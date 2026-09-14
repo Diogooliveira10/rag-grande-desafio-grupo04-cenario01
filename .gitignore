@@ -1,0 +1,12 @@
+# Environment variables
+.env
+
+# Python / Cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Data and logs
+data/raw/
+index/
+logs/
