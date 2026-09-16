@@ -10,7 +10,17 @@ Escolhemos o tema de Contratações Públicas por possuir grande quantidade de i
 
 ## 2. Pipeline da solução
 
--
+**O pipeline é composto pelos seguintes estágios:**
+
+- query_analysis
+- roteamento
+- retrieval_denso
+- retrieval_bm25
+- fusao_rrf
+- rerank
+- geracao
+- validacao
+- feedback
 
 ### Stages
 
