@@ -22,7 +22,6 @@ env/
 .serena/
 
 # Data and logs
-data/raw/
 index/
 logs/
 

@@ -1,0 +1,182 @@
+{
+  "verificado_em": "2026-09-16T18:30:50+00:00",
+  "resultados": [
+    {
+      "id": "contratacoes_publicacao",
+      "nome": "PNCP — contratações/publicação",
+      "url": "https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao?dataInicial=20250101&dataFinal=20251231&codigoModalidadeContratacao=1&uf=RJ&pagina=1&tamanhoPagina=50",
+      "status": "acessivel_com_erro_http",
+      "http_status": 502,
+      "content_type": "text/html",
+      "bytes_lidos": 107,
+      "url_final": "https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao?dataInicial=20250101&dataFinal=20251231&codigoModalidadeContratacao=1&uf=RJ&pagina=1&tamanhoPagina=50",
+      "previa": "<html><body><h1>502 Bad Gateway</h1> The server returned an invalid or incomplete response. </body></html>",
+      "erro": "Bad Gateway"
+    },
+    {
+      "id": "contratos",
+      "nome": "PNCP — contratos",
+      "url": "https://pncp.gov.br/api/consulta/v1/contratos?dataInicial=20250101&dataFinal=20251231&pagina=1&tamanhoPagina=10",
+      "status": "acessivel_com_erro_http",
+      "http_status": 503,
+      "content_type": "text/html",
+      "bytes_lidos": 107,
+      "url_final": "https://pncp.gov.br/api/consulta/v1/contratos?dataInicial=20250101&dataFinal=20251231&pagina=1&tamanhoPagina=10",
+      "previa": "<html><body><h1>503 Service Unavailable</h1> No server is available to handle this request. </body></html>",
+      "erro": "Service Unavailable"
+    },
+    {
+      "id": "detalhe_contratacao",
+      "nome": "PNCP — detalhe da contratação encontrada",
+      "url": "parametrizada",
+      "status": "pendente_amostra",
+      "http_status": null,
+      "content_type": "",
+      "bytes_lidos": 0,
+      "url_final": "",
+      "previa": "",
+      "observacao": "não testado: a consulta de contratações não retornou uma amostra com cnpj/ano/sequencial"
+    },
+    {
+      "id": "arquivos_edital",
+      "nome": "PNCP — arquivos/editais da contratação",
+      "url": "parametrizada",
+      "status": "pendente_amostra",
+      "http_status": null,
+      "content_type": "",
+      "bytes_lidos": 0,
+      "url_final": "",
+      "previa": "",
+      "observacao": "não testado: a consulta de contratações não retornou uma amostra com cnpj/ano/sequencial"
+    },
+    {
+      "id": "lei_14133",
+      "nome": "Planalto — Lei 14.133/2021",
+      "url": "https://www.planalto.gov.br/ccivil_03/_ato2019-2022/2021/lei/l14133.htm?utm_source=chatgpt.com",
+      "status": "disponivel",
+      "http_status": 200,
+      "content_type": "text/html",
+      "bytes_lidos": 649705,
+      "url_final": "https://www.planalto.gov.br/ccivil_03/_ato2019-2022/2021/lei/l14133.htm?utm_source=chatgpt.com",
+      "previa": "<html xmlns=\"http://www.w3.org/TR/REC-html40\" xmlns:o=\"urn:schemas-microsoft-com:office:office\" xmlns:v=\"urn:schemas-microsoft-com:vml\"> <head> <meta content=\"Microsoft FrontPage 6.0\" name=\"GENERATOR\"/> <title> L14133 </title> <…"
+    },
+    {
+      "id": "redelog",
+      "nome": "REDELOG RJ — legislação de licitações",
+      "url": "https://redelog.rj.gov.br/redelog/legislacao-licitacoes/?utm_source=chatgpt.com",
+      "status": "disponivel",
+      "http_status": 200,
+      "content_type": "text/html; charset=UTF-8",
+      "bytes_lidos": 370174,
+      "url_final": "https://redelog.rj.gov.br/redelog/legislacao-licitacoes/?utm_source=chatgpt.com",
+      "previa": "<!DOCTYPE html> <html lang=\"pt-BR\"> <head> <meta charset=\"UTF-8\"> <link rel=\"profile\" href=\"http://gmpg.org/xfn/11\"> <link rel=\"pingback\" href=\"https://redelog.rj.gov.br/redelog/xmlrpc.php\"> <title>Rede Logística - Redelog</title> <meta na…"
+    },
+    {
+      "id": "cge_decretos",
+      "nome": "CGE-RJ — decretos",
+      "url": "https://cge.rj.gov.br/legislacao/decretos/?utm_source=chatgpt.com",
+      "status": "disponivel",
+      "http_status": 200,
+      "content_type": "text/html; charset=UTF-8",
+      "bytes_lidos": 138246,
+      "url_final": "https://cge.rj.gov.br/legislacao/decretos/?utm_source=chatgpt.com",
+      "previa": "<!DOCTYPE html> <html lang=\"pt-br\"> <head> <meta charset=\"UTF-8\" /> <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" /> <!-- coisas normais, favicon, fontes, css etc --> <link rel=\"shortcut icon\" href=\"h…"
+    },
+    {
+      "id": "atas",
+      "nome": "PNCP — atas",
+      "url": "https://pncp.gov.br/api/consulta/v1/atas?dataInicial=20250101&dataFinal=20251231&pagina=1&tamanhoPagina=10",
+      "status": "acessivel_com_erro_http",
+      "http_status": 503,
+      "content_type": "text/html",
+      "bytes_lidos": 107,
+      "url_final": "https://pncp.gov.br/api/consulta/v1/atas?dataInicial=20250101&dataFinal=20251231&pagina=1&tamanhoPagina=10",
+      "previa": "<html><body><h1>503 Service Unavailable</h1> No server is available to handle this request. </body></html>",
+      "erro": "Service Unavailable"
+    },
+    {
+      "id": "arquivos_atas",
+      "nome": "PNCP — arquivos das atas",
+      "url": "parametrizada",
+      "status": "pendente_amostra",
+      "http_status": null,
+      "content_type": "",
+      "bytes_lidos": 0,
+      "url_final": "",
+      "previa": "",
+      "observacao": "não testado: a consulta de atas não retornou uma amostra com os identificadores necessários"
+    },
+    {
+      "id": "emails_sinteticos",
+      "nome": "Base sintética — e-mails de compras",
+      "url": "não há URL pública indicada",
+      "status": "nao_aplicavel",
+      "http_status": null,
+      "content_type": "",
+      "bytes_lidos": 0,
+      "url_final": "",
+      "previa": "",
+      "observacao": "fonte local/sintética; localizar a base fornecida pelo desafio"
+    },
+    {
+      "id": "pca_consulta",
+      "nome": "PNCP — consulta de PCA",
+      "url": "https://pncp.gov.br/api/consulta/v1/pca/?anoPca=2025&codigoClassificacaoSuperior=1&pagina=1&tamanhoPagina=20",
+      "status": "acessivel_com_erro_http",
+      "http_status": 503,
+      "content_type": "text/html",
+      "bytes_lidos": 107,
+      "url_final": "https://pncp.gov.br/api/consulta/v1/pca/?anoPca=2025&codigoClassificacaoSuperior=1&pagina=1&tamanhoPagina=20",
+      "previa": "<html><body><h1>503 Service Unavailable</h1> No server is available to handle this request. </body></html>",
+      "erro": "Service Unavailable"
+    },
+    {
+      "id": "pca_consolidado",
+      "nome": "PNCP — PCA consolidado por órgão",
+      "url": "parametrizada",
+      "status": "pendente_amostra",
+      "http_status": null,
+      "content_type": "",
+      "bytes_lidos": 0,
+      "url_final": "",
+      "previa": "",
+      "observacao": "não testado: a consulta de PCA não retornou cnpj/ano/sequencial"
+    },
+    {
+      "id": "pca_itens",
+      "nome": "PNCP — itens do PCA",
+      "url": "parametrizada",
+      "status": "pendente_amostra",
+      "http_status": null,
+      "content_type": "",
+      "bytes_lidos": 0,
+      "url_final": "",
+      "previa": "",
+      "observacao": "não testado: a consulta de PCA não retornou cnpj/ano/sequencial"
+    },
+    {
+      "id": "resultados_itens",
+      "nome": "PNCP — resultados por item",
+      "url": "parametrizada",
+      "status": "pendente_amostra",
+      "http_status": null,
+      "content_type": "",
+      "bytes_lidos": 0,
+      "url_final": "",
+      "previa": "",
+      "observacao": "não testado: depende de uma contratação encontrada"
+    },
+    {
+      "id": "pipeline_agregacoes",
+      "nome": "Pipeline — totais, médias e séries",
+      "url": "sem API própria",
+      "status": "nao_aplicavel",
+      "http_status": null,
+      "content_type": "",
+      "bytes_lidos": 0,
+      "url_final": "",
+      "previa": "",
+      "observacao": "processamento local; disponibilidade depende da implementação do pipeline"
+    }
+  ]
+}
