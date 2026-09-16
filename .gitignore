@@ -1,15 +1,33 @@
-# Environment variables
-.env
-
-# Python / Cache
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
+
+# Ambientes virtuais
+.venv/
+venv/
+env/
+
+# Variáveis de ambiente e segredos locais
+.env
+.env.*
+!.env.example
+
+# Ferramentas de teste e análise
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Metadados locais do Serena
+.serena/
 
 # Data and logs
 data/raw/
 index/
 logs/
+
+# Resultados gerados pelas checagens
+testes/resultados/
 
 # Claude
 .claude/
