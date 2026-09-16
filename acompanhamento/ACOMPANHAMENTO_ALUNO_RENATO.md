@@ -12,4 +12,4 @@
 
 ### Relato individual - Renato Lemos
 
--Criei o arquivo corpus_manifest inicial do projeto e o requiremts.txt, coordenei o time nas tarefas colaborativas e dividi o time para fazer as pesquisas das fontes pra usar no projeto.
+-Criei o arquivo corpus_manifest inicial do projeto e o requiremts.txt, coordenei o time nas tarefas colaborativas e dividi o time para fazer as pesquisas das fontes pra usar no projeto. Fiquei responsável por fazer os merges nas branches durante o projeto.
