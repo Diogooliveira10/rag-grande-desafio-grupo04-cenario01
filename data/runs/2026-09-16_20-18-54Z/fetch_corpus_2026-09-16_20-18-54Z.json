@@ -1,0 +1,131 @@
+{
+  "verificado_em": "2026-09-16T20:18:54+00:00",
+  "quantidade_por_tipo": {
+    "html": 2,
+    "json": 2,
+    "jsonl": 2
+  },
+  "novos_unicos_por_tipo": {
+    "html": 2,
+    "json": 2,
+    "jsonl": 2
+  },
+  "candidatos_por_tipo": {
+    "html": 8,
+    "json": 4,
+    "jsonl": 3
+  },
+  "candidatos_considerados": 7,
+  "completo": true,
+  "downloads": [
+    {
+      "id": "fetch_api_contratos",
+      "nome": "API — PNCP — contratos",
+      "url": "https://pncp.gov.br/api/consulta/v1/contratos?dataInicial=20250101&dataFinal=20250131&pagina=1&tamanhoPagina=50",
+      "tipo_solicitado": "json",
+      "tipo": "json",
+      "destino": "data/raw/v1/arquivos/json",
+      "status": "baixado",
+      "bytes": 83179,
+      "sha256": "cf172d844344bcaa97eceab0ec3250bb6647ed5c8f4f1336e7429a844d5fd53e",
+      "arquivo": "data\\raw\\v1\\arquivos\\json\\api_contratos_cf172d844344.json",
+      "http_status": 200,
+      "tentativas": 1,
+      "content_type": "application/json",
+      "url_final": "https://pncp.gov.br/api/consulta/v1/contratos?dataInicial=20250101&dataFinal=20250131&pagina=1&tamanhoPagina=50"
+    },
+    {
+      "id": "fetch_api_contratos_jsonl",
+      "nome": "JSONL — registros de PNCP — contratos",
+      "url": "https://pncp.gov.br/api/consulta/v1/contratos?dataInicial=20250101&dataFinal=20250131&pagina=1&tamanhoPagina=50",
+      "tipo_solicitado": "jsonl",
+      "tipo": "jsonl",
+      "destino": "data/raw/v1/arquivos/jsonl",
+      "http_status": null,
+      "tentativas": 0,
+      "content_type": "application/x-ndjson",
+      "url_final": "https://pncp.gov.br/api/consulta/v1/contratos?dataInicial=20250101&dataFinal=20250131&pagina=1&tamanhoPagina=50",
+      "status": "baixado",
+      "bytes": 87798,
+      "sha256": "9beb1c5fb765b63d537555cf96d94191595de7b930722f919cda97cbef243fb6",
+      "arquivo": "data\\raw\\v1\\arquivos\\jsonl\\records_contratos_9beb1c5fb765.jsonl"
+    },
+    {
+      "id": "fetch_api_atas",
+      "nome": "API — PNCP — atas",
+      "url": "https://pncp.gov.br/api/consulta/v1/atas?dataInicial=20250101&dataFinal=20250131&pagina=1&tamanhoPagina=50",
+      "tipo_solicitado": "json",
+      "tipo": "json",
+      "destino": "data/raw/v1/arquivos/json",
+      "status": "baixado",
+      "bytes": 45708,
+      "sha256": "282e1417a48687fb9ee0731d0febbb8fb6a23f30a23c5041f5a98ac3e87525ed",
+      "arquivo": "data\\raw\\v1\\arquivos\\json\\api_atas_282e1417a486.json",
+      "http_status": 200,
+      "tentativas": 1,
+      "content_type": "application/json",
+      "url_final": "https://pncp.gov.br/api/consulta/v1/atas?dataInicial=20250101&dataFinal=20250131&pagina=1&tamanhoPagina=50"
+    },
+    {
+      "id": "fetch_api_atas_jsonl",
+      "nome": "JSONL — registros de PNCP — atas",
+      "url": "https://pncp.gov.br/api/consulta/v1/atas?dataInicial=20250101&dataFinal=20250131&pagina=1&tamanhoPagina=50",
+      "tipo_solicitado": "jsonl",
+      "tipo": "jsonl",
+      "destino": "data/raw/v1/arquivos/jsonl",
+      "http_status": null,
+      "tentativas": 0,
+      "content_type": "application/x-ndjson",
+      "url_final": "https://pncp.gov.br/api/consulta/v1/atas?dataInicial=20250101&dataFinal=20250131&pagina=1&tamanhoPagina=50",
+      "status": "baixado",
+      "bytes": 47949,
+      "sha256": "e71c2fbbde6c0d2e5526507a1f4210ee775983876571d1b5984b3353d080bb1b",
+      "arquivo": "data\\raw\\v1\\arquivos\\jsonl\\records_atas_e71c2fbbde6c.jsonl"
+    },
+    {
+      "id": "fetch_lei_14133",
+      "nome": "Planalto — Lei 14.133/2021",
+      "url": "https://www.planalto.gov.br/ccivil_03/_ato2019-2022/2021/lei/l14133.htm",
+      "tipo_solicitado": "html",
+      "tipo": "html",
+      "destino": "data/raw/v1/arquivos/html",
+      "status": "erro_download",
+      "http_status": null,
+      "tentativas": 3,
+      "content_type": "",
+      "erro": "[WinError 10054] Foi forçado o cancelamento de uma conexão existente pelo host remoto"
+    },
+    {
+      "id": "fetch_redelog",
+      "nome": "REDELOG RJ — legislação de licitações",
+      "url": "https://redelog.rj.gov.br/redelog/legislacao-licitacoes/",
+      "tipo_solicitado": "html",
+      "tipo": "html",
+      "destino": "data/raw/v1/arquivos/html",
+      "status": "baixado",
+      "bytes": 370174,
+      "sha256": "77fc6d5d97571cec4dfdee0f25a24011b95122f7000b9a693b781c1fcfbeec6f",
+      "arquivo": "data\\raw\\v1\\arquivos\\html\\redelog_77fc6d5d9757.html",
+      "http_status": 200,
+      "tentativas": 1,
+      "content_type": "text/html; charset=UTF-8",
+      "url_final": "https://redelog.rj.gov.br/redelog/legislacao-licitacoes/"
+    },
+    {
+      "id": "fetch_cge_decretos",
+      "nome": "CGE-RJ — decretos estaduais RJ",
+      "url": "https://cge.rj.gov.br/legislacao/decretos/",
+      "tipo_solicitado": "html",
+      "tipo": "html",
+      "destino": "data/raw/v1/arquivos/html",
+      "status": "baixado",
+      "bytes": 140476,
+      "sha256": "92dacd382dcc1b4f2c0daedf1ade7ac72d3aa3e6f577ed11e5166ed154decd7f",
+      "arquivo": "data\\raw\\v1\\arquivos\\html\\cge_decretos_92dacd382dcc.html",
+      "http_status": 200,
+      "tentativas": 1,
+      "content_type": "text/html; charset=UTF-8",
+      "url_final": "https://cge.rj.gov.br/legislacao/decretos/"
+    }
+  ]
+}
