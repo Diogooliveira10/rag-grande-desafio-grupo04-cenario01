@@ -1,0 +1,42 @@
+scenario_id: contratacoes-rj
+version: "2026-09-14"              # data do congelamento do corpus
+description: "Contratações públicas do Estado do RJ, ano-base 2025"
+
+bases:
+  - base_id: contratos_estruturado
+    natureza: estruturada            # normativa | estruturada | conversacional | agregada
+    fonte: "PNCP - API de consulta v3"
+    acesso:
+      tipo: rest_api                 # rest_api | http_pdf | arquivo_local | sintetico
+      endpoint: "<https://pncp.gov.br/api/consulta/v1/contratos>"
+      params:
+        dataInicial: "2025-01-01"
+        dataFinal: "2025-12-31"
+        uf: "RJ"
+      paginacao: { campo: "pagina", tamanho: 50 }
+      rate_limit_seg: 1.0
+    selecao_deterministica: true     # mesmo manifesto ⇒ mesmo corpus
+    volume_alvo: 1200                # registros esperados; divergência grande = investigar
+    formato: json
+    licenca: "Dados abertos gov.br - atribuição"
+    sensitivity_default: publico     # publico | interno | restrito
+    campo_vigencia: "dataVigenciaFim"
+    chunking_sugerido: "1 contrato = 1 chunk, serializado em linguagem natural"
+    metadados_extras: [orgao, modalidade, valor, municipio, ano]
+
+  - base_id: editais_normativo
+    natureza: normativa
+    fonte: "Editais e legislação"
+    acesso:
+      tipo: http_pdf
+      urls:
+        - "<https://exemplo.gov.br/edital-001-2025.pdf>"
+        - "<https://exemplo.gov.br/edital-014-2025.pdf>"
+    selecao_deterministica: true
+    volume_alvo: 20
+    formato: pdf
+    licenca: "Domínio público"
+    sensitivity_default: publico
+    campo_vigencia: "data_publicacao"
+    chunking_sugerido: "Split por cláusula, com overlap"
+    metadados_extras: [numero_edital, orgao, data_publicacao, objeto]
