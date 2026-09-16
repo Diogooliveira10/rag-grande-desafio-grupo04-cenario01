@@ -51,4 +51,5 @@ O fluxo de coleta ficou modularizado, seletivo por tipo e resiliente a falhas po
 - `2affbcb` — `chore: inclui dados coletados no repositório`
 - `2563ea4` — `feat: amplia a coleta seletiva do corpus`
 - `acfac9e` — `data: adiciona artefatos coletados por tipo`
-- `f440494` — `docs: atualiza o manifesto do corpus`
+- `e038a91` — `docs: atualiza o manifesto do corpus`
+- `77e9668` — `docs: atualiza acompanhamento do João`
