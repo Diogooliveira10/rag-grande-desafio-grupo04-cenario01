@@ -14,7 +14,7 @@
 
 ## **Ficou pendente:**
 
-- Sem pendencias.
+- Sem pendências.
 
 ## **Bloqueios em aberto:**
 
@@ -40,8 +40,28 @@ O grupo também avançou na compreensão dos entregáveis iniciais, principalmen
 
 ## **Ficou pendente:**
 
-- Sem pendencias.
+- Sem pendências.
 
 ## **Bloqueios em aberto:**
 
 - Sem bloqueios.
+
+## Encontro 3 - 2026-09-18
+
+## **Entregamos hoje:**
+
+- Hoje foram adicionadas e estruturadas as personas do projeto, incluindo a criação de três novas personas e suas respectivas perguntas de referência, seguindo o padrão definido no PERSONAS.md. Também foi implementada a extração do corpus orientada por manifesto, utilizando o corpus_manifest.yaml como fonte única de configuração, com suporte a múltiplos formatos e fontes, controle de tentativas, checkpoints, retomada de processos e versionamento imutável.
+
+- Foi desenvolvido o config.py para centralização de credenciais e parâmetros, além da geração de inventário com hash SHA-256 e comparação entre versões do corpus. Também foram adicionados testes offline para validação da extração e dos contratos do inventário, bem como a documentação inicial no README.md e a revisão do projeto no Notion para acompanhamento das entregas.
+
+## **Ficou pendente:**
+
+- Sem pendências.
+
+## **Bloqueios em aberto:**
+
+- Sem bloqueios.
+
+## **Uso de assistentes de IA:**
+
+- Foram utilizados assistentes de IA para apoio em correções pontuais no código, revisão de implementação e esclarecimento de dúvidas técnicas durante o desenvolvimento.
