@@ -1,131 +1,48 @@
 scenario_id: contratacoes-rj
-version: "2026-09-16"              # data do congelamento do corpus
+version: "2026-09-14"              # data do congelamento do corpus
 description: "Contratações públicas do Estado do RJ, ano-base 2025"
 
-coleta:
-  executada_em: "2026-09-16"
-  ferramenta: "src/fetch_corpus.py"
-  armazenamento_bruto: "data/raw/v1/arquivos"
-  relatorios:
-    - "data/runs/2026-09-16_20-17-21Z/fetch_corpus_2026-09-16_20-17-21Z.json"
-    - "data/runs/2026-09-16_20-18-54Z/fetch_corpus_2026-09-16_20-18-54Z.json"
-  arquivos_totais: 47
-  hashes_unicos: 47
-  duplicatas: 0
-  arquivos_novos_na_coleta:
-    pdf: 20
-    html: 2
-    json: 2
-    jsonl: 2
-  arquivos_por_extensao:
-    pdf: 23
-    html: 11
-    htm: 1
-    json: 7
-    jsonl: 5
-
-diretorios_locais:
-  pdf: "data/raw/v1/arquivos/pdf"
-  pncp: "data/raw/v1/arquivos/pncp"
-  html: "data/raw/v1/arquivos/html"
-  json: "data/raw/v1/arquivos/json"
-  jsonl: "data/raw/v1/arquivos/jsonl"
-  relatorios: "data/runs"
-
 bases:
+  # ---------------------------------------------------------------------
+  # NATUREZA: estruturada
+  # ---------------------------------------------------------------------
   - base_id: contratos_estruturado
-    natureza: estruturada            # normativa | estruturada | conversacional | agregada
-    fonte: "PNCP - API de consulta v3"
+    natureza: estruturada
+    fonte: "PNCP - API de consulta v1/v3 (/v1/contratos)"
     acesso:
-      tipo: rest_api                 # rest_api | http_pdf | arquivo_local | sintetico
-      endpoint: "<https://pncp.gov.br/api/consulta/v1/contratos>"
+      tipo: rest_api
+      endpoint: "https://pncp.gov.br/api/consulta/v1/contratos"
       params:
         dataInicial: "2025-01-01"
-        dataFinal: "2025-12-31"
-        uf: "RJ"
-      paginacao: { campo: "pagina", tamanho: 50 }
+        dataFinal: "2025-03-31"   # trimestre — evita puxar o volume nacional inteiro sem filtro de UF
+      paginacao:
+        campo_pagina: "pagina"
+        campo_tamanho: "tamanhoPagina"
+      tamanho_pagina: 50
       rate_limit_seg: 1.0
-    selecao_deterministica: true     # mesmo manifesto ⇒ mesmo corpus
-    volume_alvo: 1200                # registros esperados; divergência grande = investigar
-    formato: json
-    licenca: "Dados abertos gov.br - atribuição"
-    sensitivity_default: publico     # publico | interno | restrito
+     
+      filtro_local:
+        campo: "unidadeOrgao.ufSigla"
+        operador: "=="
+        valor: "RJ"
+    selecao_deterministica: true
     campo_vigencia: "dataVigenciaFim"
     chunking_sugerido: "1 contrato = 1 chunk, serializado em linguagem natural"
     metadados_extras: [orgao, modalidade, valor, municipio, ano]
 
-  - base_id: contratacoes_publicacao_rj
-    natureza: estruturada
-    fonte: "PNCP - API pública de consulta"
-    acesso:
-      tipo: rest_api
-      endpoint: "<https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao>"
-      params:
-        dataInicial: "2025-01-01"
-        dataFinal: "2025-12-31"
-        uf: "RJ"
-        pagina: 1
-        tamanhoPagina: 50
-      resposta: json
-    selecao_deterministica: true
-    volume_alvo: 50
-    formato: json
-    licenca: "Dados abertos gov.br - atribuição"
-    sensitivity_default: publico
-    local: "data/raw/v1/arquivos/json"
-    observacao: "A modalidade pode ser omitida para consultar todas as modalidades; o coletor usa recortes para descoberta."
-
-  - base_id: fontes_normativas
+  - base_id: editais_normativo
     natureza: normativa
-    fonte: "Planalto, REDELOG RJ, CGE-RJ e MPPI"
+    fonte: "Editais e legislação"
     acesso:
       tipo: http_misto
       urls:
-        - "<https://www.planalto.gov.br/ccivil_03/_ato2019-2022/2021/lei/l14133.htm>"
-        - "<https://redelog.rj.gov.br/redelog/legislacao-licitacoes/>"
-        - "<https://cge.rj.gov.br/legislacao/decretos/>"
-        - "<https://www.mppi.mp.br/internet/wp-content/uploads/2021/04/L14133.pdf>"
+        - "<https://exemplo.gov.br/edital-001-2025.pdf>"
+        - "<https://exemplo.gov.br/edital-014-2025.pdf>"
     selecao_deterministica: true
-    volume_alvo: 12
-    formatos: [html, htm, pdf]
+    volume_alvo: 20
+    formato: pdf
     licenca: "Domínio público"
     sensitivity_default: publico
     campo_vigencia: "data_publicacao"
     chunking_sugerido: "Split por cláusula, com overlap"
     metadados_extras: [numero_edital, orgao, data_publicacao, objeto]
-    locais:
-      html: "data/raw/v1/arquivos/html"
-      pdf: "data/raw/v1/arquivos/pdf"
-
-  - base_id: documentos_pncp
-    natureza: normativa
-    fonte: "PNCP - documentos de contratações e atas"
-    acesso:
-      tipo: rest_api_mais_arquivo
-      endpoints:
-        edital: "<https://pncp.gov.br/api/pncp/v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/arquivos>"
-        ata: "<https://pncp.gov.br/api/pncp/v1/orgaos/{cnpj}/compras/{anoCompra}/{seqCompra}/atas/{seqAta}/arquivos>"
-      fluxo: "consultar metadados JSON e baixar a URL direta do arquivo"
-    selecao_deterministica: true
-    volume_alvo: 20
-    volume_coletado: 20
-    formato: pdf
-    licenca: "Dados abertos gov.br - atribuição"
-    sensitivity_default: publico
-    local: "data/raw/v1/arquivos/pncp"
-    deduplicacao: "SHA-256"
-
-  - base_id: respostas_api_jsonl
-    natureza: conversacional
-    fonte: "PNCP - respostas JSON normalizadas localmente"
-    acesso:
-      tipo: processamento_local
-      origem: "data/raw/v1/arquivos/json"
-    selecao_deterministica: true
-    volume_alvo: 5
-    volume_coletado: 5
-    formato: jsonl
-    licenca: "Derivado de dados abertos gov.br"
-    sensitivity_default: publico
-    local: "data/raw/v1/arquivos/jsonl"
-    deduplicacao: "SHA-256"

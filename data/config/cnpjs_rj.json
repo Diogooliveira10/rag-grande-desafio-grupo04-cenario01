@@ -1,0 +1,4 @@
+{
+  "_comentario": "TODO (pendente com o time): lista fixa e versionada de CNPJs de orgaos publicos do Estado do RJ. E o unico jeito de restringir a base pca_agregado ao RJ, pois a API /v1/pca/ nao devolve nenhum campo de UF. Preencher antes da proxima coleta -- ate la, pca_agregado roda e simplesmente retem zero registros (nao trava o fetch_corpus.py).",
+  "cnpjs": []
+}
