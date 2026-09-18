@@ -15,3 +15,10 @@
 ### Relato individual - Pâmela de Freitas
 
 - Hoje fizemos o arquivo de arquitetura, eu fiz a parte de pipeline, o diagrama e stage. Ainda vamos discutir sobre os nomes se vão mudar ou ficarão esses mesmos do arquivo.
+
+
+## Encontro 3 - 2026-09-18
+
+### Relato individual - Pâmela de Freitas
+
+- Minha parte individual hoje foi fazer o arquivo config.py
