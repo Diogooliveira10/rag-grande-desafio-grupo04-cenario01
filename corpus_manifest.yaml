@@ -13,8 +13,8 @@ bases:
       tipo: rest_api
       endpoint: "https://pncp.gov.br/api/consulta/v1/contratos"
       params:
-        dataInicial: "2025-01-01"
-        dataFinal: "2025-03-31"   # trimestre — evita puxar o volume nacional inteiro sem filtro de UF
+        dataInicial: "20250101"  # AAAAMMDD — formato exigido pela API do PNCP
+        dataFinal: "20250331"    # trimestre — evita puxar o volume nacional inteiro sem filtro de UF
       paginacao:
         campo_pagina: "pagina"
         campo_tamanho: "tamanhoPagina"

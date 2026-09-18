@@ -70,8 +70,8 @@ Estágios (mesmos nomes usados no campo `stage` do log estruturado): `query_anal
 │   ├── raw/vN/                  ← versão imutável de cada coleta (staging em raw/.staging/ até promoção)
 │   ├── inventory/                ← inventário por versão (JSON), checkpoints e diffs entre versões
 │   ├── runs/                    ← relatórios do CLI legado de coleta (--quantidade)
-│   ├── config/                  ← dados de apoio ao manifesto (ex.: cnpjs_rj.json)
-│   └── CORPUS_INVENTORY.md      ← inventário legível da versão mais recente
+│   └── config/                  ← dados de apoio ao manifesto (ex.: cnpjs_rj.json)
+├── CORPUS_INVENTORY.md          ← inventário legível da versão mais recente
 ├── testes/test-fontes/          ← verificação de disponibilidade das fontes e downloader compartilhado
 ├── testes/teste_extração.py     ← valida offline o contrato do fetch_corpus (manifesto, CLI, inventário)
 ├── tests/                       ← testes de contrato (pytest), offline
