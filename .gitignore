@@ -25,6 +25,12 @@ env/
 index/
 logs/
 
+# Corpus bruto e artefatos gerados (regra de ouro do desafio: data/raw/ nunca vai para o Git)
+data/raw/
+data/normalized/
+data/runs/
+data/inventory/checkpoints/
+
 # Resultados gerados pelas checagens
 testes/resultados/
 
