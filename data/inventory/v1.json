@@ -1,25 +1,25 @@
 {
   "scenario_id": "contratacoes-rj",
   "version": "v1",
-  "coletado_em": "2026-09-18T19:50:34+00:00",
+  "coletado_em": "2026-09-18T19:54:39+00:00",
   "manifest_hash": "67a68cdc199cf0f35e881c08455efbdf60945e3e0eb0e335b86f3160ca91ed44",
   "completo": false,
   "totais": {
-    "arquivos": 1,
-    "bytes": 107985,
+    "arquivos": 12,
+    "bytes": 1329680,
     "falhas": 3
   },
   "por_base": [
     {
       "base_id": "contratos_estruturado",
       "natureza": "estruturada",
-      "arquivos": 1,
+      "arquivos": 12,
       "formatos": [
         "json"
       ],
-      "bytes": 107985,
+      "bytes": 1329680,
       "volume_alvo": null,
-      "volume_observado": 50,
+      "volume_observado": 600,
       "divergencia_alvo": null
     },
     {
@@ -49,11 +49,47 @@
       "path": "data/raw/.staging/v1/contratos_estruturado/principal_pagina_1_545767152ac3.json"
     },
     {
-      "logical_id": "contratos_estruturado:principal:pagina=2",
+      "logical_id": "contratos_estruturado:principal:pagina=10",
       "base_id": "contratos_estruturado",
       "tipo": "json",
-      "origem": "https://pncp.gov.br/api/consulta/v1/contratos?dataInicial=20250101&dataFinal=20250331&pagina=2&tamanhoPagina=50",
-      "coletado_em": "2026-09-18T19:50:34+00:00",
+      "origem": "https://pncp.gov.br/api/consulta/v1/contratos?dataInicial=20250101&dataFinal=20250331&pagina=10&tamanhoPagina=50",
+      "coletado_em": "2026-09-18T19:54:39+00:00",
+      "registros": 50,
+      "status": "ok",
+      "bytes": 108613,
+      "sha256": "b240c58863a7eba3b7fa20e67cf2191b30fae22ff43131e68e1450d8a612e9ec",
+      "path": "data/raw/.staging/v1/contratos_estruturado/principal_pagina_10_b240c58863a7.json"
+    },
+    {
+      "logical_id": "contratos_estruturado:principal:pagina=11",
+      "base_id": "contratos_estruturado",
+      "tipo": "json",
+      "origem": "https://pncp.gov.br/api/consulta/v1/contratos?dataInicial=20250101&dataFinal=20250331&pagina=11&tamanhoPagina=50",
+      "coletado_em": "2026-09-18T19:54:39+00:00",
+      "registros": 50,
+      "status": "ok",
+      "bytes": 115731,
+      "sha256": "b34b3a68bf7d44f4fe7ba94a09191a8019d0c3a5d44f54228097721113d914eb",
+      "path": "data/raw/.staging/v1/contratos_estruturado/principal_pagina_11_b34b3a68bf7d.json"
+    },
+    {
+      "logical_id": "contratos_estruturado:principal:pagina=12",
+      "base_id": "contratos_estruturado",
+      "tipo": "json",
+      "origem": "https://pncp.gov.br/api/consulta/v1/contratos?dataInicial=20250101&dataFinal=20250331&pagina=12&tamanhoPagina=50",
+      "coletado_em": "2026-09-18T19:54:39+00:00",
+      "registros": 50,
+      "status": "ok",
+      "bytes": 111797,
+      "sha256": "3d748faabb6c0f0caf868f2f23cec491be0fd1ec9f289b2827799e6bcefb7ab0",
+      "path": "data/raw/.staging/v1/contratos_estruturado/principal_pagina_12_3d748faabb6c.json"
+    },
+    {
+      "logical_id": "contratos_estruturado:principal:pagina=13",
+      "base_id": "contratos_estruturado",
+      "tipo": "json",
+      "origem": "https://pncp.gov.br/api/consulta/v1/contratos?dataInicial=20250101&dataFinal=20250331&pagina=13&tamanhoPagina=50",
+      "coletado_em": "2026-09-18T19:54:39+00:00",
       "registros": 0,
       "status": "falhou",
       "bytes": 0,
@@ -62,11 +98,107 @@
       "erro": "The read operation timed out"
     },
     {
+      "logical_id": "contratos_estruturado:principal:pagina=2",
+      "base_id": "contratos_estruturado",
+      "tipo": "json",
+      "origem": "https://pncp.gov.br/api/consulta/v1/contratos?dataInicial=20250101&dataFinal=20250331&pagina=2&tamanhoPagina=50",
+      "coletado_em": "2026-09-18T19:54:39+00:00",
+      "registros": 50,
+      "status": "ok",
+      "bytes": 109276,
+      "sha256": "bab1f20702f4b092d9ceed996bcc8e245a9ef8a3f73020c0d32fdcb973ec0e70",
+      "path": "data/raw/.staging/v1/contratos_estruturado/principal_pagina_2_bab1f20702f4.json"
+    },
+    {
+      "logical_id": "contratos_estruturado:principal:pagina=3",
+      "base_id": "contratos_estruturado",
+      "tipo": "json",
+      "origem": "https://pncp.gov.br/api/consulta/v1/contratos?dataInicial=20250101&dataFinal=20250331&pagina=3&tamanhoPagina=50",
+      "coletado_em": "2026-09-18T19:54:39+00:00",
+      "registros": 50,
+      "status": "ok",
+      "bytes": 109003,
+      "sha256": "572843c4f231d23306df5be963a66883f433c6546d26a13b3bb9e0a50f9f57d3",
+      "path": "data/raw/.staging/v1/contratos_estruturado/principal_pagina_3_572843c4f231.json"
+    },
+    {
+      "logical_id": "contratos_estruturado:principal:pagina=4",
+      "base_id": "contratos_estruturado",
+      "tipo": "json",
+      "origem": "https://pncp.gov.br/api/consulta/v1/contratos?dataInicial=20250101&dataFinal=20250331&pagina=4&tamanhoPagina=50",
+      "coletado_em": "2026-09-18T19:54:39+00:00",
+      "registros": 50,
+      "status": "ok",
+      "bytes": 112577,
+      "sha256": "1210e173936ca1daf58d61d232c99d582dd0cbf0a21bdcab3275d41bf995bc82",
+      "path": "data/raw/.staging/v1/contratos_estruturado/principal_pagina_4_1210e173936c.json"
+    },
+    {
+      "logical_id": "contratos_estruturado:principal:pagina=5",
+      "base_id": "contratos_estruturado",
+      "tipo": "json",
+      "origem": "https://pncp.gov.br/api/consulta/v1/contratos?dataInicial=20250101&dataFinal=20250331&pagina=5&tamanhoPagina=50",
+      "coletado_em": "2026-09-18T19:54:39+00:00",
+      "registros": 50,
+      "status": "ok",
+      "bytes": 111234,
+      "sha256": "15a86a2f5146df1bcb9db9c378844f345cea347c69e20988fbb543f2772acef7",
+      "path": "data/raw/.staging/v1/contratos_estruturado/principal_pagina_5_15a86a2f5146.json"
+    },
+    {
+      "logical_id": "contratos_estruturado:principal:pagina=6",
+      "base_id": "contratos_estruturado",
+      "tipo": "json",
+      "origem": "https://pncp.gov.br/api/consulta/v1/contratos?dataInicial=20250101&dataFinal=20250331&pagina=6&tamanhoPagina=50",
+      "coletado_em": "2026-09-18T19:54:39+00:00",
+      "registros": 50,
+      "status": "ok",
+      "bytes": 110340,
+      "sha256": "02b671ad018ec47285de247d27ee4de6f1780aed770dd1ce938158d752abb26b",
+      "path": "data/raw/.staging/v1/contratos_estruturado/principal_pagina_6_02b671ad018e.json"
+    },
+    {
+      "logical_id": "contratos_estruturado:principal:pagina=7",
+      "base_id": "contratos_estruturado",
+      "tipo": "json",
+      "origem": "https://pncp.gov.br/api/consulta/v1/contratos?dataInicial=20250101&dataFinal=20250331&pagina=7&tamanhoPagina=50",
+      "coletado_em": "2026-09-18T19:54:39+00:00",
+      "registros": 50,
+      "status": "ok",
+      "bytes": 109714,
+      "sha256": "c7e2c7346903107ba87b631f8072107b78b851dff01e51ae9a8a8c030c51f36f",
+      "path": "data/raw/.staging/v1/contratos_estruturado/principal_pagina_7_c7e2c7346903.json"
+    },
+    {
+      "logical_id": "contratos_estruturado:principal:pagina=8",
+      "base_id": "contratos_estruturado",
+      "tipo": "json",
+      "origem": "https://pncp.gov.br/api/consulta/v1/contratos?dataInicial=20250101&dataFinal=20250331&pagina=8&tamanhoPagina=50",
+      "coletado_em": "2026-09-18T19:54:39+00:00",
+      "registros": 50,
+      "status": "ok",
+      "bytes": 112440,
+      "sha256": "7e9cd8373c438ff907951b4658a95462e4ee467b9e0f240d612014c8884edc28",
+      "path": "data/raw/.staging/v1/contratos_estruturado/principal_pagina_8_7e9cd8373c43.json"
+    },
+    {
+      "logical_id": "contratos_estruturado:principal:pagina=9",
+      "base_id": "contratos_estruturado",
+      "tipo": "json",
+      "origem": "https://pncp.gov.br/api/consulta/v1/contratos?dataInicial=20250101&dataFinal=20250331&pagina=9&tamanhoPagina=50",
+      "coletado_em": "2026-09-18T19:54:39+00:00",
+      "registros": 50,
+      "status": "ok",
+      "bytes": 110970,
+      "sha256": "9406adb64625320b0528c41807efdca16f39f4aacef53c20fa5c4be2f45e5c9e",
+      "path": "data/raw/.staging/v1/contratos_estruturado/principal_pagina_9_9406adb64625.json"
+    },
+    {
       "logical_id": "editais_normativo:url:1",
       "base_id": "editais_normativo",
       "tipo": "pdf",
       "origem": "https://exemplo.gov.br/edital-001-2025.pdf",
-      "coletado_em": "2026-09-18T19:50:34+00:00",
+      "coletado_em": "2026-09-18T19:54:39+00:00",
       "registros": 0,
       "status": "falhou",
       "bytes": 0,
@@ -79,7 +211,7 @@
       "base_id": "editais_normativo",
       "tipo": "pdf",
       "origem": "https://exemplo.gov.br/edital-014-2025.pdf",
-      "coletado_em": "2026-09-18T19:50:34+00:00",
+      "coletado_em": "2026-09-18T19:54:39+00:00",
       "registros": 0,
       "status": "falhou",
       "bytes": 0,
@@ -90,9 +222,9 @@
   ],
   "falhas": [
     {
-      "origem": "https://pncp.gov.br/api/consulta/v1/contratos?dataInicial=20250101&dataFinal=20250331&pagina=2&tamanhoPagina=50",
+      "origem": "https://pncp.gov.br/api/consulta/v1/contratos?dataInicial=20250101&dataFinal=20250331&pagina=13&tamanhoPagina=50",
       "erro": "The read operation timed out",
-      "logical_id": "contratos_estruturado:principal:pagina=2"
+      "logical_id": "contratos_estruturado:principal:pagina=13"
     },
     {
       "origem": "https://exemplo.gov.br/edital-001-2025.pdf",
