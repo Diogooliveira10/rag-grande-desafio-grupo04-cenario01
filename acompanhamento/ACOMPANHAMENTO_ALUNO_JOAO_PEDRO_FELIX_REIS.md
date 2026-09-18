@@ -53,3 +53,25 @@ O fluxo de coleta ficou modularizado, seletivo por tipo e resiliente a falhas po
 - `acfac9e` — `data: adiciona artefatos coletados por tipo`
 - `e038a91` — `docs: atualiza o manifesto do corpus`
 - `77e9668` — `docs: atualiza acompanhamento do João`
+
+## Atualização — 18/09/2026
+
+### Atividades realizadas
+
+Reestruturei o `src/fetch_corpus.py` para realizar a coleta de arquivos HTML, PDF, JSON e JSONL, com seleção de uma quantidade exata de documentos novos e únicos. O fluxo passou a incluir deduplicação, tentativas configuráveis, timeout, checkpoints e retomada de execuções interrompidas.
+
+Também implementei o armazenamento versionado e imutável dos resultados, com promoção da versão somente após a conclusão da coleta. Cada arquivo passou a ser registrado em um inventário com informações de origem, caminho, tamanho, status, data de coleta e hash SHA-256.
+
+O coletor passou a oferecer os subcomandos `fetch`, `update` e `inventory`. Além da coleta, o inventário permite comparar versões do corpus e identificar arquivos adicionados, removidos, alterados ou mantidos iguais. Também foi incluída a opção de salvar relatórios de execução em JSON.
+
+Criei o teste offline `testes/teste_extração.py` e o respectivo log de execução. A validação verificou o carregamento do manifesto, a disponibilidade dos subcomandos, o contrato do inventário e as regras de armazenamento dos dados brutos, sem realizar novos downloads durante o teste.
+
+### Resultado da sessão
+
+O fluxo de extração ficou mais controlado, reexecutável e rastreável, com suporte a versionamento e auditoria das alterações no corpus. A validação registrou um inventário com 47 arquivos distribuídos em 5 bases, sem falhas.
+
+O principal commit realizado foi:
+
+- `2a31f9a` — `feat: implementar extração de corpus orientada por manifesto`
+
+Esse commit alterou o coletor, adicionou o teste offline e registrou o log de validação, totalizando 994 linhas adicionadas em três arquivos.
