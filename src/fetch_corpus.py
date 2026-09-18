@@ -717,7 +717,8 @@ def _safe_component(value: str, fallback: str = "item") -> str:
 
 
 def _manifest_hash(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    normalized = path.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def _version_number(value: str | Path) -> int | None:

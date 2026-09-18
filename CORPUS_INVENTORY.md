@@ -2,7 +2,7 @@
 
 - Cenário: `contratacoes-rj`
 - Versão: `v1`
-- Coletado em: `2026-09-18T19:41:07+00:00`
+- Coletado em: `2026-09-18T19:50:34+00:00`
 - Arquivos: **1**
 - Bytes: **107985**
 - Falhas: **3**
