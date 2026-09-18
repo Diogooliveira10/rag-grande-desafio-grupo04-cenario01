@@ -1,0 +1,108 @@
+{
+  "scenario_id": "contratacoes-rj",
+  "version": "v1",
+  "coletado_em": "2026-09-18T19:41:07+00:00",
+  "manifest_hash": "67a68cdc199cf0f35e881c08455efbdf60945e3e0eb0e335b86f3160ca91ed44",
+  "completo": false,
+  "totais": {
+    "arquivos": 1,
+    "bytes": 107985,
+    "falhas": 3
+  },
+  "por_base": [
+    {
+      "base_id": "contratos_estruturado",
+      "natureza": "estruturada",
+      "arquivos": 1,
+      "formatos": [
+        "json"
+      ],
+      "bytes": 107985,
+      "volume_alvo": null,
+      "volume_observado": 50,
+      "divergencia_alvo": null
+    },
+    {
+      "base_id": "editais_normativo",
+      "natureza": "normativa",
+      "arquivos": 0,
+      "formatos": [
+        "pdf"
+      ],
+      "bytes": 0,
+      "volume_alvo": 20,
+      "volume_observado": 0,
+      "divergencia_alvo": -20
+    }
+  ],
+  "arquivos": [
+    {
+      "logical_id": "contratos_estruturado:principal:pagina=1",
+      "base_id": "contratos_estruturado",
+      "tipo": "json",
+      "origem": "https://pncp.gov.br/api/consulta/v1/contratos?dataInicial=20250101&dataFinal=20250331&pagina=1&tamanhoPagina=50",
+      "coletado_em": "2026-09-18T19:41:07+00:00",
+      "registros": 50,
+      "status": "ok",
+      "bytes": 107985,
+      "sha256": "545767152ac3be99cd234c182675f8997bb14eee5eacb2633dc4fb572d1eb8a7",
+      "path": "data/raw/.staging/v1/contratos_estruturado/principal_pagina_1_545767152ac3.json"
+    },
+    {
+      "logical_id": "contratos_estruturado:principal:pagina=2",
+      "base_id": "contratos_estruturado",
+      "tipo": "json",
+      "origem": "https://pncp.gov.br/api/consulta/v1/contratos?dataInicial=20250101&dataFinal=20250331&pagina=2&tamanhoPagina=50",
+      "coletado_em": "2026-09-18T19:41:07+00:00",
+      "registros": 0,
+      "status": "falhou",
+      "bytes": 0,
+      "sha256": null,
+      "path": null,
+      "erro": "The read operation timed out"
+    },
+    {
+      "logical_id": "editais_normativo:url:1",
+      "base_id": "editais_normativo",
+      "tipo": "pdf",
+      "origem": "https://exemplo.gov.br/edital-001-2025.pdf",
+      "coletado_em": "2026-09-18T19:41:07+00:00",
+      "registros": 0,
+      "status": "falhou",
+      "bytes": 0,
+      "sha256": null,
+      "path": null,
+      "erro": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "logical_id": "editais_normativo:url:2",
+      "base_id": "editais_normativo",
+      "tipo": "pdf",
+      "origem": "https://exemplo.gov.br/edital-014-2025.pdf",
+      "coletado_em": "2026-09-18T19:41:07+00:00",
+      "registros": 0,
+      "status": "falhou",
+      "bytes": 0,
+      "sha256": null,
+      "path": null,
+      "erro": "[Errno 11001] getaddrinfo failed"
+    }
+  ],
+  "falhas": [
+    {
+      "origem": "https://pncp.gov.br/api/consulta/v1/contratos?dataInicial=20250101&dataFinal=20250331&pagina=2&tamanhoPagina=50",
+      "erro": "The read operation timed out",
+      "logical_id": "contratos_estruturado:principal:pagina=2"
+    },
+    {
+      "origem": "https://exemplo.gov.br/edital-001-2025.pdf",
+      "erro": "[Errno 11001] getaddrinfo failed",
+      "logical_id": "editais_normativo:url:1"
+    },
+    {
+      "origem": "https://exemplo.gov.br/edital-014-2025.pdf",
+      "erro": "[Errno 11001] getaddrinfo failed",
+      "logical_id": "editais_normativo:url:2"
+    }
+  ]
+}

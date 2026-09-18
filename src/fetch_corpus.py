@@ -512,7 +512,7 @@ def save_report(checked_at: str, payload: dict[str, Any]) -> Path:
 MANIFEST_DEFAULT = PROJECT_ROOT / "corpus_manifest.yaml"
 RAW_ROOT = PROJECT_ROOT / "data" / "raw"
 INVENTORY_ROOT = PROJECT_ROOT / "data" / "inventory"
-CORPUS_INVENTORY_PATH = PROJECT_ROOT / "data" / "CORPUS_INVENTORY.md"
+CORPUS_INVENTORY_PATH = PROJECT_ROOT / "CORPUS_INVENTORY.md"
 
 
 def _strip_yaml_comment(value: str) -> str:
@@ -923,13 +923,10 @@ def _collect_rest_endpoint(context: _VersionContext, base: dict[str, Any], endpo
         return [_failed_record(context, base, f"{base['base_id']}:{endpoint_name}:template", endpoint, "endpoint possui placeholders e precisa de adapter de descoberta PNCP", "json")]
     access = base.get("acesso", {})
     params = dict(access.get("params") or {})
-    pagination = access.get("paginacao") or (
-        {"campo": "pagina", "tamanho": access.get("params", {}).get("tamanhoPagina", 50)}
-        if "pagina" in params
-        else {}
-    )
-    page_field = str(pagination.get("campo", "pagina")) if pagination else ""
-    page_size = int(pagination.get("tamanho", params.get("tamanhoPagina", 50)) or 50)
+    pagination = access.get("paginacao") or {}
+    page_field = str(pagination.get("campo_pagina", "pagina")) if pagination else ""
+    size_field = pagination.get("campo_tamanho") if pagination else None
+    page_size = int(access.get("tamanho_pagina") or params.get("tamanhoPagina", 50) or 50)
     page = int(params.get(page_field, 1) or 1) if page_field else 1
     output: list[dict[str, Any]] = []
     seen_pages: set[str] = set()
@@ -937,6 +934,8 @@ def _collect_rest_endpoint(context: _VersionContext, base: dict[str, Any], endpo
         request_params = dict(params)
         if page_field:
             request_params[page_field] = page
+        if size_field:
+            request_params[str(size_field)] = page_size
         url = _build_request_url(endpoint, request_params)
         logical_id = f"{base['base_id']}:{endpoint_name}:pagina={page}"
         existing = _completed_item(context, logical_id)
@@ -1185,6 +1184,24 @@ def _find_complete_matching_manifest(manifest_hash: str) -> dict[str, Any] | Non
     return None
 
 
+def _find_resumable_version(manifest_hash: str) -> int | None:
+    checkpoints_dir = INVENTORY_ROOT / "checkpoints"
+    if not checkpoints_dir.exists():
+        return None
+    candidates: list[int] = []
+    for child in checkpoints_dir.iterdir():
+        version = _version_number(child.name)
+        if version is None:
+            continue
+        try:
+            checkpoint = json.loads(child.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if checkpoint.get("manifest_hash") == manifest_hash and checkpoint.get("state") != "promoted":
+            candidates.append(version)
+    return max(candidates) if candidates else None
+
+
 def _run_manifest_command(command: str, manifest_path: Path) -> int:
     manifest = load_manifest(manifest_path)
     manifest_hash = _manifest_hash(manifest_path)
@@ -1200,11 +1217,17 @@ def _run_manifest_command(command: str, manifest_path: Path) -> int:
         if latest is None:
             raise RuntimeError("update exige uma versão anterior")
         previous = _inventory_for_version(latest)
-    version = _next_version()
+        version = _next_version()
+    else:
+        version = _find_resumable_version(manifest_hash) or _next_version()
     context = _load_version_context(manifest, manifest_hash, version)
     for base in manifest["bases"]:
         _collect_base(context, base)
-    _promote_version(context)
+    failures = [item for item in context.items.values() if item.get("status") != "ok"]
+    if failures:
+        _checkpoint_write(context, state="staging")
+    else:
+        _promote_version(context)
     inventory = _build_inventory(manifest, version, manifest_hash, context.collected_at, context.items)
     inventory_path = _write_inventory(inventory)
     _render_corpus_inventory(inventory)

@@ -12,16 +12,18 @@ Escolhemos o Cenário 1 por ser o **mais verificável** dos três disponíveis (
 
 Contexto completo do desafio, dos outros dois cenários e dos padrões de engenharia exigidos está em [GRANDE_DESAFIO_CENARIOS.md](GRANDE_DESAFIO_CENARIOS.md).
 
-## As quatro bases de conhecimento
+## As bases de conhecimento
+
+O desafio pede **quatro bases** de naturezas diferentes (normativa, estruturada, conversacional, agregada). O manifesto atual declara as duas primeiras; conversacional e agregada ainda estão pendentes.
 
 | Base | Natureza | Conteúdo | Fonte | Acesso |
 | --- | --- | --- | --- | --- |
-| `editais_normativo` / `fontes_normativas` | Normativa | Lei 14.133/2021, decretos estaduais, editais de licitação | Planalto, REDELOG-RJ, CGE-RJ, PNCP | PDF/HTML por URL |
-| `contratos_estruturado` | Estruturada | Contratos e contratações, UF=RJ, período fechado | PNCP — API de consulta v3 | REST paginado |
-| `atas_conversacional` | Conversacional | Atas de registro de preço, e-mails de compras (base sintética) | PNCP + base sintética | Texto |
-| `pca_agregado` | Agregada | Plano de Contratações Anual, valores homologados por item | PNCP | REST |
+| `contratos_estruturado` | Estruturada | Contratos PNCP, filtrados por UF=RJ, recorte trimestral | PNCP — API de consulta v1/v3 (`/v1/contratos`) | REST paginado |
+| `editais_normativo` | Normativa | Editais e legislação de licitação | *(URLs placeholder — fontes reais ainda a definir)* | PDF/HTML por URL |
+| `atas_conversacional` | Conversacional | Atas de registro de preço, e-mails de compras | — | **Pendente** |
+| `pca_agregado` | Agregada | Plano de Contratações Anual, valores homologados | PNCP | **Pendente** |
 
-A definição declarativa de cada base — fonte, tipo de acesso, volume-alvo, campo de vigência, licença — vive em [corpus_manifest.yaml](corpus_manifest.yaml), que é a fonte única de verdade sobre o que entra no corpus. `data/raw/` nunca é versionado; qualquer pessoa reconstrói o corpus rodando o coletor contra o manifesto.
+A definição declarativa de cada base — fonte, tipo de acesso, volume-alvo, campo de vigência, licença — vive em [corpus_manifest.yaml](corpus_manifest.yaml), que é a fonte única de verdade sobre o que entra no corpus. `data/raw/` guarda versões imutáveis por coleta (`v1/`, `v2/`, ...); nenhuma versão é sobrescrita, e uma nova coleta sempre soma uma versão.
 
 > A API do PNCP **não tem busca textual**. Filtro por objeto é feito localmente, e o recorte de dados é sempre determinístico (mesmo manifesto ⇒ mesmo corpus).
 
@@ -65,10 +67,13 @@ Estágios (mesmos nomes usados no campo `stage` do log estruturado): `query_anal
 ```
 ├── acompanhamento/              ← relato individual + resumo do dia, a cada encontro
 ├── data/
-│   ├── raw/                     ← corpus bruto coletado (ignorado pelo Git)
-│   ├── runs/                    ← relatórios de execução de cada coleta
-│   └── CORPUS_INVENTORY.md      ← inventário legível do corpus coletado
+│   ├── raw/vN/                  ← versão imutável de cada coleta (staging em raw/.staging/ até promoção)
+│   ├── inventory/                ← inventário por versão (JSON), checkpoints e diffs entre versões
+│   ├── runs/                    ← relatórios do CLI legado de coleta (--quantidade)
+│   └── config/                  ← dados de apoio ao manifesto (ex.: cnpjs_rj.json)
+├── CORPUS_INVENTORY.md          ← inventário legível da versão mais recente
 ├── testes/test-fontes/          ← verificação de disponibilidade das fontes e downloader compartilhado
+├── testes/teste_extração.py     ← valida offline o contrato do fetch_corpus (manifesto, CLI, inventário)
 ├── tests/                       ← testes de contrato (pytest), offline
 ├── src/
 │   ├── fetch_corpus.py          ← coleta determinística e versionada do corpus
@@ -92,11 +97,12 @@ pip install -r requirements.txt
 copy .env.example .env          # preencher se necessário; os defaults já apontam para o endpoint da turma
 ```
 
-**2. Coletar o corpus** (grava em `data/raw/v1/arquivos/`, nunca versionado)
+**2. Coletar o corpus** (grava em `data/raw/vN/`, versão imutável por execução)
 
 ```bash
-py .\src\fetch_corpus.py --quantidade 2 --tipos html,pdf,json,jsonl
-py .\src\fetch_corpus.py --quantidade 3 --tipo pdf --salvar-json
+python -m src.fetch_corpus fetch      --manifest corpus_manifest.yaml   # nova versão a partir do manifesto
+python -m src.fetch_corpus update     --manifest corpus_manifest.yaml   # nova versão + diff com a anterior
+python -m src.fetch_corpus inventory  --version v1                     # reconstrói/valida o inventário de uma versão
 ```
 
 **3. Normalizar em chunks** (lê `data/raw/v1`, grava `data/normalized/documents.jsonl`)
