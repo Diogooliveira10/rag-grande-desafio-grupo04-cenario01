@@ -37,23 +37,23 @@ class TokenUsage:
     total: int = 0
 
     def __post_init__(self) -> None:
-        """Valida contagens não negativas em tempo e espaço O(1)."""
+        """Valida se todas as contagens de tokens são não negativas."""
         if min(self.prompt, self.completion, self.total) < 0:
             raise ValueError("A contagem de tokens não pode ser negativa.")
 
 
 def new_run_id() -> str:
-    """Cria um identificador de execução com oito caracteres em O(1)."""
+    """Cria um identificador de execução com oito caracteres."""
     return uuid.uuid4().hex[:8]
 
 
 def new_query_id() -> str:
-    """Cria um identificador de consulta no formato ``q_<id>`` em O(1)."""
+    """Cria um identificador de consulta no formato ``q_<id>``."""
     return f"q_{uuid.uuid4().hex[:8]}"
 
 
 def token_usage_from_response(response: Any) -> TokenUsage:
-    """Extrai tokens de ``response.usage`` ou retorna contagem zerada em O(1)."""
+    """Extrai tokens de ``response.usage`` ou retorna uma contagem zerada."""
     usage = getattr(response, "usage", None)
     if usage is None and isinstance(response, dict):
         usage = response.get("usage")
@@ -67,7 +67,7 @@ def token_usage_from_response(response: Any) -> TokenUsage:
 
 
 def _read_usage_value(usage: Any, field_name: str) -> int:
-    """Lê em O(1) um campo de uso de tokens de um objeto ou dicionário."""
+    """Lê um campo de uso de tokens de um objeto ou dicionário."""
     if isinstance(usage, Mapping):
         value = usage.get(field_name, 0)
     else:
@@ -76,7 +76,7 @@ def _read_usage_value(usage: Any, field_name: str) -> int:
 
 
 def _json_default(value: Any) -> Any:
-    """Converte tipos conhecidos para JSON em tempo e espaço O(n)."""
+    """Converte tipos conhecidos para valores serializáveis em JSON."""
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, Path):
@@ -107,7 +107,7 @@ class LogRecord:
     extra: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        """Converte o registro para um dicionário em tempo e espaço O(n)."""
+        """Converte o registro para um dicionário pronto para serialização."""
         data = asdict(self)
         data["stage"] = self.stage.value
         return data
@@ -117,17 +117,17 @@ class PipelineLogger:
     """Grava eventos estruturados e correlacionados do pipeline em JSONL."""
 
     def __init__(self, logs_dir: str | Path = "logs") -> None:
-        """Configura o diretório e o controle de escrita concorrente em O(1)."""
+        """Configura o diretório e o controle de escrita concorrente."""
         self.logs_dir = Path(logs_dir)
         self._lock = threading.Lock()
 
     def log_path(self, now: datetime | None = None) -> Path:
-        """Retorna em O(1) o caminho diário ``pipeline-AAAA-MM-DD.jsonl``."""
+        """Retorna o caminho diário ``pipeline-AAAA-MM-DD.jsonl``."""
         current = now or datetime.now().astimezone()
         return self.logs_dir / f"pipeline-{current.date().isoformat()}.jsonl"
 
     def write(self, record: LogRecord) -> Path:
-        """Acrescenta um registro ao JSONL e retorna seu caminho em O(n)."""
+        """Acrescenta um registro ao JSONL e retorna seu caminho."""
         path = self.log_path(datetime.fromisoformat(record.ts))
         line = json.dumps(record.to_dict(), ensure_ascii=False, default=_json_default)
         with self._lock:
@@ -146,7 +146,7 @@ class PipelineLogger:
         modelo: str | None = None,
         extra: dict[str, Any] | None = None,
     ) -> "LogSpan":
-        """Cria em O(m) um contexto de medição, sendo ``m`` o tamanho de ``extra``."""
+        """Cria um contexto para medir e registrar uma etapa do pipeline."""
         return LogSpan(
             logger=self,
             run_id=run_id,
@@ -172,7 +172,7 @@ class LogSpan:
         modelo: str | None,
         extra: dict[str, Any],
     ) -> None:
-        """Inicializa em O(1) os dados de uma medição ainda não iniciada."""
+        """Inicializa os dados de uma medição ainda não iniciada."""
         self.logger = logger
         self.run_id = run_id
         self.query_id = query_id
@@ -186,13 +186,13 @@ class LogSpan:
         self._timestamp = ""
 
     def __enter__(self) -> "LogSpan":
-        """Marca o instante inicial da etapa em tempo e espaço O(1)."""
+        """Marca o instante inicial da etapa."""
         self._timestamp = datetime.now().astimezone().isoformat(timespec="milliseconds")
         self._started = time.perf_counter()
         return self
 
     def set_result(self, output: Any, response: Any | None = None) -> None:
-        """Define a saída e captura tokens opcionais em tempo e espaço O(1)."""
+        """Define a saída observável e captura tokens opcionais."""
         self.output = output
         if response is not None:
             self.tokens = token_usage_from_response(response)
@@ -203,7 +203,7 @@ class LogSpan:
         exc: BaseException | None,
         _traceback: Any,
     ) -> bool:
-        """Persiste o evento em O(n) e retorna ``False`` para preservar exceções."""
+        """Persiste o evento e retorna ``False`` para preservar exceções."""
         latency = max(0, round((time.perf_counter() - self._started) * 1000))
         status = "erro" if exc is not None else "ok"
         output = self.output
@@ -245,7 +245,7 @@ def observe(
     output_builder: Callable[[Any], Any] | None = None,
     extra: dict[str, Any] | None = None,
 ) -> Callable[[Callable[P, R]], Callable[P, R]]:
-    """Decora uma função e registra cada chamada em O(n) para um evento de tamanho ``n``."""
+    """Decora uma função para registrar latência, resultado e uso de tokens."""
 
     def decorator(function: Callable[P, R]) -> Callable[P, R]:
         """Constrói o wrapper de observabilidade para a função recebida."""
