@@ -28,6 +28,18 @@ DEFAULT_INPUT = PROJECT_ROOT / "data" / "raw" / "v1"
 DEFAULT_OUTPUT = PROJECT_ROOT / "data" / "normalized" / "documents.jsonl"
 TEXT_EXTENSIONS = {".html", ".htm", ".aspx", ".txt", ".json", ".jsonl"}
 
+# Mapeia o base_id (ver base_id_for) para a Natureza de src/schema.py — o
+# metadado de todo chunk segue o formato de ChunkMetadata daquele módulo.
+NATUREZA_BY_BASE = {
+    "contratos_estruturado": "estruturada",
+    "atas_conversacional": "conversacional",
+    "pca_agregado": "agregada",
+    "editais_normativo": "normativa",
+    "fontes_normativas": "normativa",
+}
+DEFAULT_NATUREZA = "normativa"  # fallback para base_id sem mapeamento (ex.: fontes_externas)
+DEFAULT_SENSITIVITY = "publico"
+
 
 @dataclass(frozen=True)
 class RawDocument:
@@ -206,6 +218,20 @@ def iter_raw_documents(input_dir: Path) -> Iterator[RawDocument]:
             )
 
 
+def build_chunk_metadata(document: RawDocument, chunk_id: str) -> dict[str, Any]:
+    """Monta o metadado do chunk no formato de ChunkMetadata (src/schema.py)."""
+    extras = {key: value for key, value in document.metadata.items() if key != "nome_arquivo"}
+    return {
+        "source_file": document.metadata.get("nome_arquivo") or Path(document.source_path).name,
+        "chunk_id": chunk_id,
+        "base_id": document.base_id,
+        "doc_type": NATUREZA_BY_BASE.get(document.base_id, DEFAULT_NATUREZA),
+        "sensitivity": DEFAULT_SENSITIVITY,
+        "data_vigencia": None,
+        "extras": extras,
+    }
+
+
 def chunk_text(text: str, max_chars: int = 1200, overlap: int = 150) -> Iterator[str]:
     """Divide texto em blocos determinísticos, respeitando parágrafos."""
     normalized = re.sub(r"\n{3,}", "\n\n", text).strip()
@@ -239,8 +265,9 @@ def ingest(input_dir: Path, output_file: Path, max_chars: int, overlap: int) -> 
             if document.status_extracao == "pendente_extracao_pdf":
                 pending_pdf += 1
             for chunk_number, text in enumerate(chunk_text(document.text, max_chars, overlap), start=1):
+                chunk_id = f"{document.document_id}:chunk-{chunk_number}"
                 record = {
-                    "chunk_id": f"{document.document_id}:chunk-{chunk_number}",
+                    "chunk_id": chunk_id,
                     "document_id": document.document_id,
                     "base_id": document.base_id,
                     "text": text,
@@ -248,7 +275,7 @@ def ingest(input_dir: Path, output_file: Path, max_chars: int, overlap: int) -> 
                     "sha256": document.sha256,
                     "formato": document.formato,
                     "status_extracao": document.status_extracao,
-                    "metadata": document.metadata,
+                    "metadata": build_chunk_metadata(document, chunk_id),
                 }
                 handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
                 chunks += 1

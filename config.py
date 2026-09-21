@@ -29,4 +29,5 @@ REQUEST_TIMEOUT = float(_env("REQUEST_TIMEOUT", "30"))
 REQUEST_ATTEMPTS = int(_env("REQUEST_ATTEMPTS", "3"))
 RAW_DATA_DIR = ROOT_DIR / "data" / "raw" / "v1"
 NORMALIZED_DATA_DIR = ROOT_DIR / "data" / "normalized"
+INDEX_DIR = ROOT_DIR / "index"
 LOGS_DIR = ROOT_DIR / "logs"
