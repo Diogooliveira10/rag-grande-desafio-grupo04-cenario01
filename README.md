@@ -178,20 +178,100 @@ Os PDFs são amostras de entrada para inspeção e testes locais. A base usa
 `arquivo_local`, não faz requisições externas e só entra no corpus quando o
 comando é executado; usando `--data-root`, a execução não altera `data/raw/`.
 
-**3. Normalizar em chunks** (lê `data/raw/v1`, grava `data/normalized/documents.jsonl`)
+**3. Preparar documentos e PDFs** (extrai formatos, organiza metadados e grava chunks JSONL)
 
 ```bash
-py .\src\ingest.py
-py .\src\ingest.py --dry-run    # só conta documentos/chunks, sem gravar
+py -m src.prepare_documents `
+  --input tests/fixtures/pdf `
+  --manifest corpus_manifest.yaml `
+  --base-id exemplos_teste `
+  --output data/attempts/corpus_fetch/demo/normalized/documents.jsonl `
+  --report data/attempts/corpus_fetch/demo/normalized/extraction_report.json
+
+py -m src.prepare_documents `
+  --input tests/fixtures/pdf `
+  --manifest corpus_manifest.yaml `
+  --base-id exemplos_teste `
+  --dry-run
 ```
 
-**4. Testar o endpoint de LLM/embeddings compartilhado**
+Quando a entrada veio de uma coleta já registrada, informe também o inventário
+correspondente. O preparador usa `base_id + SHA-256` para recuperar a origem
+específica e o horário real de coleta de cada arquivo:
+
+```bash
+py -m src.prepare_documents `
+  --input data/raw/v1/contratos_estruturado `
+  --manifest corpus_manifest.yaml `
+  --base-id contratos_estruturado `
+  --inventory data/inventory/v1.json `
+  --output data/attempts/corpus_fetch/demo/normalized/contratos.jsonl `
+  --report data/attempts/corpus_fetch/demo/normalized/contratos_report.json
+```
+
+O script separado trata PDF, HTML, TXT, Markdown, CSV, JSON e JSONL. O
+chunking é adaptativo conforme `chunking_sugerido` do manifesto: registros
+estruturados permanecem inteiros, enquanto documentos normativos são divididos
+por cláusulas/artigos quando esses cabeçalhos existem, usando o chunking
+genérico como fallback. Cada chunk preserva `source_file`, `chunk_id`,
+`parent_chunk_id`, `base_id`, `natureza`, `doc_type` (formato original), `sensitivity`,
+SHA-256, página, vigência e proveniência no manifesto. `src/ingest.py` mantém
+uma fachada compatível para esse mesmo fluxo oficial.
+
+A base opcional `licitacoes_siga_csv` usa o CSV público da SEPLAG-RJ. O parser
+detecta o delimitador publicado, preserva os nomes reais das colunas e cria um
+chunk por licitação. A amostra versionada em `tests/fixtures/formats/` contém
+50 linhas reais para testes rápidos; a URL do manifesto permite reconstruir o
+arquivo completo.
+
+**4. Criar embeddings com cache**
+
+Primeiro valide sem chamar o endpoint:
+
+```bash
+py -m src.create_embeddings `
+  --input data/attempts/corpus_fetch/demo/normalized/documents.jsonl `
+  --output data/attempts/corpus_fetch/demo/embeddings/embeddings.jsonl `
+  --dry-run
+```
+
+Com o endpoint configurado, remova `--dry-run`. O padrão usa lotes de 64,
+pausa de 10 segundos entre chamadas e partes de até 45 MiB, seguindo a mesma
+estratégia de persistência incremental da inspiração:
+
+```bash
+py -m src.create_embeddings `
+  --input data/attempts/corpus_fetch/demo/normalized/documents.jsonl `
+  --output data/attempts/corpus_fetch/demo/embeddings/embeddings.jsonl
+```
+
+O cache é indexado pelo SHA-256 do conteúdo e por uma impressão digital dos
+metadados semânticos do chunk. Textos idênticos podem ser reutilizados quando
+pertencem ao mesmo contexto; alterações em `base_id`, natureza, origem,
+manifesto, vigência ou sensibilidade invalidam o embedding anterior. A
+execução deixa, no mesmo diretório, `embeddings.part-0001.jsonl` (partes
+atômicas) e `embedding_report.json` (estatísticas). Se o processo for
+interrompido, a execução seguinte reutiliza somente registros compatíveis.
+
+O diretório `data/embeddings/` fica versionável, como na inspiração. A
+materialização pública atual está em
+[`data/embeddings/embeddings.jsonl`](data/embeddings/embeddings.jsonl), com o
+relatório em [`data/embeddings/embedding_report.json`](data/embeddings/embedding_report.json).
+Assim, o professor pode testar a leitura e a indexação diretamente após clonar
+o repositório. Novas execuções de desenvolvimento devem usar
+`data/attempts/`, que continua fora do Git.
+
+As opções de provedor são `ecoa`, `ollama`, `openai` e `custom`. O cache registra
+provedor, endpoint e modelo para impedir a mistura de espaços vetoriais
+diferentes.
+
+**5. Testar o endpoint de LLM/embeddings compartilhado**
 
 ```bash
 python llm_ecoa.py
 ```
 
-**5. Rodar os testes**
+**6. Rodar os testes**
 
 ```bash
 pytest tests/ -m "not llm"      # camadas unitária e de contrato, offline
