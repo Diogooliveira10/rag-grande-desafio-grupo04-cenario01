@@ -1,16 +1,20 @@
 r"""Verifica a disponibilidade das fontes do Cenário 1.
 
 Uso:
-    py .\testes\test-fontes\testar_fontes.py
-    py .\testes\test-fontes\testar_fontes.py --atualizar-md --salvar-json --baixar-arquivos
-    py .\testes\test-fontes\testar_fontes_cenario01.py
+    py -m src.source_catalog
+    py -m src.source_catalog --atualizar-md --salvar-json --baixar-arquivos
+    py -m src.source_catalog discover
+    py -m src.source_catalog propose --manifest corpus_manifest.yaml
+    py -m src.source_catalog manifest-diff --proposal data/proposals/manifest-proposal.json
+    py -m src.source_catalog apply --proposal data/proposals/manifest-proposal.json
+    py .\testes\test-fontes\testar_fontes_cenario01.py  # compatibilidade
     py .\testes\test-fontes\testar_fontes_cenario01.py --atualizar-md
     py .\testes\test-fontes\testar_fontes_cenario01.py --atualizar-md --salvar-json
     py .\testes\test-fontes\testar_fontes_cenario01.py --atualizar-md --salvar-json --baixar-arquivos
 
 Exemplos de recorte:
-    py .\testes\test-fontes\testar_fontes_cenario01.py --ano 2025 --uf RJ --modalidade 1
-    py .\testes\test-fontes\testar_fontes_cenario01.py --ano 2025 --uf RJ --modalidade 6
+    py -m src.source_catalog --ano 2025 --uf RJ --modalidade 1
+    py -m src.source_catalog --ano 2025 --uf RJ --modalidade 6
 
 O script usa somente a biblioteca padrão do Python. Endpoints que dependem de
 identificadores reais são encadeados a partir de uma contratação/ata/PCA
@@ -32,16 +36,16 @@ from pathlib import Path
 from typing import Any, Callable
 
 try:
-    from artifact_downloader import ArtifactDownloader
-    from pncp_client import PncpClient
-except ImportError:  # permite import como pacote
     from .artifact_downloader import ArtifactDownloader
     from .pncp_client import PncpClient
+except ImportError:  # permite executar o módulo diretamente
+    from artifact_downloader import ArtifactDownloader
+    from pncp_client import PncpClient
 
 
-ROOT = Path(__file__).resolve().parent
-PROJECT_ROOT = ROOT.parents[1]
-MARKDOWN_PATH = ROOT / "fontes_cenario01.md"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+LEGACY_TEST_DIR = PROJECT_ROOT / "testes" / "test-fontes"
+MARKDOWN_PATH = LEGACY_TEST_DIR / "fontes_cenario01.md"
 JSON_PREFIX = "resultados_fontes_cenario01"
 DATA_DIR = PROJECT_ROOT / "data"
 RAW_DIR = DATA_DIR / "raw" / "v1"
@@ -147,8 +151,9 @@ PARTIAL_STATUSES = {"sem_amostra", "bloqueado_por_fonte"}
 class CheckConfig:
     ano: int = 2025
     uf: str = "RJ"
-    modalidade: int = 1
+    modalidade: int | None = 1
     tamanho_pagina: int = 10
+    pagina: int = 1
     timeout: float = DEFAULT_TIMEOUT
     attempts: int = DEFAULT_ATTEMPTS
     classificacao_superior: str = "979"
@@ -156,9 +161,20 @@ class CheckConfig:
     data_final: str | None = None
 
 
+def _normalize_api_date(value: Any) -> Any:
+    if isinstance(value, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        return value.replace("-", "")
+    return value
+
+
 def make_consulta_url(path: str, params: dict[str, Any]) -> str:
     """Monta URL da API pública de consultas (/api/consulta)."""
-    return PNCP_CLIENT.consulta_url(path, params)
+    date_fields = {"dataInicial", "dataFinal", "dataInicio", "dataFim"}
+    normalized = {
+        key: _normalize_api_date(value) if key in date_fields else value
+        for key, value in params.items()
+    }
+    return PNCP_CLIENT.consulta_url(path, normalized)
 
 
 def make_api_url(path: str) -> str:
@@ -174,16 +190,6 @@ def bounded_preview(body: bytes, content_type: str) -> str:
     if "html" not in content_type.lower() and "json" not in content_type.lower():
         return f"{len(body)} bytes binários"
     return text
-
-
-def _retry_delay(attempt: int, retry_after: str | None) -> float:
-    if retry_after:
-        try:
-            return min(max(float(retry_after), 0.0), 15.0)
-        except ValueError:
-            pass
-    # 1 s, 2 s, 4 s...; limitado para não transformar o verificador em espera longa.
-    return min(float(2 ** (attempt - 1)), 8.0)
 
 
 def run_timestamp(checked_at: str) -> str:
@@ -203,6 +209,8 @@ def download_url(
     *,
     attempts: int = DEFAULT_ATTEMPTS,
     timeout: float = DEFAULT_TIMEOUT,
+    headers: dict[str, str] | None = None,
+    deduplicate: bool = True,
 ) -> dict[str, Any]:
     """Compatibilidade para o CLI; a implementação fica em ArtifactDownloader."""
     return ARTIFACT_DOWNLOADER.download_url(
@@ -211,6 +219,8 @@ def download_url(
         filename_prefix,
         attempts=attempts,
         timeout=timeout,
+        headers=headers,
+        deduplicate=deduplicate,
     )
 
 
@@ -220,9 +230,10 @@ def request_url(
     *,
     attempts: int = DEFAULT_ATTEMPTS,
     timeout: float = DEFAULT_TIMEOUT,
+    headers: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Compatibilidade para o CLI; a implementação fica em PncpClient."""
-    return PNCP_CLIENT.request_url(url, kind, attempts=attempts, timeout=timeout)
+    return PNCP_CLIENT.request_url(url, kind, attempts=attempts, timeout=timeout, headers=headers)
 
 
 def empty_result(status: str, observacao: str) -> dict[str, Any]:
@@ -389,6 +400,7 @@ def query_for_sample(
     params_factory: Callable[[str, str], dict[str, Any]],
     extractor: Callable[[Any], dict[str, str] | None],
     config: CheckConfig,
+    before_request: Callable[[], None] | None = None,
 ) -> tuple[str, dict[str, Any], dict[str, str] | None]:
     """Tenta recortes pequenos até encontrar amostra; não insiste quando o servidor falha."""
     tested_periods: list[str] = []
@@ -398,6 +410,8 @@ def query_for_sample(
     for start, end in sample_windows(config):
         params = params_factory(start, end)
         url = make_consulta_url(path, params)
+        if before_request is not None:
+            before_request()
         result = request_url(url, "json", attempts=config.attempts, timeout=config.timeout)
         tested_periods.append(f"{start}-{end}")
         result["periodos_testados"] = tested_periods.copy()
@@ -437,9 +451,13 @@ def run_checks(config: CheckConfig) -> tuple[str, list[dict[str, Any]]]:
         lambda start, end: {
             "dataInicial": start,
             "dataFinal": end,
-            "codigoModalidadeContratacao": str(config.modalidade),
+            **(
+                {"codigoModalidadeContratacao": str(config.modalidade)}
+                if config.modalidade is not None
+                else {}
+            ),
             "uf": config.uf,
-            "pagina": "1",
+            "pagina": str(config.pagina),
             "tamanhoPagina": str(config.tamanho_pagina),
         },
         sample_purchase,
@@ -461,7 +479,7 @@ def run_checks(config: CheckConfig) -> tuple[str, list[dict[str, Any]]]:
         {
             "dataInicial": first_start,
             "dataFinal": first_end,
-            "pagina": "1",
+            "pagina": str(config.pagina),
             "tamanhoPagina": str(config.tamanho_pagina),
         },
     )
@@ -526,7 +544,7 @@ def run_checks(config: CheckConfig) -> tuple[str, list[dict[str, Any]]]:
         lambda start, end: {
             "dataInicial": start,
             "dataFinal": end,
-            "pagina": "1",
+            "pagina": str(config.pagina),
             "tamanhoPagina": str(config.tamanho_pagina),
         },
         sample_ata,
@@ -568,7 +586,7 @@ def run_checks(config: CheckConfig) -> tuple[str, list[dict[str, Any]]]:
 
     pca_params: dict[str, Any] = {
         "anoPca": str(config.ano),
-        "pagina": "1",
+        "pagina": str(config.pagina),
         "tamanhoPagina": str(config.tamanho_pagina),
     }
     pca_params["codigoClassificacaoSuperior"] = config.classificacao_superior
@@ -659,11 +677,11 @@ def run_checks(config: CheckConfig) -> tuple[str, list[dict[str, Any]]]:
     return checked_at, results
 
 
-def _find_result(results: list[dict[str, Any]], result_id: str) -> dict[str, Any] | None:
+def find_result(results: list[dict[str, Any]], result_id: str) -> dict[str, Any] | None:
     return next((result for result in results if result.get("id") == result_id), None)
 
 
-def _first_file_url(result: dict[str, Any] | None) -> str | None:
+def first_file_url(result: dict[str, Any] | None) -> str | None:
     if not result or not _is_available(result):
         return None
     for record in records_from_payload(result.get("json")):
@@ -744,7 +762,7 @@ def download_artifacts(
     """Baixa fontes e persiste respostas JSON/JSONL sem duplicação."""
     downloads: list[dict[str, Any]] = []
     for source_id, name, url, kind in WEB_SOURCES:
-        source = _find_result(results, source_id)
+        source = find_result(results, source_id)
         if source and _is_available(source):
             folder = (
                 "pdf"
@@ -776,8 +794,8 @@ def download_artifacts(
         ("arquivos_edital", "PNCP — primeiro arquivo de edital", "edital"),
         ("arquivos_atas", "PNCP — primeiro arquivo de ata", "ata"),
     ):
-        source = _find_result(results, result_id)
-        file_url = _first_file_url(source)
+        source = find_result(results, result_id)
+        file_url = first_file_url(source)
         if file_url:
             downloaded = download_url(
                 file_url,
@@ -917,7 +935,15 @@ def _exit_code(results: list[dict[str, Any]]) -> int:
     return 0
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] in {"discover", "lookup", "propose", "review", "manifest-diff", "apply"}:
+        try:
+            from .manifest_curator import main as curator_main
+        except ImportError:  # permite executar o módulo diretamente
+            from manifest_curator import main as curator_main
+        return curator_main(arguments)
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--atualizar-md", action="store_true", help="atualiza a tabela de resultados em fontes_cenario01.md")
     parser.add_argument("--salvar-json", action="store_true", help="salva resultados_fontes_cenario01_AAAA-MM-DD_HH-MM-SSZ.json")
@@ -940,7 +966,7 @@ def main() -> int:
     )
     parser.add_argument("--data-inicial", type=_validate_yyyymmdd, default=None, help="recorte explícito YYYYMMDD")
     parser.add_argument("--data-final", type=_validate_yyyymmdd, default=None, help="recorte explícito YYYYMMDD")
-    args = parser.parse_args()
+    args = parser.parse_args(arguments)
 
     if (args.data_inicial is None) != (args.data_final is None):
         parser.error("--data-inicial e --data-final devem ser usados juntos")

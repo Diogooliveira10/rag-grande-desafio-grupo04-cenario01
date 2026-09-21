@@ -50,9 +50,31 @@ class NormalizedChunk:
     document_id: str
     base_id: str
     text: str
-    source_path: str
+    source_file: str
     sha256: str
     metadata: dict[str, Any]
+
+
+def _chunk_metadata(record: dict[str, Any]) -> dict[str, Any]:
+    """Monta o metadado no formato de ChunkMetadata (src/schema.py).
+
+    src/prepare_documents.py grava um contrato plano (sem ``"metadata"``
+    aninhado): ``doc_type`` é o formato do arquivo (json/pdf/html) e
+    ``natureza`` é a classificação Adaptive RAG — ambos viram campos de
+    ChunkMetadata diretamente.
+    """
+    if "metadata" in record:  # compat: formato antigo, já aninhado
+        return record["metadata"]
+    return {
+        "source_file": record.get("source_file", ""),
+        "chunk_id": record["chunk_id"],
+        "base_id": record["base_id"],
+        "doc_type": record.get("doc_type", record.get("formato", "")),
+        "natureza": record.get("natureza"),
+        "sensitivity": record.get("sensitivity", "publico"),
+        "data_vigencia": record.get("data_vigencia"),
+        "extras": record.get("extras", {}),
+    }
 
 
 def read_normalized_chunks(input_file: Path) -> Iterator[NormalizedChunk]:
@@ -67,9 +89,9 @@ def read_normalized_chunks(input_file: Path) -> Iterator[NormalizedChunk]:
                 document_id=record["document_id"],
                 base_id=record["base_id"],
                 text=record.get("text", ""),
-                source_path=record.get("source_path", ""),
+                source_file=record.get("source_file", record.get("source_path", "")),
                 sha256=record.get("sha256", ""),
-                metadata=record.get("metadata", {}),
+                metadata=_chunk_metadata(record),
             )
 
 
@@ -163,7 +185,7 @@ def build_index(
                         "document_id": chunk.document_id,
                         "base_id": chunk.base_id,
                         "embedding": embedding,
-                        "source_path": chunk.source_path,
+                        "source_file": chunk.source_file,
                         "sha256": chunk.sha256,
                         "metadata": chunk.metadata,
                     }

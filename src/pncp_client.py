@@ -15,6 +15,11 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+try:
+    from .retry import retry_delay
+except ImportError:  # permite executar o módulo diretamente
+    from retry import retry_delay
+
 
 def _preview(body: bytes, content_type: str, limit: int = 240) -> str:
     if "json" in content_type.lower():
@@ -23,15 +28,6 @@ def _preview(body: bytes, content_type: str, limit: int = 240) -> str:
         except (UnicodeDecodeError, json.JSONDecodeError):
             pass
     return body.decode("utf-8", errors="replace").replace("\x00", " ").strip()[:limit]
-
-
-def _retry_delay(attempt: int, retry_after: str | None) -> float:
-    if retry_after:
-        try:
-            return min(max(float(retry_after), 0.0), 15.0)
-        except ValueError:
-            pass
-    return min(float(2 ** (attempt - 1)), 8.0)
 
 
 @dataclass
@@ -66,6 +62,7 @@ class PncpClient:
         *,
         attempts: int = 3,
         timeout: float = 20.0,
+        headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Consulta um endpoint, retentando apenas falhas transitórias."""
         attempts = max(1, attempts)
@@ -77,13 +74,15 @@ class PncpClient:
         last_network_error: BaseException | None = None
 
         for attempt in range(1, attempts + 1):
+            request_headers = {
+                "Accept": accept,
+                "User-Agent": self.user_agent,
+                "Cache-Control": "no-cache",
+            }
+            request_headers.update(headers or {})
             request = Request(
                 url,
-                headers={
-                    "Accept": accept,
-                    "User-Agent": self.user_agent,
-                    "Cache-Control": "no-cache",
-                },
+                headers=request_headers,
             )
             try:
                 with urlopen(request, timeout=timeout, context=ssl.create_default_context()) as response:
@@ -98,6 +97,8 @@ class PncpClient:
                         "url_final": response.geturl(),
                         "previa": _preview(body, content_type),
                         "tentativas": attempt,
+                        "etag": response.headers.get("ETag"),
+                        "last_modified": response.headers.get("Last-Modified"),
                     }
 
                     if len(raw) > self.read_limit:
@@ -120,12 +121,23 @@ class PncpClient:
                     return result
 
             except HTTPError as error:
+                response_headers = error.headers
+                if error.code == 304:
+                    return {
+                        "status": "nao_modificado",
+                        "http_status": 304,
+                        "content_type": response_headers.get("Content-Type", "") if response_headers else "",
+                        "bytes_lidos": 0,
+                        "url_final": url,
+                        "etag": response_headers.get("ETag") if response_headers else None,
+                        "last_modified": response_headers.get("Last-Modified") if response_headers else None,
+                        "tentativas": attempt,
+                    }
                 body = error.read(4096)
-                headers = error.headers
-                content_type = headers.get("Content-Type", "") if headers else ""
-                retry_after = headers.get("Retry-After") if headers else None
+                content_type = response_headers.get("Content-Type", "") if response_headers else ""
+                retry_after = response_headers.get("Retry-After") if response_headers else None
                 if error.code in self.retryable_http and attempt < attempts:
-                    time.sleep(_retry_delay(attempt, retry_after))
+                    time.sleep(retry_delay(attempt, retry_after))
                     continue
                 if error.code in self.retryable_http:
                     status = "indisponivel_temporariamente"
@@ -142,12 +154,14 @@ class PncpClient:
                     "previa": _preview(body, content_type),
                     "erro": str(error.reason),
                     "tentativas": attempt,
+                    "etag": response_headers.get("ETag") if response_headers else None,
+                    "last_modified": response_headers.get("Last-Modified") if response_headers else None,
                 }
 
             except (TimeoutError, URLError, OSError) as error:
                 last_network_error = error
                 if attempt < attempts:
-                    time.sleep(_retry_delay(attempt, None))
+                    time.sleep(retry_delay(attempt, None))
                     continue
 
         return {

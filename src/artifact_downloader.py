@@ -11,14 +11,10 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-
-def _retry_delay(attempt: int, retry_after: str | None) -> float:
-    if retry_after:
-        try:
-            return min(max(float(retry_after), 0.0), 15.0)
-        except ValueError:
-            pass
-    return min(float(2 ** (attempt - 1)), 8.0)
+try:
+    from .retry import retry_delay
+except ImportError:  # permite executar o módulo diretamente
+    from retry import retry_delay
 
 
 def _safe_filename(value: str) -> str:
@@ -77,11 +73,13 @@ class ArtifactDownloader:
         destination_dir: Path,
         filename_prefix: str,
         extension: str,
+        *,
+        deduplicate: bool = True,
     ) -> dict[str, object]:
         """Salva bytes únicos; o hash é a identidade do conteúdo."""
         destination_dir.mkdir(parents=True, exist_ok=True)
         digest = hashlib.sha256(body).hexdigest()
-        existing_path = self._find_existing_by_hash(digest)
+        existing_path = self._find_existing_by_hash(digest) if deduplicate else None
         if existing_path:
             return {
                 "status": "reutilizado",
@@ -94,11 +92,15 @@ class ArtifactDownloader:
         filename = _safe_filename(filename_prefix) + "_" + digest[:12] + normalized_extension
         path = destination_dir / filename
         path.write_bytes(body)
+        try:
+            relative_path = str(path.relative_to(self.root))
+        except ValueError:
+            relative_path = str(path)
         return {
             "status": "baixado",
             "bytes": len(body),
             "sha256": digest,
-            "arquivo": str(path.relative_to(self.root)),
+            "arquivo": relative_path,
         }
 
     def download_url(
@@ -109,15 +111,16 @@ class ArtifactDownloader:
         *,
         attempts: int = 3,
         timeout: float = 20.0,
+        headers: dict[str, str] | None = None,
+        deduplicate: bool = True,
     ) -> dict[str, object]:
         destination_dir.mkdir(parents=True, exist_ok=True)
-        request = Request(
-            url,
-            headers={
-                "Accept": "application/pdf, text/html, application/xhtml+xml, text/plain, */*",
-                "User-Agent": "rag-grande-desafio/1.0",
-            },
-        )
+        request_headers = {
+            "Accept": "application/pdf, text/html, application/xhtml+xml, text/plain, */*",
+            "User-Agent": "rag-grande-desafio/1.0",
+        }
+        request_headers.update(headers or {})
+        request = Request(url, headers=request_headers)
         last_error = ""
         for attempt in range(1, max(1, attempts) + 1):
             try:
@@ -140,6 +143,7 @@ class ArtifactDownloader:
                         destination_dir,
                         filename_prefix,
                         _extension(response.geturl(), content_type, body),
+                        deduplicate=deduplicate,
                     )
                     return {
                         **saved,
@@ -148,11 +152,23 @@ class ArtifactDownloader:
                         "content_type": content_type,
                         "url": url,
                         "url_final": response.geturl(),
+                        "etag": response.headers.get("ETag"),
+                        "last_modified": response.headers.get("Last-Modified"),
                     }
             except HTTPError as error:
                 last_error = str(error.reason)
+                if error.code == 304:
+                    return {
+                        "status": "nao_modificado",
+                        "http_status": 304,
+                        "tentativas": attempt,
+                        "content_type": error.headers.get("Content-Type", "") if error.headers else "",
+                        "url": url,
+                        "etag": error.headers.get("ETag") if error.headers else None,
+                        "last_modified": error.headers.get("Last-Modified") if error.headers else None,
+                    }
                 if error.code in self.retryable_http and attempt < max(1, attempts):
-                    time.sleep(_retry_delay(attempt, error.headers.get("Retry-After")))
+                    time.sleep(retry_delay(attempt, error.headers.get("Retry-After")))
                     continue
                 return {
                     "status": "erro_download",
@@ -165,7 +181,7 @@ class ArtifactDownloader:
             except (TimeoutError, URLError, OSError) as error:
                 last_error = str(getattr(error, "reason", error))
                 if attempt < max(1, attempts):
-                    time.sleep(_retry_delay(attempt, None))
+                    time.sleep(retry_delay(attempt, None))
                     continue
                 return {
                     "status": "erro_download",

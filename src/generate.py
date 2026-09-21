@@ -11,6 +11,7 @@ from typing import Optional, Protocol
 
 from src.schema import (
     Chunk,
+    ChunkMetadata,
     ConfidenceLevel,
     Natureza,
     RAGResponse,
@@ -135,10 +136,16 @@ sources_used deve conter apenas os chunk_id que você realmente usou, exatamente
 aparecem no contexto. Se is_refusal for true, sources_used deve ser uma lista vazia."""
 
 
+def _natureza_label(metadata: ChunkMetadata) -> str:
+    """``natureza`` é a classificação Adaptive RAG; ``doc_type`` é o formato do
+    arquivo (json/pdf/html) — só cai para ``doc_type`` se natureza não veio."""
+    return metadata.natureza.value if metadata.natureza is not None else metadata.doc_type
+
+
 def _montar_prompt(query: str, chunks: list[Chunk]) -> list[dict]:
     contexto = "\n\n".join(
         f"[chunk_id={c.metadata.chunk_id} | base={c.metadata.base_id} | "
-        f"natureza={c.metadata.doc_type.value}]\n{c.content}"
+        f"natureza={_natureza_label(c.metadata)}]\n{c.content}"
         for c in chunks
     )
     mensagem_usuario = f"Contexto:\n{contexto}\n\nPergunta: {query}"

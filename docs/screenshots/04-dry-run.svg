@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="500" viewBox="0 0 1100 500">
+  <rect width="1100" height="500" rx="18" fill="#111827"/>
+  <rect width="1100" height="42" rx="18" fill="#1f2937"/>
+  <circle cx="26" cy="21" r="7" fill="#fb7185"/><circle cx="50" cy="21" r="7" fill="#fbbf24"/><circle cx="74" cy="21" r="7" fill="#34d399"/>
+  <text x="105" y="27" fill="#cbd5e1" font-family="Segoe UI, sans-serif" font-size="16">Corpus Manager — update dry-run</text>
+  <g font-family="Cascadia Mono, Consolas, monospace" font-size="17">
+    <text x="34" y="82" fill="#86efac">PS&gt; py -m src.fetch_corpus update --manifest corpus_manifest.yaml --official --dry-run</text>
+    <text x="34" y="130" fill="#67e8f9">╭────────────── Update preview ──────────────╮</text>
+    <text x="34" y="164" fill="#f8fafc">│ Cenário: contratacoes-rj                     │</text>
+    <text x="34" y="198" fill="#f8fafc">│ Versão anterior: v1   Próxima: v2            │</text>
+    <text x="34" y="232" fill="#f8fafc">│ Escrita: não                                  │</text>
+    <text x="34" y="266" fill="#67e8f9">╰──────────────────────────────────────────────╯</text>
+    <text x="34" y="322" fill="#f8fafc">Base                  Acesso                Requisições</text>
+    <text x="34" y="356" fill="#94a3b8">contratos_estruturado rest_api               1</text>
+    <text x="34" y="390" fill="#94a3b8">documentos_pncp       rest_api_mais_arquivo 110</text>
+    <text x="34" y="448" fill="#fbbf24">Prévia concluída: nenhuma alteração foi feita.</text>
+  </g>
+</svg>

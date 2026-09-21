@@ -15,7 +15,8 @@ def _chunk(chunk_id="c1", base_id="contratos_estruturado", conteudo="texto do ch
             source_file="arquivo.json",
             chunk_id=chunk_id,
             base_id=base_id,
-            doc_type=Natureza.ESTRUTURADA,
+            doc_type="json",
+            natureza=Natureza.ESTRUTURADA,
         ),
     )
 

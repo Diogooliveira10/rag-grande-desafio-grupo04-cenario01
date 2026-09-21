@@ -1,36 +1,33 @@
-2026-09-18T17:59:37+00:00 [INFO] Início do teste offline da extração
-2026-09-18T17:59:37+00:00 [OK] Manifesto carregado como fonte única de verdade | arquivo=corpus_manifest.yaml | scenario_id=contratacoes-rj | versao=2026-09-16
-2026-09-18T17:59:37+00:00 [INFO] Base declarada no manifesto | base_id=contratos_estruturado | natureza=estruturada | acesso=rest_api | volume_alvo=1200 | rate_limit_seg=1.0
-2026-09-18T17:59:37+00:00 [INFO] Parâmetros da base inspecionados | base_id=contratos_estruturado | parametros={'dataInicial': '2025-01-01', 'dataFinal': '2025-12-31', 'uf': 'RJ'} | paginacao={'campo': 'pagina', 'tamanho': 50} | endpoints=não declarados | origem_local=não aplicável
-2026-09-18T17:59:37+00:00 [INFO] Base declarada no manifesto | base_id=contratacoes_publicacao_rj | natureza=estruturada | acesso=rest_api | volume_alvo=50 | rate_limit_seg=0
-2026-09-18T17:59:37+00:00 [INFO] Parâmetros da base inspecionados | base_id=contratacoes_publicacao_rj | parametros={'dataInicial': '2025-01-01', 'dataFinal': '2025-12-31', 'uf': 'RJ', 'pagina': 1, 'tamanhoPagina': 50} | paginacao=não declarada | endpoints=não declarados | origem_local=não aplicável
-2026-09-18T17:59:37+00:00 [INFO] Base declarada no manifesto | base_id=fontes_normativas | natureza=normativa | acesso=http_misto | volume_alvo=12 | rate_limit_seg=0
-2026-09-18T17:59:37+00:00 [INFO] Parâmetros da base inspecionados | base_id=fontes_normativas | parametros=não declarados | paginacao=não declarada | endpoints=não declarados | origem_local=não aplicável
-2026-09-18T17:59:37+00:00 [INFO] Base declarada no manifesto | base_id=documentos_pncp | natureza=normativa | acesso=rest_api_mais_arquivo | volume_alvo=20 | rate_limit_seg=0
-2026-09-18T17:59:37+00:00 [INFO] Parâmetros da base inspecionados | base_id=documentos_pncp | parametros=não declarados | paginacao=não declarada | endpoints=['edital', 'ata'] | origem_local=não aplicável
-2026-09-18T17:59:37+00:00 [INFO] Base declarada no manifesto | base_id=respostas_api_jsonl | natureza=conversacional | acesso=processamento_local | volume_alvo=5 | rate_limit_seg=0
-2026-09-18T17:59:37+00:00 [INFO] Parâmetros da base inspecionados | base_id=respostas_api_jsonl | parametros=não declarados | paginacao=não declarada | endpoints=não declarados | origem_local=data/raw/v1/arquivos/json
-2026-09-18T17:59:37+00:00 [INFO] Contrato operacional dos comandos
-2026-09-18T17:59:37+00:00 [INFO] Comando oficial | comando=python -m src.fetch_corpus fetch | objetivo=materializa uma nova versão a partir do manifesto
-2026-09-18T17:59:37+00:00 [INFO] Comando oficial | comando=python -m src.fetch_corpus update | objetivo=materializa a próxima versão e calcula o diff
-2026-09-18T17:59:37+00:00 [INFO] Comando oficial | comando=python -m src.fetch_corpus inventory | objetivo=reconstrói ou valida inventário sem baixar dados
-2026-09-18T17:59:37+00:00 [INFO] Conceito: idempotência | explicacao=reexecutar o mesmo manifesto completo reutiliza a versão existente e não duplica conteúdo
-2026-09-18T17:59:37+00:00 [INFO] Conceito: retomada | explicacao=o checkpoint registra cada logical_id concluído para continuar após uma interrupção
-2026-09-18T17:59:37+00:00 [INFO] Conceito: imutabilidade | explicacao=a coleta ocorre em data/raw/.staging/vN e só é promovida para data/raw/vN ao finalizar
-2026-09-18T17:59:37+00:00 [OK] Subcomando verificado | comando=fetch | encontrado=True
-2026-09-18T17:59:37+00:00 [OK] Subcomando verificado | comando=update | encontrado=True
-2026-09-18T17:59:37+00:00 [OK] Subcomando verificado | comando=inventory | encontrado=True
-2026-09-18T17:59:37+00:00 [OK] Inventário de versão encontrado | arquivo=data\inventory\v1.json | arquivos=47 | falhas=0
-2026-09-18T17:59:37+00:00 [OK] Contrato do inventário verificado | campos_ausentes=nenhum | registros=47 | bases=5
-2026-09-18T17:59:37+00:00 [INFO] Resumo da base no inventário | base_id=html | arquivos=12 | bytes=2812387 | volume_observado=12 | divergencia_alvo=None
-2026-09-18T17:59:37+00:00 [INFO] Resumo da base no inventário | base_id=json | arquivos=7 | bytes=272061 | volume_observado=7 | divergencia_alvo=None
-2026-09-18T17:59:37+00:00 [INFO] Resumo da base no inventário | base_id=jsonl | arquivos=5 | bytes=156147 | volume_observado=5 | divergencia_alvo=None
-2026-09-18T17:59:37+00:00 [INFO] Resumo da base no inventário | base_id=pdf | arquivos=1 | bytes=1605433 | volume_observado=1 | divergencia_alvo=None
-2026-09-18T17:59:37+00:00 [INFO] Resumo da base no inventário | base_id=pncp | arquivos=22 | bytes=75046062 | volume_observado=22 | divergencia_alvo=None
-2026-09-18T17:59:37+00:00 [ATENÇÃO] Inventário v1 foi reconstruído de dados históricos | explicacao=o hash do manifesto será preenchido nas versões produzidas pelo novo fetch
-2026-09-18T17:59:37+00:00 [INFO] Artefatos auxiliares localizados | diffs=nenhum | checkpoints=nenhum
-2026-09-18T17:59:37+00:00 [OK] Regra de armazenamento bruto verificada | gitignore_data_raw=True
-2026-09-18T17:59:37+00:00 [ATENÇÃO] Arquivos brutos já rastreados no Git | quantidade=47
-2026-09-18T17:59:37+00:00 [OK] Diretório de dados brutos verificado | existe=True
-2026-09-18T17:59:37+00:00 [INFO] Contagem física do armazenamento bruto | arquivos=47 | observacao=arquivos existentes não são alterados por este teste
-2026-09-18T17:59:37+00:00 [INFO] Teste concluído sem downloads e sem alteração de data/raw
+2026-09-18T18:54:34+00:00 [INFO] Início do teste offline da extração | run_id=offline-extraction-20260918T185434Z | stage=offline_validation
+2026-09-18T18:54:34+00:00 [OK] Manifesto carregado como fonte única de verdade | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | arquivo=corpus_manifest.yaml | scenario_id=contratacoes-rj | versao=2026-09-18
+2026-09-18T18:54:34+00:00 [INFO] Base declarada no manifesto | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | base_id=contratos_estruturado | natureza=estruturada | acesso=rest_api | volume_alvo=1200 | rate_limit_seg=1.0
+2026-09-18T18:54:34+00:00 [INFO] Parâmetros da base inspecionados | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | base_id=contratos_estruturado | parametros={'dataInicial': '2025-01-01', 'dataFinal': '2025-01-31'} | paginacao={'campo': 'pagina', 'tamanho': 50} | endpoints=não declarados | origem_local=não aplicável
+2026-09-18T18:54:34+00:00 [INFO] Base declarada no manifesto | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | base_id=editais_normativo | natureza=normativa | acesso=http_misto | volume_alvo=4 | rate_limit_seg=0.5
+2026-09-18T18:54:34+00:00 [INFO] Parâmetros da base inspecionados | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | base_id=editais_normativo | parametros=não declarados | paginacao=não declarada | endpoints=não declarados | origem_local=não aplicável
+2026-09-18T18:54:34+00:00 [INFO] Base declarada no manifesto | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | base_id=contratacoes_publicacao_rj | natureza=estruturada | acesso=rest_api | volume_alvo=50 | rate_limit_seg=1.0
+2026-09-18T18:54:34+00:00 [INFO] Parâmetros da base inspecionados | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | base_id=contratacoes_publicacao_rj | parametros={'dataInicial': '2025-01-01', 'dataFinal': '2025-01-31', 'codigoModalidadeContratacao': 1, 'uf': 'RJ', 'pagina': 1, 'tamanhoPagina': 50} | paginacao={'campo': 'pagina', 'tamanho': 50} | endpoints=não declarados | origem_local=não aplicável
+2026-09-18T18:54:34+00:00 [INFO] Base declarada no manifesto | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | base_id=documentos_pncp | natureza=normativa | acesso=rest_api_mais_arquivo | volume_alvo=100 | rate_limit_seg=1.0
+2026-09-18T18:54:34+00:00 [INFO] Parâmetros da base inspecionados | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | base_id=documentos_pncp | parametros={'ano': 2025, 'uf': 'RJ', 'codigoModalidadeContratacao': 1, 'tamanhoPagina': 100, 'maxPaginas': 10} | paginacao=não declarada | endpoints=['edital', 'ata'] | origem_local=não aplicável
+2026-09-18T18:54:34+00:00 [INFO] Base declarada no manifesto | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | base_id=respostas_api_jsonl | natureza=conversacional | acesso=processamento_local | volume_alvo=5 | rate_limit_seg=0
+2026-09-18T18:54:34+00:00 [INFO] Parâmetros da base inspecionados | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | base_id=respostas_api_jsonl | parametros=não declarados | paginacao=não declarada | endpoints=não declarados | origem_local=data/raw/v1/arquivos/json
+2026-09-18T18:54:34+00:00 [INFO] Contrato operacional dos comandos | run_id=offline-extraction-20260918T185434Z | stage=offline_validation
+2026-09-18T18:54:34+00:00 [INFO] Comando oficial | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | comando=python -m src.fetch_corpus fetch --official | objetivo=materializa uma nova versão a partir do manifesto
+2026-09-18T18:54:34+00:00 [INFO] Comando oficial | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | comando=python -m src.fetch_corpus update --official | objetivo=materializa a próxima versão e calcula o diff
+2026-09-18T18:54:34+00:00 [INFO] Comando oficial | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | comando=python -m src.fetch_corpus inventory --corpus-version v1 --official | objetivo=reconstrói ou valida inventário sem baixar dados
+2026-09-18T18:54:34+00:00 [INFO] Comando experimental | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | comando=python -m src.fetch_corpus fetch --manifest corpus_manifest.yaml --data-root data/attempts/corpus_fetch/tentativa-vN | objetivo=testa uma coleta isolada sem alterar a v1 oficial
+2026-09-18T18:54:34+00:00 [INFO] Conceito: idempotência | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | explicacao=reexecutar o mesmo manifesto completo reutiliza a versão existente e não duplica conteúdo
+2026-09-18T18:54:34+00:00 [INFO] Conceito: retomada | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | explicacao=o checkpoint registra cada logical_id concluído para continuar após uma interrupção
+2026-09-18T18:54:34+00:00 [INFO] Conceito: imutabilidade | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | explicacao=a coleta ocorre em data/raw/.staging/vN e só é promovida para data/raw/vN ao finalizar
+2026-09-18T18:54:34+00:00 [OK] Subcomando verificado | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | comando=fetch | encontrado=True
+2026-09-18T18:54:34+00:00 [OK] Subcomando verificado | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | comando=update | encontrado=True
+2026-09-18T18:54:34+00:00 [OK] Subcomando verificado | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | comando=inventory | encontrado=True
+2026-09-18T18:54:34+00:00 [OK] Inventário de versão encontrado | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | arquivo=data\inventory\v1.json | tipo=legacy_physical | oficial=True | vinculado_ao_manifesto=False | manifest_hash=não aplicável (legado) | arquivos=47 | itens=47 | falhas=0
+2026-09-18T18:54:34+00:00 [OK] Contrato do inventário verificado | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | campos_ausentes=nenhum | registros=47 | bases=1
+2026-09-18T18:54:34+00:00 [INFO] Resumo da base no inventário | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | base_id=legacy_physical | arquivos=47 | itens=47 | formatos={'html': 11, 'htm': 1, 'json': 7, 'jsonl': 5, 'pdf': 23} | bytes=79892090 | volume_observado=47 | divergencia_alvo=None
+2026-09-18T18:54:34+00:00 [ATENÇÃO] Inventário legado não está vinculado ao manifesto | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | explicacao=as versões oficiais produzidas pelo fetch possuem hash do manifesto
+2026-09-18T18:54:34+00:00 [INFO] Artefatos auxiliares localizados | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | diffs=nenhum | checkpoints=nenhum
+2026-09-18T18:54:34+00:00 [OK] Regra de armazenamento bruto verificada | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | gitignore_data_raw=True
+2026-09-18T18:54:34+00:00 [OK] Arquivos brutos já rastreados no Git | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | quantidade=0
+2026-09-18T18:54:34+00:00 [OK] Diretório de dados brutos verificado | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | existe=True
+2026-09-18T18:54:34+00:00 [INFO] Contagem física do armazenamento bruto | run_id=offline-extraction-20260918T185434Z | stage=offline_validation | arquivos=47 | observacao=arquivos existentes não são alterados por este teste
+2026-09-18T18:54:34+00:00 [INFO] Teste concluído sem downloads e sem alteração de data/raw | run_id=offline-extraction-20260918T185434Z | stage=offline_validation
