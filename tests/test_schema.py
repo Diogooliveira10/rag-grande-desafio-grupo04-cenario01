@@ -17,15 +17,15 @@ def test_chunk_metadata_tem_campos_obrigatorios():
         source_file="contrato_001.json",
         chunk_id="c001",
         base_id="contratos_estruturado",
-        doc_type=Natureza.ESTRUTURADA,
+        doc_type="json",
     )
     assert meta.sensitivity == Sensibilidade.PUBLICO  # default
-    assert meta.doc_type == Natureza.ESTRUTURADA
+    assert meta.doc_type == "json"
 
 
 def test_chunk_metadata_falha_sem_campo_obrigatorio():
     with pytest.raises(ValidationError):
-        ChunkMetadata(chunk_id="c001", base_id="x", doc_type=Natureza.NORMATIVA)  # falta source_file
+        ChunkMetadata(chunk_id="c001", base_id="x", doc_type="pdf")  # falta source_file
 
 
 def test_rag_response_valida_com_fontes():

@@ -40,7 +40,8 @@ class ChunkMetadata(BaseModel):
     source_file: str
     chunk_id: str
     base_id: str
-    doc_type: Natureza
+    doc_type: str
+    natureza: Optional[Natureza] = None
     sensitivity: Sensibilidade = Sensibilidade.PUBLICO
     data_vigencia: Optional[date] = None
     extras: dict = Field(default_factory=dict)  # orgao, modalidade, valor, municipio...
