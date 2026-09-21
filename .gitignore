@@ -34,5 +34,8 @@ data/inventory/checkpoints/
 # Resultados gerados pelas checagens
 testes/resultados/
 
+# Relatórios de execução do eval (golden set em si é versionado)
+eval/runs/
+
 # Claude
 .claude/
