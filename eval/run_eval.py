@@ -9,9 +9,9 @@ Uso:
 pipeline. ``run`` importa a função apontada por ``--pipeline`` (formato
 ``modulo.submodulo:funcao``), roda cada pergunta do golden set contra ela e
 grava o relatório (JSON + Markdown) em ``eval/runs/<run_id>/``.
-``eval.adapters:rota_apenas`` já funciona hoje e avalia só o roteamento
-(``src/router.py``); um pipeline completo (roteamento + recuperação +
-geração) só é possível quando ``retrieve.py`` existir.
+``eval.adapters:rota_apenas`` avalia só o roteamento (``src/router.py``) —
+rápido e offline. ``src.pipeline:responder`` roda o pipeline completo
+(roteamento + recuperação híbrida + geração), chamando o LLM de verdade.
 
 O golden set (``eval/golden_set.jsonl``) é derivado das 18 perguntas de
 referência + a pergunta de falha esperada do ``PERSONAS.md``. Cada caso
@@ -238,8 +238,8 @@ def main() -> int:
     except (ImportError, ValueError) as exc:
         parser.error(
             f"não foi possível carregar --pipeline={args.pipeline}: {exc}. "
-            "router.py/retrieve.py/generate.py ainda podem não existir neste repositório; "
-            "aponte para uma função compatível quando o pipeline estiver pronto."
+            "use eval.adapters:rota_apenas (só roteamento) ou src.pipeline:responder "
+            "(pipeline completo)."
         )
 
     run_id = args.run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")

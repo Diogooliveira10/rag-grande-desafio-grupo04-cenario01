@@ -60,7 +60,7 @@ flowchart TD
 
 Estágios (mesmos nomes usados no campo `stage` do log estruturado): `query_analysis`, `roteamento`, `retrieval_denso`, `retrieval_bm25`, `fusao_rrf`, `rerank`, `geracao`, `validacao`, `feedback`. Detalhes de decisão e divisão de responsabilidades em [ARQUITETURA.md](ARQUITETURA.md).
 
-**Implementado:** `roteamento` ([src/router.py](src/router.py)) e `geracao` ([src/generate.py](src/generate.py), com guardrails determinísticos antes do LLM e parsing defensivo da saída). **Em desenvolvimento por outro integrante:** `retrieval_denso`/`retrieval_bm25`/`fusao_rrf`/`rerank` (`retrieve.py`). Toda etapa registra log estruturado via [src/obs.py](src/obs.py) (JSONL em `logs/pipeline-AAAA-MM-DD.jsonl`, com `run_id`, `stage`, latência e tokens).
+**Implementado:** `roteamento` ([src/router.py](src/router.py)), `retrieval_denso`/`retrieval_bm25`/`fusao_rrf` ([src/retrieve.py](src/retrieve.py), rerank ainda é opcional/plugável) e `geracao` ([src/generate.py](src/generate.py), com guardrails determinísticos antes do LLM e parsing defensivo da saída). [src/pipeline.py](src/pipeline.py) une os três estágios numa única função (`responder`). Toda etapa registra log estruturado via [src/obs.py](src/obs.py) (JSONL em `logs/pipeline-AAAA-MM-DD.jsonl`, com `run_id`, `stage`, latência e tokens).
 
 ## Estrutura do repositório
 
@@ -77,7 +77,7 @@ Estágios (mesmos nomes usados no campo `stage` do log estruturado): `query_anal
 ├── index/                       ← índice vetorial por base, gerado por src/index.py (ignorado pelo Git)
 ├── eval/
 │   ├── golden_set.jsonl         ← golden set derivado do PERSONAS.md (18 perguntas + 1 de falha esperada)
-│   ├── adapters.py              ← plugs de módulos do pipeline no harness (hoje: só o roteamento)
+│   ├── adapters.py              ← plugs de módulos do pipeline no harness (hoje: só o roteamento, offline)
 │   └── run_eval.py              ← roda o golden set contra um pipeline e grava relatório em eval/runs/
 ├── CORPUS_INVENTORY.md          ← inventário legível da versão mais recente
 ├── testes/test-fontes/          ← verificação de disponibilidade das fontes e downloader compartilhado
@@ -92,7 +92,9 @@ Estágios (mesmos nomes usados no campo `stage` do log estruturado): `query_anal
 │   ├── create_embeddings.py     ← embeddings com cache, multi-provedor e escrita incremental
 │   ├── index.py                 ← índice vetorial por base a partir do JSONL normalizado
 │   ├── router.py                ← roteamento determinístico (Adaptive RAG)
+│   ├── retrieve.py              ← recuperação híbrida: denso + BM25 + RRF, filtros de metadado, rerank plugável
 │   ├── generate.py              ← geração com guardrails e parsing defensivo da saída do LLM
+│   ├── pipeline.py              ← une roteamento + recuperação + geração numa função (responder)
 │   ├── obs.py                   ← logging estruturado (JSONL) e contagem de tokens
 │   └── schema.py                ← modelos Pydantic (chunk, roteamento, resposta, recusa)
 ├── llm_ecoa.py                  ← exemplo mínimo de geração e embedding via endpoint compartilhado
@@ -307,11 +309,12 @@ pytest tests/ -m "not llm"      # camadas unitária e de contrato, offline
 **7. Rodar a avaliação (golden set das personas)**
 
 ```bash
-py .\eval\run_eval.py check                                    # valida o golden set, sem pipeline
-py .\eval\run_eval.py run --pipeline eval.adapters:rota_apenas  # roda src/router.py contra o golden set
+py .\eval\run_eval.py check                                     # valida o golden set, sem pipeline
+py .\eval\run_eval.py run --pipeline eval.adapters:rota_apenas   # só roteamento (src/router.py), rápido e offline
+py .\eval\run_eval.py run --pipeline src.pipeline:responder      # pipeline completo: roteamento + recuperação + geração
 ```
 
-`eval/adapters.py:rota_apenas` avalia só o estágio de roteamento. Um pipeline completo (roteamento + recuperação + geração) só é possível quando `retrieve.py` — em desenvolvimento por outro integrante — estiver pronto.
+`eval/adapters.py:rota_apenas` avalia só o estágio de roteamento, sem chamar o LLM — útil para checar regressão rápida. `src/pipeline.py:responder` roda o pipeline completo (roteamento + recuperação híbrida via `retrieve.py` + geração via `generate.py`), chamando o LLM de verdade a cada pergunta do golden set.
 
 ### Endpoint de modelos (compartilhado com toda a turma)
 

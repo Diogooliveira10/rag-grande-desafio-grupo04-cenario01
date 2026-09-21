@@ -292,10 +292,16 @@ def gerar_resposta(
     cliente: Optional[ClienteLLM] = None,
     run_id: str = "sem-run-id",
     query_id: Optional[str] = None,
+    refusal_reason_hint: Optional[RefusalReason] = None,
 ) -> RAGResponse:
     """
     Estágio "geracao": recebe a pergunta e os chunks já recuperados/rerankeados,
     devolve sempre uma RAGResponse válida (nunca uma exception do LLM/parsing).
+
+    ``refusal_reason_hint`` é usado só quando ``chunks`` vem vazio (nenhuma base
+    foi consultada) — permite a quem chama (ex.: src/pipeline.py, a partir da
+    justificativa de src/router.py) dizer *por que* não há chunks (fora de
+    escopo, juízo de legalidade...) em vez de sempre cair em SEM_EVIDENCIA.
     """
     query_id = query_id or str(uuid.uuid4())
     inicio = time.monotonic()
@@ -307,7 +313,7 @@ def gerar_resposta(
         return resposta
 
     if not chunks:
-        resposta = _recusa(query, bases_consultadas, RefusalReason.SEM_EVIDENCIA)
+        resposta = _recusa(query, bases_consultadas, refusal_reason_hint or RefusalReason.SEM_EVIDENCIA)
         _logar_evento(run_id, query_id, "sem_chunks", inicio, resposta)
         return resposta
 

@@ -1,37 +1,23 @@
 """Adaptadores que plugam módulos já implementados do pipeline no harness de eval/run_eval.py.
 
-``retrieve.py`` ainda não existe, então não há como rodar o pipeline completo
-(roteamento + recuperação + geração) contra o golden set. ``rota_apenas``
-avalia só o estágio ``roteamento`` (``src/router.py``), que já está pronto —
-é o suficiente para medir se o roteador escolhe as bases certas e recusa nos
-casos de recusa/fora de escopo do golden set.
+``rota_apenas`` avalia só o estágio ``roteamento`` (``src/router.py``): é
+determinístico, offline e não chama o LLM — o suficiente para medir se o
+roteador escolhe as bases certas e recusa nos casos de recusa/fora de escopo
+do golden set, sem o custo (tempo, tokens) de rodar a geração.
+
+Agora que ``src/retrieve.py`` existe, o pipeline completo (roteamento +
+recuperação híbrida + geração) roda direto via ``src/pipeline.py:responder``
+— já compatível com o contrato de ``eval/run_eval.py`` sem precisar de
+adaptador:
+
+    py .\\eval\\run_eval.py run --pipeline src.pipeline:responder
 """
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
-from src.router import rotear_pergunta
-
-# Palavras da justificativa do roteador (src/router.py) usadas para inferir o
-# RefusalReason equivalente — router.py hoje só devolve texto livre, não o enum.
-_PISTAS_MOTIVO = (
-    ("dado bancario", "dados_bancarios_fornecedor"),
-    ("dados bancarios", "dados_bancarios_fornecedor"),
-    ("credencia", "credenciais_vazadas"),
-    ("juizo", "juizo_legalidade_contrato"),
-    ("legalidade", "juizo_legalidade_contrato"),
-    ("fora do corpus", "fora_de_escopo"),
-    ("nao foi identificado", "sem_evidencia"),
-)
-
-
-def _inferir_motivo(justificativa: str) -> Optional[str]:
-    texto = justificativa.lower()
-    for pista, motivo in _PISTAS_MOTIVO:
-        if pista in texto:
-            return motivo
-    return None
+from src.router import inferir_motivo_recusa, rotear_pergunta
 
 
 def rota_apenas(pergunta: str) -> dict[str, Any]:
@@ -39,10 +25,11 @@ def rota_apenas(pergunta: str) -> dict[str, Any]:
     decisao = rotear_pergunta(pergunta)
     bases = [base.value for base in decisao.bases_selecionadas]
     is_refusal = not bases
+    motivo = inferir_motivo_recusa(decisao.justificativa) if is_refusal else None
     return {
         "bases_consultadas": bases,
         "is_refusal": is_refusal,
-        "refusal_reason": _inferir_motivo(decisao.justificativa) if is_refusal else None,
+        "refusal_reason": motivo.value if motivo else None,
     }
 
 

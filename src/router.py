@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from typing import Optional
 
-from src.schema import Natureza, RouteDecision
+from src.schema import Natureza, RefusalReason, RouteDecision
 
 
 _REFUSAL_PATTERNS = (
@@ -76,6 +77,34 @@ def _contains_pattern(text: str, patterns: tuple[str, ...]) -> bool:
     return any(re.search(pattern, text) for pattern in patterns)
 
 
+# Palavras da `justificativa` (abaixo) usadas para inferir o RefusalReason
+# equivalente quando bases_selecionadas vem vazia — rotear_pergunta só devolve
+# texto livre, não o enum, então quem consome a recusa (eval/adapters.py,
+# src/pipeline.py) infere o motivo estruturado a partir daqui.
+_PISTAS_MOTIVO_RECUSA: tuple[tuple[str, RefusalReason], ...] = (
+    ("dado bancario", RefusalReason.DADOS_BANCARIOS),
+    ("dados bancarios", RefusalReason.DADOS_BANCARIOS),
+    ("credencia", RefusalReason.CREDENCIAIS_VAZADAS),
+    ("juizo", RefusalReason.JUIZO_LEGALIDADE),
+    ("legalidade", RefusalReason.JUIZO_LEGALIDADE),
+    ("fora do corpus", RefusalReason.FORA_DE_ESCOPO),
+    ("nao foi identificado", RefusalReason.SEM_EVIDENCIA),
+)
+
+
+def inferir_motivo_recusa(justificativa: str) -> Optional[RefusalReason]:
+    """Mapeia a `justificativa` de uma RouteDecision sem bases para um RefusalReason.
+
+    Devolve ``None`` quando a justificativa não bate com nenhuma pista
+    conhecida — quem chama decide o padrão (normalmente ``SEM_EVIDENCIA``).
+    """
+    texto = justificativa.lower()
+    for pista, motivo in _PISTAS_MOTIVO_RECUSA:
+        if pista in texto:
+            return motivo
+    return None
+
+
 def _normalize(query: str) -> str:
     folded = query.casefold()
     without_accents = "".join(
@@ -143,4 +172,4 @@ def rotear_pergunta(query: str) -> RouteDecision:
     )
 
 
-__all__ = ["rotear_pergunta"]
+__all__ = ["rotear_pergunta", "inferir_motivo_recusa"]
