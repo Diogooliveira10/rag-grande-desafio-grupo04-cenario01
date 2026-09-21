@@ -34,6 +34,7 @@ data/inventory/checkpoints/
 data/normalized/
 data/runs/
 data/inventory/checkpoints/
+data/attempts
 
 # Resultados gerados pelas checagens
 testes/resultados/
