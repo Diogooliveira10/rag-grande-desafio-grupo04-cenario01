@@ -35,7 +35,7 @@ A pergunta que o roteador responde não é "sobre o que o usuário falou", e sim
 - *"Quais contratos de licenciamento de software foram assinados acima de R$ 500 mil em 2025?"* → estruturada, com filtro numérico extraído da pergunta.
 - *"Sou MEI, posso participar de pregão eletrônico? Tem algum aberto pra material de escritório?"* → normativa (tratamento a ME/EPP) **e** estruturada (contratações em aberto) na mesma pergunta.
 
-As personas de referência, com as nove perguntas classificadas por rota esperada e tipo, estão em [PERSONAS.md](PERSONAS.md).
+As seis personas de referência, com as 18 perguntas classificadas por rota esperada e tipo (mais uma pergunta de falha esperada), estão em [PERSONAS.md](PERSONAS.md) — e viraram o golden set que `eval/run_eval.py` roda contra o pipeline. `src/router.py` já implementa esse roteamento de forma determinística (regex sobre o texto normalizado da pergunta, sem chamar o LLM).
 
 ## Política de sensibilidade
 
@@ -62,22 +62,34 @@ flowchart TD
 
 Estágios (mesmos nomes usados no campo `stage` do log estruturado): `query_analysis`, `roteamento`, `retrieval_denso`, `retrieval_bm25`, `fusao_rrf`, `rerank`, `geracao`, `validacao`, `feedback`. Detalhes de decisão e divisão de responsabilidades em [ARQUITETURA.md](ARQUITETURA.md).
 
+**Implementado:** `roteamento` ([src/router.py](src/router.py)) e `geracao` ([src/generate.py](src/generate.py), com guardrails determinísticos antes do LLM e parsing defensivo da saída). **Em desenvolvimento por outro integrante:** `retrieval_denso`/`retrieval_bm25`/`fusao_rrf`/`rerank` (`retrieve.py`). Toda etapa registra log estruturado via [src/obs.py](src/obs.py) (JSONL em `logs/pipeline-AAAA-MM-DD.jsonl`, com `run_id`, `stage`, latência e tokens).
+
 ## Estrutura do repositório
 
 ```
 ├── acompanhamento/              ← relato individual + resumo do dia, a cada encontro
 ├── data/
 │   ├── raw/vN/                  ← versão imutável de cada coleta (staging em raw/.staging/ até promoção)
+│   ├── normalized/              ← chunks normalizados (JSONL), saída de src/ingest.py (ignorado pelo Git)
 │   ├── inventory/                ← inventário por versão (JSON), checkpoints e diffs entre versões
 │   ├── runs/                    ← relatórios do CLI legado de coleta (--quantidade)
 │   └── config/                  ← dados de apoio ao manifesto (ex.: cnpjs_rj.json)
+├── index/                       ← índice vetorial por base, gerado por src/index.py (ignorado pelo Git)
+├── eval/
+│   ├── golden_set.jsonl         ← golden set derivado do PERSONAS.md (18 perguntas + 1 de falha esperada)
+│   ├── adapters.py              ← plugs de módulos do pipeline no harness (hoje: só o roteamento)
+│   └── run_eval.py              ← roda o golden set contra um pipeline e grava relatório em eval/runs/
 ├── CORPUS_INVENTORY.md          ← inventário legível da versão mais recente
 ├── testes/test-fontes/          ← verificação de disponibilidade das fontes e downloader compartilhado
 ├── testes/teste_extração.py     ← valida offline o contrato do fetch_corpus (manifesto, CLI, inventário)
 ├── tests/                       ← testes de contrato (pytest), offline
 ├── src/
 │   ├── fetch_corpus.py          ← coleta determinística e versionada do corpus
-│   ├── ingest.py                ← normalização de brutos em chunks (JSONL)
+│   ├── ingest.py                ← normalização de brutos em chunks (JSONL) e metadados (ChunkMetadata)
+│   ├── index.py                 ← embeddings e índice vetorial por base
+│   ├── router.py                ← roteamento determinístico (Adaptive RAG)
+│   ├── generate.py              ← geração com guardrails e parsing defensivo da saída do LLM
+│   ├── obs.py                   ← logging estruturado (JSONL) e contagem de tokens
 │   └── schema.py                ← modelos Pydantic (chunk, roteamento, resposta, recusa)
 ├── llm_ecoa.py                  ← exemplo mínimo de geração e embedding via endpoint compartilhado
 ├── corpus_manifest.yaml         ← o que entra no corpus (fonte única de verdade)
@@ -112,17 +124,33 @@ py .\src\ingest.py
 py .\src\ingest.py --dry-run    # só conta documentos/chunks, sem gravar
 ```
 
-**4. Testar o endpoint de LLM/embeddings compartilhado**
+**4. Construir o índice vetorial** (lê `data/normalized/documents.jsonl`, grava `index/<base_id>/`)
+
+```bash
+py .\src\index.py --dry-run     # só conta chunks por base, sem chamar o modelo de embeddings
+py .\src\index.py               # gera embeddings de verdade, via o endpoint compartilhado
+```
+
+**5. Testar o endpoint de LLM/embeddings compartilhado**
 
 ```bash
 python llm_ecoa.py
 ```
 
-**5. Rodar os testes**
+**6. Rodar os testes**
 
 ```bash
 pytest tests/ -m "not llm"      # camadas unitária e de contrato, offline
 ```
+
+**7. Rodar a avaliação (golden set das personas)**
+
+```bash
+py .\eval\run_eval.py check                                    # valida o golden set, sem pipeline
+py .\eval\run_eval.py run --pipeline eval.adapters:rota_apenas  # roda src/router.py contra o golden set
+```
+
+`eval/adapters.py:rota_apenas` avalia só o estágio de roteamento. Um pipeline completo (roteamento + recuperação + geração) só é possível quando `retrieve.py` — em desenvolvimento por outro integrante — estiver pronto.
 
 ### Endpoint de modelos (compartilhado com toda a turma)
 
