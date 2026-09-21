@@ -1,2 +1,5 @@
 openai>=3.14.1
 python-dotenv>=1.2.3
+typer>=0.16.0
+rich>=13.9.0
+InquirerPy>=0.3.4
