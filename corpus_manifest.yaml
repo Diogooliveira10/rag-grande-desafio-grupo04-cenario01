@@ -1,7 +1,17 @@
 scenario_id: contratacoes-rj
-version: "2026-09-14"              # data do congelamento do corpus
+version: "2026-09-18"              # data da declaração desta versão do manifesto
 description: "Contratações públicas do Estado do RJ, ano-base 2025"
 
+coleta:
+  ferramenta: "src/fetch_corpus.py"
+  armazenamento_bruto: "data/raw/vN/<base_id>"
+  inventario: "data/inventory/vN.json"
+  logs: "data/runs/<run_id>.jsonl"
+
+diretorios_locais:
+  raw: "data/raw/vN/<base_id>"
+  inventario: "data/inventory/vN.json"
+  relatorios: "data/runs"
 bases:
   # ---------------------------------------------------------------------
   # NATUREZA: estruturada
@@ -13,36 +23,113 @@ bases:
       tipo: rest_api
       endpoint: "https://pncp.gov.br/api/consulta/v1/contratos"
       params:
-        dataInicial: "20250101"  # AAAAMMDD — formato exigido pela API do PNCP
-        dataFinal: "20250331"    # trimestre — evita puxar o volume nacional inteiro sem filtro de UF
+        dataInicial: "2025-01-01"
+        dataFinal: "2025-01-31"
       paginacao:
-        campo_pagina: "pagina"
-        campo_tamanho: "tamanhoPagina"
-      tamanho_pagina: 50
+        campo: "pagina"
+        tamanho: 50
       rate_limit_seg: 1.0
-     
-      filtro_local:
-        campo: "unidadeOrgao.ufSigla"
-        operador: "=="
-        valor: "RJ"
     selecao_deterministica: true
+    volume_alvo: 1200
+    formato: json
+    licenca: "Dados abertos gov.br - atribuição"
+    sensitivity_default: publico
     campo_vigencia: "dataVigenciaFim"
     chunking_sugerido: "1 contrato = 1 chunk, serializado em linguagem natural"
     metadados_extras: [orgao, modalidade, valor, municipio, ano]
 
   - base_id: editais_normativo
     natureza: normativa
-    fonte: "Editais e legislação"
+    fonte: "Planalto, REDELOG RJ, CGE-RJ e MPPI"
     acesso:
       tipo: http_misto
       urls:
-        - "<https://exemplo.gov.br/edital-001-2025.pdf>"
-        - "<https://exemplo.gov.br/edital-014-2025.pdf>"
+        - "https://www.planalto.gov.br/ccivil_03/_ato2019-2022/2021/lei/l14133.htm"
+        - "https://redelog.rj.gov.br/redelog/legislacao-licitacoes/"
+        - "https://cge.rj.gov.br/legislacao/decretos/"
+        - "https://www.mppi.mp.br/internet/wp-content/uploads/2021/04/L14133.pdf"
+      rate_limit_seg: 0.5
     selecao_deterministica: true
-    volume_alvo: 20
-    formato: pdf
+    volume_alvo: 4
+    formatos: [html, htm, pdf]
     licenca: "Domínio público"
     sensitivity_default: publico
     campo_vigencia: "data_publicacao"
     chunking_sugerido: "Split por cláusula, com overlap"
     metadados_extras: [numero_edital, orgao, data_publicacao, objeto]
+
+  - base_id: contratacoes_publicacao_rj
+    natureza: estruturada
+    fonte: "PNCP - API pública de consulta"
+    acesso:
+      tipo: rest_api
+      endpoint: "https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao"
+      params:
+        dataInicial: "2025-01-01"
+        dataFinal: "2025-01-31"
+        codigoModalidadeContratacao: 1
+        uf: "RJ"
+        pagina: 1
+        tamanhoPagina: 50
+      paginacao:
+        campo: "pagina"
+        tamanho: 50
+      rate_limit_seg: 1.0
+    selecao_deterministica: true
+    volume_alvo: 50
+    formato: json
+    licenca: "Dados abertos gov.br - atribuição"
+    sensitivity_default: publico
+
+  - base_id: documentos_pncp
+    natureza: normativa
+    fonte: "PNCP - documentos de contratações e atas"
+    acesso:
+      tipo: rest_api_mais_arquivo
+      endpoints:
+        edital: "https://pncp.gov.br/api/pncp/v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/arquivos"
+        ata: "https://pncp.gov.br/api/pncp/v1/orgaos/{cnpj}/compras/{anoCompra}/{seqCompra}/atas/{seqAta}/arquivos"
+      params:
+        ano: 2025
+        uf: "RJ"
+        codigoModalidadeContratacao: 1
+        tamanhoPagina: 100
+        maxPaginas: 10
+      rate_limit_seg: 1.0
+      fluxo: "consultar metadados JSON e baixar a URL direta do arquivo"
+    selecao_deterministica: true
+    volume_alvo: 100
+    formato: pdf
+    licenca: "Dados abertos gov.br - atribuição"
+    sensitivity_default: publico
+    local: "data/raw/vN/documentos_pncp"
+    deduplicacao: "SHA-256"
+
+  - base_id: respostas_api_jsonl
+    natureza: conversacional
+    fonte: "PNCP - respostas JSON normalizadas localmente"
+    acesso:
+      tipo: processamento_local
+      origem: "data/raw/v1/arquivos/json"
+    selecao_deterministica: true
+    volume_alvo: 5
+    formato: jsonl
+    licenca: "Derivado de dados abertos gov.br"
+    sensitivity_default: publico
+    local: "data/raw/vN/respostas_api_jsonl"
+    deduplicacao: "SHA-256"
+
+  # Base local opcional para testes rápidos, sem requisições externas.
+  - base_id: exemplos_teste
+    natureza: normativa
+    fonte: "PDFs locais versionados como fixtures de teste"
+    acesso:
+      tipo: arquivo_local
+      origem: "tests/fixtures/pdf"
+      rate_limit_seg: 0
+    selecao_deterministica: true
+    volume_alvo: 20
+    formato: pdf
+    licenca: "Fixture de teste do repositorio"
+    sensitivity_default: publico
+    deduplicacao: "SHA-256"
