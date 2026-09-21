@@ -24,3 +24,14 @@ def test_examples_fixture_contains_at_least_twenty_valid_pdfs():
 
     assert len(pdfs) >= 20
     assert all(pdf.read_bytes().startswith(b"%PDF") for pdf in pdfs)
+
+
+def test_manifest_declares_real_siga_csv_base():
+    manifest = fetch_corpus.load_manifest(MANIFEST)
+    base = next(base for base in manifest["bases"] if base["base_id"] == "licitacoes_siga_csv")
+
+    assert base["natureza"] == "estruturada"
+    assert base["acesso"]["tipo"] == "http_csv"
+    assert base["acesso"]["url"].endswith("/LICITACOES.CSV")
+    assert base["formato"] == "csv"
+    assert base["selecao_deterministica"] is True

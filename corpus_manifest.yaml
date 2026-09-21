@@ -133,3 +133,33 @@ bases:
     licenca: "Fixture de teste do repositorio"
     sensitivity_default: publico
     deduplicacao: "SHA-256"
+
+  # Amostra real opcional em CSV, publicada pelo Portal de Dados Abertos do RJ.
+  - base_id: licitacoes_siga_csv
+    natureza: estruturada
+    fonte: "SEPLAG-RJ - Sistema Integrado de Gestão de Aquisições (SIGA)"
+    acesso:
+      tipo: http_csv
+      url: "https://www.compras.rj.gov.br/siga/imagens/LICITACOES.CSV"
+      rate_limit_seg: 1.0
+    selecao_deterministica: true
+    volume_alvo: 33793
+    formato: csv
+    licenca: "Open Data Commons Public Domain Dedication and License (PDDL)"
+    sensitivity_default: publico
+    campo_vigencia: "Data/Hora Homologação"
+    chunking_sugerido: "1 licitação = 1 chunk"
+    metadados_extras:
+      - "ID Licitação"
+      - "Licitação"
+      - "Unidade"
+      - "Objeto"
+      - "Modalidade"
+      - "Critério de Julgamento"
+      - "SRP"
+      - "Status"
+      - "Valor Total Homologado (R$)"
+      - "Valor Total Estimado (R$)"
+      - "Processos"
+      - "Regime"
+      - "Data_extracao"

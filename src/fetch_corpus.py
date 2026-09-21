@@ -669,7 +669,7 @@ def _estimate_base_requests(base: dict[str, Any]) -> int:
     kind = str(access.get("tipo", "")).lower()
     if kind in {"arquivo_local", "processamento_local"}:
         return 0
-    if kind in {"http_pdf", "http_misto"}:
+    if kind in {"http_pdf", "http_misto", "http_csv"}:
         urls = access.get("urls") or ([access.get("url")] if access.get("url") else [])
         return len([url for url in urls if url])
     endpoints = access.get("endpoints") or {"principal": access.get("endpoint")}
@@ -1299,7 +1299,7 @@ def _collect_pncp_documents(context: _VersionContext, base: dict[str, Any]) -> l
 def _collect_base(context: _VersionContext, base: dict[str, Any]) -> list[dict[str, Any]]:
     access = base.get("acesso", {})
     kind = str(access.get("tipo", "")).lower()
-    if kind in {"http_pdf", "http_misto"}:
+    if kind in {"http_pdf", "http_misto", "http_csv"}:
         urls = access.get("urls") or ([access["url"]] if access.get("url") else [])
         return [_collect_http_item(context, base, _clean_url(url), f"{base['base_id']}:url:{index}", f"{base['base_id']}_{index:03d}") for index, url in enumerate(urls, start=1)]
     if kind in {"rest_api", "rest_api_mais_arquivo"}:
