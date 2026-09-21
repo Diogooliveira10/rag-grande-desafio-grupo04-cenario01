@@ -65,3 +65,33 @@ O grupo também avançou na compreensão dos entregáveis iniciais, principalmen
 ## **Uso de assistentes de IA:**
 
 - Foram utilizados assistentes de IA para apoio em correções pontuais no código, revisão de implementação e esclarecimento de dúvidas técnicas durante o desenvolvimento.
+
+## Encontro 4 - 2026-09-21
+
+## **Entregamos hoje:**
+
+- A equipe avançou significativamente na implementação do pipeline de RAG, com o desenvolvimento dos principais módulos de roteamento, indexação, recuperação e geração. Também foram criados e executados testes para validar os componentes desenvolvidos.
+
+- Foi implementado o src/router.py, responsável pela análise das perguntas e definição das bases de conhecimento que devem ser consultadas. O roteador contempla as quatro naturezas previstas no projeto, normativa, estruturada, conversacional e agregada, permite rotas combinadas, normaliza diferenças de maiúsculas, minúsculas e acentuação e trata casos de recusa, como solicitações envolvendo dados sensíveis, fraude ou ilegalidade, além de perguntas fora do escopo. Foram criados 7 testes para validação do módulo.
+
+- Também foi desenvolvido o index.py, responsável pela estruturação dos índices utilizados na recuperação dos dados, juntamente com seus testes e os fixtures do projeto. Foram realizados 12 testes, todos executados com sucesso. Além disso, foi iniciada a estrutura de avaliação (Eval) para apoiar as próximas etapas de validação do sistema.
+
+- O módulo src/retrieve.py foi desenvolvido e revisado, contemplando recuperação híbrida com busca densa e BM25, filtros de metadata, fusão por RRF e preparação para integração futura com rerank. Também foram corrigidos problemas identificados durante a auditoria técnica, incluindo tratamento de queries vazias, deduplicação de chunks, normalização de tipos e suporte a datas e valores monetários em diferentes formatos. O módulo foi validado com testes específicos e verificações de compatibilidade com os componentes existentes.
+
+- A equipe também avançou na implementação do generate.py, responsável pela geração da resposta final a partir dos chunks recuperados. Foram adicionados guardrails para bloqueio de solicitações envolvendo dados bancários e credenciais, além de parsing defensivo para lidar com respostas do LLM fora do formato esperado, utilizando recusa segura nesses casos. Foram realizados 9 testes, todos passando.
+
+- De forma geral, o encontro marcou um avanço na integração das principais etapas do pipeline, aproximando o projeto de um fluxo completo de análise da consulta → roteamento → indexação/recuperação → geração e validação da resposta.
+
+## **Ficou pendente:**
+
+- Continuidade da integração entre os módulos desenvolvidos e evolução da estrutura de avaliação do sistema.
+
+- Finalização e validação das etapas restantes do pipeline, conforme os contratos definidos no projeto.
+
+## **Bloqueios em aberto:**
+
+- Sem bloqueios críticos identificados no encontro.
+
+## **Uso de assistentes de IA:**
+
+- Foram utilizados assistentes de IA como apoio ao desenvolvimento, revisão de código, identificação e correção de problemas, elaboração de testes e esclarecimento de dúvidas técnicas. As implementações foram analisadas e validadas pela equipe de acordo com os requisitos e a arquitetura do projeto.
