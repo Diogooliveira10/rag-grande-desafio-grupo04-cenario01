@@ -12,18 +12,16 @@ Escolhemos o Cenário 1 por ser o **mais verificável** dos três disponíveis (
 
 Contexto completo do desafio, dos outros dois cenários e dos padrões de engenharia exigidos está em [GRANDE_DESAFIO_CENARIOS.md](GRANDE_DESAFIO_CENARIOS.md).
 
-## As bases de conhecimento
-
-O desafio pede **quatro bases** de naturezas diferentes (normativa, estruturada, conversacional, agregada). O manifesto atual declara as duas primeiras; conversacional e agregada ainda estão pendentes.
+## As quatro bases de conhecimento
 
 | Base | Natureza | Conteúdo | Fonte | Acesso |
 | --- | --- | --- | --- | --- |
-| `contratos_estruturado` | Estruturada | Contratos PNCP, filtrados por UF=RJ, recorte trimestral | PNCP — API de consulta v1/v3 (`/v1/contratos`) | REST paginado |
-| `editais_normativo` | Normativa | Editais e legislação de licitação | *(URLs placeholder — fontes reais ainda a definir)* | PDF/HTML por URL |
-| `atas_conversacional` | Conversacional | Atas de registro de preço, e-mails de compras | — | **Pendente** |
-| `pca_agregado` | Agregada | Plano de Contratações Anual, valores homologados | PNCP | **Pendente** |
+| `editais_normativo` / `fontes_normativas` | Normativa | Lei 14.133/2021, decretos estaduais, editais de licitação | Planalto, REDELOG-RJ, CGE-RJ, PNCP | PDF/HTML por URL |
+| `contratos_estruturado` | Estruturada | Contratos e contratações, UF=RJ, período fechado | PNCP — API de consulta v3 | REST paginado |
+| `atas_conversacional` | Conversacional | Atas de registro de preço, e-mails de compras (base sintética) | PNCP + base sintética | Texto |
+| `pca_agregado` | Agregada | Plano de Contratações Anual, valores homologados por item | PNCP | REST |
 
-A definição declarativa de cada base — fonte, tipo de acesso, volume-alvo, campo de vigência, licença — vive em [corpus_manifest.yaml](corpus_manifest.yaml), que é a fonte única de verdade sobre o que entra no corpus. `data/raw/` guarda versões imutáveis por coleta (`v1/`, `v2/`, ...); nenhuma versão é sobrescrita, e uma nova coleta sempre soma uma versão.
+A definição declarativa de cada base — fonte, tipo de acesso, volume-alvo, campo de vigência, licença — vive em [corpus_manifest.yaml](corpus_manifest.yaml), que é a fonte única de verdade sobre o que entra no corpus. `data/raw/` nunca é versionado; qualquer pessoa reconstrói o corpus rodando o coletor contra o manifesto.
 
 > A API do PNCP **não tem busca textual**. Filtro por objeto é feito localmente, e o recorte de dados é sempre determinístico (mesmo manifesto ⇒ mesmo corpus).
 
@@ -66,17 +64,18 @@ Estágios (mesmos nomes usados no campo `stage` do log estruturado): `query_anal
 
 ```
 ├── acompanhamento/              ← relato individual + resumo do dia, a cada encontro
+├── docs/                         ← guia da interface CLI e capturas de tela
 ├── data/
-│   ├── raw/vN/                  ← versão imutável de cada coleta (staging em raw/.staging/ até promoção)
-│   ├── inventory/                ← inventário por versão (JSON), checkpoints e diffs entre versões
-│   ├── runs/                    ← relatórios do CLI legado de coleta (--quantidade)
-│   └── config/                  ← dados de apoio ao manifesto (ex.: cnpjs_rj.json)
-├── CORPUS_INVENTORY.md          ← inventário legível da versão mais recente
+│   ├── raw/                     ← corpus bruto coletado (ignorado pelo Git)
+│   ├── runs/                    ← relatórios de execução de cada coleta
+│   └── CORPUS_INVENTORY.md      ← inventário legível do corpus coletado
 ├── testes/test-fontes/          ← verificação de disponibilidade das fontes e downloader compartilhado
-├── testes/teste_extração.py     ← valida offline o contrato do fetch_corpus (manifesto, CLI, inventário)
 ├── tests/                       ← testes de contrato (pytest), offline
 ├── src/
 │   ├── fetch_corpus.py          ← coleta determinística e versionada do corpus
+│   ├── manifest_curator.py      ← descoberta e propostas para o manifesto
+│   ├── source_lookup.py         ← busca remota nas fontes suportadas
+│   ├── corpus_search.py         ← busca local no inventário
 │   ├── ingest.py                ← normalização de brutos em chunks (JSONL)
 │   └── schema.py                ← modelos Pydantic (chunk, roteamento, resposta, recusa)
 ├── llm_ecoa.py                  ← exemplo mínimo de geração e embedding via endpoint compartilhado
@@ -88,6 +87,10 @@ Estágios (mesmos nomes usados no campo `stage` do log estruturado): `query_anal
 
 ## Como rodar
 
+O guia visual da interface de coleta, curadoria e busca está em
+[docs/README.md](docs/README.md), com exemplos de comandos e capturas de tela
+da CLI.
+
 **1. Configurar ambiente**
 
 ```bash
@@ -97,13 +100,83 @@ pip install -r requirements.txt
 copy .env.example .env          # preencher se necessário; os defaults já apontam para o endpoint da turma
 ```
 
-**2. Coletar o corpus** (grava em `data/raw/vN/`, versão imutável por execução)
+**2. Coletar o corpus** (materializa versões imutáveis a partir do manifesto)
 
 ```bash
-python -m src.fetch_corpus fetch      --manifest corpus_manifest.yaml   # nova versão a partir do manifesto
-python -m src.fetch_corpus update     --manifest corpus_manifest.yaml   # nova versão + diff com a anterior
-python -m src.fetch_corpus inventory  --version v1                     # reconstrói/valida o inventário de uma versão
+py -m src.fetch_corpus fetch --manifest corpus_manifest.yaml --official
+py -m src.fetch_corpus update --manifest corpus_manifest.yaml --official
+py -m src.fetch_corpus inventory --corpus-version v1 --official
 ```
+
+**Curar novas fontes antes da coleta**
+
+`source_catalog` pode descobrir fontes e gerar propostas sem alterar o
+manifesto. A incorporação oficial exige revisão e `apply`, que valida o hash
+do manifesto antes de escrever:
+
+```bash
+py -m src.source_catalog discover
+py -m src.source_catalog lookup pncp --query "contratação software" --uf RJ --year 2025
+py -m src.source_catalog propose --manifest corpus_manifest.yaml
+py -m src.source_catalog manifest-diff --manifest corpus_manifest.yaml --proposal data/proposals/manifest-proposal-AAAA.json
+py -m src.source_catalog review --proposal data/proposals/manifest-proposal-AAAA.json
+py -m src.source_catalog apply --manifest corpus_manifest.yaml --proposal data/proposals/manifest-proposal-AAAA-reviewed.json
+```
+
+O comando `apply` é o único dessa interface que altera o manifesto. Depois da
+revisão, use `fetch` ou `update` para materializar a definição aprovada.
+
+`lookup` pesquisa uma fonte remota suportada, mas não incorpora resultados ao
+corpus automaticamente. Para pesquisar o que já foi coletado, use o inventário:
+
+```bash
+py -m src.corpus_search search local \
+  --corpus-version v1 \
+  --query "edital 90012" \
+  --base-id documentos_pncp
+```
+
+Essa busca inicial consulta apenas metadados (`logical_id`, base, origem,
+caminho, tipo e hash); ela não faz busca textual dentro de PDFs.
+
+Para inspecionar um update sem rede nem escrita:
+
+```bash
+py -m src.fetch_corpus update --manifest corpus_manifest.yaml --official --dry-run
+```
+
+Use `--official` somente para operar a árvore principal `data/`. Sem essa
+flag, a execução é experimental e exige um `--data-root` separado. Cada
+tentativa terá seu próprio `raw/`, `inventory/`, `runs/` e
+`CORPUS_INVENTORY.md`:
+
+```bash
+py -m src.fetch_corpus fetch --manifest corpus_manifest.yaml --data-root data/attempts/corpus_fetch/tentativa-v5
+py -m src.fetch_corpus update --manifest corpus_manifest.yaml --data-root data/attempts/corpus_fetch/tentativa-v5
+py -m src.fetch_corpus inventory --corpus-version v1 --data-root data/attempts/corpus_fetch/tentativa-v5
+```
+
+O diretório `data/attempts/` é experimental e pode ser versionado seletivamente
+como histórico de testes; ele não substitui a v1 oficial em `data/raw/` e
+`data/inventory/`.
+
+Para uma verificação rápida após clonar o repositório, há 20 PDFs pequenos em
+`tests/fixtures/pdf/`. A base `exemplos_teste` está declarada no manifesto
+principal e pode ser executada em uma área experimental:
+
+```bash
+py -m src.fetch_corpus fetch `
+  --manifest corpus_manifest.yaml `
+  --data-root data/attempts/corpus_fetch/demo `
+  --base-id exemplos_teste
+
+pytest tests/ -m "not llm"
+pytest testes/test_fetch_corpus.py -q
+```
+
+Os PDFs são amostras de entrada para inspeção e testes locais. A base usa
+`arquivo_local`, não faz requisições externas e só entra no corpus quando o
+comando é executado; usando `--data-root`, a execução não altera `data/raw/`.
 
 **3. Normalizar em chunks** (lê `data/raw/v1`, grava `data/normalized/documents.jsonl`)
 
