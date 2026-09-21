@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="620" viewBox="0 0 1100 620">
+  <rect width="1100" height="620" rx="18" fill="#111827"/>
+  <rect width="1100" height="42" rx="18" fill="#1f2937"/>
+  <circle cx="26" cy="21" r="7" fill="#fb7185"/><circle cx="50" cy="21" r="7" fill="#fbbf24"/><circle cx="74" cy="21" r="7" fill="#34d399"/>
+  <text x="105" y="27" fill="#cbd5e1" font-family="Segoe UI, sans-serif" font-size="16">Corpus Manager — busca remota</text>
+  <g font-family="Cascadia Mono, Consolas, monospace" font-size="17">
+    <text x="34" y="82" fill="#86efac">PS&gt; py -m src.source_catalog lookup pncp --query "contratação software" --uf RJ --year 2025</text>
+    <text x="34" y="124" fill="#67e8f9">Busca remota</text>
+    <text x="34" y="157" fill="#f8fafc">Fonte: PNCP       Consulta: contratação software</text>
+    <text x="34" y="187" fill="#f8fafc">Páginas: 3        Resultados: 2</text>
+    <text x="34" y="237" fill="#f8fafc">#   Objeto                              ID externo             Docs</text>
+    <text x="34" y="271" fill="#94a3b8">1   Contratação de software de gestão    123...00012/2025       4</text>
+    <text x="34" y="305" fill="#94a3b8">2   Serviços de tecnologia da informação  123...00048/2025       2</text>
+    <text x="34" y="361" fill="#67e8f9">[1] Documentos</text>
+    <text x="34" y="395" fill="#94a3b8">  • Edital.pdf              — https://pncp.gov.br/.../edital.pdf</text>
+    <text x="34" y="429" fill="#94a3b8">  • Termo_de_Referencia.pdf — https://pncp.gov.br/.../termo.pdf</text>
+    <text x="34" y="463" fill="#94a3b8">  • Anexo_I.pdf              — https://pncp.gov.br/.../anexo.pdf</text>
+    <text x="34" y="531" fill="#fbbf24">A busca consulta o PNCP, mas não altera o manifesto nem o corpus.</text>
+  </g>
+</svg>
