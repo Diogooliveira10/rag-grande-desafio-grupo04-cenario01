@@ -1,16 +1,12 @@
-r"""Coleta uma quantidade exata de arquivos novos e únicos para o corpus.
+r"""Materializa o corpus declarado pelo manifesto.
 
 Uso:
-    py .\src\fetch_corpus.py --quantidade 2 --tipos html,pdf,json,jsonl
-    py .\src\fetch_corpus.py --quantidade 2 --tipos pdf --salvar-json
-    py .\src\fetch_corpus.py --quantidade 3 --tipo pdf
+    py -m src.fetch_corpus fetch --manifest corpus_manifest.yaml --official
+    py -m src.fetch_corpus update --manifest corpus_manifest.yaml --official
+    py -m src.fetch_corpus inventory --corpus-version v1 --official
 
-O script reutiliza o verificador em ``testes/test-fontes`` como módulo. A
-deduplicação é feita pelo downloader compartilhado: somente o status
-``baixado`` conta para a quantidade solicitada; ``reutilizado`` não conta.
-``--quantidade`` vale para cada tipo selecionado. Cada artefato é baixado e
-salvo imediatamente, para preservar o progresso se uma chamada posterior
-falhar.
+As versões são coletadas com checkpoint, staging, inventário e deduplicação
+por conteúdo. Coletas experimentais exigem ``--data-root`` explícito.
 """
 
 from __future__ import annotations
@@ -20,27 +16,49 @@ import ast
 import hashlib
 import importlib
 import json
+import os
 import re
 import shutil
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
-
-FILE_TYPES = ("html", "pdf", "json", "jsonl")
-HTML_SUFFIXES = {".html", ".htm", ".aspx"}
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-TEST_FONTES_DIR = PROJECT_ROOT / "testes" / "test-fontes"
-if str(TEST_FONTES_DIR) not in sys.path:
-    sys.path.insert(0, str(TEST_FONTES_DIR))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-source_check = importlib.import_module("testar_fontes_cenario01")  # noqa: E402
+source_check = importlib.import_module("src.source_catalog")  # noqa: E402
+RICH_CONSOLE = Console()
+
+
+class _RunLogger:
+    """Registro JSONL de uma execução da coleta, sem bibliotecas externas."""
+
+    def __init__(self, command: str) -> None:
+        timestamp = datetime.now(timezone.utc)
+        self.run_id = f"{command}-{timestamp.strftime('%Y%m%dT%H%M%SZ')}-{time.time_ns() % 1_000_000:06d}"
+        self.path = RUNS_ROOT / f"{self.run_id}.jsonl"
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    def event(self, stage: str, status: str, **fields: Any) -> None:
+        record = {
+            "run_id": self.run_id,
+            "stage": stage,
+            "status": status,
+            "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            **fields,
+        }
+        with self.path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
 
 
 @dataclass(frozen=True)
@@ -59,21 +77,6 @@ def _available(result: dict[str, Any] | None) -> bool:
     return bool(result and source_check._is_available(result))
 
 
-def _find_result(results: list[dict[str, Any]], result_id: str) -> dict[str, Any] | None:
-    return next((result for result in results if result.get("id") == result_id), None)
-
-
-def _first_file_url(result: dict[str, Any] | None) -> str | None:
-    if not result or not _available(result):
-        return None
-    for record in source_check.records_from_payload(result.get("json")):
-        for key in ("url", "uri", "location"):
-            value = record.get(key)
-            if isinstance(value, str) and value.startswith(("http://", "https://")):
-                return value
-    return None
-
-
 def _file_urls(result: dict[str, Any] | None) -> Iterator[tuple[int, str]]:
     if not result or not _available(result):
         return
@@ -86,15 +89,6 @@ def _file_urls(result: dict[str, Any] | None) -> Iterator[tuple[int, str]]:
                     seen.add(value)
                     yield index, value
                 break
-
-
-def _file_type_from_result(result: dict[str, Any], fallback: str) -> str:
-    suffix = Path(str(result.get("arquivo") or "")).suffix.lower()
-    if suffix in HTML_SUFFIXES:
-        return "html"
-    if suffix in {".pdf", ".json", ".jsonl"}:
-        return suffix[1:]
-    return fallback
 
 
 def iter_candidates(results: list[dict[str, Any]]) -> Iterator[FetchCandidate]:
@@ -134,7 +128,7 @@ def iter_candidates(results: list[dict[str, Any]]) -> Iterator[FetchCandidate]:
             )
 
     for source_id, name, url, kind in source_check.WEB_SOURCES:
-        result = _find_result(results, source_id)
+        result = source_check.find_result(results, source_id)
         if not _available(result) or url in seen_urls:
             continue
         seen_urls.add(url)
@@ -173,20 +167,6 @@ def iter_candidates(results: list[dict[str, Any]]) -> Iterator[FetchCandidate]:
             )
 
 
-def _config_from_args(args: argparse.Namespace) -> Any:
-    return source_check.CheckConfig(
-        ano=args.ano,
-        uf=args.uf.strip().upper(),
-        modalidade=args.modalidade,
-        tamanho_pagina=args.tamanho_pagina,
-        timeout=args.timeout,
-        attempts=args.tentativas,
-        classificacao_superior=args.classificacao_superior,
-        data_inicial=args.data_inicial,
-        data_final=args.data_final,
-    )
-
-
 def _unique_samples(payload: Any, extractor: Any) -> list[dict[str, str]]:
     samples: list[dict[str, str]] = []
     seen: set[tuple[tuple[str, str], ...]] = set()
@@ -203,6 +183,8 @@ def _unique_samples(payload: Any, extractor: Any) -> list[dict[str, str]]:
 def _run_checks_for_types(
     config: Any,
     tipos: tuple[str, ...],
+    *,
+    before_request: Callable[[], None] | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
     """Consulta somente as fontes compatíveis com os tipos solicitados."""
     checked_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -215,6 +197,8 @@ def _run_checks_for_types(
         url: str,
         kind: str,
     ) -> dict[str, Any]:
+        if before_request is not None:
+            before_request()
         payload = source_check.request_url(
             url,
             kind,
@@ -259,11 +243,12 @@ def _run_checks_for_types(
                     else {}
                 ),
                 "uf": config.uf,
-                "pagina": "1",
+                "pagina": str(config.pagina),
                 "tamanhoPagina": str(config.tamanho_pagina),
             },
             source_check.sample_purchase,
             config,
+            before_request=before_request,
         )
         results.append(
             {
@@ -287,7 +272,7 @@ def _run_checks_for_types(
                 {
                     "dataInicial": first_start,
                     "dataFinal": first_end,
-                    "pagina": "1",
+                    "pagina": str(config.pagina),
                     "tamanhoPagina": str(config.tamanho_pagina),
                 },
             )
@@ -350,11 +335,12 @@ def _run_checks_for_types(
             lambda start, end: {
                 "dataInicial": start,
                 "dataFinal": end,
-                "pagina": "1",
+                "pagina": str(config.pagina),
                 "tamanhoPagina": str(config.tamanho_pagina),
             },
             source_check.sample_ata,
             config,
+            before_request=before_request,
         )
         results.append(
             {
@@ -389,7 +375,7 @@ def _run_checks_for_types(
             {
                 "anoPca": str(config.ano),
                 "codigoClassificacaoSuperior": config.classificacao_superior,
-                "pagina": "1",
+                "pagina": str(config.pagina),
                 "tamanhoPagina": str(config.tamanho_pagina),
             },
         )
@@ -423,96 +409,24 @@ def _run_checks_for_types(
 
     return checked_at, results
 
-def _save_jsonl_candidate(candidate: FetchCandidate) -> dict[str, Any]:
-    records = candidate.payload if isinstance(candidate.payload, list) else []
-    content = b"".join(
-        json.dumps(record, ensure_ascii=False, sort_keys=True).encode("utf-8") + b"\n"
-        for record in records
-    )
-    result = source_check.ARTIFACT_DOWNLOADER.save_bytes(
-        content,
-        source_check.RAW_DIR / "arquivos" / candidate.folder,
-        candidate.filename_prefix,
-        ".jsonl",
-    )
-    return {
-        "http_status": None,
-        "tentativas": 0,
-        "content_type": "application/x-ndjson",
-        "url_final": candidate.url,
-        **result,
-    }
-
-
-def fetch_exact(
-    results: list[dict[str, Any]],
-    quantidade: int,
-    config: Any,
-    tipos: tuple[str, ...],
-) -> tuple[list[dict[str, Any]], dict[str, int], int]:
-    """Baixa e salva imediatamente até atingir a quantidade por tipo."""
-    downloads: list[dict[str, Any]] = []
-    novos_por_tipo = {file_type: 0 for file_type in tipos}
-    candidatos_considerados = 0
-
-    for candidate in iter_candidates(results):
-        if all(novos_por_tipo[file_type] >= quantidade for file_type in tipos):
-            break
-        if candidate.file_type not in novos_por_tipo:
-            continue
-        if novos_por_tipo[candidate.file_type] >= quantidade:
-            continue
-
-        candidatos_considerados += 1
-        try:
-            if candidate.payload is not None:
-                result = _save_jsonl_candidate(candidate)
-            else:
-                result = source_check.download_url(
-                    candidate.url,
-                    source_check.RAW_DIR / "arquivos" / candidate.folder,
-                    candidate.filename_prefix,
-                    attempts=config.attempts,
-                    timeout=config.timeout,
-                )
-        except Exception as exc:
-            result = {
-                "status": "erro",
-                "erro": f"{type(exc).__name__}: {exc}",
-                "http_status": None,
-                "tentativas": 0,
-                "url_final": candidate.url,
-            }
-
-        actual_type = _file_type_from_result(result, candidate.file_type)
-        record = {
-            "id": f"fetch_{candidate.candidate_id}",
-            "nome": candidate.nome,
-            "url": candidate.url,
-            "tipo_solicitado": candidate.file_type,
-            "tipo": actual_type,
-            "destino": f"data/raw/v1/arquivos/{candidate.folder}",
-            **result,
-        }
-        downloads.append(record)
-
-        if result.get("status") == "baixado" and actual_type in novos_por_tipo:
-            novos_por_tipo[actual_type] += 1
-
-    return downloads, novos_por_tipo, candidatos_considerados
-
-
-def save_report(checked_at: str, payload: dict[str, Any]) -> Path:
-    output_dir = source_check.run_output_dir(checked_at)
-    output_path = output_dir / f"fetch_corpus_{source_check.run_timestamp(checked_at)}.json"
-    output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return output_path
-
-
 MANIFEST_DEFAULT = PROJECT_ROOT / "corpus_manifest.yaml"
-RAW_ROOT = PROJECT_ROOT / "data" / "raw"
-INVENTORY_ROOT = PROJECT_ROOT / "data" / "inventory"
-CORPUS_INVENTORY_PATH = PROJECT_ROOT / "CORPUS_INVENTORY.md"
+DATA_ROOT = PROJECT_ROOT / "data"
+RAW_ROOT = DATA_ROOT / "raw"
+OBJECTS_ROOT = RAW_ROOT / ".objects" / "sha256"
+INVENTORY_ROOT = DATA_ROOT / "inventory"
+RUNS_ROOT = DATA_ROOT / "runs"
+CORPUS_INVENTORY_PATH = DATA_ROOT / "CORPUS_INVENTORY.md"
+
+
+def _configure_data_root(data_root: Path) -> None:
+    """Direciona uma execução para uma árvore de dados isolada."""
+    global DATA_ROOT, RAW_ROOT, OBJECTS_ROOT, INVENTORY_ROOT, RUNS_ROOT, CORPUS_INVENTORY_PATH
+    DATA_ROOT = data_root
+    RAW_ROOT = DATA_ROOT / "raw"
+    OBJECTS_ROOT = RAW_ROOT / ".objects" / "sha256"
+    INVENTORY_ROOT = DATA_ROOT / "inventory"
+    RUNS_ROOT = DATA_ROOT / "runs"
+    CORPUS_INVENTORY_PATH = DATA_ROOT / "CORPUS_INVENTORY.md"
 
 
 def _strip_yaml_comment(value: str) -> str:
@@ -717,8 +631,7 @@ def _safe_component(value: str, fallback: str = "item") -> str:
 
 
 def _manifest_hash(path: Path) -> str:
-    normalized = path.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    return f"sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
 
 
 def _version_number(value: str | Path) -> int | None:
@@ -751,6 +664,95 @@ def _inventory_path(version: int) -> Path:
     return INVENTORY_ROOT / f"v{version}.json"
 
 
+def _estimate_base_requests(base: dict[str, Any]) -> int:
+    access = base.get("acesso") or {}
+    kind = str(access.get("tipo", "")).lower()
+    if kind in {"arquivo_local", "processamento_local"}:
+        return 0
+    if kind in {"http_pdf", "http_misto"}:
+        urls = access.get("urls") or ([access.get("url")] if access.get("url") else [])
+        return len([url for url in urls if url])
+    endpoints = access.get("endpoints") or {"principal": access.get("endpoint")}
+    endpoint_count = len([endpoint for endpoint in endpoints.values() if endpoint])
+    if kind == "rest_api_mais_arquivo" and any("{" in str(endpoint) for endpoint in endpoints.values() if endpoint):
+        params = access.get("params") or {}
+        try:
+            pages = int(params.get("maxPaginas", 1))
+        except (TypeError, ValueError):
+            pages = 1
+        try:
+            target = int(base.get("volume_alvo", 1))
+        except (TypeError, ValueError):
+            target = 1
+        return max(1, pages) + max(0, target)
+    return max(1, endpoint_count)
+
+
+def _dry_run_update(manifest_path: Path) -> int:
+    """Mostra o plano do update sem criar logs, checkpoints ou arquivos."""
+    manifest = load_manifest(manifest_path)
+    latest = _latest_version()
+    if latest is None:
+        raise RuntimeError("update exige uma versão anterior")
+    inventory_path = _inventory_path(latest)
+    if not inventory_path.exists():
+        raise RuntimeError(f"inventário da versão anterior não encontrado: {inventory_path}")
+    previous = json.loads(inventory_path.read_text(encoding="utf-8"))
+    previous_items = [
+        item
+        for item in previous.get("arquivos", [])
+        if isinstance(item, dict) and item.get("status") == "ok"
+    ]
+    estimated = sum(_estimate_base_requests(base) for base in manifest["bases"])
+    conditional = min(estimated, len(previous_items))
+    summary = {
+        "dry_run": True,
+        "scenario_id": manifest.get("scenario_id"),
+        "manifest": str(manifest_path),
+        "manifest_hash": _manifest_hash(manifest_path),
+        "previous": f"v{latest}",
+        "next": f"v{latest + 1}",
+        "bases": [
+            {
+                "base_id": base["base_id"],
+                "acesso": (base.get("acesso") or {}).get("tipo"),
+                "estimated_requests": _estimate_base_requests(base),
+            }
+            for base in manifest["bases"]
+        ],
+        "previous_files": len(previous_items),
+        "estimated_requests": estimated,
+        "estimated_conditional_requests": conditional,
+        "estimated_new_or_changed_requests": max(0, estimated - conditional),
+        "writes": False,
+    }
+    RICH_CONSOLE.print(
+        Panel(
+            f"[bold]Cenário:[/] {summary['scenario_id']}\n"
+            f"[bold]Manifest hash:[/] {summary['manifest_hash']}\n"
+            f"[bold]Versão anterior:[/] {summary['previous']}    "
+            f"[bold]Próxima:[/] {summary['next']}\n"
+            f"[bold]Arquivos anteriores:[/] {summary['previous_files']}    "
+            f"[bold]Escrita:[/] não",
+            title="Update preview",
+            border_style="cyan",
+        )
+    )
+    table = Table(title="Estimativa de requisições")
+    table.add_column("Base", style="cyan")
+    table.add_column("Acesso", style="magenta")
+    table.add_column("Estimadas", justify="right")
+    for base in summary["bases"]:
+        table.add_row(base["base_id"], str(base["acesso"] or "—"), str(base["estimated_requests"]))
+    table.add_row("TOTAL", "", str(summary["estimated_requests"]), style="bold")
+    RICH_CONSOLE.print(table)
+    RICH_CONSOLE.print(
+        f"Condicionais estimadas: [yellow]{summary['estimated_conditional_requests']}[/]  "
+        f"Novas/alteradas estimadas: [yellow]{summary['estimated_new_or_changed_requests']}[/]"
+    )
+    return 0
+
+
 def _relative_path(path: Path) -> str:
     return path.resolve().relative_to(PROJECT_ROOT.resolve()).as_posix()
 
@@ -773,7 +775,9 @@ class _VersionContext:
     collected_at: str
     items: dict[str, dict[str, Any]]
     hash_index: dict[str, str]
-    last_request_at: dict[str, float]
+    last_request_at: dict[str, float] = field(default_factory=dict)
+    previous_items: dict[str, dict[str, Any]] = field(default_factory=dict)
+    previous_version: int | None = None
 
 
 def _checkpoint_write(context: _VersionContext, state: str = "staging") -> None:
@@ -791,7 +795,14 @@ def _checkpoint_write(context: _VersionContext, state: str = "staging") -> None:
     temporary.replace(context.checkpoint_path)
 
 
-def _load_version_context(manifest: dict[str, Any], manifest_hash: str, version: int) -> _VersionContext:
+def _load_version_context(
+    manifest: dict[str, Any],
+    manifest_hash: str,
+    version: int,
+    *,
+    previous_items: dict[str, dict[str, Any]] | None = None,
+    previous_version: int | None = None,
+) -> _VersionContext:
     staging_path = RAW_ROOT / ".staging" / f"v{version}"
     checkpoint_path = INVENTORY_ROOT / "checkpoints" / f"v{version}.json"
     items: dict[str, dict[str, Any]] = {}
@@ -816,6 +827,8 @@ def _load_version_context(manifest: dict[str, Any], manifest_hash: str, version:
             for record in items.values()
             if record.get("status") == "ok" and record.get("sha256") and record.get("path")
         },
+        previous_items=previous_items or {},
+        previous_version=previous_version,
         last_request_at={},
     )
     _checkpoint_write(context)
@@ -834,22 +847,149 @@ def _wait_rate_limit(context: _VersionContext, base: dict[str, Any]) -> None:
     context.last_request_at[base_id] = time.monotonic()
 
 
+def _effective_objects_root() -> Path:
+    try:
+        OBJECTS_ROOT.resolve().relative_to(PROJECT_ROOT.resolve())
+    except ValueError:
+        return PROJECT_ROOT / "data" / "raw" / ".objects" / "sha256"
+    return OBJECTS_ROOT
+
+
+def _object_path(digest: str) -> Path:
+    return _effective_objects_root() / digest[:2] / digest
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _ensure_object(body: bytes, digest: str) -> Path:
+    object_path = _object_path(digest)
+    object_path.parent.mkdir(parents=True, exist_ok=True)
+    if object_path.exists():
+        if _file_sha256(object_path) != digest:
+            raise RuntimeError(f"objeto SHA-256 corrompido: {object_path}")
+        return object_path
+    temporary = object_path.with_name(f".{object_path.name}.tmp")
+    temporary.write_bytes(body)
+    try:
+        if object_path.exists():
+            temporary.unlink(missing_ok=True)
+        else:
+            temporary.replace(object_path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return object_path
+
+
+def _materialize_object(object_path: Path, destination: Path, digest: str) -> str:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.exists():
+        if _file_sha256(destination) != digest:
+            raise RuntimeError(f"destino existente não corresponde ao SHA-256: {destination}")
+        return "existente"
+    try:
+        os.link(object_path, destination)
+        return "hardlink"
+    except FileExistsError:
+        if _file_sha256(destination) != digest:
+            raise RuntimeError(f"destino criado com conteúdo diferente: {destination}")
+        return "existente"
+    except OSError:
+        temporary = destination.with_name(f".{destination.name}.tmp")
+        shutil.copy2(object_path, temporary)
+        try:
+            if destination.exists():
+                if _file_sha256(destination) != digest:
+                    raise RuntimeError(f"destino criado com conteúdo diferente: {destination}")
+                return "existente"
+            temporary.replace(destination)
+            return "copy"
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
 def _save_version_bytes(context: _VersionContext, body: bytes, base_id: str, filename_prefix: str, extension: str) -> dict[str, Any]:
     digest = hashlib.sha256(body).hexdigest()
-    if digest in context.hash_index:
-        return {"status": "ok", "bytes": len(body), "sha256": digest, "path": context.hash_index[digest], "observacao": "conteúdo reutilizado na versão"}
-    destination = context.staging_path / _safe_component(base_id)
-    destination.mkdir(parents=True, exist_ok=True)
+    object_path = _ensure_object(body, digest)
+    destination_dir = context.staging_path / _safe_component(base_id)
     suffix = extension if extension.startswith(".") else f".{extension}"
-    path = destination / f"{_safe_component(filename_prefix)}_{digest[:12]}{suffix}"
-    path.write_bytes(body)
+    path = destination_dir / f"{_safe_component(filename_prefix)}_{digest[:12]}{suffix}"
+    storage_mode = _materialize_object(object_path, path, digest)
     relative = _relative_path(path)
     context.hash_index[digest] = relative
-    return {"status": "ok", "bytes": len(body), "sha256": digest, "path": relative}
+    return {
+        "status": "ok",
+        "bytes": len(body),
+        "sha256": digest,
+        "path": relative,
+        "storage": {
+            "mode": storage_mode,
+            "object_path": _relative_path(object_path),
+            "object_sha256": digest,
+        },
+    }
+
+
+def _previous_record(context: _VersionContext, logical_id: str) -> dict[str, Any] | None:
+    record = context.previous_items.get(logical_id)
+    return record if isinstance(record, dict) and record.get("status") == "ok" else None
+
+
+def _conditional_headers(record: dict[str, Any] | None) -> dict[str, str]:
+    if not record:
+        return {}
+    headers: dict[str, str] = {}
+    if record.get("etag"):
+        headers["If-None-Match"] = str(record["etag"])
+    if record.get("last_modified"):
+        headers["If-Modified-Since"] = str(record["last_modified"])
+    return headers
+
+
+def _materialize_previous_record(
+    context: _VersionContext,
+    base_id: str,
+    filename_prefix: str,
+    previous: dict[str, Any],
+    extension: str,
+) -> dict[str, Any] | None:
+    digest = str(previous.get("sha256") or "")
+    raw_storage = previous.get("storage")
+    storage: dict[str, Any] = raw_storage if isinstance(raw_storage, dict) else {}
+    object_path = PROJECT_ROOT / str(storage.get("object_path", "")) if storage.get("object_path") else None
+    source_path = object_path if object_path and object_path.exists() else _path_from_record(previous)
+    if source_path is None or not source_path.exists():
+        return None
+    if not digest:
+        digest = _file_sha256(source_path)
+    elif _file_sha256(source_path) != digest:
+        raise RuntimeError(f"registro anterior não corresponde ao SHA-256: {source_path}")
+    object_path = _ensure_object(source_path.read_bytes(), digest)
+    suffix = extension if extension.startswith(".") else f".{extension}"
+    destination = context.staging_path / _safe_component(base_id) / f"{_safe_component(filename_prefix)}_{digest[:12]}{suffix}"
+    storage_mode = _materialize_object(object_path, destination, digest)
+    return {
+        "status": "ok",
+        "bytes": destination.stat().st_size,
+        "sha256": digest,
+        "path": _relative_path(destination),
+        "storage": {
+            "mode": storage_mode,
+            "object_path": _relative_path(object_path),
+            "object_sha256": digest,
+        },
+        "reutilizado_de": f"v{context.previous_version}" if context.previous_version else previous.get("path"),
+        "reuso_motivo": "resposta HTTP 304" if previous.get("etag") or previous.get("last_modified") else "conteúdo anterior",
+    }
 
 
 def _base_record(context: _VersionContext, base: dict[str, Any], logical_id: str, origin: str, result: dict[str, Any], *, tipo: str, registros: int = 0) -> dict[str, Any]:
-    record = {"logical_id": logical_id, "base_id": base["base_id"], "tipo": tipo, "origem": origin, "coletado_em": context.collected_at, "registros": registros, **result}
+    record = {"logical_id": logical_id, "base_id": base["base_id"], "natureza": base.get("natureza"), "tipo": tipo, "origem": origin, "coletado_em": context.collected_at, "registros": registros, **result}
     context.items[logical_id] = record
     _checkpoint_write(context)
     return record
@@ -877,20 +1017,45 @@ def _collect_http_item(context: _VersionContext, base: dict[str, Any], url: str,
     existing = _completed_item(context, logical_id)
     if existing:
         return existing
+    previous = _previous_record(context, logical_id)
+    conditional_headers = _conditional_headers(previous)
     _wait_rate_limit(context, base)
+    download_dir = context.staging_path / ".downloads" / _safe_component(base["base_id"])
     try:
-        result = source_check.download_url(url, context.staging_path / _safe_component(base["base_id"]), filename_prefix, attempts=3, timeout=30.0)
+        result = source_check.download_url(
+            url,
+            download_dir,
+            filename_prefix,
+            attempts=3,
+            timeout=30.0,
+            headers=conditional_headers,
+            deduplicate=False,
+        )
+        if result.get("status") == "nao_modificado" and previous:
+            previous_path = _path_from_record(previous)
+            extension = previous_path.suffix if previous_path is not None else _extension_for("", url)
+            saved = _materialize_previous_record(context, str(base["base_id"]), filename_prefix, previous, extension)
+            if saved is not None:
+                for key in ("etag", "last_modified"):
+                    if result.get(key):
+                        saved[key] = result[key]
+                return _base_record(context, base, logical_id, url, saved, tipo=Path(str(saved["path"])).suffix.lstrip(".") or "bin", registros=int(previous.get("registros", 0) or 0))
         if result.get("status") not in {"baixado", "reutilizado"}:
             return _failed_record(context, base, logical_id, url, str(result.get("erro") or result.get("observacao") or result.get("status")), _extension_for(str(result.get("content_type", "")), url).lstrip("."))
-        source_path = PROJECT_ROOT / str(result.get("arquivo", ""))
+        source_path = Path(str(result.get("arquivo", "")))
+        if not source_path.is_absolute():
+            source_path = PROJECT_ROOT / source_path
         if not source_path.exists():
             return _failed_record(context, base, logical_id, url, "download sem arquivo resultante")
-        relative_source = _relative_path(source_path)
-        if relative_source.startswith(f"data/raw/.staging/v{context.version}/"):
-            saved = {"status": "ok", "bytes": source_path.stat().st_size, "sha256": hashlib.sha256(source_path.read_bytes()).hexdigest(), "path": relative_source}
-            context.hash_index.setdefault(saved["sha256"], relative_source)
-        else:
-            saved = _save_version_bytes(context, source_path.read_bytes(), str(base["base_id"]), filename_prefix, source_path.suffix or _extension_for(str(result.get("content_type", "")), url))
+        extension = source_path.suffix or _extension_for(str(result.get("content_type", "")), url)
+        saved = _save_version_bytes(context, source_path.read_bytes(), str(base["base_id"]), filename_prefix, extension)
+        if previous and previous.get("sha256") == saved.get("sha256"):
+            saved["reutilizado_de"] = f"v{context.previous_version}" if context.previous_version else previous.get("path")
+            saved["reuso_motivo"] = "SHA-256 idêntico"
+        for key in ("etag", "last_modified", "url_final"):
+            if result.get(key):
+                saved[key] = result[key]
+        source_path.unlink(missing_ok=True)
         return _base_record(context, base, logical_id, url, saved, tipo=Path(str(saved["path"])).suffix.lstrip(".") or "bin")
     except Exception as exc:
         return _failed_record(context, base, logical_id, url, f"{type(exc).__name__}: {exc}")
@@ -904,7 +1069,20 @@ def _build_request_url(endpoint: str, params: dict[str, Any]) -> str:
         for part in split.query.split("&"):
             key, separator, value = part.partition("=")
             query[key] = value if separator else ""
-    query.update({str(key): value for key, value in params.items() if value is not None})
+    date_fields = {"dataInicial", "dataFinal", "dataInicio", "dataFim"}
+    query.update(
+        {
+            str(key): (
+                value.replace("-", "")
+                if str(key) in date_fields
+                and isinstance(value, str)
+                and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value)
+                else value
+            )
+            for key, value in params.items()
+            if value is not None
+        }
+    )
     return urlunsplit((split.scheme, split.netloc, split.path, urlencode(query), split.fragment))
 
 
@@ -924,10 +1102,21 @@ def _collect_rest_endpoint(context: _VersionContext, base: dict[str, Any], endpo
         return [_failed_record(context, base, f"{base['base_id']}:{endpoint_name}:template", endpoint, "endpoint possui placeholders e precisa de adapter de descoberta PNCP", "json")]
     access = base.get("acesso", {})
     params = dict(access.get("params") or {})
-    pagination = access.get("paginacao") or {}
-    page_field = str(pagination.get("campo_pagina", "pagina")) if pagination else ""
-    size_field = pagination.get("campo_tamanho") if pagination else None
-    page_size = int(access.get("tamanho_pagina") or params.get("tamanhoPagina", 50) or 50)
+    pagination = access.get("paginacao") or (
+        {"campo": "pagina", "tamanho": access.get("params", {}).get("tamanhoPagina", 50)}
+        if "pagina" in params
+        else {}
+    )
+    page_field = str(
+        pagination.get("campo") or pagination.get("campo_pagina") or "pagina"
+    ) if pagination else ""
+    page_size = int(
+        pagination.get("tamanho")
+        or pagination.get("campo_tamanho")
+        or params.get("tamanhoPagina")
+        or access.get("tamanho_pagina")
+        or 50
+    )
     page = int(params.get(page_field, 1) or 1) if page_field else 1
     output: list[dict[str, Any]] = []
     seen_pages: set[str] = set()
@@ -935,8 +1124,6 @@ def _collect_rest_endpoint(context: _VersionContext, base: dict[str, Any], endpo
         request_params = dict(params)
         if page_field:
             request_params[page_field] = page
-        if size_field:
-            request_params[str(size_field)] = page_size
         url = _build_request_url(endpoint, request_params)
         logical_id = f"{base['base_id']}:{endpoint_name}:pagina={page}"
         existing = _completed_item(context, logical_id)
@@ -946,9 +1133,25 @@ def _collect_rest_endpoint(context: _VersionContext, base: dict[str, Any], endpo
                 break
             page += 1
             continue
+        previous = _previous_record(context, logical_id)
         _wait_rate_limit(context, base)
         try:
-            response = source_check.request_url(url, "json", attempts=3, timeout=30.0)
+            response = source_check.request_url(
+                url,
+                "json",
+                attempts=3,
+                timeout=30.0,
+                headers=_conditional_headers(previous),
+            )
+            if response.get("status") == "nao_modificado" and previous:
+                saved = _materialize_previous_record(context, str(base["base_id"]), f"{endpoint_name}_pagina_{page}", previous, ".json")
+                if saved is not None:
+                    saved["registros"] = int(previous.get("registros", 0) or 0)
+                    for key in ("etag", "last_modified"):
+                        if response.get(key):
+                            saved[key] = response[key]
+                    output.append(_base_record(context, base, logical_id, url, saved, tipo="json", registros=int(previous.get("registros", 0) or 0)))
+                    break
             payload = response.get("json")
             if payload is None:
                 output.append(_failed_record(context, base, logical_id, url, str(response.get("erro") or response.get("status") or "resposta JSON ausente"), "json"))
@@ -959,6 +1162,12 @@ def _collect_rest_endpoint(context: _VersionContext, base: dict[str, Any], endpo
                 break
             seen_pages.add(page_digest)
             saved = _save_version_bytes(context, body, str(base["base_id"]), f"{endpoint_name}_pagina_{page}", ".json")
+            if previous and previous.get("sha256") == saved.get("sha256"):
+                saved["reutilizado_de"] = f"v{context.previous_version}" if context.previous_version else previous.get("path")
+                saved["reuso_motivo"] = "SHA-256 idêntico"
+            for key in ("etag", "last_modified", "url_final"):
+                if response.get(key):
+                    saved[key] = response[key]
             records = _payload_records(payload)
             output.append(_base_record(context, base, logical_id, url, saved, tipo="json", registros=len(records)))
             if not page_field or not records or len(records) < page_size:
@@ -1005,36 +1214,86 @@ def _collect_local_base(context: _VersionContext, base: dict[str, Any]) -> list[
 
 
 def _collect_pncp_documents(context: _VersionContext, base: dict[str, Any]) -> list[dict[str, Any]]:
-    """Adapter de transição: reaproveita a descoberta PNCP sem usar o fluxo legado de gravação."""
+    """Descobre e baixa documentos PNCP até cumprir o alvo declarado.
+
+    A descoberta usa páginas sucessivas da API. O limite é controlado pelo
+    manifesto para evitar que uma fonte indisponível provoque uma coleta
+    infinita. Cada URL é baixada no mesmo contexto de checkpoint da versão.
+    """
     params = (base.get("acesso") or {}).get("params") or {}
     try:
         year = int(params.get("ano", 2025))
-        page_size = int(params.get("tamanhoPagina", 10))
+        page_size = max(1, int(params.get("tamanhoPagina", 10)))
+        target = max(1, int(base.get("volume_alvo", 1)))
     except (TypeError, ValueError):
-        year, page_size = 2025, 10
-    config = source_check.CheckConfig(
-        ano=year,
-        uf=str(params.get("uf", "RJ")).upper(),
-        modalidade=params.get("codigoModalidadeContratacao"),
-        tamanho_pagina=page_size,
-        timeout=30.0,
-        attempts=3,
-        data_inicial=params.get("dataInicial"),
-        data_final=params.get("dataFinal"),
-    )
-    _, results = _run_checks_for_types(config, ("pdf",))
-    candidates = [candidate for candidate in iter_candidates(results) if candidate.folder == "pncp"]
-    output = [
-        _collect_http_item(
-            context,
-            base,
-            candidate.url,
-            f"{base['base_id']}:{candidate.candidate_id}",
-            candidate.filename_prefix,
+        year, page_size, target = 2025, 10, 1
+
+    try:
+        max_pages = max(
+            1,
+            int(params.get("maxPaginas", (target + page_size - 1) // page_size + 2)),
         )
-        for candidate in candidates
-    ]
-    return output or [_failed_record(context, base, f"{base['base_id']}:discovery", "PNCP", "nenhum arquivo PNCP foi descoberto")]
+    except (TypeError, ValueError):
+        max_pages = (target + page_size - 1) // page_size + 2
+
+    output: list[dict[str, Any]] = []
+    seen_urls: set[str] = set()
+    page = 1
+    while page <= max_pages:
+        _wait_rate_limit(context, base)
+        config = source_check.CheckConfig(
+            ano=year,
+            uf=str(params.get("uf", "RJ")).upper(),
+            modalidade=params.get("codigoModalidadeContratacao"),
+            tamanho_pagina=page_size,
+            pagina=page,
+            timeout=30.0,
+            attempts=3,
+            data_inicial=params.get("dataInicial"),
+            data_final=params.get("dataFinal"),
+        )
+        _, results = _run_checks_for_types(
+            config,
+            ("pdf",),
+            before_request=lambda: _wait_rate_limit(context, base),
+        )
+        candidates = [candidate for candidate in iter_candidates(results) if candidate.folder == "pncp"]
+        new_candidates = [candidate for candidate in candidates if candidate.url not in seen_urls]
+        for candidate in new_candidates:
+            seen_urls.add(candidate.url)
+            output.append(
+                _collect_http_item(
+                    context,
+                    base,
+                    candidate.url,
+                    f"{base['base_id']}:{candidate.candidate_id}",
+                    candidate.filename_prefix,
+                )
+            )
+            pdf_successes = sum(
+                1 for record in output if record.get("status") == "ok" and record.get("tipo") == "pdf"
+            )
+            if pdf_successes >= target:
+                return output
+        if not new_candidates:
+            break
+        page += 1
+
+    pdf_successes = sum(1 for record in output if record.get("status") == "ok" and record.get("tipo") == "pdf")
+    if not output:
+        return [_failed_record(context, base, f"{base['base_id']}:discovery", "PNCP", "nenhum arquivo PNCP foi descoberto")]
+    if pdf_successes < target:
+        output.append(
+            _failed_record(
+                context,
+                base,
+                f"{base['base_id']}:target",
+                "PNCP",
+                f"alvo de {target} PDFs não atingido; somente {pdf_successes} foram coletados",
+                "pdf",
+            )
+        )
+    return output
 
 
 def _collect_base(context: _VersionContext, base: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1057,33 +1316,56 @@ def _collect_base(context: _VersionContext, base: dict[str, Any]) -> list[dict[s
     return [_failed_record(context, base, f"{base['base_id']}:adapter", kind, f"tipo de acesso não suportado: {kind}")]
 
 
-def _build_inventory(manifest: dict[str, Any], version: int, manifest_hash: str, collected_at: str, items: dict[str, dict[str, Any]]) -> dict[str, Any]:
+def _build_inventory(
+    manifest: dict[str, Any],
+    version: int,
+    manifest_hash: str,
+    collected_at: str,
+    items: dict[str, dict[str, Any]],
+    *,
+    inventory_type: str = "manifest",
+    manifest_bound: bool = True,
+    official: bool = True,
+) -> dict[str, Any]:
     records = sorted(items.values(), key=lambda record: str(record.get("logical_id", "")))
     successful = [record for record in records if record.get("status") == "ok" and record.get("path")]
     failures = [record for record in records if record.get("status") != "ok"]
     by_base: list[dict[str, Any]] = []
     for base in manifest.get("bases", []):
         base_records = [record for record in records if record.get("base_id") == base["base_id"]]
-        observed_records = sum(int(record.get("registros", 0) or 0) for record in base_records)
-        observed = observed_records or sum(record.get("status") == "ok" for record in base_records)
+        successful_base = [record for record in base_records if record.get("status") == "ok" and record.get("path")]
+        observed_records = sum(int(record.get("registros", 0) or 0) for record in successful_base)
+        observed = observed_records or len(successful_base)
+        formatos: dict[str, int] = {}
+        for record in successful_base:
+            tipo = str(record.get("tipo") or "bin")
+            formatos[tipo] = formatos.get(tipo, 0) + 1
         target = base.get("volume_alvo")
         by_base.append({
             "base_id": base["base_id"],
             "natureza": base.get("natureza"),
-            "arquivos": sum(record.get("status") == "ok" for record in base_records),
-            "formatos": sorted({str(record.get("tipo")) for record in base_records if record.get("tipo")}),
-            "bytes": sum(int(record.get("bytes", 0) or 0) for record in base_records if record.get("status") == "ok"),
+            "arquivos": len(successful_base),
+            "itens": observed,
+            "formatos": formatos,
+            "bytes": sum(int(record.get("bytes", 0) or 0) for record in successful_base),
             "volume_alvo": target,
             "volume_observado": observed,
             "divergencia_alvo": observed - int(target) if target is not None else None,
         })
+    total_items = sum(
+        int(record.get("registros", 0) or 0) or 1
+        for record in successful
+    )
     return {
-        "scenario_id": manifest.get("scenario_id"),
+        "inventory_type": inventory_type,
+        "official": official,
+        "manifest_bound": manifest_bound,
+        "scenario_id": manifest.get("scenario_id") if manifest_bound else None,
         "version": f"v{version}",
         "coletado_em": collected_at,
-        "manifest_hash": manifest_hash,
+        "manifest_hash": manifest_hash if manifest_bound else None,
         "completo": not failures,
-        "totais": {"arquivos": len(successful), "bytes": sum(int(record.get("bytes", 0) or 0) for record in successful), "falhas": len(failures)},
+        "totais": {"arquivos": len(successful), "itens": total_items, "bytes": sum(int(record.get("bytes", 0) or 0) for record in successful), "falhas": len(failures)},
         "por_base": by_base,
         "arquivos": records,
         "falhas": [{"origem": record.get("origem"), "erro": record.get("erro", "falha sem detalhe"), "logical_id": record.get("logical_id")} for record in failures],
@@ -1100,12 +1382,16 @@ def _write_inventory(inventory: dict[str, Any]) -> Path:
 def _render_corpus_inventory(inventory: dict[str, Any]) -> None:
     totals = inventory["totais"]
     lines = [
-        "# Inventário do corpus", "", f"- Cenário: `{inventory.get('scenario_id')}`", f"- Versão: `{inventory.get('version')}`",
-        f"- Coletado em: `{inventory.get('coletado_em')}`", f"- Arquivos: **{totals.get('arquivos', 0)}**", f"- Bytes: **{totals.get('bytes', 0)}**", f"- Falhas: **{totals.get('falhas', 0)}**", "",
-        "## Bases", "", "| Base | Natureza | Arquivos | Formatos | Bytes | Alvo | Divergência |", "|---|---|---:|---|---:|---:|---:|",
+        "# Inventário do corpus", "", f"- Tipo: `{inventory.get('inventory_type', 'manifest')}`", f"- Oficial: `{inventory.get('official', False)}`", f"- Vinculado ao manifesto: `{inventory.get('manifest_bound', False)}`", f"- Cenário: `{inventory.get('scenario_id') or '—'}`", f"- Versão: `{inventory.get('version')}`",
+        f"- Coletado em: `{inventory.get('coletado_em')}`", f"- Arquivos: **{totals.get('arquivos', 0)}**", f"- Itens/registros: **{totals.get('itens', 0)}**", f"- Bytes: **{totals.get('bytes', 0)}**", f"- Falhas: **{totals.get('falhas', 0)}**", "",
+        "## Bases", "", "| Base | Natureza | Arquivos | Itens | Formatos | Bytes | Alvo | Divergência |", "|---|---|---:|---:|---|---:|---:|---:|",
     ]
     for base in inventory.get("por_base", []):
-        lines.append(f"| `{base['base_id']}` | {base.get('natureza', '')} | {base.get('arquivos', 0)} | {', '.join(base.get('formatos', []))} | {base.get('bytes', 0)} | {base.get('volume_alvo', '')} | {base.get('divergencia_alvo', '')} |")
+        formatos = base.get("formatos") or {}
+        formatos_text = ", ".join(f"{tipo}: {quantidade}" for tipo, quantidade in formatos.items()) if isinstance(formatos, dict) else ", ".join(formatos)
+        alvo = base.get("volume_alvo") if base.get("volume_alvo") is not None else "—"
+        divergencia = base.get("divergencia_alvo") if base.get("divergencia_alvo") is not None else "—"
+        lines.append(f"| `{base['base_id']}` | {base.get('natureza') or '—'} | {base.get('arquivos', 0)} | {base.get('itens', 0)} | {formatos_text or '—'} | {base.get('bytes', 0)} | {alvo} | {divergencia} |")
     lines.extend(["", "## Falhas", ""])
     failures = inventory.get("falhas", [])
     lines.extend((f"- `{failure.get('origem')}`: {failure.get('erro')}" for failure in failures) if failures else ["Nenhuma falha registrada."])
@@ -1123,22 +1409,32 @@ def _scan_existing_version(version: int) -> dict[str, Any]:
     if not root.exists():
         raise FileNotFoundError(f"versão não encontrada: v{version}")
     records: list[dict[str, Any]] = []
+    legacy_base_id = "legacy_physical"
     for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue
         parts = path.relative_to(root).as_posix().split("/")
         if not parts:
             continue
-        base_id = parts[1] if parts[:1] == ("arquivos",) and len(parts) > 1 else parts[0]
+        physical_group = parts[1] if parts[:1] == ["arquivos"] and len(parts) > 1 else parts[0]
+        base_id = legacy_base_id
         body = path.read_bytes()
-        records.append({"logical_id": f"{base_id}:{_relative_path(path)}", "base_id": base_id, "tipo": path.suffix.lstrip(".") or "bin", "origem": "inventário reconstruído a partir do armazenamento", "coletado_em": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(timespec="seconds"), "registros": 0, "status": "ok", "bytes": len(body), "sha256": hashlib.sha256(body).hexdigest(), "path": _relative_path(path)})
-    bases = [{"base_id": base_id, "natureza": "desconhecida"} for base_id in sorted({record["base_id"] for record in records})]
-    return _build_inventory({"scenario_id": "desconhecido", "bases": bases}, version, "", datetime.now(timezone.utc).isoformat(timespec="seconds"), {record["logical_id"]: record for record in records})
+        records.append({"logical_id": f"{base_id}:{_relative_path(path)}", "base_id": base_id, "natureza": "não classificada", "physical_group": physical_group, "tipo": path.suffix.lstrip(".") or "bin", "origem": "inventário reconstruído a partir do armazenamento", "coletado_em": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(timespec="seconds"), "registros": 0, "status": "ok", "bytes": len(body), "sha256": hashlib.sha256(body).hexdigest(), "path": _relative_path(path)})
+    bases = [{"base_id": legacy_base_id, "natureza": "não classificada"}]
+    return _build_inventory({"scenario_id": None, "bases": bases}, version, "", datetime.now(timezone.utc).isoformat(timespec="seconds"), {record["logical_id"]: record for record in records}, inventory_type="legacy_physical", manifest_bound=False, official=True)
 
 
 def _inventory_for_version(version: int) -> dict[str, Any]:
     inventory = _load_inventory(version)
-    if inventory is None:
+    legacy_needs_rebuild = bool(
+        inventory
+        and inventory.get("inventory_type") == "legacy_physical"
+        and (
+            "official" not in inventory
+            or any(record.get("base_id") != "legacy_physical" for record in inventory.get("arquivos", []))
+        )
+    )
+    if inventory is None or inventory.get("inventory_type") not in {"manifest", "legacy_physical"} or legacy_needs_rebuild:
         inventory = _scan_existing_version(version)
         _write_inventory(inventory)
     _render_corpus_inventory(inventory)
@@ -1169,8 +1465,8 @@ def _promote_version(context: _VersionContext) -> None:
         raise FileExistsError(f"versão imutável já existe: {destination}")
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(context.staging_path), str(destination))
-    old_prefix = f"data/raw/.staging/v{context.version}/"
-    new_prefix = f"data/raw/v{context.version}/"
+    old_prefix = _relative_path(context.staging_path).rstrip("/") + "/"
+    new_prefix = _relative_path(destination).rstrip("/") + "/"
     for record in context.items.values():
         if isinstance(record.get("path"), str) and record["path"].startswith(old_prefix):
             record["path"] = new_prefix + record["path"][len(old_prefix):]
@@ -1186,54 +1482,142 @@ def _find_complete_matching_manifest(manifest_hash: str) -> dict[str, Any] | Non
 
 
 def _find_resumable_version(manifest_hash: str) -> int | None:
-    checkpoints_dir = INVENTORY_ROOT / "checkpoints"
-    if not checkpoints_dir.exists():
+    checkpoint_root = INVENTORY_ROOT / "checkpoints"
+    if not checkpoint_root.exists():
         return None
-    candidates: list[int] = []
-    for child in checkpoints_dir.iterdir():
-        version = _version_number(child.name)
+    checkpoints = sorted(
+        checkpoint_root.glob("v*.json"),
+        key=lambda path: _version_number(path.stem) or -1,
+        reverse=True,
+    )
+    for checkpoint_path in checkpoints:
+        version = _version_number(checkpoint_path.stem)
         if version is None:
             continue
         try:
-            checkpoint = json.loads(child.read_text(encoding="utf-8"))
+            checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        if checkpoint.get("manifest_hash") == manifest_hash and checkpoint.get("state") != "promoted":
-            candidates.append(version)
-    return max(candidates) if candidates else None
+        staging_path = RAW_ROOT / ".staging" / f"v{version}"
+        if (
+            checkpoint.get("manifest_hash") == manifest_hash
+            and checkpoint.get("state") in {"staging", "incomplete"}
+            and staging_path.exists()
+        ):
+            return version
+    return None
 
 
-def _run_manifest_command(command: str, manifest_path: Path) -> int:
+def _run_manifest_command(
+    command: str,
+    manifest_path: Path,
+    *,
+    official: bool,
+    base_ids: list[str] | None = None,
+) -> int:
+    logger = _RunLogger(command)
+    logger.event("manifest_load", "started", manifest=str(manifest_path))
     manifest = load_manifest(manifest_path)
     manifest_hash = _manifest_hash(manifest_path)
+    if base_ids:
+        if official:
+            raise ValueError("--base-id só pode ser usado em uma execução experimental")
+        available = {str(base["base_id"]): base for base in manifest["bases"]}
+        unknown = sorted(set(base_ids) - set(available))
+        if unknown:
+            raise ValueError(f"base(s) não declarada(s) no manifesto: {', '.join(unknown)}")
+        manifest = {**manifest, "bases": [available[base_id] for base_id in base_ids]}
+    logger.event(
+        "manifest_load",
+        "completed",
+        scenario_id=manifest.get("scenario_id"),
+        manifest_hash=manifest_hash,
+    )
     if command == "fetch":
-        existing = _find_complete_matching_manifest(manifest_hash)
+        existing = None if base_ids else _find_complete_matching_manifest(manifest_hash)
         if existing:
             _render_corpus_inventory(existing)
-            print(json.dumps({"version": existing["version"], "reutilizado": True}, ensure_ascii=False))
+            logger.event("version_resolution", "reused", version=existing["version"])
+            print(
+                json.dumps(
+                    {"version": existing["version"], "reutilizado": True, "run_id": logger.run_id},
+                    ensure_ascii=False,
+                )
+            )
             return 0
+    resumable_version = _find_resumable_version(manifest_hash)
     previous = None
     if command == "update":
         latest = _latest_version()
+        if resumable_version is not None and latest == resumable_version:
+            versions = [number for number in _available_versions() if number != resumable_version]
+            latest = max(versions) if versions else None
         if latest is None:
             raise RuntimeError("update exige uma versão anterior")
         previous = _inventory_for_version(latest)
-        version = _next_version()
-    else:
-        version = _find_resumable_version(manifest_hash) or _next_version()
-    context = _load_version_context(manifest, manifest_hash, version)
+    version = resumable_version or _next_version()
+    previous_items = {
+        str(record["logical_id"]): record
+        for record in (previous or {}).get("arquivos", [])
+        if isinstance(record, dict) and record.get("logical_id")
+    }
+    previous_version = _version_number(str(previous["version"])) if previous and previous.get("version") else None
+    context = _load_version_context(
+        manifest,
+        manifest_hash,
+        version,
+        previous_items=previous_items,
+        previous_version=previous_version,
+    )
+    logger.event(
+        "version_resolution",
+        "resumed" if resumable_version is not None else "started",
+        version=f"v{version}",
+    )
     for base in manifest["bases"]:
-        _collect_base(context, base)
-    failures = [item for item in context.items.values() if item.get("status") != "ok"]
-    if failures:
-        _checkpoint_write(context, state="staging")
-    else:
-        _promote_version(context)
-    inventory = _build_inventory(manifest, version, manifest_hash, context.collected_at, context.items)
+        started = time.perf_counter()
+        logger.event("base_collection", "started", base_id=base["base_id"])
+        try:
+            _collect_base(context, base)
+        except Exception as exc:
+            logger.event(
+                "base_collection",
+                "failed",
+                base_id=base["base_id"],
+                duration_ms=round((time.perf_counter() - started) * 1000, 2),
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            raise
+        logger.event(
+            "base_collection",
+            "completed",
+            base_id=base["base_id"],
+            duration_ms=round((time.perf_counter() - started) * 1000, 2),
+            items=sum(1 for item in context.items.values() if item.get("base_id") == base["base_id"]),
+        )
+    _promote_version(context)
+    logger.event("version_promotion", "completed", version=f"v{version}")
+    inventory = _build_inventory(
+        manifest,
+        version,
+        manifest_hash,
+        context.collected_at,
+        context.items,
+        inventory_type="manifest" if official else "experimental",
+        official=official,
+    )
     inventory_path = _write_inventory(inventory)
     _render_corpus_inventory(inventory)
     diff_path = _diff_inventories(previous, inventory) if previous is not None else None
-    summary = {"version": inventory["version"], "inventario": _relative_path(inventory_path), "diff": _relative_path(diff_path) if diff_path else None, "totais": inventory["totais"], "completo": inventory["completo"]}
+    logger.event(
+        "inventory",
+        "completed",
+        version=inventory["version"],
+        inventory_path=_relative_path(inventory_path),
+        totals=inventory["totais"],
+        complete=inventory["completo"],
+    )
+    summary = {"version": inventory["version"], "inventario": _relative_path(inventory_path), "diff": _relative_path(diff_path) if diff_path else None, "totais": inventory["totais"], "completo": inventory["completo"], "run_id": logger.run_id, "log": _relative_path(logger.path)}
     print(json.dumps(summary, ensure_ascii=False))
     return 0 if inventory["completo"] else 2
 
@@ -1244,127 +1628,56 @@ def _manifest_main(argv: list[str]) -> int:
     for command in ("fetch", "update"):
         command_parser = subparsers.add_parser(command)
         command_parser.add_argument("--manifest", type=Path, default=MANIFEST_DEFAULT)
+        command_parser.add_argument("--data-root", type=Path, default=None)
+        command_parser.add_argument("--official", action="store_true", help="usa a árvore oficial data/")
+        command_parser.add_argument(
+            "--base-id",
+            action="append",
+            dest="base_ids",
+            metavar="ID",
+            help="limita a execução a uma base declarada; pode ser repetido em modo experimental",
+        )
+        if command == "update":
+            command_parser.add_argument("--dry-run", action="store_true", help="mostra o plano sem modificar arquivos")
     inventory_parser = subparsers.add_parser("inventory")
-    inventory_parser.add_argument("--version", required=True, type=str)
+    inventory_parser.add_argument("--corpus-version", required=True, type=str, help="versão do corpus a inspecionar, como v1")
+    inventory_parser.add_argument("--data-root", type=Path, default=None)
+    inventory_parser.add_argument("--official", action="store_true", help="usa a árvore oficial data/")
     args = parser.parse_args(argv)
+    official_root = (PROJECT_ROOT / "data").resolve()
+    if args.official:
+        if args.data_root is not None and args.data_root.resolve() != official_root:
+            parser.error("--official não pode ser combinado com outro --data-root")
+        data_root = official_root
+    else:
+        if args.data_root is None:
+            parser.error("coletas não oficiais exigem --data-root; use --official para o corpus oficial")
+        data_root = args.data_root.resolve()
+    _configure_data_root(data_root)
     if args.command == "inventory":
-        version = _version_number(args.version)
+        version = _version_number(args.corpus_version)
         if version is None:
-            parser.error("--version deve usar o formato vN")
+            parser.error("--corpus-version deve usar o formato vN")
         inventory = _inventory_for_version(version)
         print(json.dumps({"version": inventory["version"], "totais": inventory["totais"]}, ensure_ascii=False))
         return 0
-    return _run_manifest_command(args.command, args.manifest.resolve())
+    if args.command == "update" and args.dry_run:
+        if args.base_ids:
+            parser.error("--base-id não é compatível com update --dry-run")
+        return _dry_run_update(args.manifest.resolve())
+    run_kwargs = {"official": args.official}
+    if args.base_ids:
+        run_kwargs["base_ids"] = args.base_ids
+    return _run_manifest_command(args.command, args.manifest.resolve(), **run_kwargs)
 
 
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if arguments and arguments[0] in {"fetch", "update", "inventory"}:
-        try:
-            return _manifest_main(arguments)
-        except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
-            print(f"erro: {type(exc).__name__}: {exc}", file=sys.stderr)
-            return 2
-    return _legacy_main(arguments)
-
-
-def _legacy_main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--quantidade",
-        type=int,
-        required=True,
-        help="quantidade de arquivos novos e únicos por tipo",
-    )
-    type_group = parser.add_mutually_exclusive_group()
-    type_group.add_argument(
-        "--tipo",
-        choices=FILE_TYPES,
-        help="um único tipo de arquivo para coletar",
-    )
-    type_group.add_argument(
-        "--tipos",
-        default="html,pdf,json,jsonl",
-        help="tipos selecionados, separados por vírgula (html,pdf,json,jsonl)",
-    )
-    parser.add_argument("--salvar-json", action="store_true", help="salva o relatório em data/runs/")
-    parser.add_argument("--dry-run", action="store_true", help="descobre candidatos sem baixar arquivos")
-    parser.add_argument("--ano", type=int, default=2025)
-    parser.add_argument("--uf", default="RJ")
-    parser.add_argument(
-        "--modalidade",
-        type=int,
-        default=None,
-        help="filtra uma modalidade; omitido consulta todas",
-    )
-    parser.add_argument("--tamanho-pagina", type=int, default=10)
-    parser.add_argument("--tentativas", type=int, default=3)
-    parser.add_argument("--timeout", type=float, default=30.0)
-    parser.add_argument("--classificacao-superior", default="979")
-    parser.add_argument("--data-inicial", default=None)
-    parser.add_argument("--data-final", default=None)
-    args = parser.parse_args(argv)
-
-    if args.quantidade < 1:
-        parser.error("--quantidade deve ser >= 1")
-
-    if args.tipo:
-        tipos = (args.tipo,)
-    else:
-        tipos = tuple(dict.fromkeys(
-            file_type.strip().lower()
-            for file_type in args.tipos.split(",")
-            if file_type.strip()
-        ))
-    invalid_types = sorted(set(tipos) - set(FILE_TYPES))
-    if not tipos:
-        parser.error("--tipos deve conter ao menos um tipo")
-    if invalid_types:
-        parser.error(f"tipos inválidos: {', '.join(invalid_types)}; use: {', '.join(FILE_TYPES)}")
-    if args.tentativas < 1 or args.timeout <= 0:
-        parser.error("--tentativas deve ser >= 1 e --timeout deve ser > 0")
-
-    config = _config_from_args(args)
-    checked_at, results = _run_checks_for_types(config, tipos)
-    candidates = list(iter_candidates(results))
-    candidates_by_type = {
-        file_type: sum(candidate.file_type == file_type for candidate in candidates)
-        for file_type in tipos
-    }
-
-    if args.dry_run:
-        summary = {
-            "candidatos_por_tipo": candidates_by_type,
-            "quantidade_por_tipo": {file_type: args.quantidade for file_type in tipos},
-        }
-        print(json.dumps(summary, ensure_ascii=False))
-        return 0 if all(
-            count >= args.quantidade for count in candidates_by_type.values()
-        ) else 2
-
-    downloads, novos_por_tipo, considerados = fetch_exact(
-        results,
-        args.quantidade,
-        config,
-        tipos,
-    )
-    report: dict[str, Any] = {
-        "verificado_em": checked_at,
-        "quantidade_por_tipo": {file_type: args.quantidade for file_type in tipos},
-        "novos_unicos_por_tipo": novos_por_tipo,
-        "candidatos_por_tipo": candidates_by_type,
-        "candidatos_considerados": considerados,
-        "completo": all(
-            novos_por_tipo[file_type] == args.quantidade for file_type in tipos
-        ),
-        "downloads": downloads,
-    }
-    print(json.dumps({key: report[key] for key in report if key != "downloads"}, ensure_ascii=False))
-    for download in downloads:
-        print(f"[{download.get('status')}] {download.get('nome')} — {download.get('arquivo', 'sem arquivo')}")
-    if args.salvar_json:
-        print(f"relatório={save_report(checked_at, report)}")
-    return 0 if report["completo"] else 2
+    try:
+        return _manifest_main(arguments)
+    except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
+        print(f"erro: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
