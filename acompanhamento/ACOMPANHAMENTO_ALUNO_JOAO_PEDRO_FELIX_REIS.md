@@ -200,3 +200,17 @@ De forma geral, a sessão consolidou a base técnica do pipeline: aquisição,
 seleção por manifesto, versionamento, deduplicação, preparação documental,
 metadados, rastreabilidade, curadoria, busca remota e local, geração incremental
 de embeddings, testes automatizados e documentação.
+
+### Uso de inteligência artificial
+
+Utilizei ferramentas de inteligência artificial, especialmente o Codex, como
+apoio ao desenvolvimento. A IA foi utilizada para auxiliar na análise da
+estrutura do repositório, no planejamento de refatorações, na elaboração de
+trechos de código, na criação de testes, na revisão de metadados, na
+organização da documentação e na análise do histórico de commits.
+
+As sugestões geradas foram revisadas e adaptadas ao projeto antes de serem
+incorporadas. As alterações foram conferidas manualmente, comparadas com o
+manifesto e com os requisitos do desafio, e validadas por meio da suíte de
+testes. A decisão sobre o que seria incluído no corpus, quais fontes seriam
+aceitas e quais arquivos seriam publicados permaneceu sob controle da equipe.
