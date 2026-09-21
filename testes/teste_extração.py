@@ -23,11 +23,16 @@ from src.fetch_corpus import load_manifest  # noqa: E402
 
 
 DEFAULT_OUTPUT = PROJECT_ROOT / "testes" / "output_teste_extracao.log"
+_CURRENT_RUN_ID = "offline-not-started"
 
 
 def _log(lines: list[str], level: str, message: str, **fields: object) -> None:
     timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    suffix = "".join(f" | {key}={value}" for key, value in fields.items())
+    run_id = fields.pop("run_id", _CURRENT_RUN_ID)
+    stage = fields.pop("stage", "offline_validation")
+    suffix = f" | run_id={run_id} | stage={stage}" + "".join(
+        f" | {key}={value}" for key, value in fields.items()
+    )
     lines.append(f"{timestamp} [{level}] {message}{suffix}")
 
 
@@ -46,6 +51,8 @@ def _tracked_raw_files() -> int | None:
 
 
 def run(output_path: Path = DEFAULT_OUTPUT) -> int:
+    global _CURRENT_RUN_ID
+    _CURRENT_RUN_ID = f"offline-extraction-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
     lines: list[str] = []
     _log(lines, "INFO", "Início do teste offline da extração")
     manifest_path = PROJECT_ROOT / "corpus_manifest.yaml"
@@ -91,18 +98,25 @@ def run(output_path: Path = DEFAULT_OUTPUT) -> int:
         )
 
     _log(lines, "INFO", "Contrato operacional dos comandos")
-    for command, meaning in (
-        ("fetch", "materializa uma nova versão a partir do manifesto"),
-        ("update", "materializa a próxima versão e calcula o diff"),
-        ("inventory", "reconstrói ou valida inventário sem baixar dados"),
+    for command, command_line, meaning in (
+        ("fetch", "python -m src.fetch_corpus fetch --official", "materializa uma nova versão a partir do manifesto"),
+        ("update", "python -m src.fetch_corpus update --official", "materializa a próxima versão e calcula o diff"),
+        ("inventory", "python -m src.fetch_corpus inventory --corpus-version v1 --official", "reconstrói ou valida inventário sem baixar dados"),
     ):
         _log(
             lines,
             "INFO",
             "Comando oficial",
-            comando=f"python -m src.fetch_corpus {command}",
+            comando=command_line,
             objetivo=meaning,
         )
+    _log(
+        lines,
+        "INFO",
+        "Comando experimental",
+        comando="python -m src.fetch_corpus fetch --manifest corpus_manifest.yaml --data-root data/attempts/corpus_fetch/tentativa-vN",
+        objetivo="testa uma coleta isolada sem alterar a v1 oficial",
+    )
 
     _log(
         lines,
@@ -130,7 +144,12 @@ def run(output_path: Path = DEFAULT_OUTPUT) -> int:
         _log(lines, "OK" if found else "ERRO", "Subcomando verificado", comando=command, encontrado=found)
 
     inventory: dict[str, Any] = {}
-    inventory_path = PROJECT_ROOT / "data" / "inventory" / "v1.json"
+    inventory_root = PROJECT_ROOT / "data" / "inventory"
+    inventory_paths = sorted(
+        inventory_root.glob("v*.json"),
+        key=lambda path: int(path.stem[1:]) if path.stem[1:].isdigit() else -1,
+    )
+    inventory_path = inventory_paths[-1] if inventory_paths else inventory_root / "v1.json"
     if inventory_path.exists():
         inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
         _log(
@@ -138,7 +157,12 @@ def run(output_path: Path = DEFAULT_OUTPUT) -> int:
             "OK",
             "Inventário de versão encontrado",
             arquivo=inventory_path.relative_to(PROJECT_ROOT),
+            tipo=inventory.get("inventory_type"),
+            oficial=inventory.get("official"),
+            vinculado_ao_manifesto=inventory.get("manifest_bound"),
+            manifest_hash=inventory.get("manifest_hash") or "não aplicável (legado)",
             arquivos=inventory.get("totais", {}).get("arquivos"),
+            itens=inventory.get("totais", {}).get("itens"),
             falhas=inventory.get("totais", {}).get("falhas"),
         )
         required_inventory_fields = {
@@ -146,6 +170,9 @@ def run(output_path: Path = DEFAULT_OUTPUT) -> int:
             "version",
             "coletado_em",
             "manifest_hash",
+            "inventory_type",
+            "official",
+            "manifest_bound",
             "totais",
             "por_base",
             "arquivos",
@@ -167,6 +194,8 @@ def run(output_path: Path = DEFAULT_OUTPUT) -> int:
                 "Resumo da base no inventário",
                 base_id=base_summary.get("base_id"),
                 arquivos=base_summary.get("arquivos"),
+                itens=base_summary.get("itens"),
+                formatos=base_summary.get("formatos"),
                 bytes=base_summary.get("bytes"),
                 volume_observado=base_summary.get("volume_observado"),
                 divergencia_alvo=base_summary.get("divergencia_alvo"),
@@ -175,13 +204,12 @@ def run(output_path: Path = DEFAULT_OUTPUT) -> int:
             _log(
                 lines,
                 "ATENÇÃO",
-                "Inventário v1 foi reconstruído de dados históricos",
-                explicacao="o hash do manifesto será preenchido nas versões produzidas pelo novo fetch",
+                "Inventário legado não está vinculado ao manifesto",
+                explicacao="as versões oficiais produzidas pelo fetch possuem hash do manifesto",
             )
     else:
-        _log(lines, "ATENÇÃO", "Inventário v1 ainda não existe; execute inventory --version v1")
+        _log(lines, "ATENÇÃO", "Inventário v1 ainda não existe; execute inventory --corpus-version v1 --official")
 
-    inventory_root = PROJECT_ROOT / "data" / "inventory"
     diff_files = sorted(path.name for path in inventory_root.glob("DIFF_*.md")) if inventory_root.exists() else []
     checkpoint_files = sorted(path.name for path in (inventory_root / "checkpoints").glob("v*.json")) if (inventory_root / "checkpoints").exists() else []
     _log(lines, "INFO", "Artefatos auxiliares localizados", diffs=diff_files or "nenhum", checkpoints=checkpoint_files or "nenhum")
