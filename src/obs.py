@@ -1,10 +1,4 @@
-"""Observabilidade do pipeline RAG.
-
-Cada etapa escreve uma linha JSON em ``logs/pipeline-AAAA-MM-DD.jsonl``.
-O módulo não depende de rede nem de bibliotecas externas e pode ser usado tanto
-como context manager (quando a etapa precisa enriquecer o log) quanto como
-decorator (casos simples e chamadas ao LLM).
-"""
+"""Fornece observabilidade ao pipeline RAG por meio de logs JSONL estruturados."""
 
 from __future__ import annotations
 
@@ -43,51 +37,23 @@ class TokenUsage:
     total: int = 0
 
     def __post_init__(self) -> None:
-        """Valida se todas as contagens são não negativas.
-
-        Complexidade:
-            Tempo O(1) e espaço O(1).
-        """
+        """Valida contagens não negativas em tempo e espaço O(1)."""
         if min(self.prompt, self.completion, self.total) < 0:
             raise ValueError("A contagem de tokens não pode ser negativa.")
 
 
 def new_run_id() -> str:
-    """Cria o identificador compartilhado pelas etapas de uma execução.
-
-    Returns:
-        Identificador hexadecimal com oito caracteres.
-
-    Complexidade:
-        Tempo O(1) e espaço O(1).
-    """
+    """Cria um identificador de execução com oito caracteres em O(1)."""
     return uuid.uuid4().hex[:8]
 
 
 def new_query_id() -> str:
-    """Cria um identificador único para uma consulta.
-
-    Returns:
-        Identificador no formato ``q_<oito caracteres hexadecimais>``.
-
-    Complexidade:
-        Tempo O(1) e espaço O(1).
-    """
+    """Cria um identificador de consulta no formato ``q_<id>`` em O(1)."""
     return f"q_{uuid.uuid4().hex[:8]}"
 
 
 def token_usage_from_response(response: Any) -> TokenUsage:
-    """Extrai o uso de tokens de respostas OpenAI ou objetos equivalentes.
-
-    Args:
-        response: Objeto ou dicionário que pode conter o atributo ``usage``.
-
-    Returns:
-        Contagem encontrada ou uma contagem zerada quando ``usage`` não existe.
-
-    Complexidade:
-        Tempo O(1) e espaço O(1).
-    """
+    """Extrai tokens de ``response.usage`` ou retorna contagem zerada em O(1)."""
     usage = getattr(response, "usage", None)
     if usage is None and isinstance(response, dict):
         usage = response.get("usage")
@@ -101,11 +67,7 @@ def token_usage_from_response(response: Any) -> TokenUsage:
 
 
 def _read_usage_value(usage: Any, field_name: str) -> int:
-    """Lê um campo numérico de um objeto ou dicionário de uso de tokens.
-
-    Complexidade:
-        Tempo O(1) e espaço O(1).
-    """
+    """Lê em O(1) um campo de uso de tokens de um objeto ou dicionário."""
     if isinstance(usage, Mapping):
         value = usage.get(field_name, 0)
     else:
@@ -114,11 +76,7 @@ def _read_usage_value(usage: Any, field_name: str) -> int:
 
 
 def _json_default(value: Any) -> Any:
-    """Converte tipos conhecidos para valores serializáveis em JSON.
-
-    Complexidade:
-        Tempo e espaço O(n), em que ``n`` é o tamanho do objeto convertido.
-    """
+    """Converte tipos conhecidos para JSON em tempo e espaço O(n)."""
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, Path):
@@ -149,14 +107,7 @@ class LogRecord:
     extra: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        """Converte o registro para um dicionário pronto para serialização.
-
-        Returns:
-            Dicionário contendo todos os campos do contrato de logging.
-
-        Complexidade:
-            Tempo e espaço O(n), conforme o tamanho dos dados do registro.
-        """
+        """Converte o registro para um dicionário em tempo e espaço O(n)."""
         data = asdict(self)
         data["stage"] = self.stage.value
         return data
@@ -166,44 +117,17 @@ class PipelineLogger:
     """Grava eventos estruturados e correlacionados do pipeline em JSONL."""
 
     def __init__(self, logs_dir: str | Path = "logs") -> None:
-        """Configura o diretório de logs e o controle de escrita concorrente.
-
-        Args:
-            logs_dir: Diretório no qual os arquivos diários serão armazenados.
-
-        Complexidade:
-            Tempo O(1) e espaço O(1).
-        """
+        """Configura o diretório e o controle de escrita concorrente em O(1)."""
         self.logs_dir = Path(logs_dir)
         self._lock = threading.Lock()
 
     def log_path(self, now: datetime | None = None) -> Path:
-        """Calcula o caminho do arquivo de log para uma determinada data.
-
-        Args:
-            now: Data e hora do evento. Usa o horário local quando omitida.
-
-        Returns:
-            Caminho no formato ``pipeline-AAAA-MM-DD.jsonl``.
-
-        Complexidade:
-            Tempo O(1) e espaço O(1).
-        """
+        """Retorna em O(1) o caminho diário ``pipeline-AAAA-MM-DD.jsonl``."""
         current = now or datetime.now().astimezone()
         return self.logs_dir / f"pipeline-{current.date().isoformat()}.jsonl"
 
     def write(self, record: LogRecord) -> Path:
-        """Serializa e acrescenta um registro ao arquivo JSONL diário.
-
-        Args:
-            record: Evento de observabilidade que será persistido.
-
-        Returns:
-            Caminho do arquivo que recebeu o registro.
-
-        Complexidade:
-            Tempo e espaço O(n), em que ``n`` é o tamanho do registro.
-        """
+        """Acrescenta um registro ao JSONL e retorna seu caminho em O(n)."""
         path = self.log_path(datetime.fromisoformat(record.ts))
         line = json.dumps(record.to_dict(), ensure_ascii=False, default=_json_default)
         with self._lock:
@@ -222,22 +146,7 @@ class PipelineLogger:
         modelo: str | None = None,
         extra: dict[str, Any] | None = None,
     ) -> "LogSpan":
-        """Cria um contexto para medir e registrar uma etapa do pipeline.
-
-        Args:
-            run_id: Identificador comum a toda a execução.
-            query_id: Identificador da pergunta processada.
-            stage: Etapa do pipeline, validada pelo enum :class:`Stage`.
-            input: Entrada relevante para diagnóstico da etapa.
-            modelo: Modelo utilizado, quando houver chamada ao LLM.
-            extra: Metadados adicionais específicos da etapa.
-
-        Returns:
-            Context manager que registra sucesso ou erro ao finalizar.
-
-        Complexidade:
-            Tempo O(m) e espaço O(m), sendo ``m`` o tamanho de ``extra``.
-        """
+        """Cria em O(m) um contexto de medição, sendo ``m`` o tamanho de ``extra``."""
         return LogSpan(
             logger=self,
             run_id=run_id,
@@ -263,11 +172,7 @@ class LogSpan:
         modelo: str | None,
         extra: dict[str, Any],
     ) -> None:
-        """Inicializa os dados de uma medição ainda não iniciada.
-
-        Complexidade:
-            Tempo O(1) e espaço O(1), desconsiderando objetos recebidos.
-        """
+        """Inicializa em O(1) os dados de uma medição ainda não iniciada."""
         self.logger = logger
         self.run_id = run_id
         self.query_id = query_id
@@ -281,25 +186,13 @@ class LogSpan:
         self._timestamp = ""
 
     def __enter__(self) -> "LogSpan":
-        """Marca o instante inicial da etapa.
-
-        Complexidade:
-            Tempo O(1) e espaço O(1).
-        """
+        """Marca o instante inicial da etapa em tempo e espaço O(1)."""
         self._timestamp = datetime.now().astimezone().isoformat(timespec="milliseconds")
         self._started = time.perf_counter()
         return self
 
     def set_result(self, output: Any, response: Any | None = None) -> None:
-        """Define a saída observável e captura tokens da resposta opcional.
-
-        Args:
-            output: Resumo ou resultado que será registrado.
-            response: Resposta de LLM da qual ``usage`` será extraído.
-
-        Complexidade:
-            Tempo O(1) e espaço O(1), sem copiar os objetos recebidos.
-        """
+        """Define a saída e captura tokens opcionais em tempo e espaço O(1)."""
         self.output = output
         if response is not None:
             self.tokens = token_usage_from_response(response)
@@ -310,19 +203,7 @@ class LogSpan:
         exc: BaseException | None,
         _traceback: Any,
     ) -> bool:
-        """Finaliza a medição, persiste o evento e preserva exceções.
-
-        Args:
-            _exc_type: Tipo da exceção, não utilizado diretamente.
-            exc: Exceção capturada pelo contexto, quando existente.
-            _traceback: Rastreamento da exceção, não persistido por segurança.
-
-        Returns:
-            Sempre ``False`` para nunca suprimir uma exceção da aplicação.
-
-        Complexidade:
-            Tempo e espaço O(n), em que ``n`` é o tamanho do evento gravado.
-        """
+        """Persiste o evento em O(n) e retorna ``False`` para preservar exceções."""
         latency = max(0, round((time.perf_counter() - self._started) * 1000))
         status = "erro" if exc is not None else "ok"
         output = self.output
@@ -364,24 +245,7 @@ def observe(
     output_builder: Callable[[Any], Any] | None = None,
     extra: dict[str, Any] | None = None,
 ) -> Callable[[Callable[P, R]], Callable[P, R]]:
-    """Decora uma função para capturar latência, resultado e uso de tokens.
-
-    Args:
-        logger: Gravador que persistirá o evento.
-        stage: Etapa do pipeline executada pela função.
-        run_id: Identificador comum às etapas da execução.
-        query_id: Identificador da consulta processada.
-        modelo: Nome do modelo utilizado, quando aplicável.
-        input_builder: Função opcional que resume os argumentos de entrada.
-        output_builder: Função opcional que resume o valor retornado.
-        extra: Metadados adicionais incluídos no evento.
-
-    Returns:
-        Decorator que preserva assinatura lógica, retorno e exceções da função.
-
-    Complexidade:
-        Acrescenta O(n) por chamada para serializar um evento de tamanho ``n``.
-    """
+    """Decora uma função e registra cada chamada em O(n) para um evento de tamanho ``n``."""
 
     def decorator(function: Callable[P, R]) -> Callable[P, R]:
         """Constrói o wrapper de observabilidade para a função recebida."""
