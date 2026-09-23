@@ -91,6 +91,8 @@ Uma pergunta via `responder` gera, no log, uma linha por stage — `roteamento`,
 ├── CORPUS_INVENTORY.md          ← inventário legível da versão mais recente
 ├── testes/test-fontes/          ← verificação de disponibilidade das fontes e downloader compartilhado
 ├── tests/                       ← testes de contrato (pytest), offline
+├── app/
+│   └── cli.py                   ← interface de linha de comando: rota e resposta completa do pipeline
 ├── src/
 │   ├── fetch_corpus.py          ← coleta determinística e versionada do corpus
 │   ├── manifest_curator.py      ← descoberta e propostas para o manifesto
@@ -316,7 +318,18 @@ python llm_ecoa.py
 pytest tests/ -m "not llm"      # camadas unitária e de contrato, offline
 ```
 
-**7. Rodar a avaliação (golden set das personas)**
+**7. Fazer perguntas ao sistema (app)**
+
+```bash
+py app/cli.py rota "Sou MEI, posso participar de pregão eletrônico?"       # só mostra as bases escolhidas pelo roteador
+py app/cli.py perguntar "Quais contratos de ambulâncias foram publicados?"  # pipeline completo, resposta em JSON
+py app/cli.py perguntar "Pergunta 1?" "Pergunta 2?"                       # várias perguntas de uma vez
+py app/cli.py perguntar                                                    # sem argumento, pede a pergunta no terminal
+```
+
+`perguntar` chama `src.pipeline:responder`, então a resposta já passa pelas recusas, pelo mascaramento de dados pessoais e pelo log de cada etapa. Sem índice montado (`index/`), a resposta é uma recusa `sem_evidencia`.
+
+**8. Rodar a avaliação (golden set das personas)**
 
 ```bash
 py .\eval\run_eval.py check                                     # valida o golden set, sem pipeline

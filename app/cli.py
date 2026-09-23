@@ -9,6 +9,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.obs import new_query_id, new_run_id
 from src.pipeline import responder
 from src.router import rotear_pergunta
 
@@ -28,7 +29,7 @@ def _parsear_perguntas(perguntas_raw: list[str]) -> list[str]:
 
 def cmd_rota(perguntas: list[str]) -> int:
     for pergunta in _parsear_perguntas(perguntas):
-        decisao = rotear_pergunta(pergunta)
+        decisao = rotear_pergunta(pergunta, run_id=new_run_id(), query_id=new_query_id())
         print(f"Pergunta: {pergunta}")
         _imprimir_json(decisao.model_dump(mode="json"))
         print()
