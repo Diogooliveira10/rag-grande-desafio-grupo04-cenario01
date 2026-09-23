@@ -18,7 +18,7 @@ Contexto completo do desafio, dos outros dois cenários e dos padrões de engenh
 | --- | --- | --- | --- | --- |
 | `editais_normativo` / `fontes_normativas` | Normativa | Lei 14.133/2021, decretos estaduais, editais de licitação | Planalto, REDELOG-RJ, CGE-RJ, PNCP | PDF/HTML por URL |
 | `contratos_estruturado` | Estruturada | Contratos e contratações, UF=RJ, período fechado | PNCP — API de consulta v3 | REST paginado |
-| `atas_conversacional` | Conversacional | Atas de registro de preço, e-mails de compras (base sintética) | PNCP + base sintética | Texto |
+| `atas_conversacional` | Conversacional | Atas de registro de preço; e-mails de compras (base sintética, pendente: será fornecida pelo tutor) | PNCP + base sintética | Texto |
 | `pca_agregado` | Agregada | Plano de Contratações Anual 2025 do Estado do RJ, transformado em indicadores | PNCP | REST (CSV + JSON) |
 
 A definição declarativa de cada base — fonte, tipo de acesso, volume-alvo, campo de vigência, licença — vive em [corpus_manifest.yaml](corpus_manifest.yaml), que é a fonte única de verdade sobre o que entra no corpus. `data/raw/` nunca é versionado; qualquer pessoa reconstrói o corpus rodando o coletor contra o manifesto.
