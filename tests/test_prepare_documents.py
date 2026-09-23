@@ -40,6 +40,9 @@ def test_prepare_documents_extracts_pdf_text_and_required_metadata(tmp_path):
     assert record["doc_type"] == "pdf"
     assert record["logical_id"].startswith("exemplos_teste:tests/fixtures/pdf/")
     assert record["origem"] == "tests/fixtures/pdf"
+    assert len(record["document_content_sha256"]) == 64
+    assert len(record["chunk_content_sha256"]) == 64
+    assert "content_sha256" not in record
     assert record["manifest_hash"].startswith("sha256:")
     assert datetime.fromisoformat(record["coletado_em"])
     assert "tipo_documento" not in record
@@ -125,6 +128,9 @@ def test_prepare_documents_uses_inventory_provenance_instead_of_file_mtime(tmp_p
                     {
                         "base_id": "contratos_estruturado",
                         "sha256": digest,
+                        "source_file": str(source),
+                        "path": str(source),
+                        "status": "ok",
                         "origem": "https://pncp.gov.br/api/contratos/pagina-1",
                         "coletado_em": "2026-09-20T12:34:56+00:00",
                     }
@@ -148,6 +154,51 @@ def test_prepare_documents_uses_inventory_provenance_instead_of_file_mtime(tmp_p
     assert record["origem"] == "https://pncp.gov.br/api/contratos/pagina-1"
     assert record["coletado_em"] == "2026-09-20T12:34:56+00:00"
     assert record["logical_id"] == "contratos_estruturado:numeroControlePNCP:RJ-123"
+
+
+def test_prepare_documents_processes_only_files_listed_in_inventory(tmp_path):
+    input_dir = tmp_path / "source"
+    input_dir.mkdir()
+    listed = input_dir / "listed.json"
+    listed.write_text('{"id": "listed"}', encoding="utf-8")
+    (input_dir / "not-listed.txt").write_text("não deve entrar", encoding="utf-8")
+    digest = hashlib.sha256(listed.read_bytes()).hexdigest()
+    manifest_digest = f"sha256:{hashlib.sha256(MANIFEST.read_bytes()).hexdigest()}"
+    inventory = tmp_path / "inventory.json"
+    inventory.write_text(
+        json.dumps(
+            {
+                "manifest_hash": manifest_digest,
+                "arquivos": [
+                    {
+                        "base_id": "contratos_estruturado",
+                        "status": "ok",
+                        "path": str(listed),
+                        "source_file": str(listed),
+                        "sha256": digest,
+                        "origem": "https://example.test/listed.json",
+                        "coletado_em": "2026-09-23T00:00:00+00:00",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    output = tmp_path / "documents.jsonl"
+    summary = prepare_documents(
+        input_dir,
+        output,
+        tmp_path / "report.json",
+        MANIFEST,
+        base_id="contratos_estruturado",
+        inventory_path=inventory,
+    )
+
+    records = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
+    assert summary["arquivos"] == 1
+    assert len(records) == 1
+    assert records[0]["source_file"].endswith("listed.json")
 
 
 def test_prepare_documents_extracts_real_csv_rows_and_declared_metadata(tmp_path):

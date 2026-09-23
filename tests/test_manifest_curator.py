@@ -29,6 +29,33 @@ def test_build_proposal_only_returns_undeclared_http_sources(tmp_path):
     assert proposal["current_manifest_hash"] == manifest_curator.manifest_hash(manifest_path)
 
 
+def test_build_proposal_preserves_provider_source_ref(tmp_path):
+    manifest_path = tmp_path / "corpus_manifest.yaml"
+    _manifest(manifest_path)
+    proposal = manifest_curator.build_proposal(
+        manifest_path,
+        {
+            "sources": [
+                {
+                    "source_id": "pncp:contratacao:one",
+                    "nome": "Contratação PNCP",
+                    "file_type": "json",
+                    "source_ref": {
+                        "provider": "pncp",
+                        "resource_type": "contratacao",
+                        "key": {"cnpj": "42", "ano": 2025, "sequencial": 1},
+                    },
+                }
+            ]
+        },
+    )
+
+    item = proposal["proposals"][0]
+    assert item["source_ref"]["provider"] == "pncp"
+    assert item["suggested_manifest_entry"]["acesso"]["tipo"] == "provider"
+    assert item["suggested_manifest_entry"]["acesso"]["sources"][0]["key"]["sequencial"] == 1
+
+
 def test_manifest_diff_is_non_mutating(tmp_path):
     manifest_path = tmp_path / "corpus_manifest.yaml"
     _manifest(manifest_path)
