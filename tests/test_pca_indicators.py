@@ -151,3 +151,12 @@ def test_csv_de_base_nao_agregada_continua_um_chunk_por_linha(tmp_path):
 )
 def test_normalize_date_value_aceita_ano_e_data_hora_iso(valor, esperado):
     assert _normalize_date_value(valor) == esperado
+
+
+def test_resumos_curtos_para_as_perguntas_mais_comuns():
+    resumos = {i.id: i for i in indicadores_pca(_linhas(), orgao="Estado do Rio de Janeiro") if i.dimensao == "resumo"}
+
+    assert set(resumos) == {"valor-total", "maiores-classe", "maiores-unidade"}
+    assert "R$ 10.000,50" in resumos["valor-total"].texto
+    assert resumos["maiores-classe"].texto.index("SUPRIMENTOS PARA USO MEDICO") < resumos["maiores-classe"].texto.index("INTERNET")
+    assert all(len(r.texto) < 1200 for r in resumos.values())

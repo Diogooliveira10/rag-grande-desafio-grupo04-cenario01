@@ -274,6 +274,37 @@ def indicadores_pca(
             )
         )
 
+    # Resumos curtos para as perguntas mais comuns ("qual o valor total?",
+    # "quais as classes de maior valor?"): listas longas diluem o vetor da busca
+    # densa e são penalizadas pelo BM25, então a resposta direta vira um chunk
+    # próprio.
+    resultado.append(
+        Indicador(
+            id="valor-total",
+            dimensao="resumo",
+            texto=(
+                f"Valor total do Plano de Contratações Anual {ano} de {orgao}: "
+                f"{brl(total)} planejados em {geral.itens} itens."
+            ),
+            metadados={**comum, "valor_total": float(total), "itens": geral.itens},
+        )
+    )
+    for dimensao, grupos, nome in (
+        ("classe", por_classe, "classes"),
+        ("unidade", por_unidade, "unidades"),
+    ):
+        maiores = "; ".join(
+            f"{i}. {chave} ({brl(g.total)})" for i, (chave, g) in enumerate(_ranking(grupos)[:10], start=1)
+        )
+        resultado.append(
+            Indicador(
+                id=f"maiores-{dimensao}",
+                dimensao="resumo",
+                texto=f"As 10 {nome} com maior valor planejado no PCA {ano}: {maiores}.",
+                metadados={**comum, "valor_total": float(total), "itens": geral.itens},
+            )
+        )
+
     for dimensao, grupos, nome in (
         ("unidade", por_unidade, "unidades responsáveis"),
         ("classe", por_classe, "classes de catálogo"),
