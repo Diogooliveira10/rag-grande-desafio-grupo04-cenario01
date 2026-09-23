@@ -33,6 +33,7 @@ from typing import Any, Iterator
 
 from src.fetch_corpus import load_manifest
 from src.ingest import chunk_text, sha256_file
+from src.pca_indicators import eh_csv_pca, indicadores_pca
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -206,7 +207,10 @@ def _normalize_date_value(value: Any) -> Any:
     if value in (None, ""):
         return value
     text = str(value).strip()
-    for pattern in ("%Y-%m-%d", "%d/%m/%Y", "%d/%m/%Y %H:%M:%S"):
+    # Só o ano (ex.: anoPca do PCA): o plano vale até o fim do ano.
+    if re.fullmatch(r"\d{4}", text):
+        return f"{text}-12-31"
+    for pattern in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%d/%m/%Y", "%d/%m/%Y %H:%M:%S"):
         try:
             return datetime.strptime(text, pattern).date().isoformat()
         except ValueError:
@@ -488,6 +492,37 @@ def _file_units(
             )
         return
 
+    if suffix == ".csv" and str(base.get("natureza")) == "agregada":
+        records = [record for _, record in _csv_records(path)]
+        if records and eh_csv_pca(records[0]):
+            # Base agregada: um chunk por indicador calculado, não por linha do
+            # CSV (ver src/pca_indicators.py).
+            source_file = _relative_path(path)
+            for indicador in indicadores_pca(
+                records,
+                orgao=str(base.get("orgao") or base.get("fonte") or "o órgão"),
+                ano=base.get("ano"),
+            ):
+                yield _make_unit(
+                    path,
+                    base,
+                    digest,
+                    indicador.texto,
+                    f"{base_document_id}:indicador-{indicador.id}",
+                    "csv",
+                    "ok",
+                    manifest_hash,
+                    collected_at,
+                    origin,
+                    {
+                        "indicador": indicador.id,
+                        "dimensao": indicador.dimensao,
+                        "logical_id": f"{base['base_id']}:{source_file}:indicador-{indicador.id}",
+                        **indicador.metadados,
+                    },
+                )
+            return
+
     if suffix == ".csv":
         for record_number, record in _csv_records(path):
             text = json.dumps(record, ensure_ascii=False, sort_keys=True, indent=2)
@@ -598,6 +633,7 @@ def _chunks_for_unit(unit: SourceUnit, chunk_size: int, overlap: int) -> tuple[l
         or "1 registro" in hint
         or "1 licitação" in hint
         or "1 licitacao" in hint
+        or "1 indicador" in hint
         or (unit.formato in {"json", "jsonl"} and unit.natureza in {"estruturada", "agregada", "conversacional"})
     ):
         return [unit.text.strip()], "registro_inteiro"

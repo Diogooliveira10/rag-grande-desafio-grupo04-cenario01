@@ -63,7 +63,7 @@ As tarefas são distribuídas entre os integrantes a cada encontro, de acordo co
 ### Pendências em aberto
 
 - Rodar a coleta oficial com as bases `pca_agregado` e `atas_conversacional`, já declaradas no manifesto (ver `CORPUS_INVENTORY.md`).
-- Definir como a base agregada entra na busca: o CSV do PCA gera cerca de 42 mil chunks.
+- Gerar os embeddings e o índice oficiais das bases `atas_conversacional` e `pca_agregado` (a base agregada vira ~1.000 indicadores com `src/pca_indicators.py`).
 - Obter a base sintética de e-mails de compras fornecida pelo desafio.
 
 ---

@@ -19,9 +19,13 @@ Contexto completo do desafio, dos outros dois cenários e dos padrões de engenh
 | `editais_normativo` / `fontes_normativas` | Normativa | Lei 14.133/2021, decretos estaduais, editais de licitação | Planalto, REDELOG-RJ, CGE-RJ, PNCP | PDF/HTML por URL |
 | `contratos_estruturado` | Estruturada | Contratos e contratações, UF=RJ, período fechado | PNCP — API de consulta v3 | REST paginado |
 | `atas_conversacional` | Conversacional | Atas de registro de preço, e-mails de compras (base sintética) | PNCP + base sintética | Texto |
-| `pca_agregado` | Agregada | Plano de Contratações Anual, valores homologados por item | PNCP | REST |
+| `pca_agregado` | Agregada | Plano de Contratações Anual 2025 do Estado do RJ, transformado em indicadores | PNCP | REST (CSV + JSON) |
 
 A definição declarativa de cada base — fonte, tipo de acesso, volume-alvo, campo de vigência, licença — vive em [corpus_manifest.yaml](corpus_manifest.yaml), que é a fonte única de verdade sobre o que entra no corpus. `data/raw/` nunca é versionado; qualquer pessoa reconstrói o corpus rodando o coletor contra o manifesto.
+
+Só as bases com `escopo: oficial` no manifesto (uma por natureza) respondem perguntas; as marcadas como `experimental` ficam fora da busca (`ESCOPOS_CONSULTADOS` em [src/pipeline.py](src/pipeline.py)).
+
+**Base agregada.** O CSV do PCA traz um item planejado por linha (~39,5 mil no Estado do RJ em 2025). Em vez de um chunk por linha, a preparação calcula indicadores com [src/pca_indicators.py](src/pca_indicators.py): visão geral, e totais, participação e ranking por categoria, unidade responsável, classe de catálogo e mês, além de rankings das 30 maiores unidades e classes. Cada indicador vira **um chunk** com os números já calculados (cerca de 1.000 no total). Assim o LLM cita valores prontos, em vez de tentar somar linhas.
 
 > A API do PNCP **não tem busca textual**. Filtro por objeto é feito localmente, e o recorte de dados é sempre determinístico (mesmo manifesto ⇒ mesmo corpus).
 
@@ -100,6 +104,7 @@ Uma pergunta via `responder` gera, no log, uma linha por stage — `roteamento`,
 │   ├── corpus_search.py         ← busca local no inventário
 │   ├── ingest.py                ← fachada compatível; delega a extração para prepare_documents.py
 │   ├── prepare_documents.py     ← extração por formato (PDF/HTML/CSV/JSON/JSONL), chunking e metadados canônicos
+│   ├── pca_indicators.py        ← indicadores agregados do PCA (1 indicador = 1 chunk) para a base agregada
 │   ├── create_embeddings.py     ← embeddings com cache, multi-provedor e escrita incremental
 │   ├── index.py                 ← índice vetorial por base a partir do JSONL normalizado
 │   ├── router.py                ← roteamento determinístico (Adaptive RAG)

@@ -66,11 +66,16 @@ _AGGREGATED_PATTERNS = (
     r"\bmediana\b",
     r"\bmedia[s]?\b",
     r"\btotal\b",
-    r"\bmaiores?\b",
+    r"\bmaior(es)?\b",
     r"\bfrequencia\b",
     r"\bconcentra(c|ç)(ao|oes|ões)\b",
     r"\baumento\b",
     r"\bcompar(e|ar)\b.*\bvalor(es)?\b",
+    # Plano de Contratações Anual (base pca_agregado)
+    r"\bpca\b",
+    r"\bplano (anual )?de contrata",
+    r"\bplanej\w*",
+    r"\bquanto\b.*\bgast\w*",
 )
 
 

@@ -159,11 +159,14 @@ bases:
   # PCA 2025 do Estado do Rio de Janeiro (CNPJ 42498600000171): totais
   # consolidados (JSON) e itens do plano (CSV, ~15 MB). Fixar o órgão resolve a
   # restrição ao RJ sem depender de data/config/cnpjs_rj.json, já que a API de
-  # PCA não filtra por UF.
+  # PCA não filtra por UF. Na preparação, o CSV vira ~1.000 indicadores
+  # agregados (src/pca_indicators.py), não um chunk por item.
   - base_id: pca_agregado
     escopo: oficial
     natureza: agregada
     fonte: "PNCP - PCA 2025 do Estado do Rio de Janeiro"
+    orgao: "Estado do Rio de Janeiro"
+    ano: 2025
     acesso:
       tipo: http_misto
       urls:

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -336,7 +337,11 @@ def dense_retrieve(
 
 
 def _tokens(text: str) -> list[str]:
-    return [token.lower() for token in _TOKEN_RE.findall(text)]
+    """Tokens em minúsculas e sem acento: "médico" casa com "MEDICO" do catálogo."""
+    sem_acento = "".join(
+        char for char in unicodedata.normalize("NFKD", text) if not unicodedata.combining(char)
+    )
+    return [token.lower() for token in _TOKEN_RE.findall(sem_acento)]
 
 
 def bm25_retrieve(

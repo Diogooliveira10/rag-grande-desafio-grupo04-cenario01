@@ -556,3 +556,14 @@ def test_manifesto_declara_uma_base_oficial_por_natureza():
     }
 
     assert oficiais == {item.value for item in Natureza}
+
+
+def test_bm25_ignora_acentos_e_caixa():
+    records = [
+        _record("c1", text="SUPRIMENTOS PARA USO MEDICO E CIRURGICO"),
+        _record("c2", text="material de escritorio"),
+    ]
+
+    results = bm25_retrieve("uso médico e cirúrgico", records=records)
+
+    assert [item.chunk_id for item in results] == ["c1"]
