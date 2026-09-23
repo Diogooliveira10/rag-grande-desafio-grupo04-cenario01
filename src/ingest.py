@@ -35,6 +35,9 @@ def sha256_file(path: Path) -> str:
 
 def chunk_text(text: str, max_chars: int = 1200, overlap: int = 150) -> Iterator[str]:
     """Divide texto em blocos determinísticos, respeitando parágrafos."""
+    # Com overlap >= max_chars o corte abaixo não avança e o laço nunca termina.
+    if max_chars < 1 or overlap < 0 or overlap >= max_chars:
+        raise ValueError("use max_chars >= 1 e overlap entre 0 e max_chars-1")
     normalized = re.sub(r"\n{3,}", "\n\n", text).strip()
     if not normalized:
         return

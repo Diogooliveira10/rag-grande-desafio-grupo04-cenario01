@@ -1,0 +1,91 @@
+scenario_id: contratacoes-rj-smoke
+version: "2026-09-23"
+description: "Recursos reais pequenos para validar coleta, inventário e extração das quatro bases"
+
+bases:
+  - base_id: contratos_estruturado
+    escopo: oficial
+    natureza: estruturada
+    fonte: "PNCP - contratação fixa de smoke"
+    acesso:
+      tipo: resource_set
+      recursos:
+        - id: compra_33781055000135_2025_993
+          tipo: json
+          url: "https://pncp.gov.br/api/consulta/v1/orgaos/33781055000135/compras/2025/993"
+    selecao_deterministica: true
+    volume_alvo: 1
+    formato: json
+    licenca: "Dados abertos gov.br - atribuição"
+    sensitivity_default: publico
+    campo_vigencia: "dataVigenciaFim"
+    chunking_sugerido: "1 contrato = 1 chunk, serializado em linguagem natural"
+    metadados_extras: [orgao, modalidade, valor, municipio, ano]
+
+  - base_id: editais_normativo
+    escopo: oficial
+    natureza: normativa
+    fonte: "INTO - Edital do Pregão Eletrônico 90060/2025"
+    acesso:
+      tipo: resource_set
+      recursos:
+        - id: edital_into_90060_2025
+          tipo: pdf
+          url: "https://www.into.saude.gov.br/licitacoes-e-contratos/licitacoes/item/download/2971_45dcb8de2961c59d6cfa98d95cb5c4f5"
+    selecao_deterministica: true
+    volume_alvo: 1
+    formato: pdf
+    licenca: "Domínio público"
+    sensitivity_default: publico
+    campo_vigencia: "data_publicacao"
+    chunking_sugerido: "Split por cláusula, com overlap"
+    metadados_extras: [numero_edital, orgao, data_publicacao, objeto]
+
+  - base_id: atas_conversacional
+    escopo: oficial
+    natureza: conversacional
+    fonte: "PNCP - Ata de Registro de Preços 00250/2025"
+    acesso:
+      tipo: resource_set
+      recursos:
+        - id: ata_metadata
+          tipo: json
+          url: "https://pncp.gov.br/api/pncp/v1/orgaos/42498733000148/compras/2024/2138/atas/2"
+        - id: ata_documentos
+          tipo: json
+          url: "https://pncp.gov.br/api/pncp/v1/orgaos/42498733000148/compras/2024/2138/atas/2/arquivos"
+        - id: ata_documento_001
+          tipo: pdf
+          url: "https://pncp.gov.br/pncp-api/v1/orgaos/42498733000148/compras/2024/2138/atas/2/arquivos/1"
+    selecao_deterministica: true
+    volume_alvo: 1
+    formato: pdf
+    formatos: [json, pdf]
+    licenca: "Dados abertos gov.br - atribuição"
+    sensitivity_default: publico
+    campo_vigencia: "dataVigenciaFim"
+    chunking_sugerido: "Texto por seção, com overlap"
+    metadados_extras: [numero_controle_pncp, orgao, objeto, data_vigencia]
+
+  - base_id: pca_agregado
+    escopo: oficial
+    natureza: agregada
+    fonte: "PNCP - PCA 2025 do Estado do Rio de Janeiro"
+    acesso:
+      tipo: resource_set
+      recursos:
+        - id: pca_consolidado
+          tipo: json
+          url: "https://pncp.gov.br/api/pncp/v1/orgaos/42498600000171/pca/2025/41/consolidado"
+        - id: pca_estado_rj_2025
+          tipo: csv
+          url: "https://pncp.gov.br/api/pncp/v1/orgaos/42498600000171/pca/2025/csv"
+    selecao_deterministica: true
+    volume_alvo: 2
+    formato: csv
+    formatos: [json, csv]
+    licenca: "Dados abertos gov.br - atribuição"
+    sensitivity_default: publico
+    campo_vigencia: "anoPca"
+    chunking_sugerido: "1 indicador agregado = 1 chunk"
+    metadados_extras: [orgao, ano, valor, categoria]
