@@ -75,3 +75,25 @@ O principal commit realizado foi:
 - `2a31f9a` — `feat: implementar extração de corpus orientada por manifesto`
 
 Esse commit alterou o coletor, adicionou o teste offline e registrou o log de validação, totalizando 994 linhas adicionadas em três arquivos.
+
+## Atualização — 23/09/2026
+
+### Atividades realizadas
+
+Testei a pipeline de processamento pela CLI utilizando o arquivo CSV real `licitacoes_siga_real.csv`, da base `licitacoes_siga_csv`. A execução do `prepare_documents` processou 1 arquivo, gerou 50 documentos e 50 chunks, sem falhas de extração.
+
+Também validei a fachada `ingest`. A execução exigiu a opção explícita `--allow-uninventoried`, pois o CSV foi utilizado em uma área experimental sem inventário de coleta. Com essa opção, o processamento foi concluído com os mesmos 50 documentos e 50 chunks. O estágio de embeddings foi executado em modo `--dry-run`, identificando 50 chunks pendentes sem realizar chamadas externas.
+
+Adicionei a suíte de testes do corpus, os fixtures de validação, o runner `tests/run_corpus_validation.py` e o relatório atual da execução. A validação registrou 65 testes aprovados e 1 falha, relacionada ao cálculo de caminho relativo no teste `test_official_run_excludes_experimental_bases` quando o pytest utiliza um diretório temporário fora da raiz do projeto.
+
+### Uso de IA
+
+Utilizei o Codex como apoio durante a sessão para localizar os comandos da pipeline, analisar a estrutura do projeto, executar e interpretar os testes da CLI, validar o processamento do CSV real e conferir os artefatos gerados. Também utilizei a ferramenta para organizar o escopo do commit, verificar o staged diff, realizar o commit, enviar as alterações para o repositório remoto e atualizar este acompanhamento. As decisões sobre o escopo, a revisão dos resultados e a validação final foram realizadas por mim.
+
+### Resultado da sessão
+
+O processamento de um CSV real foi validado de ponta a ponta nos estágios de preparação, ingestão e simulação de embeddings. Os testes, fixtures e o relatório atual foram registrados no commit:
+
+- `2844328` — `teste(corpus): adiciona testes e relatório atual de validação`
+
+O commit foi enviado para a branch remota `origin/joao-reis`.
