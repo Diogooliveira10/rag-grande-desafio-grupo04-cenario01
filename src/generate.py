@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import json
-import logging
 import re
 import time
 import uuid
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Optional, Protocol
+from typing import Any, Optional, Protocol
 
+import config
+from src.obs import Stage, TokenUsage, registrar, token_usage_from_response
 from src.schema import (
     Chunk,
     ChunkMetadata,
@@ -21,70 +20,41 @@ from src.schema import (
 from src.sensitivity import filtrar_chunks_permitidos, mascarar, mascarar_chunks
 
 # --------------------------------------------------------------------------
-# Logging estruturado — logs/pipeline-AAAA-MM-DD.jsonl (contrato da pipeline)
-# --------------------------------------------------------------------------
-
-ROOT = Path(__file__).resolve().parent.parent
-LOGS_DIR = ROOT / "logs"
-
-logger = logging.getLogger("pipeline.geracao")
-
-
-def _setup_logging() -> None:
-    if logger.handlers:
-        return
-    LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    log_path = LOGS_DIR / f"pipeline-{datetime.now(timezone.utc):%Y-%m-%d}.jsonl"
-
-    class JsonlHandler(logging.Handler):
-        def emit(self, record: logging.LogRecord) -> None:
-            entry = {
-                "ts": datetime.now(timezone.utc).isoformat(),
-                "level": record.levelname,
-                "msg": record.getMessage(),
-            }
-            extra = getattr(record, "extra_fields", None)
-            if extra:
-                entry.update(extra)
-            with open(log_path, "a", encoding="utf-8") as fh:
-                fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
-
-    logger.setLevel(logging.INFO)
-    logger.addHandler(JsonlHandler())
-
-
-def log_event(level: str, msg: str, **fields) -> None:
-    _setup_logging()
-    getattr(logger, level)(msg, extra={"extra_fields": fields})
-
-
-# --------------------------------------------------------------------------
 # Cliente LLM — único ponto de integração real com llm_ecoa.py
 # --------------------------------------------------------------------------
 
-GENERATION_MODEL = "qcwind/qwen3-8b-instruct-Q4-K-M"
+GENERATION_MODEL = config.GENERATION_MODEL
 
 
 class ClienteLLM(Protocol):
-    def __call__(self, mensagens: list[dict]) -> str: ...
+    """Recebe as mensagens e devolve o texto gerado — ou a resposta completa
+    do SDK OpenAI (com ``choices`` e ``usage``), para que os tokens sejam logados."""
+
+    def __call__(self, mensagens: list[dict]) -> Any: ...
 
 
 def _cliente_padrao() -> ClienteLLM:
-    """
-    Wrapper fino sobre o cliente compartilhado llm_ecoa.py.
+    """Wrapper fino sobre o cliente OpenAI compartilhado de ``llm_ecoa.py``.
 
-    TODO (confirmar com o repositório real): ajustar a chamada abaixo para a assinatura
-    exata exportada por llm_ecoa.py — o resto de generate.py não depende disso, só desta
-    função. Enquanto isso não é confirmado, chamar generate.py sem passar `cliente=` vai
-    levantar ImportError/AttributeError explicitamente, em vez de silenciosamente usar o
-    endpoint errado.
+    Devolve a resposta completa do SDK para que ``usage`` chegue ao log.
     """
-    import llm_ecoa  
+    import llm_ecoa
 
-    def _chamar(mensagens: list[dict]) -> str:
-        return llm_ecoa.chat_completion(mensagens, model=GENERATION_MODEL)  # type: ignore[attr-defined]
+    def _chamar(mensagens: list[dict]) -> Any:
+        return llm_ecoa.client.chat.completions.create(
+            model=GENERATION_MODEL,
+            messages=mensagens,
+            temperature=0.2,
+        )
 
     return _chamar
+
+
+def _texto_e_tokens(saida: Any) -> tuple[str, TokenUsage]:
+    """Aceita ``str`` (clientes simples/falsos) ou a resposta do SDK OpenAI."""
+    if isinstance(saida, str):
+        return saida, TokenUsage()
+    return saida.choices[0].message.content or "", token_usage_from_response(saida)
 
 
 # --------------------------------------------------------------------------
@@ -174,8 +144,6 @@ def _recusa(
     query: str,
     bases_consultadas: list[Natureza],
     motivo: RefusalReason,
-    *,
-    motivo_erro: Optional[str] = None,
 ) -> RAGResponse:
     respostas_padrao = {
         RefusalReason.SEM_EVIDENCIA: (
@@ -190,8 +158,6 @@ def _recusa(
             "Essa pergunta está fora do escopo de contratações públicas do RJ."
         ),
     }
-    if motivo_erro:
-        log_event("error", "recusa por erro técnico na geração", motivo_erro=motivo_erro)
     return RAGResponse(
         query=query,
         answer=respostas_padrao.get(motivo, respostas_padrao[RefusalReason.SEM_EVIDENCIA]),
@@ -208,7 +174,8 @@ def _parsear_resposta_llm(
     query: str,
     chunks: list[Chunk],
     bases_consultadas: list[Natureza],
-) -> RAGResponse:
+) -> tuple[RAGResponse, Optional[str]]:
+    """Devolve a resposta e, se a saída do LLM for inválida, o motivo."""
     chunks_por_id = {c.metadata.chunk_id: c for c in chunks}
     try:
         dados = _extrair_json(bruto)
@@ -246,7 +213,7 @@ def _parsear_resposta_llm(
         elif confidence_level == ConfidenceLevel.RECUSADO:
             confidence_level = ConfidenceLevel.BAIXA
 
-        return RAGResponse(
+        resposta = RAGResponse(
             query=query,
             answer=answer,
             bases_consultadas=bases_consultadas,
@@ -255,14 +222,10 @@ def _parsear_resposta_llm(
             is_refusal=is_refusal,
             refusal_reason=refusal_reason,
         )
+        return resposta, None
     except Exception as exc:
-        log_event(
-            "warning",
-            "saída do LLM inválida — aplicando recusa segura",
-            erro=str(exc),
-            bruto=bruto[:500],
-        )
-        return _recusa(query, bases_consultadas, RefusalReason.SEM_EVIDENCIA)
+        # Saída inválida do LLM vira recusa segura; o motivo vai para o log.
+        return _recusa(query, bases_consultadas, RefusalReason.SEM_EVIDENCIA), f"{type(exc).__name__}: {exc}"
 
 
 def _logar_evento(
@@ -271,21 +234,33 @@ def _logar_evento(
     status: str,
     inicio: float,
     resposta: RAGResponse,
+    *,
+    tokens: Optional[TokenUsage] = None,
+    modelo: Optional[str] = None,
     **extra,
 ) -> None:
-    log_event(
-        "info",
-        "geracao concluída",
+    """Registra o stage ``geracao`` no contrato de ``src/obs.py``."""
+    if resposta.is_refusal:
+        output = f"recusa: {resposta.refusal_reason.value if resposta.refusal_reason else '-'}"
+    else:
+        output = f"resposta {resposta.confidence_level.value}; {len(resposta.sources_used)} fontes"
+    registrar(
         run_id=run_id,
         query_id=query_id,
-        stage="geracao",
+        stage=Stage.GERACAO,
         status=status,
-        latencia_ms=round((time.monotonic() - inicio) * 1000, 1),
-        confidence_level=resposta.confidence_level.value,
-        is_refusal=resposta.is_refusal,
-        bases_consultadas=[b.value for b in resposta.bases_consultadas],
-        num_sources=len(resposta.sources_used),
-        **extra,
+        latencia_ms=(time.monotonic() - inicio) * 1000,
+        input=resposta.query,
+        output=output,
+        tokens=tokens,
+        modelo=modelo,
+        extra={
+            "confidence_level": resposta.confidence_level.value,
+            "is_refusal": resposta.is_refusal,
+            "bases_consultadas": [b.value for b in resposta.bases_consultadas],
+            "num_sources": len(resposta.sources_used),
+            **extra,
+        },
     )
 
 
@@ -336,17 +311,25 @@ def gerar_resposta(
     cliente = cliente or _cliente_padrao()
 
     try:
-        bruto = cliente(mensagens)
+        bruto, tokens = _texto_e_tokens(cliente(mensagens))
     except Exception as exc:
-        resposta = _recusa(query, bases_consultadas, RefusalReason.SEM_EVIDENCIA, motivo_erro=str(exc))
-        _logar_evento(run_id, query_id, "erro_llm", inicio, resposta, **sensibilidade)
+        resposta = _recusa(query, bases_consultadas, RefusalReason.SEM_EVIDENCIA)
+        _logar_evento(
+            run_id, query_id, "erro_llm", inicio, resposta,
+            modelo=GENERATION_MODEL, erro=f"{type(exc).__name__}: {exc}", **sensibilidade,
+        )
         return resposta
 
-    resposta = _parsear_resposta_llm(bruto, query, chunks, bases_consultadas)
+    resposta, erro_parsing = _parsear_resposta_llm(bruto, query, chunks, bases_consultadas)
+    if erro_parsing:
+        sensibilidade["erro_parsing"] = erro_parsing
     # Defesa em profundidade: o dado pode ter vindo da própria pergunta.
     answer_mascarada, mascaramentos_resposta = mascarar(resposta.answer)
     if mascaramentos_resposta:
         resposta = resposta.model_copy(update={"answer": answer_mascarada})
         sensibilidade["mascaramentos_resposta"] = mascaramentos_resposta
-    _logar_evento(run_id, query_id, "ok", inicio, resposta, **sensibilidade)
+    _logar_evento(
+        run_id, query_id, "saida_invalida" if erro_parsing else "ok", inicio, resposta,
+        tokens=tokens, modelo=GENERATION_MODEL, **sensibilidade,
+    )
     return resposta

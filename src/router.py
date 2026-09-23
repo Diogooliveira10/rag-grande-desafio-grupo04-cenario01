@@ -6,6 +6,7 @@ import re
 import unicodedata
 from typing import Optional
 
+from src.obs import Stage, default_logger
 from src.schema import Natureza, RefusalReason, RouteDecision
 
 
@@ -115,12 +116,33 @@ def _normalize(query: str) -> str:
     return " ".join(without_accents.split())
 
 
-def rotear_pergunta(query: str) -> RouteDecision:
+def rotear_pergunta(
+    query: str,
+    *,
+    run_id: str = "sem-run-id",
+    query_id: str = "sem-query-id",
+) -> RouteDecision:
     """Seleciona as naturezas de evidencia necessarias para ``query``.
 
     O roteador nao consulta os indices nem chama o LLM. A recuperacao usa as
     naturezas retornadas para localizar os respectivos ``base_id``s.
+    Registra o stage ``roteamento`` em ``logs/pipeline-AAAA-MM-DD.jsonl``.
     """
+    with default_logger.span(
+        run_id=run_id, query_id=query_id, stage=Stage.ROTEAMENTO, input=query
+    ) as span:
+        decisao = _rotear(query)
+        span.set_result(
+            {
+                "bases": [base.value for base in decisao.bases_selecionadas],
+                "justificativa": decisao.justificativa,
+            }
+        )
+        span.extra["confidence"] = decisao.confidence
+        return decisao
+
+
+def _rotear(query: str) -> RouteDecision:
     if not isinstance(query, str) or not query.strip():
         return RouteDecision(
             bases_selecionadas=[],

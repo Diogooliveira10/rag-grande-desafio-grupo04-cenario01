@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import config
+from src.obs import Stage, default_logger
 
 
 DEFAULT_RRF_K = 60
@@ -391,8 +392,14 @@ def retrieve(
     filters: Mapping[str, Any] | None = None,
     embed_fn: EmbedFn | None = None,
     reranker: RerankFn | None = None,
+    run_id: str = "sem-run-id",
+    query_id: str = "sem-query-id",
 ) -> list[RetrievalResult]:
-    """Executa dense + BM25 + RRF e aplica reranker somente se fornecido."""
+    """Executa dense + BM25 + RRF e aplica reranker somente se fornecido.
+
+    Cada etapa registra seu stage (``retrieval_denso``, ``retrieval_bm25``,
+    ``fusao_rrf``, ``rerank``) em ``logs/pipeline-AAAA-MM-DD.jsonl``.
+    """
     bases = None
     route_filters = filters
     if route is not None:
@@ -402,21 +409,50 @@ def retrieve(
         else:
             bases = getattr(route, "bases_selecionadas", getattr(route, "bases", None))
             route_filters = getattr(route, "filters", getattr(route, "filtros", route_filters))
-    dense = dense_retrieve(
-        query,
-        index_dir=index_dir,
-        documents_file=documents_file,
-        top_k=top_k,
-        bases=bases,
-        filters=route_filters,
-        embed_fn=embed_fn,
-    )
-    sparse = bm25_retrieve(query, index_dir=index_dir, documents_file=documents_file, top_k=top_k, bases=bases, filters=route_filters)
-    fused = reciprocal_rank_fusion([dense, sparse], top_k=top_k)
+    extra = {
+        "bases": sorted(_selected_base_ids(bases) or []),
+        "filtros": dict(route_filters or {}),
+        "k": top_k,
+    }
+
+    def _span(stage: Stage, **mais: Any):
+        return default_logger.span(
+            run_id=run_id, query_id=query_id, stage=stage, input=query, extra={**extra, **mais}
+        )
+
+    with _span(Stage.RETRIEVAL_DENSO) as span:
+        dense = dense_retrieve(
+            query,
+            index_dir=index_dir,
+            documents_file=documents_file,
+            top_k=top_k,
+            bases=bases,
+            filters=route_filters,
+            embed_fn=embed_fn,
+        )
+        span.set_result(_resumo(dense))
+    with _span(Stage.RETRIEVAL_BM25) as span:
+        sparse = bm25_retrieve(query, index_dir=index_dir, documents_file=documents_file, top_k=top_k, bases=bases, filters=route_filters)
+        span.set_result(_resumo(sparse))
+    with _span(Stage.FUSAO_RRF, rrf_k=DEFAULT_RRF_K) as span:
+        fused = reciprocal_rank_fusion([dense, sparse], top_k=top_k)
+        span.set_result(_resumo(fused))
     if reranker is not None and fused:
-        reranked = list(reranker(query, fused))
-        return reranked[:top_k]
+        with _span(Stage.RERANK) as span:
+            reranked = list(reranker(query, fused))[:top_k]
+            span.set_result(_resumo(reranked))
+        return reranked
     return fused
+
+
+def _resumo(resultados: Sequence[Any]) -> str:
+    """Resumo curto para o campo ``output`` do log (ex.: "12 chunks; top base: x")."""
+    if not resultados:
+        return "0 chunks"
+    primeiro = resultados[0]
+    metadata = getattr(primeiro, "metadata", None) or {}
+    base = metadata.get("base_id") or getattr(primeiro, "_record", {}).get("base_id")
+    return f"{len(resultados)} chunks; top base: {base}" if base else f"{len(resultados)} chunks"
 
 
 __all__ = [

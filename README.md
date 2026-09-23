@@ -69,6 +69,8 @@ Estágios (mesmos nomes usados no campo `stage` do log estruturado): `query_anal
 
 **Implementado:** `roteamento` ([src/router.py](src/router.py)), `retrieval_denso`/`retrieval_bm25`/`fusao_rrf` ([src/retrieve.py](src/retrieve.py), rerank ainda é opcional/plugável) e `geracao` ([src/generate.py](src/generate.py), com guardrails determinísticos antes do LLM e parsing defensivo da saída). [src/pipeline.py](src/pipeline.py) une os três estágios numa única função (`responder`). Toda etapa registra log estruturado via [src/obs.py](src/obs.py) (JSONL em `logs/pipeline-AAAA-MM-DD.jsonl`, com `run_id`, `stage`, latência e tokens).
 
+Uma pergunta via `responder` gera, no log, uma linha por stage — `roteamento`, `retrieval_denso`, `retrieval_bm25`, `fusao_rrf`, `rerank` (só com reranker) e `geracao` — todas com o mesmo `run_id` e `query_id`. `geracao` traz `tokens` e `modelo` a partir de `response.usage` do SDK OpenAI. Etapa que falha grava `status: "erro"` com `extra.error_type`. Dados pessoais da pergunta são mascarados antes de ir para o log. Testes em [tests/test_pipeline_logs.py](tests/test_pipeline_logs.py); os testes gravam log num diretório temporário ([tests/conftest.py](tests/conftest.py)), nunca em `logs/`.
+
 ## Estrutura do repositório
 
 ```

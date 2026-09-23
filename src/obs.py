@@ -107,9 +107,19 @@ class LogRecord:
     extra: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        """Converte o registro para um dicionário pronto para serialização."""
+        """Converte o registro para um dicionário pronto para serialização.
+
+        ``input``/``output`` textuais passam pelo mascaramento de
+        ``src/sensitivity.py``: CPF, telefone e e-mail pessoal da pergunta
+        não ficam gravados no log.
+        """
+        from src.sensitivity import mascarar
+
         data = asdict(self)
         data["stage"] = self.stage.value
+        for campo in ("input", "output"):
+            if isinstance(data[campo], str):
+                data[campo] = mascarar(data[campo])[0]
         return data
 
 
@@ -276,4 +286,41 @@ def observe(
     return decorator
 
 
-default_logger = PipelineLogger()
+def registrar(
+    *,
+    run_id: str,
+    query_id: str,
+    stage: Stage | str,
+    status: str,
+    latencia_ms: float,
+    input: Any,
+    output: Any,
+    tokens: TokenUsage | None = None,
+    modelo: str | None = None,
+    extra: dict[str, Any] | None = None,
+    logger: PipelineLogger | None = None,
+) -> Path:
+    """Grava um evento com ``status`` livre (ex.: ``bloqueado_guardrail_previo``).
+
+    Use quando o status não é só ok/erro — caso em que ``span`` não serve.
+    """
+    return (logger or default_logger).write(
+        LogRecord(
+            ts=datetime.now().astimezone().isoformat(timespec="milliseconds"),
+            run_id=run_id,
+            query_id=query_id,
+            stage=Stage(stage),
+            status=status,
+            latencia_ms=max(0, round(latencia_ms)),
+            input=input,
+            output=output,
+            tokens=tokens or TokenUsage(),
+            modelo=modelo,
+            extra=dict(extra or {}),
+        )
+    )
+
+
+# Caminho absoluto: o log vai para <repo>/logs independentemente do diretório
+# de onde o pipeline é executado.
+default_logger = PipelineLogger(Path(__file__).resolve().parents[1] / "logs")
