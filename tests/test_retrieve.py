@@ -489,3 +489,70 @@ def test_retrieve_applies_optional_reranker_and_respects_top_k(tmp_path):
     assert len(results) == 2
     assert [item.chunk_id for item in results] == ["c2", "c1"]
     assert reranker_calls[0][0] == "ambulancia"
+
+
+# --------------------------------------------------------------------------
+# Seleção por natureza e escopo (manifesto)
+# --------------------------------------------------------------------------
+
+
+def test_natureza_seleciona_todas_as_bases_daquela_natureza():
+    """Antes, cada natureza apontava para uma única base fixa."""
+    records = [
+        _record("c1", text="ambulancia", base_id="contratos_estruturado"),
+        _record("c2", text="ambulancia", base_id="licitacoes_siga_csv"),
+        _record("c3", text="ambulancia", base_id="editais_normativo"),
+    ]
+
+    results = bm25_retrieve("ambulancia", records=records, bases=[Natureza.ESTRUTURADA])
+
+    assert {item.chunk_id for item in results} == {"c1", "c2"}
+
+
+def test_natureza_do_proprio_registro_tem_prioridade_sobre_o_manifesto():
+    records = [
+        _record("c1", text="ata registro", base_id="base_nova", metadata_extra={"natureza": "conversacional"}),
+        _record("c2", text="ata registro", base_id="base_nova", metadata_extra={"natureza": "normativa"}),
+    ]
+
+    results = bm25_retrieve("ata", records=records, bases=["conversacional"])
+
+    assert [item.chunk_id for item in results] == ["c1"]
+
+
+def test_base_id_explicito_continua_aceito_na_selecao():
+    records = [
+        _record("c1", text="ambulancia", base_id="contratos_estruturado"),
+        _record("c2", text="ambulancia", base_id="licitacoes_siga_csv"),
+    ]
+
+    results = bm25_retrieve("ambulancia", records=records, bases=["licitacoes_siga_csv"])
+
+    assert [item.chunk_id for item in results] == ["c2"]
+
+
+def test_escopos_restringe_as_bases_oficiais_do_manifesto():
+    records = [
+        _record("c1", text="edital pregao", base_id="editais_normativo"),
+        _record("c2", text="edital pregao", base_id="exemplos_teste"),
+        _record("c3", text="edital pregao", base_id="documentos_pncp"),
+        _record("c4", text="edital pregao", base_id="base_fora_do_manifesto"),
+    ]
+
+    oficiais = bm25_retrieve("edital", records=records, escopos=("oficial",))
+    todas = bm25_retrieve("edital", records=records)
+
+    assert [item.chunk_id for item in oficiais] == ["c1"]
+    assert {item.chunk_id for item in todas} == {"c1", "c2", "c3", "c4"}
+
+
+def test_manifesto_declara_uma_base_oficial_por_natureza():
+    from src.retrieve import _manifest_bases
+
+    oficiais = {
+        base["natureza"]
+        for base in _manifest_bases().values()
+        if base.get("escopo") == "oficial"
+    }
+
+    assert oficiais == {item.value for item in Natureza}

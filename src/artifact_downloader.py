@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import ssl
 import time
 from dataclasses import dataclass, field
@@ -22,10 +23,21 @@ def _safe_filename(value: str) -> str:
     return cleaned.strip("_") or "arquivo"
 
 
-def _extension(url: str, content_type: str, body: bytes = b"") -> str:
+_SUFIXOS_CONHECIDOS = {".pdf", ".html", ".htm", ".aspx", ".txt", ".json", ".jsonl", ".zip", ".csv"}
+_NOME_NO_CABECALHO = re.compile(r"""filename\*?=(?:UTF-8'')?"?([^";]+)"?""", re.IGNORECASE)
+
+
+def _extension(url: str, content_type: str, body: bytes = b"", disposition: str = "") -> str:
     suffix = Path(urlparse(url).path).suffix.lower()
-    if suffix in {".pdf", ".html", ".htm", ".aspx", ".txt", ".json", ".jsonl", ".zip"}:
+    if suffix in _SUFIXOS_CONHECIDOS:
         return suffix
+    # Endpoints como /pca/{ano}/csv não têm extensão no caminho, mas mandam o
+    # nome real do arquivo em Content-Disposition.
+    nome = _NOME_NO_CABECALHO.search(disposition or "")
+    if nome:
+        suffix = Path(nome.group(1).strip()).suffix.lower()
+        if suffix in _SUFIXOS_CONHECIDOS:
+            return suffix
     if body.startswith(b"%PDF-"):
         return ".pdf"
     if body.startswith(b"PK\x03\x04"):
@@ -42,6 +54,7 @@ def _extension(url: str, content_type: str, body: bytes = b"") -> str:
         "application/xhtml+xml": ".html",
         "application/xml": ".xml",
         "text/plain": ".txt",
+        "text/csv": ".csv",
     }.get(mime, ".bin")
 
 
@@ -142,7 +155,12 @@ class ArtifactDownloader:
                         body,
                         destination_dir,
                         filename_prefix,
-                        _extension(response.geturl(), content_type, body),
+                        _extension(
+                            response.geturl(),
+                            content_type,
+                            body,
+                            response.headers.get("Content-Disposition", ""),
+                        ),
                         deduplicate=deduplicate,
                     )
                     return {

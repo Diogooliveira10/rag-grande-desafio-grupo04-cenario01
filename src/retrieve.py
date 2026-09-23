@@ -12,6 +12,7 @@ import math
 import re
 from collections import Counter
 from dataclasses import dataclass, field
+from functools import lru_cache
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -19,17 +20,14 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import config
 from src.obs import Stage, default_logger
+from src.schema import Natureza
 
 
 DEFAULT_RRF_K = 60
 DEFAULT_TOP_K = 10
 _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
-_NATUREZA_TO_BASE = {
-    "normativa": "editais_normativo",
-    "estruturada": "contratos_estruturado",
-    "conversacional": "atas_conversacional",
-    "agregada": "pca_agregado",
-}
+MANIFEST_PATH = config.ROOT_DIR / "corpus_manifest.yaml"
+_NATUREZAS = frozenset(item.value for item in Natureza)
 
 EmbedFn = Callable[[list[str]], list[list[float]]]
 RerankFn = Callable[[str, list["RetrievalResult"]], Sequence[Any]]
@@ -79,17 +77,51 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return records
 
 
-def _selected_base_ids(bases: Iterable[Any] | None) -> set[str] | None:
+@lru_cache(maxsize=4)
+def _manifest_bases(manifest_path: Path = MANIFEST_PATH) -> dict[str, dict[str, Any]]:
+    """``base_id`` -> declaração da base no manifesto (natureza, escopo...)."""
+    if not manifest_path.exists():
+        return {}
+    from src.fetch_corpus import load_manifest
+
+    return {str(base["base_id"]): base for base in load_manifest(manifest_path)["bases"]}
+
+
+def _split_selection(bases: Iterable[Any] | None) -> tuple[set[str], set[str]] | None:
+    """Separa a seleção do roteador em (naturezas, base_ids explícitos).
+
+    Um item que é nome de natureza (``Natureza`` ou "estruturada") seleciona
+    todas as bases daquela natureza; qualquer outro valor é tratado como
+    ``base_id``.
+    """
     if bases is None:
         return None
     if isinstance(bases, str):
         bases = [bases]
-    selected: set[str] = set()
+    naturezas: set[str] = set()
+    base_ids: set[str] = set()
     for base in bases:
-        value = getattr(base, "value", base)
-        value = str(value)
-        selected.add(_NATUREZA_TO_BASE.get(value, value))
-    return selected
+        value = str(getattr(base, "value", base))
+        (naturezas if value in _NATUREZAS else base_ids).add(value)
+    return naturezas, base_ids
+
+
+def _record_base_id(record: Mapping[str, Any], metadata: Mapping[str, Any]) -> str:
+    return str(record.get("base_id") or metadata.get("base_id") or "")
+
+
+def _record_natureza(record: Mapping[str, Any], metadata: Mapping[str, Any]) -> str | None:
+    """Natureza do registro; sem o campo, vem do manifesto pelo ``base_id``."""
+    natureza = record.get("natureza") or metadata.get("natureza")
+    if natureza:
+        return str(getattr(natureza, "value", natureza))
+    declarada = _manifest_bases().get(_record_base_id(record, metadata), {}).get("natureza")
+    return str(declarada) if declarada else None
+
+
+def _record_escopo(record: Mapping[str, Any], metadata: Mapping[str, Any]) -> str | None:
+    escopo = _manifest_bases().get(_record_base_id(record, metadata), {}).get("escopo")
+    return str(escopo) if escopo else None
 
 
 def _metadata_value(metadata: Mapping[str, Any], key: str) -> Any:
@@ -208,8 +240,10 @@ def _records_for(
     bases: Iterable[Any] | None,
     filters: Mapping[str, Any] | None,
     records: Iterable[Mapping[str, Any]] | None = None,
+    escopos: Iterable[str] | None = None,
 ) -> list[dict[str, Any]]:
-    selected = _selected_base_ids(bases)
+    selection = _split_selection(bases)
+    allowed_scopes = set(escopos) if escopos is not None else None
     if records is None:
         paths = sorted(index_dir.glob("*/vectors.jsonl"))
         raw = [record for path in paths for record in _read_jsonl(path)]
@@ -222,12 +256,16 @@ def _records_for(
         if not isinstance(metadata, Mapping):
             metadata = {}
         chunk_id = str(record.get("chunk_id") or metadata.get("chunk_id") or "")
-        if (
-            not chunk_id
-            or chunk_id in seen_ids
-            or (selected is not None and record.get("base_id") not in selected)
-            or not _matches_filters(metadata, filters)
-        ):
+        if not chunk_id or chunk_id in seen_ids or not _matches_filters(metadata, filters):
+            continue
+        if selection is not None:
+            naturezas, base_ids = selection
+            if (
+                _record_natureza(record, metadata) not in naturezas
+                and _record_base_id(record, metadata) not in base_ids
+            ):
+                continue
+        if allowed_scopes is not None and _record_escopo(record, metadata) not in allowed_scopes:
             continue
         seen_ids.add(chunk_id)
         filtered.append(record)
@@ -273,11 +311,12 @@ def dense_retrieve(
     filters: Mapping[str, Any] | None = None,
     embed_fn: EmbedFn | None = None,
     records: Iterable[Mapping[str, Any]] | None = None,
+    escopos: Iterable[str] | None = None,
 ) -> list[RetrievalResult]:
     """Recupera os vetores mais próximos usando o índice persistido."""
     if top_k <= 0 or not query.strip():
         return []
-    candidates = _records_for(index_dir, bases, filters, records)
+    candidates = _records_for(index_dir, bases, filters, records, escopos)
     if not candidates:
         return []
     query_vector = (embed_fn or (lambda texts: [_default_embed(texts[0])]))([query])[0]
@@ -309,14 +348,15 @@ def bm25_retrieve(
     bases: Iterable[Any] | None = None,
     filters: Mapping[str, Any] | None = None,
     records: Iterable[Mapping[str, Any]] | None = None,
+    escopos: Iterable[str] | None = None,
 ) -> list[RetrievalResult]:
     """Recupera chunks lexicalmente com BM25, sem dependências adicionais."""
     if top_k <= 0 or not query.strip():
         return []
     candidates = (
-        _records_for(index_dir, bases, filters, records)
+        _records_for(index_dir, bases, filters, records, escopos)
         if records is not None
-        else _records_for(index_dir, bases, filters, _read_jsonl(documents_file))
+        else _records_for(index_dir, bases, filters, _read_jsonl(documents_file), escopos)
     )
     documents = [(record, str(record.get("text", ""))) for record in candidates]
     query_terms = _tokens(query)
@@ -392,10 +432,14 @@ def retrieve(
     filters: Mapping[str, Any] | None = None,
     embed_fn: EmbedFn | None = None,
     reranker: RerankFn | None = None,
+    escopos: Iterable[str] | None = None,
     run_id: str = "sem-run-id",
     query_id: str = "sem-query-id",
 ) -> list[RetrievalResult]:
     """Executa dense + BM25 + RRF e aplica reranker somente se fornecido.
+
+    ``escopos`` restringe a busca às bases com esse ``escopo`` no manifesto
+    (ex.: ``("oficial",)``); ``None`` não filtra por escopo.
 
     Cada etapa registra seu stage (``retrieval_denso``, ``retrieval_bm25``,
     ``fusao_rrf``, ``rerank``) em ``logs/pipeline-AAAA-MM-DD.jsonl``.
@@ -410,7 +454,8 @@ def retrieve(
             bases = getattr(route, "bases_selecionadas", getattr(route, "bases", None))
             route_filters = getattr(route, "filters", getattr(route, "filtros", route_filters))
     extra = {
-        "bases": sorted(_selected_base_ids(bases) or []),
+        "bases": sorted(str(getattr(b, "value", b)) for b in ([bases] if isinstance(bases, str) else bases or [])),
+        "escopos": sorted(escopos) if escopos is not None else None,
         "filtros": dict(route_filters or {}),
         "k": top_k,
     }
@@ -429,10 +474,19 @@ def retrieve(
             bases=bases,
             filters=route_filters,
             embed_fn=embed_fn,
+            escopos=escopos,
         )
         span.set_result(_resumo(dense))
     with _span(Stage.RETRIEVAL_BM25) as span:
-        sparse = bm25_retrieve(query, index_dir=index_dir, documents_file=documents_file, top_k=top_k, bases=bases, filters=route_filters)
+        sparse = bm25_retrieve(
+            query,
+            index_dir=index_dir,
+            documents_file=documents_file,
+            top_k=top_k,
+            bases=bases,
+            filters=route_filters,
+            escopos=escopos,
+        )
         span.set_result(_resumo(sparse))
     with _span(Stage.FUSAO_RRF, rrf_k=DEFAULT_RRF_K) as span:
         fused = reciprocal_rank_fusion([dense, sparse], top_k=top_k)

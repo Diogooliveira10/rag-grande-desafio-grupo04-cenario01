@@ -17,6 +17,7 @@ bases:
   # NATUREZA: estruturada
   # ---------------------------------------------------------------------
   - base_id: contratos_estruturado
+    escopo: oficial
     natureza: estruturada
     fonte: "PNCP - API de consulta v1/v3 (/v1/contratos)"
     acesso:
@@ -39,6 +40,7 @@ bases:
     metadados_extras: [orgao, modalidade, valor, municipio, ano]
 
   - base_id: editais_normativo
+    escopo: oficial
     natureza: normativa
     fonte: "Planalto, REDELOG RJ, CGE-RJ e MPPI"
     acesso:
@@ -59,6 +61,7 @@ bases:
     metadados_extras: [numero_edital, orgao, data_publicacao, objeto]
 
   - base_id: contratacoes_publicacao_rj
+    escopo: experimental
     natureza: estruturada
     fonte: "PNCP - API pública de consulta"
     acesso:
@@ -82,6 +85,7 @@ bases:
     sensitivity_default: publico
 
   - base_id: documentos_pncp
+    escopo: experimental
     natureza: normativa
     fonte: "PNCP - documentos de contratações e atas"
     acesso:
@@ -106,6 +110,7 @@ bases:
     deduplicacao: "SHA-256"
 
   - base_id: respostas_api_jsonl
+    escopo: experimental
     natureza: conversacional
     fonte: "PNCP - respostas JSON normalizadas localmente"
     acesso:
@@ -119,8 +124,65 @@ bases:
     local: "data/raw/vN/respostas_api_jsonl"
     deduplicacao: "SHA-256"
 
+  # ---------------------------------------------------------------------
+  # NATUREZA: conversacional
+  # ---------------------------------------------------------------------
+  # Ata de Registro de Preços 00250/2025, com metadados, lista de arquivos e o
+  # PDF da ata. Recursos fixos (seleção determinística), validados pelo João
+  # (tests/fixtures/corpus_smoke.yaml) e respondendo HTTP 200 em 2026-09-23.
+  # O serviço /api/pncp/v1 estava no ar enquanto /api/consulta/v1/atas dava 504.
+  # PENDENTE: base sintética de e-mails de compras, a ser fornecida pelo desafio.
+  - base_id: atas_conversacional
+    escopo: oficial
+    natureza: conversacional
+    fonte: "PNCP - Ata de Registro de Preços 00250/2025"
+    acesso:
+      tipo: http_misto
+      urls:
+        - "https://pncp.gov.br/api/pncp/v1/orgaos/42498733000148/compras/2024/2138/atas/2"
+        - "https://pncp.gov.br/api/pncp/v1/orgaos/42498733000148/compras/2024/2138/atas/2/arquivos"
+        - "https://pncp.gov.br/pncp-api/v1/orgaos/42498733000148/compras/2024/2138/atas/2/arquivos/1"
+      rate_limit_seg: 1.0
+    selecao_deterministica: true
+    volume_alvo: 3
+    formato: pdf
+    formatos: [json, pdf]
+    licenca: "Dados abertos gov.br - atribuição"
+    sensitivity_default: publico
+    campo_vigencia: "dataVigenciaFim"
+    chunking_sugerido: "Texto por seção, com overlap"
+    metadados_extras: [numero_controle_pncp, orgao, objeto, data_vigencia]
+
+  # ---------------------------------------------------------------------
+  # NATUREZA: agregada
+  # ---------------------------------------------------------------------
+  # PCA 2025 do Estado do Rio de Janeiro (CNPJ 42498600000171): totais
+  # consolidados (JSON) e itens do plano (CSV, ~15 MB). Fixar o órgão resolve a
+  # restrição ao RJ sem depender de data/config/cnpjs_rj.json, já que a API de
+  # PCA não filtra por UF.
+  - base_id: pca_agregado
+    escopo: oficial
+    natureza: agregada
+    fonte: "PNCP - PCA 2025 do Estado do Rio de Janeiro"
+    acesso:
+      tipo: http_misto
+      urls:
+        - "https://pncp.gov.br/api/pncp/v1/orgaos/42498600000171/pca/2025/41/consolidado"
+        - "https://pncp.gov.br/api/pncp/v1/orgaos/42498600000171/pca/2025/csv"
+      rate_limit_seg: 1.0
+    selecao_deterministica: true
+    volume_alvo: 2
+    formato: csv
+    formatos: [json, csv]
+    licenca: "Dados abertos gov.br - atribuição"
+    sensitivity_default: publico
+    campo_vigencia: "anoPca"
+    chunking_sugerido: "1 indicador agregado = 1 chunk"
+    metadados_extras: [orgao, ano, valor, categoria]
+
   # Base local opcional para testes rápidos, sem requisições externas.
   - base_id: exemplos_teste
+    escopo: experimental
     natureza: normativa
     fonte: "PDFs locais versionados como fixtures de teste"
     acesso:
@@ -136,6 +198,7 @@ bases:
 
   # Amostra real opcional em CSV, publicada pelo Portal de Dados Abertos do RJ.
   - base_id: licitacoes_siga_csv
+    escopo: experimental
     natureza: estruturada
     fonte: "SEPLAG-RJ - Sistema Integrado de Gestão de Aquisições (SIGA)"
     acesso:

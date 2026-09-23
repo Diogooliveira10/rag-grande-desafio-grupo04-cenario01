@@ -96,7 +96,7 @@ def test_retrieve_registra_denso_bm25_e_rrf(indice):
         assert set(r) == CAMPOS_CONTRATO
         assert r["status"] == "ok"
         assert r["run_id"] == "run1"
-        assert r["extra"]["bases"] == ["contratos_estruturado"]
+        assert r["extra"]["bases"] == ["estruturada"]
         assert r["extra"]["k"] == 5
     assert registros[0]["output"].endswith("top base: contratos_estruturado")
 

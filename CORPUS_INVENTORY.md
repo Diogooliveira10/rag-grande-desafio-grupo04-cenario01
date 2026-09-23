@@ -48,7 +48,7 @@ Todas as URLs têm como prefixo `https://pncp.gov.br`. A especificação da API 
 
 ### Pendências para fechar as duas bases
 
-1. Declarar `pca_agregado` (a partir da versão da branch `marco/fetch-corpus`) e `atas_conversacional` no `corpus_manifest.yaml`.
-2. Preencher `data/config/cnpjs_rj.json`. A API de PCA não filtra por UF, então a restrição ao RJ depende de uma lista fixa de CNPJs de órgãos do estado.
+1. ~~Declarar `pca_agregado` e `atas_conversacional` no `corpus_manifest.yaml`.~~ **Feito em 2026-09-23.** As duas bases usam recursos fixos do serviço `/api/pncp/v1` (PCA 2025 do Estado do RJ e a Ata de Registro de Preços 00250/2025), que respondia normalmente enquanto `/api/consulta/v1` estava fora do ar.
+2. ~~Preencher `data/config/cnpjs_rj.json`.~~ **Não é mais necessário para o PCA:** a base fixa o órgão (Estado do RJ, CNPJ 42498600000171).
 3. Localizar a base sintética de e-mails de compras fornecida pelo desafio. Não há URL pública indicada.
-4. Rodar `python -m src.fetch_corpus fetch` quando a API estabilizar, de preferência fora do horário de pico e com períodos curtos, e gerar o inventário oficial da nova versão.
+4. Rodar a coleta oficial (`py -m src.fetch_corpus fetch --manifest corpus_manifest.yaml --official`) e gerar o inventário da nova versão. Uma coleta de verificação das duas bases novas, fora da árvore oficial (`data/attempts/`), baixou os 5 arquivos sem falhas em 2026-09-23.

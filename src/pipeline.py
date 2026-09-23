@@ -18,6 +18,11 @@ from src.router import inferir_motivo_recusa, rotear_pergunta
 from src.schema import Chunk, ChunkMetadata
 
 
+# Só as bases de escopo "oficial" no manifesto respondem perguntas; fixtures de
+# teste e amostras experimentais ficam de fora da busca.
+ESCOPOS_CONSULTADOS = ("oficial",)
+
+
 def _chunk_from_retrieval(result: RetrievalResult) -> Chunk:
     """Converte o resultado de retrieve.py no ``Chunk`` que generate.py espera."""
     return Chunk(content=result.content, metadata=ChunkMetadata(**result.metadata))
@@ -49,7 +54,13 @@ def responder(
     refusal_reason_hint = None
     if decisao.bases_selecionadas:
         resultados = retrieve(
-            query, decisao, top_k=top_k, reranker=reranker, run_id=run_id, query_id=query_id
+            query,
+            decisao,
+            top_k=top_k,
+            reranker=reranker,
+            escopos=ESCOPOS_CONSULTADOS,
+            run_id=run_id,
+            query_id=query_id,
         )
         chunks = [_chunk_from_retrieval(item) for item in resultados]
     else:
