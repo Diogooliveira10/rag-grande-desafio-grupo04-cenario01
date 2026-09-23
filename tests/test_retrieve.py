@@ -567,3 +567,32 @@ def test_bm25_ignora_acentos_e_caixa():
     results = bm25_retrieve("uso médico e cirúrgico", records=records)
 
     assert [item.chunk_id for item in results] == ["c1"]
+
+
+def test_fetch_k_deixa_chegar_a_fusao_o_chunk_que_as_duas_buscas_poem_abaixo_do_corte(tmp_path):
+    """Caso real da base agregada: "valor total" ficou em 4º na densa e na BM25."""
+    base_dir = tmp_path / "pca_agregado"
+    base_dir.mkdir()
+    # densa: d1, d2, d3 à frente de "alvo"; BM25: b1, b2, b3 à frente de "alvo".
+    especificacao = [
+        ("d1", [1.0, 0.00], "x"), ("d2", [0.99, 0.01], "x"), ("d3", [0.98, 0.02], "x"),
+        ("alvo", [0.97, 0.03], "total total"),
+        # Na densa, os campeões da BM25 ficam bem abaixo (como nos dados reais).
+        *[(f"f{i}", [0.5, 0.5], "x") for i in range(6)],
+        ("b1", [0.0, 1.0], "total total total total"), ("b2", [0.0, 1.0], "total total total"),
+        ("b3", [0.0, 1.0], "total total total"),
+    ]
+    registros = [
+        {**_record(cid, text=texto, base_id="pca_agregado", embedding=vetor), "natureza": "agregada"}
+        for cid, vetor, texto in especificacao
+    ]
+    (base_dir / "vectors.jsonl").write_text("\n".join(json.dumps(r) for r in registros), encoding="utf-8")
+    documentos = tmp_path / "documents.jsonl"
+    documentos.write_text("\n".join(json.dumps(r) for r in registros), encoding="utf-8")
+    comum = dict(index_dir=tmp_path, documents_file=documentos, top_k=3, embed_fn=lambda t: [[1.0, 0.0]])
+
+    sem_folga = retrieve("total", None, fetch_k=3, **comum)
+    com_folga = retrieve("total", None, **comum)
+
+    assert "alvo" not in [r.chunk_id for r in sem_folga]
+    assert com_folga[0].chunk_id == "alvo"

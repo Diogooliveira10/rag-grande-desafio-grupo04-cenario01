@@ -26,6 +26,7 @@ from src.schema import Natureza
 
 DEFAULT_RRF_K = 60
 DEFAULT_TOP_K = 10
+DEFAULT_FETCH_K = 50
 _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 MANIFEST_PATH = config.ROOT_DIR / "corpus_manifest.yaml"
 _NATUREZAS = frozenset(item.value for item in Natureza)
@@ -438,6 +439,7 @@ def retrieve(
     embed_fn: EmbedFn | None = None,
     reranker: RerankFn | None = None,
     escopos: Iterable[str] | None = None,
+    fetch_k: int | None = None,
     run_id: str = "sem-run-id",
     query_id: str = "sem-query-id",
 ) -> list[RetrievalResult]:
@@ -445,6 +447,11 @@ def retrieve(
 
     ``escopos`` restringe a busca às bases com esse ``escopo`` no manifesto
     (ex.: ``("oficial",)``); ``None`` não filtra por escopo.
+
+    ``fetch_k`` é quantos candidatos a busca densa e a BM25 devolvem, cada uma,
+    antes da fusão; o RRF escolhe os ``top_k`` finais entre eles. Com
+    ``fetch_k == top_k``, um chunk que as duas buscas põem logo abaixo do corte
+    nunca chega à fusão. Padrão: ``max(5 * top_k, DEFAULT_FETCH_K)``.
 
     Cada etapa registra seu stage (``retrieval_denso``, ``retrieval_bm25``,
     ``fusao_rrf``, ``rerank``) em ``logs/pipeline-AAAA-MM-DD.jsonl``.
@@ -458,11 +465,13 @@ def retrieve(
         else:
             bases = getattr(route, "bases_selecionadas", getattr(route, "bases", None))
             route_filters = getattr(route, "filters", getattr(route, "filtros", route_filters))
+    fetch_k = fetch_k if fetch_k is not None else max(5 * top_k, DEFAULT_FETCH_K)
     extra = {
         "bases": sorted(str(getattr(b, "value", b)) for b in ([bases] if isinstance(bases, str) else bases or [])),
         "escopos": sorted(escopos) if escopos is not None else None,
         "filtros": dict(route_filters or {}),
         "k": top_k,
+        "fetch_k": fetch_k,
     }
 
     def _span(stage: Stage, **mais: Any):
@@ -475,7 +484,7 @@ def retrieve(
             query,
             index_dir=index_dir,
             documents_file=documents_file,
-            top_k=top_k,
+            top_k=fetch_k,
             bases=bases,
             filters=route_filters,
             embed_fn=embed_fn,
@@ -487,7 +496,7 @@ def retrieve(
             query,
             index_dir=index_dir,
             documents_file=documents_file,
-            top_k=top_k,
+            top_k=fetch_k,
             bases=bases,
             filters=route_filters,
             escopos=escopos,

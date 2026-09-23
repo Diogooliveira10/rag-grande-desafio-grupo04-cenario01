@@ -264,7 +264,7 @@ def indicadores_pca(
                 id=f"mes-{mes}",
                 dimensao="mes",
                 texto=(
-                    f"Contratações planejadas para {_MESES[int(mes[5:]) - 1]} de {mes[:4]} ({mes[5:]}/{mes[:4]}) "
+                    f"Mês de {_MESES[int(mes[5:]) - 1]} de {mes[:4]} ({mes[5:]}/{mes[:4]}) "
                     f"no PCA {ano}: {brl(grupo.total)} ({_pct(grupo.total, total)} do plano), "
                     f"em {grupo.itens} itens com data desejada nesse mês. "
                     f"Por categoria: {_lista(grupo.top('categoria', 10), grupo.total)}. "
@@ -290,8 +290,8 @@ def indicadores_pca(
         )
     )
     for dimensao, grupos, nome in (
-        ("classe", por_classe, "classes"),
-        ("unidade", por_unidade, "unidades"),
+        ("classe", por_classe, "classes de catálogo"),
+        ("unidade", por_unidade, "unidades responsáveis"),
     ):
         maiores = "; ".join(
             f"{i}. {chave} ({brl(g.total)})" for i, (chave, g) in enumerate(_ranking(grupos)[:10], start=1)
@@ -300,7 +300,10 @@ def indicadores_pca(
             Indicador(
                 id=f"maiores-{dimensao}",
                 dimensao="resumo",
-                texto=f"As 10 {nome} com maior valor planejado no PCA {ano}: {maiores}.",
+                texto=(
+                    f"Quais as {nome} com maior valor no Plano de Contratações Anual (PCA) {ano}? "
+                    f"As 10 {nome} com maior valor planejado são: {maiores}."
+                ),
                 metadados={**comum, "valor_total": float(total), "itens": geral.itens},
             )
         )
