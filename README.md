@@ -43,6 +43,13 @@ Classificação feita na **ingestão** (metadado `sensitivity` em cada chunk), n
 - **Mascarar:** CPF de pessoa física contratada, telefone e e-mail pessoal de servidor que aparecem em atas.
 - **Recusar:** dados bancários de fornecedor, credenciais vazadas em e-mail, juízo sobre a legalidade de um contrato específico (o sistema apresenta dados, não acusa). Ver `RefusalReason` em [src/schema.py](src/schema.py).
 
+Como é aplicada ([src/sensitivity.py](src/sensitivity.py), chamado por [src/generate.py](src/generate.py)):
+
+- **Mascaramento determinístico (regex), em dois pontos:** no contexto antes do prompt (o LLM nunca vê o dado) e na resposta final (caso o dado venha da própria pergunta). CPF formatado é sempre mascarado; CPF só com dígitos e telefone sem DDD entre parênteses/`+55` só quando rotulados (`CPF:`, `Tel.:`), para não mascarar ids de processo. E-mails de domínio institucional (`.gov.br`, `.jus.br`, `.mp.br`, `.leg.br`, `.def.br`, `.mil.br`) são preservados; os demais viram `[e-mail omitido]`. CNPJ não é tocado.
+- **Chunks `sensitivity=restrito` são descartados** antes da geração; se só sobrarem restritos, a resposta é recusa `sem_evidencia`.
+- O log de geração registra quantos dados foram mascarados por tipo (`mascaramentos`) e quantos chunks restritos foram descartados — nunca o valor original.
+- Testes em [tests/test_sensitivity.py](tests/test_sensitivity.py).
+
 ## Pipeline
 
 ```mermaid
@@ -94,6 +101,7 @@ Estágios (mesmos nomes usados no campo `stage` do log estruturado): `query_anal
 │   ├── router.py                ← roteamento determinístico (Adaptive RAG)
 │   ├── retrieve.py              ← recuperação híbrida: denso + BM25 + RRF, filtros de metadado, rerank plugável
 │   ├── generate.py              ← geração com guardrails e parsing defensivo da saída do LLM
+│   ├── sensitivity.py           ← política de sensibilidade: mascaramento de CPF/telefone/e-mail e filtro de restritos
 │   ├── pipeline.py              ← une roteamento + recuperação + geração numa função (responder)
 │   ├── obs.py                   ← logging estruturado (JSONL) e contagem de tokens
 │   └── schema.py                ← modelos Pydantic (chunk, roteamento, resposta, recusa)

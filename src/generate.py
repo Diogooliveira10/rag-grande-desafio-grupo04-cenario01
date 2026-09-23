@@ -18,6 +18,7 @@ from src.schema import (
     RefusalReason,
     SourceRef,
 )
+from src.sensitivity import filtrar_chunks_permitidos, mascarar, mascarar_chunks
 
 # --------------------------------------------------------------------------
 # Logging estruturado — logs/pipeline-AAAA-MM-DD.jsonl (contrato da pipeline)
@@ -264,7 +265,14 @@ def _parsear_resposta_llm(
         return _recusa(query, bases_consultadas, RefusalReason.SEM_EVIDENCIA)
 
 
-def _logar_evento(run_id: str, query_id: str, status: str, inicio: float, resposta: RAGResponse) -> None:
+def _logar_evento(
+    run_id: str,
+    query_id: str,
+    status: str,
+    inicio: float,
+    resposta: RAGResponse,
+    **extra,
+) -> None:
     log_event(
         "info",
         "geracao concluída",
@@ -277,6 +285,7 @@ def _logar_evento(run_id: str, query_id: str, status: str, inicio: float, respos
         is_refusal=resposta.is_refusal,
         bases_consultadas=[b.value for b in resposta.bases_consultadas],
         num_sources=len(resposta.sources_used),
+        **extra,
     )
 
 
@@ -312,9 +321,15 @@ def gerar_resposta(
         _logar_evento(run_id, query_id, "bloqueado_guardrail_previo", inicio, resposta)
         return resposta
 
+    # Política de sensibilidade (src/sensitivity.py): chunk restrito nunca chega
+    # ao LLM, e CPF/telefone/e-mail pessoal são mascarados antes do prompt.
+    chunks, restritos_descartados = filtrar_chunks_permitidos(chunks)
+    chunks, mascaramentos = mascarar_chunks(chunks)
+    sensibilidade = {"restritos_descartados": restritos_descartados, "mascaramentos": mascaramentos}
+
     if not chunks:
         resposta = _recusa(query, bases_consultadas, refusal_reason_hint or RefusalReason.SEM_EVIDENCIA)
-        _logar_evento(run_id, query_id, "sem_chunks", inicio, resposta)
+        _logar_evento(run_id, query_id, "sem_chunks", inicio, resposta, **sensibilidade)
         return resposta
 
     mensagens = _montar_prompt(query, chunks)
@@ -324,9 +339,14 @@ def gerar_resposta(
         bruto = cliente(mensagens)
     except Exception as exc:
         resposta = _recusa(query, bases_consultadas, RefusalReason.SEM_EVIDENCIA, motivo_erro=str(exc))
-        _logar_evento(run_id, query_id, "erro_llm", inicio, resposta)
+        _logar_evento(run_id, query_id, "erro_llm", inicio, resposta, **sensibilidade)
         return resposta
 
     resposta = _parsear_resposta_llm(bruto, query, chunks, bases_consultadas)
-    _logar_evento(run_id, query_id, "ok", inicio, resposta)
+    # Defesa em profundidade: o dado pode ter vindo da própria pergunta.
+    answer_mascarada, mascaramentos_resposta = mascarar(resposta.answer)
+    if mascaramentos_resposta:
+        resposta = resposta.model_copy(update={"answer": answer_mascarada})
+        sensibilidade["mascaramentos_resposta"] = mascaramentos_resposta
+    _logar_evento(run_id, query_id, "ok", inicio, resposta, **sensibilidade)
     return resposta
