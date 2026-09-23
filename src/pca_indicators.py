@@ -265,7 +265,8 @@ def indicadores_pca(
                 dimensao="mes",
                 texto=(
                     f"Mês de {_MESES[int(mes[5:]) - 1]} de {mes[:4]} ({mes[5:]}/{mes[:4]}) "
-                    f"no PCA {ano}: {brl(grupo.total)} ({_pct(grupo.total, total)} do plano), "
+                    f"no PCA {ano}: as contratações previstas para {_MESES[int(mes[5:]) - 1]} somam "
+                    f"{brl(grupo.total)} ({_pct(grupo.total, total)} do plano), "
                     f"em {grupo.itens} itens com data desejada nesse mês. "
                     f"Por categoria: {_lista(grupo.top('categoria', 10), grupo.total)}. "
                     f"Classes com maior valor: {_lista(grupo.top('classe'), grupo.total)}."
