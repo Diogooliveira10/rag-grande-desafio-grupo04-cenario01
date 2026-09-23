@@ -41,15 +41,12 @@
 - Identifiquei que a base agregada (`pca_agregado`) não está no manifesto do `main` e que o `retrieve.py` procura uma base conversacional (`atas_conversacional`) que também não existe. Tentei consultar os endpoints de PCA e de atas do PNCP, mas a API está instável para todas as turmas (HTTP 500 e 504). Registrei as tentativas, com horário e resultado, numa seção manual do `CORPUS_INVENTORY.md`.
 - Comparei os dois `CORPUS_INVENTORY.md` (raiz e `data/`). Eles não são iguais, e o da raiz é o que corresponde ao `data/inventory/v1.json`. Não removi nenhum: a decisão sobre qual é o oficial ficou para quem cuida da coleta.
 - Atualizei a seção de divisão de responsabilidades e coordenação do `ARQUITETURA.md`, registrando que as tarefas são distribuídas a cada encontro conforme as necessidades do projeto e as revisões, e listando as pendências em aberto.
+- Como responsável pelos merges, integrei ao `main` as branches do time. Fiz o merge da branch da Pâmela (`app/cli.py`), testei o app no terminal e completei a entrega com `tests/test_app_cli.py` (8 testes), a seção de uso no README e o `run_id` no comando `rota`, para que ele apareça certo no log.
+- Fiz o merge da branch do João (`joao-reis`) e resolvi o conflito em `tests/test_ingest.py`, que tinha sido criado nos dois lados: mantive os meus testes e acrescentei os dele. Um teste dele revelou um laço infinito no `chunk_text` do `src/ingest.py` quando `overlap >= max_chars`, e corrigi. Os testes dele dependem de código que ainda não foi publicado em `src/` (como `src/providers/`), então marquei 13 testes com `skip` e o motivo, para o `main` continuar sem falhas até esse código entrar.
+- Fiz o merge da branch do Marco (`marco/test-fetch-corpus`) e resolvi o conflito em `tests/test_fetch_corpus.py`, criado também na branch do João, juntando os testes dos dois no mesmo arquivo. Ajustei o fixture `project` para restaurar as variáveis globais do `fetch_corpus` ao fim de cada teste, evitando que um teste afetasse o seguinte. A suíte terminou com 176 testes passando e 13 pulados.
 
-### Pendências
-
-- Declarar `pca_agregado` e `atas_conversacional` no manifesto e coletar quando a API do PNCP estabilizar.
-- Fazer o `retrieve.py` consultar todas as bases de uma natureza.
-- Obter a base sintética de e-mails de compras.
-- Rodar o pipeline de ponta a ponta com o índice e o LLM reais: os testes de hoje usam dados e LLM falsos.
 
 ### Uso de assistentes de IA
 
-- Usei o Claude (Claude Code) para levantar o que faltava no repositório em relação ao desafio e para implementar os testes do `ingest`, o módulo `src/sensitivity.py`, os logs do pipeline e seus testes, a seção do inventário e o texto do `ARQUITETURA.md`.
-- Defini as tarefas e as prioridades, tomei as decisões e revisei os resultados antes de cada commit. Por exemplo: escolhi quais itens eram meus e quais ficavam com o restante do time, determinei que o inventário de `data/` só seria removido se fosse idêntico ao da raiz (não era, e ficou) e pedi para suavizar o `ARQUITETURA.md`, sem atribuir tarefas fixas a cada membro, já que elas são redistribuídas a cada encontro.
+- Usei o Claude (Claude Code) para levantar o que faltava no repositório em relação ao desafio e para implementar os testes do `ingest`, o módulo `src/sensitivity.py`, os logs do pipeline e seus testes, a seção do inventário e o texto do `ARQUITETURA.md`. Também usei na resolução dos conflitos de merge e nos testes do app.
+- Defini as tarefas e as prioridades, tomei as decisões e revisei os resultados antes de cada commit. Por exemplo: escolhi quais itens eram meus e quais ficavam com o restante do time, determinei que o inventário de `data/` só seria removido se fosse idêntico ao da raiz (não era, e ficou) e pedi para suavizar o `ARQUITETURA.md`, sem atribuir tarefas fixas a cada membro, já que elas são redistribuídas a cada encontro. Nos merges, decidi a ordem (primeiro o João, depois o Marco) e aprovei concluir o do João marcando com `skip` os testes que dependem de código ainda não publicado, em vez de trazer testes falhando para o `main`.
