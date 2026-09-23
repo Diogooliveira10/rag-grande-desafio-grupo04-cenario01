@@ -52,21 +52,20 @@ flowchart TD
 
 ## 3. Divisão de responsabilidades
 
-Neste momento inicial do projeto, a divisão definitiva das responsabilidades entre os integrantes ainda está em discussão.
+As tarefas são distribuídas entre os integrantes a cada encontro, de acordo com as necessidades do projeto naquele momento e com o que surge nas revisões do trabalho já feito. Por isso, a equipe não mantém uma divisão fixa por pessoa: quem cuida de cada módulo pode mudar de um encontro para outro.
 
-Durante esta etapa, o desenvolvimento está sendo realizado de forma **colaborativa**, com os integrantes trabalhando conjuntamente na definição da arquitetura, estrutura do projeto, corpus, pipeline de RAG e decisões técnicas.
+### Como as tarefas são organizadas
 
-A divisão dos módulos e responsabilidades individuais será formalizada conforme o projeto avançar e as necessidades de implementação forem melhor definidas.
+- **A cada encontro**, a equipe verifica o que falta em relação aos entregáveis do desafio e combina quem assume cada pendência, levando em conta a familiaridade de cada um com os módulos e a carga de trabalho.
+- **As revisões** ajudam a apontar ajustes e novas tarefas, que entram na distribuição seguinte.
+- **O registro do que cada integrante fez** fica no próprio arquivo de acompanhamento (`acompanhamento/ACOMPANHAMENTO_*.md`), atualizado a cada encontro.
 
-### Responsabilidades atuais
+### Pendências em aberto
 
-- Definição conjunta da arquitetura da solução;
-- Definição do corpus e das fontes de dados;
-- Discussão das estratégias de recuperação;
-- Desenvolvimento colaborativo dos módulos;
-- Definição e validação das personas e perguntas de referência;
-- Discussão e implementação do Adaptive RAG;
-- Testes e avaliação da solução.
+- Declarar as bases `pca_agregado` e `atas_conversacional` no `corpus_manifest.yaml` e coletá-las quando a API do PNCP estabilizar (ver `CORPUS_INVENTORY.md`).
+- Fazer `src/retrieve.py` consultar todas as bases de uma natureza, e não só uma.
+- Definir qual `CORPUS_INVENTORY.md` é o oficial (raiz ou `data/`).
+- Obter a base sintética de e-mails de compras fornecida pelo desafio.
 
 ---
 
@@ -74,6 +73,6 @@ A divisão dos módulos e responsabilidades individuais será formalizada confor
 
 **Coordenador:** Renato Lemos
 
-No momento, Renato Lemos assumiu a responsabilidade pela coordenação da equipe, auxiliando na organização das atividades, acompanhamento do desenvolvimento e alinhamento das decisões do grupo.
+Renato Lemos coordena a equipe: acompanha o andamento do projeto, ajuda a organizar e distribuir as tarefas a cada encontro e apoia o alinhamento das decisões do grupo, participando também do desenvolvimento.
 
-A coordenação poderá ser ajustada conforme a evolução do projeto e a definição formal das responsabilidades individuais.
+A coordenação pode ser ajustada ao longo das sprints, conforme a equipe decidir.
