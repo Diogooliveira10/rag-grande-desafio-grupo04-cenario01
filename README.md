@@ -16,16 +16,18 @@ Contexto completo do desafio, dos outros dois cenários e dos padrões de engenh
 
 | Base | Natureza | Conteúdo | Fonte | Acesso |
 | --- | --- | --- | --- | --- |
-| `editais_normativo` / `fontes_normativas` | Normativa | Lei 14.133/2021, decretos estaduais, editais de licitação | Planalto, REDELOG-RJ, CGE-RJ, PNCP | PDF/HTML por URL |
-| `contratos_estruturado` | Estruturada | Contratos e contratações, UF=RJ, período fechado | PNCP — API de consulta v3 | REST paginado |
-| `atas_conversacional` | Conversacional | Atas de registro de preço; e-mails de compras (base sintética, pendente: será fornecida pelo tutor) | PNCP + base sintética | Texto |
-| `pca_agregado` | Agregada | Plano de Contratações Anual 2025 do Estado do RJ, transformado em indicadores | PNCP | REST (CSV + JSON) |
+| `editais_normativo` | Normativa | Lei 14.133/2021, decretos estaduais, editais de licitação | Senado Federal, REDELOG-RJ, CGE-RJ, MPPI | PDF/HTML por URL |
+| `contratos_estruturado` | Estruturada | 160 contratações publicadas em 2025, UF=RJ | PNCP — API de consulta | REST paginado |
+| `atas_conversacional` | Conversacional | 20 atas de registro de preços do Estado do RJ: metadados, lista de arquivos e os PDFs das atas; e-mails de compras (base sintética, a ser criada com o tutor) | PNCP + base sintética | REST (JSON) + PDF |
+| `pca_agregado` | Agregada | Plano de Contratações Anual 2024–2025 do Estado do RJ, transformado em indicadores | PNCP | REST (CSV + JSON) |
 
 A definição declarativa de cada base — fonte, tipo de acesso, volume-alvo, campo de vigência, licença — vive em [corpus_manifest.yaml](corpus_manifest.yaml), que é a fonte única de verdade sobre o que entra no corpus. `data/raw/` nunca é versionado; qualquer pessoa reconstrói o corpus rodando o coletor contra o manifesto.
 
 Só as bases com `escopo: oficial` no manifesto (uma por natureza) respondem perguntas; as marcadas como `experimental` ficam fora da busca (`ESCOPOS_CONSULTADOS` em [src/pipeline.py](src/pipeline.py)).
 
 **Base agregada.** O CSV do PCA traz um item planejado por linha (~39,5 mil no Estado do RJ em 2025). Em vez de um chunk por linha, a preparação calcula indicadores com [src/pca_indicators.py](src/pca_indicators.py): visão geral, e totais, participação e ranking por categoria, unidade responsável, classe de catálogo e mês, além de rankings das 30 maiores unidades e classes. Cada indicador vira **um chunk** com os números já calculados (cerca de 1.000 no total). Assim o LLM cita valores prontos, em vez de tentar somar linhas.
+
+**Base conversacional.** A API de atas do PNCP ignora o filtro `uf`; o recorte do RJ é feito pelo CNPJ do órgão (`cnpjs` no manifesto, o mesmo do PCA). Para cada ata, o coletor baixa o JSON de metadados, a listagem `/arquivos` e cada PDF anunciado nela. Parte desses PDFs é escaneada, sem texto; com o Tesseract instalado, a preparação aplica OCR nessas páginas ([src/ocr.py](src/ocr.py)). Os chunks do PDF herdam da mesma ata a vigência (`dataVigenciaFim`) e o título do documento, que também aparecem para o LLM no cabeçalho de cada trecho — assim ele distingue a ata de uma publicação no Diário Oficial anexada a ela.
 
 > A API do PNCP **não tem busca textual**. Filtro por objeto é feito localmente, e o recorte de dados é sempre determinístico (mesmo manifesto ⇒ mesmo corpus).
 
@@ -71,7 +73,9 @@ flowchart TD
 
 Estágios (mesmos nomes usados no campo `stage` do log estruturado): `query_analysis`, `roteamento`, `retrieval_denso`, `retrieval_bm25`, `fusao_rrf`, `rerank`, `geracao`, `validacao`, `feedback`. Detalhes de decisão e divisão de responsabilidades em [ARQUITETURA.md](ARQUITETURA.md).
 
-**Implementado:** `roteamento` ([src/router.py](src/router.py)), `retrieval_denso`/`retrieval_bm25`/`fusao_rrf` ([src/retrieve.py](src/retrieve.py), rerank ainda é opcional/plugável) e `geracao` ([src/generate.py](src/generate.py), com guardrails determinísticos antes do LLM e parsing defensivo da saída). [src/pipeline.py](src/pipeline.py) une os três estágios numa única função (`responder`). Toda etapa registra log estruturado via [src/obs.py](src/obs.py) (JSONL em `logs/pipeline-AAAA-MM-DD.jsonl`, com `run_id`, `stage`, latência e tokens).
+**Implementado:** `roteamento` ([src/router.py](src/router.py)), `retrieval_denso`/`retrieval_bm25`/`fusao_rrf` ([src/retrieve.py](src/retrieve.py), rerank ainda é opcional/plugável) e `geracao` ([src/generate.py](src/generate.py), com guardrails determinísticos antes do LLM e parsing defensivo da saída). [src/pipeline.py](src/pipeline.py) une os três estágios numa única função (`responder`). **Ainda não implementados:** `query_analysis` (o roteador ainda não extrai filtros de metadado da pergunta), `validacao` e `feedback`.
+
+O parsing da geração aceita as variações de chave que o modelo da turma produz na prática (`sources` em vez de `sources_used`, `confidence` numérico em vez de `confidence_level`) e registra no log, em `extra.chaves_fora_do_contrato`, quando isso acontece. Toda etapa registra log estruturado via [src/obs.py](src/obs.py) (JSONL em `logs/pipeline-AAAA-MM-DD.jsonl`, com `run_id`, `stage`, latência e tokens).
 
 Uma pergunta via `responder` gera, no log, uma linha por stage — `roteamento`, `retrieval_denso`, `retrieval_bm25`, `fusao_rrf`, `rerank` (só com reranker) e `geracao` — todas com o mesmo `run_id` e `query_id`. `geracao` traz `tokens` e `modelo` a partir de `response.usage` do SDK OpenAI. Etapa que falha grava `status: "erro"` com `extra.error_type`. Dados pessoais da pergunta são mascarados antes de ir para o log. Testes em [tests/test_pipeline_logs.py](tests/test_pipeline_logs.py); os testes gravam log num diretório temporário ([tests/conftest.py](tests/conftest.py)), nunca em `logs/`.
 
@@ -87,20 +91,28 @@ Uma pergunta via `responder` gera, no log, uma linha por stage — `roteamento`,
 │   ├── embeddings/               ← embeddings versionados (cache + partes), gerados por src/create_embeddings.py
 │   ├── inventory/                ← inventário por versão (JSON), checkpoints e diffs entre versões
 │   ├── runs/                    ← relatórios de execução de cada coleta
+│   └── attempts/                ← coletas e preparações experimentais (--data-root), fora do Git
+├── index/                       ← índice vetorial por base (index/<base_id>/vectors.jsonl), fora do Git
+├── logs/                        ← log estruturado do pipeline (pipeline-AAAA-MM-DD.jsonl), fora do Git
+├── eval/                        ← golden set das personas e harness de avaliação (run_eval.py)
 ├── tests/fixtures/               ← amostras locais para testes offline
 ├── tests/                       ← testes de contrato (pytest), offline
 ├── app/
 │   └── cli.py                   ← interface de linha de comando: rota e resposta completa do pipeline
 ├── src/
 │   ├── fetch_corpus.py          ← coleta determinística e versionada do corpus
+│   ├── providers/               ← provedores declarativos de fontes (pncp.py: contratações, atas + PDFs, PCA)
+│   ├── pncp_client.py           ← cliente HTTP do PNCP com tentativas e timeout
+│   ├── corpus_validator.py      ← validação do inventário contra o manifesto
 │   ├── manifest_curator.py      ← descoberta e propostas para o manifesto
 │   ├── source_lookup.py         ← busca remota nas fontes suportadas
 │   ├── corpus_search.py         ← busca local no inventário
 │   ├── ingest.py                ← fachada compatível; delega a extração para prepare_documents.py
 │   ├── prepare_documents.py     ← extração por formato (PDF/HTML/CSV/JSON/JSONL), chunking e metadados canônicos
 │   ├── pca_indicators.py        ← indicadores agregados do PCA (1 indicador = 1 chunk) para a base agregada
+│   ├── ocr.py                   ← OCR (Tesseract) das páginas de PDF escaneadas, usado por prepare_documents.py
 │   ├── create_embeddings.py     ← embeddings com cache, multi-provedor e escrita incremental
-│   ├── index.py                 ← índice vetorial por base a partir do JSONL normalizado
+│   ├── index.py                 ← índice vetorial por base; gera embeddings ou reaproveita os de data/embeddings/
 │   ├── router.py                ← roteamento determinístico (Adaptive RAG)
 │   ├── retrieve.py              ← recuperação híbrida: denso + BM25 + RRF, filtros de metadado, rerank plugável
 │   ├── generate.py              ← geração com guardrails e parsing defensivo da saída do LLM
@@ -130,12 +142,20 @@ pip install -r requirements.txt
 copy .env.example .env          # preencher se necessário; os defaults já apontam para o endpoint da turma
 ```
 
+Opcional: para ler as atas escaneadas, instale o Tesseract com o idioma português (passo a passo em [docs/CLI.md](docs/CLI.md#ocr-de-pdfs-escaneados-opcional)). Sem ele, tudo funciona, mas as páginas escaneadas ficam sem texto.
+
+No Windows, coletas em pastas com nome longo podem passar do limite de 260 caracteres de caminho (`FileNotFoundError: [WinError 3]`). Ative o suporte a caminhos longos, no PowerShell como administrador:
+
+```powershell
+Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name LongPathsEnabled -Value 1
+```
+
 **2. Coletar o corpus** (materializa versões imutáveis a partir do manifesto)
 
 ```bash
 py -m src.fetch_corpus fetch --manifest corpus_manifest.yaml --official
 py -m src.fetch_corpus update --manifest corpus_manifest.yaml --official
-py -m src.fetch_corpus inventory --corpus-version v1 --official
+py -m src.fetch_corpus inventory --corpus-version v2 --official
 ```
 
 **Curar novas fontes antes da coleta**
@@ -186,9 +206,8 @@ py -m src.fetch_corpus update --manifest corpus_manifest.yaml --data-root data/a
 py -m src.fetch_corpus inventory --corpus-version v1 --data-root data/attempts/corpus_fetch/tentativa-v5
 ```
 
-O diretório `data/attempts/` é experimental e pode ser versionado seletivamente
-como histórico de testes; ele não substitui a v1 oficial em `data/raw/` e
-`data/inventory/`.
+O diretório `data/attempts/` é experimental e fica fora do Git; ele não
+substitui as versões oficiais em `data/raw/` e `data/inventory/`.
 
 Para uma verificação rápida após clonar o repositório, há 20 PDFs pequenos em
 `tests/fixtures/pdf/`. A base `exemplos_teste` está declarada no manifesto
@@ -227,7 +246,9 @@ py -m src.prepare_documents `
 
 Quando a entrada veio de uma coleta já registrada, informe também o inventário
 correspondente. O preparador usa `base_id + SHA-256` para recuperar a origem
-específica e o horário real de coleta de cada arquivo:
+específica e o horário real de coleta de cada arquivo, e usa a `source_ref` do
+inventário para que o PDF de uma ata herde a vigência e o título do documento
+registrados nos JSONs da mesma ata:
 
 ```bash
 py -m src.prepare_documents `
@@ -245,8 +266,10 @@ estruturados permanecem inteiros, enquanto documentos normativos são divididos
 por cláusulas/artigos quando esses cabeçalhos existem, usando o chunking
 genérico como fallback. Cada chunk preserva `source_file`, `chunk_id`,
 `parent_chunk_id`, `base_id`, `natureza`, `doc_type` (formato original), `sensitivity`,
-SHA-256, página, vigência e proveniência no manifesto. `src/ingest.py` mantém
-uma fachada compatível para esse mesmo fluxo oficial.
+SHA-256, página, vigência e proveniência no manifesto. Páginas de PDF sem texto
+passam por OCR quando o Tesseract está instalado (`status_extracao: ok_ocr` no
+relatório; sem OCR, `sem_texto`). `src/ingest.py` mantém uma fachada compatível
+para esse mesmo fluxo oficial.
 
 A base opcional `licitacoes_siga_csv` usa o CSV público da SEPLAG-RJ. O parser
 detecta o delimitador publicado, preserva os nomes reais das colunas e cria um
@@ -305,6 +328,17 @@ py .\src\index.py --dry-run     # só conta chunks por base, sem chamar o modelo
 py .\src\index.py               # gera embeddings de verdade, via o endpoint compartilhado
 ```
 
+`--embeddings` reaproveita vetores já publicados em vez de chamar o modelo; cada
+chunk é localizado pelo SHA-256 do texto, então só entra texto idêntico ao que
+gerou o vetor. O `data/embeddings/embeddings.jsonl` versionado não traz o texto
+dos chunks; para montar um índice de desenvolvimento a partir dele, prepare de
+novo os PDFs de `tests/fixtures/pdf/` (base `exemplos_teste`, 446 chunks):
+
+```bash
+py -m src.prepare_documents --input tests/fixtures/pdf --manifest corpus_manifest.yaml --base-id exemplos_teste --output data/normalized/documents.jsonl
+py .\src\index.py --embeddings data/embeddings/embeddings.jsonl
+```
+
 **5. Testar o endpoint de LLM/embeddings compartilhado**
 
 ```bash
@@ -326,7 +360,13 @@ py app/cli.py perguntar "Pergunta 1?" "Pergunta 2?"                       # vár
 py app/cli.py perguntar                                                    # sem argumento, pede a pergunta no terminal
 ```
 
-`perguntar` chama `src.pipeline:responder`, então a resposta já passa pelas recusas, pelo mascaramento de dados pessoais e pelo log de cada etapa. Sem índice montado (`index/`), a resposta é uma recusa `sem_evidencia`.
+`perguntar` chama `src.pipeline:responder`, então a resposta já passa pelas recusas, pelo mascaramento de dados pessoais e pelo log de cada etapa. Sem índice montado (`index/`), a resposta é uma recusa `sem_evidencia`. Por padrão só as bases oficiais são consultadas; `--incluir-experimentais` busca também nas experimentais, como o índice de desenvolvimento de `exemplos_teste`:
+
+```bash
+py app/cli.py perguntar --incluir-experimentais "Quais sanções a norma prevê para o fornecedor que não recolher a multa?"
+```
+
+Com o endpoint compartilhado, cada resposta completa leva alguns minutos (o vetor da pergunta e, principalmente, a geração).
 
 **8. Rodar a avaliação (golden set das personas)**
 
@@ -334,6 +374,7 @@ py app/cli.py perguntar                                                    # sem
 py .\eval\run_eval.py check                                     # valida o golden set, sem pipeline
 py .\eval\run_eval.py run --pipeline eval.adapters:rota_apenas   # só roteamento (src/router.py), rápido e offline
 py .\eval\run_eval.py run --pipeline src.pipeline:responder      # pipeline completo: roteamento + recuperação + geração
+py .\eval\run_eval.py run --pipeline src.pipeline:responder_incluindo_experimentais   # idem, incluindo bases experimentais
 ```
 
 `eval/adapters.py:rota_apenas` avalia só o estágio de roteamento, sem chamar o LLM — útil para checar regressão rápida. `src/pipeline.py:responder` roda o pipeline completo (roteamento + recuperação híbrida via `retrieve.py` + geração via `generate.py`), chamando o LLM de verdade a cada pergunta do golden set.

@@ -17,6 +17,24 @@ Typer e Rich fornecem a interface e a formatação de algumas CLIs. InquirerPy �
 usado na revisão interativa de propostas. Para embeddings remotos, configure o
 provedor por `.env` ou pelas opções `--provider`, `--endpoint` e `--model`.
 
+### OCR de PDFs escaneados (opcional)
+
+Parte das atas do PNCP é PDF escaneado, sem camada de texto. Com o Tesseract
+instalado, `prepare_documents` reconhece essas páginas (status `ok_ocr` no
+relatório); sem ele, elas continuam como `sem_texto` e não geram chunks.
+
+```powershell
+winget install --id UB-Mannheim.TesseractOCR -e
+# Modelo de português (requer PowerShell como administrador):
+Invoke-WebRequest https://github.com/tesseract-ocr/tessdata/raw/main/por.traineddata `
+  -OutFile "C:\Program Files\Tesseract-OCR\tessdata\por.traineddata"
+& "C:\Program Files\Tesseract-OCR\tesseract.exe" --list-langs   # deve listar "por"
+```
+
+O executável é procurado no `PATH` e em `C:\Program Files\Tesseract-OCR`; outro
+local vai em `TESSERACT_CMD` no `.env`. O OCR leva alguns segundos por página,
+mas o resultado fica no cache incremental da preparação.
+
 ## Coleta e versões do corpus
 
 `fetch_corpus` tem os subcomandos `fetch`, `update` e `inventory`.

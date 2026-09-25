@@ -31,6 +31,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Iterator
 
+from src import ocr
 from src.fetch_corpus import load_manifest
 from src.ingest import chunk_text, sha256_file
 from src.pca_indicators import eh_csv_pca, indicadores_pca
@@ -138,6 +139,8 @@ def _extraction_fingerprint(base: dict[str, Any]) -> str:
             "campo_vigencia": base.get("campo_vigencia"),
             "metadados_extras": base.get("metadados_extras"),
             "chunking_sugerido": base.get("chunking_sugerido"),
+            # Instalar ou trocar o OCR muda o texto extraído das páginas escaneadas.
+            "ocr": ocr.motor(),
         }
     )
 
@@ -359,6 +362,73 @@ def _load_inventory_provenance(
         if previous["coletado_em"] != entry["coletado_em"]:
             previous["coletado_em"] = ""
     return provenance
+
+
+def _load_related_context(path: Path | None, base: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Metadados que um arquivo herda de outros artefatos da mesma fonte.
+
+    Um PDF de ata não traz vigência nem título próprios: eles estão no JSON de
+    metadados (``...:metadata``) e na listagem ``...:arquivos`` da mesma
+    ``source_ref`` no inventário. Devolve, por SHA-256 do arquivo, os campos
+    declarados no manifesto (incluindo ``data_vigencia``) e o título do
+    documento anunciado na listagem.
+    """
+    if path is None:
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for record in payload.get("arquivos", []):
+        if (
+            isinstance(record, dict)
+            and record.get("base_id") == base.get("base_id")
+            and record.get("status") == "ok"
+            and isinstance(record.get("source_ref"), dict)
+        ):
+            key = json.dumps(record["source_ref"], sort_keys=True)
+            groups.setdefault(key, []).append(record)
+
+    def _json_file(record: dict[str, Any] | None) -> Any:
+        file_path = PROJECT_ROOT / str((record or {}).get("path") or "")
+        if record is None or not file_path.is_file():
+            return None
+        try:
+            return json.loads(_read_text(file_path))
+        except json.JSONDecodeError:
+            return None
+
+    context: dict[str, dict[str, Any]] = {}
+    for records in groups.values():
+        by_suffix = {str(record.get("artifact_id", "")).rsplit(":", 1)[-1]: record for record in records}
+        inherited = _declared_record_metadata(_json_file(by_suffix.get("metadata")), base)
+        listing = _json_file(by_suffix.get("arquivos"))
+        documents = {
+            str(document.get("url")): document
+            for document in (listing if isinstance(listing, list) else [])
+            if isinstance(document, dict) and document.get("url")
+        }
+        for record in records:
+            if record.get("tipo") != "pdf" or not record.get("sha256"):
+                continue
+            entry = dict(inherited)
+            document = documents.get(str(record.get("origem")))
+            if document:
+                entry["titulo_documento"] = document.get("titulo")
+                entry["tipo_documento"] = document.get("tipoDocumentoNome")
+            if entry:
+                context[str(record["sha256"])] = entry
+    return context
+
+
+def _with_related_context(unit: SourceUnit, related: dict[str, Any] | None) -> SourceUnit:
+    if not related:
+        return unit
+    extras = {**related, **unit.extras}
+    vigencia = unit.data_vigencia or related.get("data_vigencia")
+    return replace(
+        unit,
+        extras=extras,
+        data_vigencia=str(vigencia) if vigencia not in (None, "") else None,
+    )
 
 
 def _embedded_origin(path: Path) -> str:
@@ -597,6 +667,14 @@ def _pdf_units(
     base_document_id = f"{base['base_id']}:{digest[:16]}"
     for page_number, page in enumerate(reader.pages, start=1):
         text = (page.extract_text() or "").strip()
+        status = "ok" if text else "sem_texto"
+        extras: dict[str, Any] = {"pagina": page_number, "total_paginas": total_pages}
+        # Página escaneada: sem camada de texto, tenta o OCR (src/ocr.py).
+        if not text and ocr.disponivel():
+            text = ocr.texto_da_pagina(path, page_number - 1)
+            if text:
+                status = "ok_ocr"
+                extras["extracao"] = ocr.motor()
         yield _make_unit(
             path,
             base,
@@ -604,11 +682,11 @@ def _pdf_units(
             text,
             f"{base_document_id}:pagina-{page_number}",
             "pdf",
-            "ok" if text else "sem_texto",
+            status,
             manifest_hash,
             collected_at,
             origin,
-            {"pagina": page_number, "total_paginas": total_pages},
+            extras,
         )
 
 
@@ -818,7 +896,7 @@ def _chunks_for_unit(unit: SourceUnit, chunk_size: int, overlap: int) -> tuple[l
 
 
 def _chunk_records(unit: SourceUnit, chunk_size: int, overlap: int) -> list[dict[str, Any]]:
-    if unit.status != "ok" or not unit.text.strip():
+    if unit.status not in {"ok", "ok_ocr"} or not unit.text.strip():
         return []
     chunks, chunking_strategy = _chunks_for_unit(unit, chunk_size, overlap)
     records: list[dict[str, Any]] = []
@@ -1001,6 +1079,7 @@ def prepare_documents(
         inventory_path,
         expected_manifest_hash=summary_manifest_hash,
     )
+    related_context = _load_related_context(inventory_path, base)
     fallback_collected_at = datetime.now(timezone.utc).isoformat()
     if inventory_path is not None:
         paths, ignored = _input_files_from_inventory(
@@ -1057,6 +1136,8 @@ def prepare_documents(
                 ]
                 extraction_cache_misses += 1
             state_units.extend(units)
+            # Aplicado a cada execução (e fora do cache): depende de outros arquivos.
+            units = [_with_related_context(unit, related_context.get(digest)) for unit in units]
         except Exception as error:
             failures.append({"source_file": source_file, "erro": f"{type(error).__name__}: {error}"})
             continue

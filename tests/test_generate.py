@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 
 import pytest
 
@@ -210,3 +211,15 @@ def test_erro_do_cliente_llm_nao_propaga_excecao():
     resposta = gen.gerar_resposta("pergunta", [_chunk()], [Natureza.ESTRUTURADA], cliente=cliente_com_erro)
     assert resposta.is_refusal is True
     assert resposta.refusal_reason == RefusalReason.SEM_EVIDENCIA
+
+def test_prompt_mostra_titulo_do_documento_e_vigencia():
+    chunk = _chunk(chunk_id="c1")
+    chunk.metadata.extras["titulo_documento"] = "Ata de Registro de Preços nº 00178"
+    chunk.metadata.data_vigencia = date(2026, 10, 22)
+
+    [_, usuario] = gen._montar_prompt("pergunta", [chunk])
+
+    assert (
+        "[chunk_id=c1 | base=contratos_estruturado | natureza=estruturada | "
+        "documento=Ata de Registro de Preços nº 00178 | vigencia_ate=2026-10-22]"
+    ) in usuario["content"]

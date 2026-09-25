@@ -113,12 +113,22 @@ def _natureza_label(metadata: ChunkMetadata) -> str:
     return metadata.natureza.value if metadata.natureza is not None else metadata.doc_type
 
 
+def _cabecalho(metadata: ChunkMetadata) -> str:
+    campos = [
+        f"chunk_id={metadata.chunk_id}",
+        f"base={metadata.base_id}",
+        f"natureza={_natureza_label(metadata)}",
+    ]
+    # Distingue a ata em si de publicações anexadas (ex.: Diário Oficial).
+    if metadata.extras.get("titulo_documento"):
+        campos.append(f"documento={metadata.extras['titulo_documento']}")
+    if metadata.data_vigencia is not None:
+        campos.append(f"vigencia_ate={metadata.data_vigencia.isoformat()}")
+    return f"[{' | '.join(campos)}]"
+
+
 def _montar_prompt(query: str, chunks: list[Chunk]) -> list[dict]:
-    contexto = "\n\n".join(
-        f"[chunk_id={c.metadata.chunk_id} | base={c.metadata.base_id} | "
-        f"natureza={_natureza_label(c.metadata)}]\n{c.content}"
-        for c in chunks
-    )
+    contexto = "\n\n".join(f"{_cabecalho(c.metadata)}\n{c.content}" for c in chunks)
     mensagem_usuario = f"Contexto:\n{contexto}\n\nPergunta: {query}"
     return [
         {"role": "system", "content": _SYSTEM_PROMPT},
