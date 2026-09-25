@@ -53,3 +53,24 @@
 
 - Utilizei assistentes de IA como apoio na análise do projeto atualizado, na identificação dos comportamentos que deveriam ser cobertos pelos testes automatizados e na elaboração e revisão da suíte `tests/test_retrieve.py`.
 - Os testes, mocks, cenários e critérios de validação foram analisados em conjunto com o código e os contratos existentes no projeto, sendo executados e verificados localmente. As decisões finais sobre os casos testados e a interpretação dos resultados foram realizadas com base no comportamento real da implementação.
+
+## Encontro 6 - 2026-09-25
+
+### Relato individual - Diogo Oliveira
+
+- Realizei uma revisão final do módulo `src/retrieve.py` após as correções anteriores, identificando e corrigindo comportamentos relacionados ao tratamento de valores numéricos e embeddings inválidos ou ausentes.
+- Ajustei o parser numérico para diferenciar corretamente valores decimais iniciados por zero, como `0.125` e `0.500`, de valores que utilizam ponto como separador de milhar, como `1.500` e `1.234.567`. Também preservei o tratamento de formatos decimais como `1500.50` e `1500,50`.
+- Ajustei a propagação de `run_id` e `query_id` na recuperação densa, fazendo com que `dense_retrieve()` receba os identificadores da execução e que `retrieve()` os repasse corretamente. Com isso, os avisos de embeddings incompatíveis passam a utilizar os IDs reais da execução e da consulta.
+- Corrigi também o tratamento de registros que possuem `embedding=None`. Esses registros agora são ignorados pela busca densa, sem geração de vetor ou cálculo de score, enquanto embeddings válidos continuam sendo processados normalmente.
+- Para o caso de embedding ausente ou nulo, adicionei um aviso estruturado utilizando a observabilidade existente, contendo `run_id`, `query_id`, identificação do `chunk` e a indicação de que o embedding está ausente ou nulo.
+- Ampliei a suíte `tests/test_retrieve.py` para cobrir os novos casos de borda e validar as correções de parsing, recuperação e observabilidade.
+- A suíte específica de `tests/test_retrieve.py` foi finalizada com **50 testes aprovados**.
+- A suíte completa do projeto foi executada com **274 testes aprovados**.
+- Executei `git diff --check`, sem identificação de problemas.
+- As alterações ficaram restritas aos arquivos `src/retrieve.py` e `tests/test_retrieve.py`.
+
+### Uso de assistentes de IA:
+
+- Utilizei assistentes de IA como apoio na revisão técnica das correções, identificação de casos de borda e elaboração e revisão dos testes de regressão.
+- As alterações foram verificadas em conjunto com a implementação existente e validadas por meio da execução dos testes específicos, da suíte completa e do `git diff --check`.
+- As decisões finais sobre as correções, o comportamento esperado e os critérios de validação foram baseadas no comportamento real do código e nos requisitos definidos para o projeto.

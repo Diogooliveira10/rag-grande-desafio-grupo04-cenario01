@@ -161,3 +161,65 @@ O grupo também avançou na compreensão dos entregáveis iniciais, principalmen
 ## **Uso de assistentes de IA:**
 
 - Foram utilizados assistentes de IA como apoio à análise do código, desenvolvimento e revisão das suítes de testes, identificação de cenários de validação, esclarecimento de dúvidas técnicas, investigação de problemas de integração e apoio na estruturação das implementações. As alterações e resultados foram analisados e validados por meio dos testes automatizados e da execução do projeto.
+
+## Encontro 6 - 2026-09-25
+
+## **Entregamos hoje:**
+
+- Foi realizada uma revisão final do módulo `src/retrieve.py` após as correções anteriores, com identificação e correção de comportamentos relacionados ao tratamento de valores numéricos e embeddings inválidos ou ausentes. O parser numérico passou a diferenciar corretamente valores decimais iniciados por zero, como `0.125` e `0.500`, de valores que utilizam ponto como separador de milhar, como `1.500` e `1.234.567`, mantendo também o suporte a formatos como `1500.50` e `1500,50`.
+
+- Também foi ajustada a propagação de `run_id` e `query_id` na recuperação densa, permitindo que os avisos relacionados a embeddings incompatíveis sejam associados corretamente à execução e à consulta. Registros com `embedding=None` passaram a ser ignorados pela busca densa, sem geração de vetor ou cálculo de score, enquanto embeddings válidos continuam sendo processados normalmente. Para esses casos, também foi adicionado aviso estruturado na observabilidade, contendo os identificadores da execução, da consulta e do chunk.
+
+- A suíte `tests/test_retrieve.py` foi ampliada para contemplar os novos casos de borda e regressão. A suíte específica do módulo foi finalizada com **50 testes aprovados**, enquanto a suíte completa do projeto chegou a **274 testes aprovados**. Também foi executado `git diff --check`, sem identificação de problemas, e as alterações dessa etapa ficaram restritas aos arquivos `src/retrieve.py` e `tests/test_retrieve.py`.
+
+- Foi realizada uma nova validação do inventário do corpus, com regeneração do `CORPUS_INVENTORY.md` e comparação com o manifesto. O inventário da versão 2 foi considerado coerente, enquanto foram identificadas diferenças no manifesto após a coleta, incluindo a declaração das atas como PDF quando inicialmente apenas os JSONs eram coletados. O `corpus_manifest.yaml` foi atualizado para refletir a versão e os formatos efetivamente utilizados.
+
+- Durante a validação da base conversacional e das coletas reais do PNCP, foram identificados e tratados problemas relacionados ao ambiente e à coleta: suporte a caminhos longos no Windows, contagem incorreta de arquivos locais que não estavam em JSONL e filtragem das atas do PNCP. Foi identificado que o endpoint de atas ignorava o filtro por UF, fazendo com que registros de outros estados fossem retornados. A coleta passou a utilizar o CNPJ do órgão do Estado do Rio de Janeiro como filtro adicional, com atualização do `src/providers/pncp.py`, do manifesto e dos respectivos testes. Na nova coleta, foram obtidas **20 atas do RJ**.
+
+- Foi implementada a coleta dos PDFs associados às atas do PNCP. O provedor passou a identificar os arquivos disponíveis em cada ata e realizar o download dos PDFs correspondentes. A coleta real resultou em **20 atas e 33 PDFs, sem falhas**.
+
+- Como parte dos PDFs estava digitalizada sem camada de texto, foi implementado o `src/ocr.py` e integrado o OCR ao `src/prepare_documents.py` para processamento das páginas sem texto. Foram processadas **176 páginas escaneadas** com OCR em português. Também foi ajustada a preparação documental para que os chunks dos PDFs herdassem informações da ata, como vigência e título do documento. Com isso, as 20 atas passaram de **372 para 956 chunks**, com os chunks provenientes dos PDFs contendo essas informações no cabeçalho.
+
+- Foi criado um índice de desenvolvimento a partir dos embeddings já disponíveis em `data/embeddings/`, permitindo reaproveitar vetores existentes sem chamar novamente o modelo de embeddings. Para recuperar os textos correspondentes, os PDFs das fixtures foram preparados novamente e os **446 chunks** foram conferidos por SHA-256. Também foram adicionadas opções ao `src/index.py`, ao fluxo de resposta e à CLI para permitir a utilização desses índices experimentais.
+
+- Com o índice de desenvolvimento, foi executado um teste real de ponta a ponta do pipeline utilizando o LLM real. Durante essa validação, foi identificado que o modelo da turma retornava as informações de `sources` e `confidence` em formatos diferentes dos campos originalmente esperados pelo parser. O `src/generate.py` foi ajustado para aceitar essas variações, converter a confiança numérica para o nível correspondente e registrar a ocorrência nos logs. Após a correção, a mesma consulta passou a retornar **3 fontes e confiança alta**.
+
+- Também foi analisado o desempenho da execução real, sendo observado que aproximadamente três minutos por pergunta estavam relacionados principalmente ao servidor compartilhado utilizado pela turma, e não ao processamento local do projeto.
+
+- Foi concluída a coleta oficial das quatro bases. Durante o processo, foi necessário corrigir um problema de certificado SSL utilizando o bundle `certifi` do Python. A coleta foi concluída com **222 arquivos, 200 itens e zero falhas**.
+
+- As bases foram preparadas e foi gerado um índice local contendo **3.130 chunks**, todos com vetores de dimensão 1024. Também foi realizado um teste real de recuperação, que retornou três resultados. A avaliação completa do golden set ainda não foi executada.
+
+- Foi implementado cache incremental na preparação documental, permitindo reaproveitar resultados quando os documentos e suas configurações não foram alterados. O fluxo também foi ajustado para localizar e preparar a versão mais recente do corpus, em vez de depender de uma versão fixa. Foram atualizados os testes e a documentação para contemplar esse comportamento.
+
+- Foi avançada a organização da coleta declarativa do corpus a partir do manifesto, com criação de uma interface comum para provedores e integração específica com o PNCP. A configuração passou a descrever parâmetros de consulta e paginação, enquanto a coleta passou a enumerar documentos e registrar os resultados no inventário. Também foram ampliados os testes relacionados à coleta e aos providers.
+
+- Foram consolidados os testes do corpus na pasta `tests/`, com organização das fixtures e arquivos de validação e ajustes nos testes de manifesto, coleta, preparação, providers, indexação e recuperação. A documentação da CLI e do inventário do corpus v2 também foi atualizada.
+
+- Foram integradas as alterações da branch `main` à branch de trabalho e realizadas as revisões necessárias no manifesto, testes de coleta e ingestão e documentação após o merge. Também foi adicionado um exemplo sintético de e-mail em Markdown para demonstração.
+
+- A equipe deu continuidade ao desenvolvimento do **front-end** e iniciou o trabalho relacionado ao **query analysis**, avançando na integração das etapas necessárias para o fluxo completo do sistema.
+
+## **Ficou pendente:**
+
+- Continuidade do desenvolvimento do **front-end** e do **query analysis**.
+
+- Execução da avaliação completa do **golden set** para validação mais ampla do comportamento do sistema.
+
+- Continuidade da validação e integração das quatro bases no fluxo completo do pipeline.
+
+- A **base de e-mails sintética** continua pendente e será construída/disponibilizada em conjunto com o tutor. A integração e os testes dessa base serão realizados posteriormente.
+
+- Permanece identificado um comportamento no `update --dry-run`: quando a pasta `data/raw/vN/` não existe na máquina, o comando não reconhece corretamente o arquivo `data/inventory/vN.json`. O ponto foi identificado e permanece para avaliação.
+
+## **Bloqueios em aberto:**
+
+- Sem impedimentos técnicos críticos identificados no encontro.
+
+- A base de e-mails sintética permanece como uma **dependência externa do projeto**, aguardando construção/disponibilização junto ao tutor.
+
+## **Uso de assistentes de IA:**
+
+- Foram utilizados assistentes de IA como apoio à revisão técnica do projeto após os merges, análise de problemas encontrados durante as coletas e preparações, desenvolvimento e revisão de testes, investigação de comportamentos de recuperação e geração, implementação de correções, configuração do OCR e atualização da documentação.
+
+- As sugestões e implementações foram revisadas antes das integrações, com validação por meio de testes automatizados, coletas reais, execução do pipeline, conferência dos dados produzidos e verificações de consistência do projeto. As decisões sobre comportamento esperado e critérios de validação foram tomadas com base nos requisitos do projeto e nos resultados observados durante os testes.
