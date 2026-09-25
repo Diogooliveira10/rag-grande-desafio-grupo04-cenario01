@@ -95,7 +95,7 @@ bases:
     volume_alvo: 20
     # O provider PNCP coleta, por ata, o JSON de metadados e a listagem
     # /arquivos (também JSON); o PDF da ata ainda não é baixado.
-    formato: json
+    formatos: [json, pdf]
     licenca: "Dados abertos gov.br - atribuição"
     sensitivity_default: publico
     campo_vigencia: "dataVigenciaFim"

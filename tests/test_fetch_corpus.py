@@ -843,6 +843,27 @@ def test_collect_base_arquivo_local_e_idempotente(project):
     assert segunda[0] is primeira[0]
 
 
+def test_collect_base_arquivo_local_conta_um_item_por_arquivo(project):
+    (project / "emails").mkdir()
+    (project / "emails" / "email_1.md").write_text("# E-mail 1", encoding="utf-8")
+    (project / "emails" / "email_2.md").write_text("# E-mail 2", encoding="utf-8")
+    base = {
+        "base_id": "emails",
+        "natureza": "conversacional",
+        "formato": "md",
+        "volume_alvo": 2,
+        "acesso": {"tipo": "arquivo_local", "origem": "emails"},
+    }
+    manifest = {"scenario_id": "c", "version": 1, "bases": [base]}
+    context = _novo_contexto(project, manifest)
+
+    items = {record["logical_id"]: record for record in fc._collect_base(context, base)}
+    [by_base] = fc._build_inventory(manifest, 1, "sha256:manifest", "now", items)["por_base"]
+
+    assert by_base["itens"] == 2
+    assert by_base["status"] == "complete"
+
+
 def test_collect_base_arquivo_local_ausente_gera_falha_sem_lancar(project):
     base = {
         "base_id": "base_local",
