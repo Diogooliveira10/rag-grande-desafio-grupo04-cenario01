@@ -11,11 +11,6 @@ import src.fetch_corpus as fetch_corpus
 from src import fetch_corpus as fc
 
 # Merge da branch joao-reis (2026-09-23): remover os skips quando o código entrar no main.
-AGUARDA_FETCH_CORPUS_NOVO = (
-    "depende da versão do fetch_corpus/manifesto da branch joao-reis (escopo oficial/experimental, status por base, promoção do staging), ainda não publicada em src/"
-)
-
-
 def _item(logical_id: str, base_id: str, sha256: str, tipo: str = "pdf", **extra) -> dict:
     return {
         "logical_id": logical_id,
@@ -39,7 +34,6 @@ def _fixture_documents() -> list[dict]:
     ]
 
 
-@pytest.mark.skip(reason=AGUARDA_FETCH_CORPUS_NOVO)
 def test_manifest_declares_real_bases_and_official_pdf_target():
     manifest = fetch_corpus.load_manifest(Path("corpus_manifest.yaml"))
     bases = {base["base_id"]: base for base in manifest["bases"]}
@@ -114,7 +108,6 @@ def test_inventory_aggregates_by_semantic_base_and_format():
     assert all(record["base_id"] != "pdf" for record in inventory["arquivos"])
 
 
-@pytest.mark.skip(reason=AGUARDA_FETCH_CORPUS_NOVO)
 def test_resource_set_collects_declared_json_and_binary_resources(monkeypatch):
     calls = []
 
@@ -467,7 +460,6 @@ def test_failed_http_item_is_recorded_without_raising(monkeypatch, tmp_path):
     assert checkpoint["items"]["base_teste:url:1"]["status"] == "falhou"
 
 
-@pytest.mark.skip(reason=AGUARDA_FETCH_CORPUS_NOVO)
 def test_manifest_separates_official_bases_from_experimental_ones():
     manifest = fetch_corpus.load_manifest(Path("corpus_manifest.yaml"))
     bases = {base["base_id"]: base for base in manifest["bases"]}
@@ -488,7 +480,6 @@ def test_manifest_separates_official_bases_from_experimental_ones():
     )
 
 
-@pytest.mark.skip(reason=AGUARDA_FETCH_CORPUS_NOVO)
 def test_inventory_marks_not_configured_and_partial_bases_as_incomplete():
     manifest = {
         "scenario_id": "fixture",
@@ -539,7 +530,6 @@ def test_inventory_marks_not_configured_and_partial_bases_as_incomplete():
     assert inventory["completo"] is False
 
 
-@pytest.mark.skip(reason=AGUARDA_FETCH_CORPUS_NOVO)
 def test_promotion_moves_staging_paths_to_immutable_version(monkeypatch, tmp_path):
     project_root = tmp_path / "project"
     staging = project_root / "data" / "raw" / ".staging" / "v7"
@@ -587,7 +577,6 @@ def test_promotion_moves_staging_paths_to_immutable_version(monkeypatch, tmp_pat
     assert checkpoint_payload["state"] == "promoted"
 
 
-@pytest.mark.skip(reason=AGUARDA_FETCH_CORPUS_NOVO)
 def test_official_run_excludes_experimental_bases(monkeypatch, tmp_path):
     manifest = tmp_path / "manifest.yaml"
     manifest.write_text(
