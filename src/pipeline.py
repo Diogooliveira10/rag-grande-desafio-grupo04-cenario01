@@ -9,7 +9,7 @@ função compatível com o contrato ``PipelineFn`` de ``eval/run_eval.py``
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 from src.obs import new_query_id, new_run_id
 from src.generate import ClienteLLM, gerar_resposta
@@ -35,8 +35,12 @@ def responder(
     reranker: Optional[RerankFn] = None,
     cliente: Optional[ClienteLLM] = None,
     run_id: Optional[str] = None,
+    escopos: Optional[Sequence[str]] = ESCOPOS_CONSULTADOS,
 ) -> dict[str, Any]:
     """Roda roteamento + recuperação híbrida + geração para uma pergunta.
+
+    ``escopos=None`` consulta também as bases experimentais (ex.:
+    ``exemplos_teste``), útil para desenvolver com um índice parcial.
 
     Quando o roteador não seleciona nenhuma base (recusa, fora de escopo ou
     "não identificado"), a recuperação é pulada; o motivo da recusa é inferido
@@ -58,7 +62,7 @@ def responder(
             decisao,
             top_k=top_k,
             reranker=reranker,
-            escopos=ESCOPOS_CONSULTADOS,
+            escopos=escopos,
             run_id=run_id,
             query_id=query_id,
         )
@@ -78,4 +82,12 @@ def responder(
     return resposta.model_dump(mode="json")
 
 
-__all__ = ["responder"]
+def responder_incluindo_experimentais(query: str) -> dict[str, Any]:
+    """``responder`` sem o recorte de escopo, no contrato ``PipelineFn`` do eval::
+
+        py .\\eval\\run_eval.py run --pipeline src.pipeline:responder_incluindo_experimentais
+    """
+    return responder(query, escopos=None)
+
+
+__all__ = ["responder", "responder_incluindo_experimentais"]

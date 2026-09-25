@@ -10,7 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.obs import new_query_id, new_run_id
-from src.pipeline import responder
+from src.pipeline import ESCOPOS_CONSULTADOS, responder
 from src.router import rotear_pergunta
 
 
@@ -36,9 +36,10 @@ def cmd_rota(perguntas: list[str]) -> int:
     return 0
 
 
-def cmd_perguntar(perguntas: list[str]) -> int:
+def cmd_perguntar(perguntas: list[str], *, incluir_experimentais: bool = False) -> int:
+    escopos = None if incluir_experimentais else ESCOPOS_CONSULTADOS
     for pergunta in _parsear_perguntas(perguntas):
-        resposta = responder(pergunta)
+        resposta = responder(pergunta, escopos=escopos)
         print(f"Pergunta: {pergunta}")
         _imprimir_json(resposta)
         print()
@@ -65,7 +66,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     perguntar_parser = subparsers.add_parser("perguntar", help="Executa a resposta completa do pipeline para uma ou mais perguntas.")
     perguntar_parser.add_argument("perguntas", nargs="*", help="Perguntas em linguagem natural. Se vazio, pede interação no terminal.")
-    perguntar_parser.set_defaults(func=lambda args: cmd_perguntar(args.perguntas if args.perguntas else [input("Pergunta: ")]))
+    perguntar_parser.add_argument(
+        "--incluir-experimentais",
+        action="store_true",
+        help="Busca também nas bases experimentais (ex.: exemplos_teste), não só nas oficiais.",
+    )
+    perguntar_parser.set_defaults(
+        func=lambda args: cmd_perguntar(
+            args.perguntas if args.perguntas else [input("Pergunta: ")],
+            incluir_experimentais=args.incluir_experimentais,
+        )
+    )
 
     return parser
 
