@@ -1,5 +1,5 @@
 scenario_id: contratacoes-rj
-version: "2026-09-18"              # data da declaração desta versão do manifesto
+version: "2026-09-23"
 description: "Contratações públicas do Estado do RJ, ano-base 2025"
 
 coleta:
@@ -14,23 +14,33 @@ diretorios_locais:
   relatorios: "data/runs"
 bases:
   # ---------------------------------------------------------------------
+  # BASES CANÔNICAS — entram na execução oficial.
+  # ---------------------------------------------------------------------
   # NATUREZA: estruturada
   # ---------------------------------------------------------------------
   - base_id: contratos_estruturado
+    escopo: oficial
     natureza: estruturada
-    fonte: "PNCP - API de consulta v1/v3 (/v1/contratos)"
+    fonte: "PNCP - API de consulta de contratações/publicação"
     acesso:
-      tipo: rest_api
-      endpoint: "https://pncp.gov.br/api/consulta/v1/contratos"
+      tipo: provider
+      provider: pncp
+      resource_type: contratacao
+      transporte: http_json
+      estrategia: paginated_collection
       params:
         dataInicial: "2025-01-01"
-        dataFinal: "2025-01-31"
-      paginacao:
-        campo: "pagina"
-        tamanho: 50
+        dataFinal: "2025-12-31"
+        modalidades: [1, 3, 4, 5, 6, 7, 8, 9, 11]
+        uf: "RJ"
       rate_limit_seg: 1.0
     selecao_deterministica: true
-    volume_alvo: 1200
+    selecao:
+      deterministica: true
+      limite: 160
+      chave: "numeroControlePNCP"
+      max_paginas: 2
+    volume_alvo: 160
     formato: json
     licenca: "Dados abertos gov.br - atribuição"
     sensitivity_default: publico
@@ -39,16 +49,19 @@ bases:
     metadados_extras: [orgao, modalidade, valor, municipio, ano]
 
   - base_id: editais_normativo
+    escopo: oficial
     natureza: normativa
     fonte: "Planalto, REDELOG RJ, CGE-RJ e MPPI"
     acesso:
       tipo: http_misto
+      transporte: http_misto
+      estrategia: fixed_sources
       urls:
-        - "https://www.planalto.gov.br/ccivil_03/_ato2019-2022/2021/lei/l14133.htm"
+        - "https://legis.senado.gov.br/norma/33382036/publicacao/33383820"
         - "https://redelog.rj.gov.br/redelog/legislacao-licitacoes/"
         - "https://cge.rj.gov.br/legislacao/decretos/"
         - "https://www.mppi.mp.br/internet/wp-content/uploads/2021/04/L14133.pdf"
-      rate_limit_seg: 0.5
+      rate_limit_seg: 2.0
     selecao_deterministica: true
     volume_alvo: 4
     formatos: [html, htm, pdf]
@@ -58,7 +71,67 @@ bases:
     chunking_sugerido: "Split por cláusula, com overlap"
     metadados_extras: [numero_edital, orgao, data_publicacao, objeto]
 
+  - base_id: atas_conversacional
+    escopo: oficial
+    natureza: conversacional
+    fonte: "PNCP - atas de registro de preço"
+    acesso:
+      tipo: provider
+      provider: pncp
+      resource_type: ata
+      transporte: http_json
+      estrategia: paginated_collection
+      params:
+        dataInicial: "2025-01-01"
+        dataFinal: "2025-12-31"
+        tamanhoPagina: 50
+        maxPaginas: 10
+      rate_limit_seg: 1.0
+    selecao_deterministica: true
+    selecao:
+      deterministica: true
+      limite: 20
+      chave: "numeroControlePNCPAta"
+    volume_alvo: 20
+    formato: pdf
+    licenca: "Dados abertos gov.br - atribuição"
+    sensitivity_default: publico
+    campo_vigencia: "dataVigenciaFim"
+    chunking_sugerido: "Texto por seção, com overlap"
+    metadados_extras: [numero_controle_pncp, orgao, objeto, data_vigencia]
+
+  - base_id: pca_agregado
+    escopo: oficial
+    natureza: agregada
+    fonte: "PNCP - Plano de Contratações Anual consolidado"
+    acesso:
+      tipo: provider
+      provider: pncp
+      resource_type: pca
+      transporte: http_misto
+      estrategia: units_by_organization_and_year
+      params:
+        cnpjs: ["42498600000171"]
+        anos: [2024, 2025]
+      rate_limit_seg: 1.0
+    selecao_deterministica: true
+    selecao:
+      deterministica: true
+      limite: 16
+      chave: "numeroControlePNCP"
+    volume_alvo: 16
+    formatos: [json, csv]
+    licenca: "Dados abertos gov.br - atribuição"
+    sensitivity_default: publico
+    campo_vigencia: "anoPca"
+    chunking_sugerido: "1 indicador agregado = 1 chunk"
+    metadados_extras: [orgao, ano, valor]
+
+  # ---------------------------------------------------------------------
+  # BASES AUXILIARES — somente por seleção experimental explícita.
+  # ---------------------------------------------------------------------
   - base_id: contratacoes_publicacao_rj
+    escopo: experimental
     natureza: estruturada
     fonte: "PNCP - API pública de consulta"
     acesso:
@@ -80,8 +153,12 @@ bases:
     formato: json
     licenca: "Dados abertos gov.br - atribuição"
     sensitivity_default: publico
+    campo_vigencia: "dataPublicacao"
+    chunking_sugerido: "1 contratação = 1 chunk, serializado em linguagem natural"
+    metadados_extras: [orgao, modalidade, valor, municipio, ano]
 
   - base_id: documentos_pncp
+    escopo: experimental
     natureza: normativa
     fonte: "PNCP - documentos de contratações e atas"
     acesso:
@@ -102,10 +179,14 @@ bases:
     formato: pdf
     licenca: "Dados abertos gov.br - atribuição"
     sensitivity_default: publico
+    campo_vigencia: "dataPublicacao"
+    chunking_sugerido: "Texto por seção, com overlap"
+    metadados_extras: [numero_controle_pncp, orgao, objeto, data_publicacao]
     local: "data/raw/vN/documentos_pncp"
     deduplicacao: "SHA-256"
 
   - base_id: respostas_api_jsonl
+    escopo: experimental
     natureza: conversacional
     fonte: "PNCP - respostas JSON normalizadas localmente"
     acesso:
@@ -118,9 +199,12 @@ bases:
     sensitivity_default: publico
     local: "data/raw/vN/respostas_api_jsonl"
     deduplicacao: "SHA-256"
+    chunking_sugerido: "1 resposta JSON = 1 chunk"
+    metadados_extras: [endpoint, status_http, pagina]
 
   # Base local opcional para testes rápidos, sem requisições externas.
   - base_id: exemplos_teste
+    escopo: experimental
     natureza: normativa
     fonte: "PDFs locais versionados como fixtures de teste"
     acesso:
@@ -133,9 +217,12 @@ bases:
     licenca: "Fixture de teste do repositorio"
     sensitivity_default: publico
     deduplicacao: "SHA-256"
+    chunking_sugerido: "Texto por seção, com overlap"
+    metadados_extras: [nome_arquivo, fixture]
 
   # Amostra real opcional em CSV, publicada pelo Portal de Dados Abertos do RJ.
   - base_id: licitacoes_siga_csv
+    escopo: experimental
     natureza: estruturada
     fonte: "SEPLAG-RJ - Sistema Integrado de Gestão de Aquisições (SIGA)"
     acesso:

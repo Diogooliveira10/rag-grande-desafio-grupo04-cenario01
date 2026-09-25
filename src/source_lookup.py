@@ -6,6 +6,11 @@ import json
 import time
 from typing import Any
 
+try:
+    from .providers.pncp import PNCPProvider
+except ImportError:
+    from providers.pncp import PNCPProvider
+
 
 def _first(record: dict[str, Any], *keys: str) -> Any:
     for key in keys:
@@ -99,6 +104,8 @@ def lookup_pncp(
     except ImportError:
         import source_catalog
 
+    provider = PNCPProvider()
+
     page_size = max(1, min(int(page_size), 100))
     max_pages = max(1, int(max_pages))
     max_results = max(1, int(max_results))
@@ -151,6 +158,7 @@ def lookup_pncp(
             if not _matches(record, query):
                 continue
             purchase = source_catalog.sample_purchase([record])
+            source_ref = provider.purchase_ref(purchase) if purchase else None
             detail_url = None
             documents: list[dict[str, Any]] = []
             if purchase:
@@ -193,6 +201,8 @@ def lookup_pncp(
                     "url": detail_url or url,
                     "document_urls": [document["url"] for document in documents],
                     "documents": documents,
+                    "source_ref": source_ref.to_dict() if source_ref else None,
+                    "provider": "pncp",
                     "metadata": record,
                 }
             )

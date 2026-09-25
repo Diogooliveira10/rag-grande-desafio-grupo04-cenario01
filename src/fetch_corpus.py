@@ -18,6 +18,7 @@ import importlib
 import json
 import os
 import re
+import socket
 import shutil
 import sys
 import time
@@ -30,6 +31,15 @@ from urllib.parse import urlencode, urlsplit, urlunsplit
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+
+try:
+    from .providers import get_provider
+    from .providers.base import SourceRef
+    from .corpus_validator import ValidationResult, validate_inventory_contract
+except ImportError:
+    from providers import get_provider
+    from providers.base import SourceRef
+    from corpus_validator import ValidationResult, validate_inventory_contract
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -59,6 +69,85 @@ class _RunLogger:
         }
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+class _VersionLock:
+    """Lock exclusivo para impedir dois writers na mesma versão."""
+
+    def __init__(self, version: int) -> None:
+        self.path = RAW_ROOT / ".staging" / f"v{version}.lock"
+        self._owned = False
+
+    @staticmethod
+    def _process_is_alive(pid: int) -> bool:
+        if os.name == "nt":
+            import ctypes
+
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            handle = kernel32.OpenProcess(0x1000, False, pid)
+            if not handle:
+                return False
+            exit_code = ctypes.c_ulong()
+            try:
+                if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                    return False
+                return exit_code.value == 259
+            finally:
+                kernel32.CloseHandle(handle)
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except OSError:
+            return False
+        return True
+
+    def _is_stale(self) -> bool:
+        try:
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+            if payload.get("hostname") != socket.gethostname():
+                return False
+            pid = int(payload["pid"])
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+            return False
+        return not self._process_is_alive(pid)
+
+    def acquire(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "pid": os.getpid(),
+            "hostname": socket.gethostname(),
+            "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        for attempt in range(2):
+            try:
+                descriptor = os.open(str(self.path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                if attempt == 0 and self._is_stale():
+                    try:
+                        self.path.unlink()
+                    except FileNotFoundError:
+                        continue
+                    continue
+                raise RuntimeError(f"versão já está sendo coletada: {self.path}")
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+                handle.write("\n")
+            self._owned = True
+            return
+        raise RuntimeError(f"não foi possível adquirir lock da versão: {self.path}")
+
+    def release(self) -> None:
+        if not self._owned:
+            return
+        try:
+            self.path.unlink()
+        except FileNotFoundError:
+            pass
+        finally:
+            self._owned = False
 
 
 @dataclass(frozen=True)
@@ -415,7 +504,7 @@ RAW_ROOT = DATA_ROOT / "raw"
 OBJECTS_ROOT = RAW_ROOT / ".objects" / "sha256"
 INVENTORY_ROOT = DATA_ROOT / "inventory"
 RUNS_ROOT = DATA_ROOT / "runs"
-CORPUS_INVENTORY_PATH = DATA_ROOT / "CORPUS_INVENTORY.md"
+CORPUS_INVENTORY_PATH = PROJECT_ROOT / "CORPUS_INVENTORY.md"
 
 
 def _configure_data_root(data_root: Path) -> None:
@@ -426,7 +515,12 @@ def _configure_data_root(data_root: Path) -> None:
     OBJECTS_ROOT = RAW_ROOT / ".objects" / "sha256"
     INVENTORY_ROOT = DATA_ROOT / "inventory"
     RUNS_ROOT = DATA_ROOT / "runs"
-    CORPUS_INVENTORY_PATH = DATA_ROOT / "CORPUS_INVENTORY.md"
+    official_data_root = (PROJECT_ROOT / "data").resolve()
+    CORPUS_INVENTORY_PATH = (
+        PROJECT_ROOT / "CORPUS_INVENTORY.md"
+        if DATA_ROOT.resolve() == official_data_root
+        else DATA_ROOT / "CORPUS_INVENTORY.md"
+    )
 
 
 def _strip_yaml_comment(value: str) -> str:
@@ -616,8 +710,22 @@ def load_manifest(path: Path) -> dict[str, Any]:
                 raise ValueError(f"base sem campo obrigatório: {field}")
         if base["base_id"] in seen:
             raise ValueError(f"base_id duplicado: {base['base_id']}")
+        escopo = str(base.get("escopo") or "experimental").lower()
+        if escopo not in {"oficial", "experimental"}:
+            raise ValueError(f"escopo inválido para a base {base['base_id']}: {escopo}")
+        base["escopo"] = escopo
         seen.add(base["base_id"])
     return manifest
+
+
+def _manifest_for_scope(manifest: dict[str, Any], *, official: bool) -> dict[str, Any]:
+    """Retorna o manifesto limitado ao escopo da execução."""
+    if not official:
+        return manifest
+    bases = [base for base in manifest["bases"] if base.get("escopo") == "oficial"]
+    if not bases:
+        raise ValueError("manifesto não declara bases com escopo oficial")
+    return {**manifest, "bases": bases}
 
 
 def _clean_url(value: str) -> str:
@@ -672,6 +780,11 @@ def _estimate_base_requests(base: dict[str, Any]) -> int:
     if kind in {"http_pdf", "http_misto", "http_csv"}:
         urls = access.get("urls") or ([access.get("url")] if access.get("url") else [])
         return len([url for url in urls if url])
+    if kind in {"resource_set", "pncp_resource_set"}:
+        resources = access.get("recursos") or access.get("resources") or []
+        return len(resources)
+    if kind == "provider":
+        return max(1, len(access.get("sources") or []))
     endpoints = access.get("endpoints") or {"principal": access.get("endpoint")}
     endpoint_count = len([endpoint for endpoint in endpoints.values() if endpoint])
     if kind == "rest_api_mais_arquivo" and any("{" in str(endpoint) for endpoint in endpoints.values() if endpoint):
@@ -688,9 +801,9 @@ def _estimate_base_requests(base: dict[str, Any]) -> int:
     return max(1, endpoint_count)
 
 
-def _dry_run_update(manifest_path: Path) -> int:
+def _dry_run_update(manifest_path: Path, *, official: bool = False) -> int:
     """Mostra o plano do update sem criar logs, checkpoints ou arquivos."""
-    manifest = load_manifest(manifest_path)
+    manifest = _manifest_for_scope(load_manifest(manifest_path), official=official)
     latest = _latest_version()
     if latest is None:
         raise RuntimeError("update exige uma versão anterior")
@@ -754,7 +867,11 @@ def _dry_run_update(manifest_path: Path) -> int:
 
 
 def _relative_path(path: Path) -> str:
-    return path.resolve().relative_to(PROJECT_ROOT.resolve()).as_posix()
+    resolved = path.resolve()
+    try:
+        return resolved.relative_to(PROJECT_ROOT.resolve()).as_posix()
+    except ValueError:
+        return resolved.as_posix()
 
 
 def _path_from_record(record: dict[str, Any]) -> Path | None:
@@ -778,16 +895,167 @@ class _VersionContext:
     last_request_at: dict[str, float] = field(default_factory=dict)
     previous_items: dict[str, dict[str, Any]] = field(default_factory=dict)
     previous_version: int | None = None
+    selection: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+
+
+def _selection_from_items(items: dict[str, dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    selection: dict[str, list[dict[str, Any]]] = {}
+    seen: dict[str, set[str]] = {}
+    for logical_id, record in sorted(items.items()):
+        source_value = record.get("source_ref")
+        if not isinstance(source_value, dict):
+            continue
+        try:
+            source_ref = SourceRef.from_dict(source_value)
+        except (TypeError, ValueError, KeyError):
+            continue
+        base_id = str(record.get("base_id") or "")
+        stable_id = source_ref.stable_id
+        if not base_id or stable_id in seen.setdefault(base_id, set()):
+            continue
+        seen[base_id].add(stable_id)
+        selection.setdefault(base_id, []).append(
+            {
+                "logical_id": logical_id,
+                "stable_id": stable_id,
+                "source_ref": source_ref.to_dict(),
+            }
+        )
+    return selection
+
+
+def _set_selection(
+    context: _VersionContext,
+    base_id: str,
+    source_values: list[dict[str, Any]],
+) -> None:
+    if not hasattr(context, "selection"):
+        context.selection = {}
+    selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for source_value in source_values:
+        source_ref = SourceRef.from_dict(source_value)
+        if source_ref.stable_id in seen:
+            continue
+        seen.add(source_ref.stable_id)
+        selected.append(
+            {
+                "stable_id": source_ref.stable_id,
+                "source_ref": source_ref.to_dict(),
+            }
+        )
+    context.selection[base_id] = selected
+
+
+def _validate_checkpoint(
+    checkpoint: dict[str, Any],
+    manifest: dict[str, Any] | None,
+    manifest_hash: str,
+    version: int,
+    staging_path: Path,
+) -> ValidationResult:
+    errors: list[str] = []
+    if checkpoint.get("manifest_hash") != manifest_hash:
+        errors.append("manifest_hash incompatível")
+    if checkpoint.get("version") not in {None, f"v{version}"}:
+        errors.append("versão do checkpoint incompatível")
+    if checkpoint.get("state") not in {"staging", "incomplete", "promoted"}:
+        errors.append("estado do checkpoint inválido")
+
+    items = checkpoint.get("items", {})
+    if not isinstance(items, dict):
+        errors.append("items do checkpoint não é um objeto")
+        return ValidationResult(tuple(errors))
+
+    manifest_bases = {
+        str(base.get("base_id")): base
+        for base in (manifest or {}).get("bases", [])
+        if isinstance(base, dict) and base.get("base_id")
+    }
+    logical_by_base: dict[str, int] = {}
+    source_ids_by_base: dict[str, set[str]] = {}
+    for logical_id, record in items.items():
+        if not isinstance(record, dict):
+            errors.append(f"item {logical_id}: registro inválido")
+            continue
+        if record.get("logical_id") not in {None, logical_id}:
+            errors.append(f"item {logical_id}: logical_id divergente")
+        base_id = str(record.get("base_id") or "")
+        if manifest_bases and base_id not in manifest_bases:
+            errors.append(f"item {logical_id}: base desconhecida {base_id!r}")
+        if record.get("status") == "ok":
+            path = _path_from_record(record)
+            if path is None:
+                errors.append(f"item {logical_id}: arquivo ausente")
+            elif checkpoint.get("state") != "promoted":
+                try:
+                    path.resolve().relative_to(staging_path.resolve())
+                except ValueError:
+                    errors.append(f"item {logical_id}: caminho fora do staging")
+            expected_sha = record.get("sha256")
+            if not expected_sha:
+                errors.append(f"item {logical_id}: SHA-256 ausente")
+            elif path is not None and _file_sha256(path) != expected_sha:
+                errors.append(f"item {logical_id}: SHA-256 divergente")
+            units = int(record.get("unidades_logicas", record.get("registros", 0)) or 0)
+            logical_by_base[base_id] = logical_by_base.get(base_id, 0) + units
+            source_value = record.get("source_ref")
+            if isinstance(source_value, dict):
+                try:
+                    source_id = SourceRef.from_dict(source_value).stable_id
+                except (TypeError, ValueError, KeyError) as exc:
+                    errors.append(f"item {logical_id}: SourceRef inválida: {exc}")
+                else:
+                    source_ids_by_base.setdefault(base_id, set()).add(source_id)
+
+    selection = checkpoint.get("selection")
+    if selection is not None:
+        if not isinstance(selection, dict):
+            errors.append("selection do checkpoint não é um objeto")
+        else:
+            for base_id, entries in selection.items():
+                if not isinstance(entries, list):
+                    errors.append(f"selection/{base_id}: não é uma lista")
+                    continue
+                seen: set[str] = set()
+                for entry in entries:
+                    if not isinstance(entry, dict) or not isinstance(entry.get("source_ref"), dict):
+                        errors.append(f"selection/{base_id}: entrada inválida")
+                        continue
+                    try:
+                        source_id = SourceRef.from_dict(entry["source_ref"]).stable_id
+                    except (TypeError, ValueError, KeyError) as exc:
+                        errors.append(f"selection/{base_id}: SourceRef inválida: {exc}")
+                        continue
+                    if source_id in seen:
+                        errors.append(f"selection/{base_id}: SourceRef duplicada {source_id}")
+                    seen.add(source_id)
+                    if entry.get("stable_id") not in {None, source_id}:
+                        errors.append(f"selection/{base_id}: stable_id divergente")
+                target = manifest_bases.get(base_id, {}).get("volume_alvo")
+                if target is not None and len(entries) > int(target):
+                    errors.append(f"selection/{base_id}: excede volume_alvo")
+                missing = source_ids_by_base.get(base_id, set()) - seen
+                if missing:
+                    errors.append(f"selection/{base_id}: item fora da seleção congelada")
+
+    for base_id, observed in logical_by_base.items():
+        target = manifest_bases.get(base_id, {}).get("volume_alvo")
+        if target is not None and observed > int(target):
+            errors.append(f"{base_id}: unidades lógicas excedem volume_alvo")
+    return ValidationResult(tuple(errors))
 
 
 def _checkpoint_write(context: _VersionContext, state: str = "staging") -> None:
     context.checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    selection = context.selection or _selection_from_items(context.items)
     payload = {
         "scenario_id": context.manifest["scenario_id"],
         "version": f"v{context.version}",
         "manifest_hash": context.manifest_hash,
         "coletado_em": context.collected_at,
         "state": state,
+        "selection": selection,
         "items": context.items,
     }
     temporary = context.checkpoint_path.with_suffix(".tmp")
@@ -810,9 +1078,20 @@ def _load_version_context(
         raise RuntimeError(f"staging sem checkpoint; recuse sobrescrever: {staging_path}")
     if checkpoint_path.exists():
         checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
-        if checkpoint.get("manifest_hash") != manifest_hash:
-            raise RuntimeError(f"checkpoint de v{version} pertence a outro manifesto")
+        validation = _validate_checkpoint(
+            checkpoint,
+            manifest,
+            manifest_hash,
+            version,
+            staging_path,
+        )
+        if not validation.ok:
+            details = "; ".join(validation.errors)
+            raise RuntimeError(f"checkpoint inválido para resume: {details}")
         items = dict(checkpoint.get("items", {}))
+        selection = checkpoint.get("selection") or _selection_from_items(items)
+    else:
+        selection = {}
     staging_path.mkdir(parents=True, exist_ok=True)
     context = _VersionContext(
         manifest=manifest,
@@ -829,6 +1108,7 @@ def _load_version_context(
         },
         previous_items=previous_items or {},
         previous_version=previous_version,
+        selection=selection,
         last_request_at={},
     )
     _checkpoint_write(context)
@@ -989,7 +1269,21 @@ def _materialize_previous_record(
 
 
 def _base_record(context: _VersionContext, base: dict[str, Any], logical_id: str, origin: str, result: dict[str, Any], *, tipo: str, registros: int = 0) -> dict[str, Any]:
-    record = {"logical_id": logical_id, "base_id": base["base_id"], "natureza": base.get("natureza"), "tipo": tipo, "origem": origin, "coletado_em": context.collected_at, "registros": registros, **result}
+    path = result.get("path")
+    record = {
+        "logical_id": logical_id,
+        "base_id": base["base_id"],
+        "escopo": base.get("escopo", "experimental"),
+        "natureza": base.get("natureza"),
+        "tipo": tipo,
+        "origem": origin,
+        "coletado_em": context.collected_at,
+        "manifest_hash": context.manifest_hash,
+        "registros": registros,
+        "source_file": path,
+        "size_bytes": int(result.get("bytes", 0) or 0),
+        **result,
+    }
     context.items[logical_id] = record
     _checkpoint_write(context)
     return record
@@ -1000,8 +1294,24 @@ def _completed_item(context: _VersionContext, logical_id: str) -> dict[str, Any]
     return record if record and record.get("status") == "ok" and _path_from_record(record) else None
 
 
-def _failed_record(context: _VersionContext, base: dict[str, Any], logical_id: str, origin: str, error: str, tipo: str = "desconhecido") -> dict[str, Any]:
-    return _base_record(context, base, logical_id, origin, {"status": "falhou", "bytes": 0, "sha256": None, "path": None, "erro": error}, tipo=tipo)
+def _failed_record(
+    context: _VersionContext,
+    base: dict[str, Any],
+    logical_id: str,
+    origin: str,
+    error: str,
+    tipo: str = "desconhecido",
+    *,
+    status: str = "falhou",
+) -> dict[str, Any]:
+    return _base_record(
+        context,
+        base,
+        logical_id,
+        origin,
+        {"status": status, "bytes": 0, "sha256": None, "path": None, "erro": error},
+        tipo=tipo,
+    )
 
 
 def _extension_for(content_type: str, url: str, default: str = ".bin") -> str:
@@ -1013,9 +1323,18 @@ def _extension_for(content_type: str, url: str, default: str = ".bin") -> str:
     return suffix if suffix in {".json", ".jsonl", ".pdf", ".html", ".htm"} else default
 
 
-def _collect_http_item(context: _VersionContext, base: dict[str, Any], url: str, logical_id: str, filename_prefix: str) -> dict[str, Any]:
+def _collect_http_item(
+    context: _VersionContext,
+    base: dict[str, Any],
+    url: str,
+    logical_id: str,
+    filename_prefix: str,
+    *,
+    expected_type: str | None = None,
+) -> dict[str, Any]:
     existing = _completed_item(context, logical_id)
     if existing:
+        existing["unidades_logicas"] = 1
         return existing
     previous = _previous_record(context, logical_id)
     conditional_headers = _conditional_headers(previous)
@@ -1039,7 +1358,9 @@ def _collect_http_item(context: _VersionContext, base: dict[str, Any], url: str,
                 for key in ("etag", "last_modified"):
                     if result.get(key):
                         saved[key] = result[key]
-                return _base_record(context, base, logical_id, url, saved, tipo=Path(str(saved["path"])).suffix.lstrip(".") or "bin", registros=int(previous.get("registros", 0) or 0))
+                record = _base_record(context, base, logical_id, url, saved, tipo=Path(str(saved["path"])).suffix.lstrip(".") or "bin", registros=int(previous.get("registros", 0) or 0))
+                record["unidades_logicas"] = 1
+                return record
         if result.get("status") not in {"baixado", "reutilizado"}:
             return _failed_record(context, base, logical_id, url, str(result.get("erro") or result.get("observacao") or result.get("status")), _extension_for(str(result.get("content_type", "")), url).lstrip("."))
         source_path = Path(str(result.get("arquivo", "")))
@@ -1048,6 +1369,8 @@ def _collect_http_item(context: _VersionContext, base: dict[str, Any], url: str,
         if not source_path.exists():
             return _failed_record(context, base, logical_id, url, "download sem arquivo resultante")
         extension = source_path.suffix or _extension_for(str(result.get("content_type", "")), url)
+        if expected_type and extension in {"", ".bin"}:
+            extension = f".{expected_type.lstrip('.') }"
         saved = _save_version_bytes(context, source_path.read_bytes(), str(base["base_id"]), filename_prefix, extension)
         if previous and previous.get("sha256") == saved.get("sha256"):
             saved["reutilizado_de"] = f"v{context.previous_version}" if context.previous_version else previous.get("path")
@@ -1056,7 +1379,9 @@ def _collect_http_item(context: _VersionContext, base: dict[str, Any], url: str,
             if result.get(key):
                 saved[key] = result[key]
         source_path.unlink(missing_ok=True)
-        return _base_record(context, base, logical_id, url, saved, tipo=Path(str(saved["path"])).suffix.lstrip(".") or "bin")
+        record = _base_record(context, base, logical_id, url, saved, tipo=Path(str(saved["path"])).suffix.lstrip(".") or "bin")
+        record["unidades_logicas"] = 1
+        return record
     except Exception as exc:
         return _failed_record(context, base, logical_id, url, f"{type(exc).__name__}: {exc}")
 
@@ -1096,10 +1421,139 @@ def _payload_records(payload: Any) -> list[Any]:
     return []
 
 
+def _selection_limit(base: dict[str, Any]) -> int | None:
+    selection = base.get("selecao") or {}
+    raw_limit = selection.get("limite") or selection.get("limit")
+    if raw_limit in (None, ""):
+        return None
+    return max(1, int(raw_limit))
+
+
+def _selection_key(record: Any, base: dict[str, Any]) -> str:
+    selection = base.get("selecao") or {}
+    field = str(selection.get("chave") or selection.get("key") or "")
+    if isinstance(record, dict) and field and record.get(field) not in (None, ""):
+        return str(record[field])
+    return json.dumps(record, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _payload_with_records(payload: Any, records: list[Any]) -> Any:
+    if isinstance(payload, list):
+        return records
+    if isinstance(payload, dict):
+        result = dict(payload)
+        for key in ("data", "items", "results", "content"):
+            if isinstance(payload.get(key), list):
+                result[key] = records
+                return result
+    return {"data": records}
+
+
+def _collect_selected_rest_endpoint(
+    context: _VersionContext,
+    base: dict[str, Any],
+    endpoint_name: str,
+    endpoint: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Coleta páginas completas e persiste somente a seleção canônica."""
+    endpoint = _clean_url(endpoint)
+    access = base.get("acesso", {})
+    params = dict(access.get("params") or {})
+    pagination = access.get("paginacao") or {
+        "campo": "pagina",
+        "tamanho": params.get("tamanhoPagina", 50),
+    }
+    page_field = str(pagination.get("campo") or "pagina")
+    page_size = max(
+        1,
+        int(
+            pagination.get("tamanho")
+            or params.get("tamanhoPagina")
+            or access.get("tamanho_pagina")
+            or 50
+        ),
+    )
+    max_pages = max(1, int((base.get("selecao") or {}).get("max_paginas") or 100))
+    all_records: list[Any] = []
+    seen_pages: set[str] = set()
+    last_payload: Any = {"data": []}
+    for page in range(1, max_pages + 1):
+        request_params = dict(params)
+        request_params[page_field] = page
+        url = _build_request_url(endpoint, request_params)
+        response = source_check.request_url(url, "json", attempts=3, timeout=30.0)
+        payload = response.get("json")
+        if payload is None:
+            return [
+                _failed_record(
+                    context,
+                    base,
+                    f"{base['base_id']}:{endpoint_name}:selecao",
+                    url,
+                    str(response.get("erro") or response.get("status") or "resposta JSON ausente"),
+                    "json",
+                )
+            ]
+        body = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+        if digest in seen_pages:
+            break
+        seen_pages.add(digest)
+        last_payload = payload
+        records = _payload_records(payload)
+        all_records.extend(records)
+        if not records or len(records) < page_size:
+            break
+
+    unique = {_selection_key(record, base): record for record in all_records}
+    selected = [unique[key] for key in sorted(unique)[:limit]]
+    selected_payload = _payload_with_records(last_payload, selected)
+    saved = _save_version_bytes(
+        context,
+        json.dumps(selected_payload, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8"),
+        str(base["base_id"]),
+        f"{endpoint_name}_selecionado",
+        ".json",
+    )
+    logical_id = f"{base['base_id']}:{endpoint_name}:selecionado"
+    record = _base_record(
+        context,
+        base,
+        logical_id,
+        endpoint,
+        saved,
+        tipo="json",
+        registros=len(selected),
+    )
+    record["selecao"] = {
+        "limite": limit,
+        "observados": len(all_records),
+        "deduplicados": len(unique),
+    }
+    _checkpoint_write(context)
+    output = [record]
+    if len(selected) < limit:
+        output.append(
+            _failed_record(
+                context,
+                base,
+                f"{base['base_id']}:{endpoint_name}:alvo",
+                endpoint,
+                f"alvo de {limit} registros não atingido; somente {len(selected)} selecionados",
+                "json",
+            )
+        )
+    return output
+
+
 def _collect_rest_endpoint(context: _VersionContext, base: dict[str, Any], endpoint_name: str, endpoint: str) -> list[dict[str, Any]]:
     endpoint = _clean_url(endpoint)
     if "{" in endpoint or "}" in endpoint:
         return [_failed_record(context, base, f"{base['base_id']}:{endpoint_name}:template", endpoint, "endpoint possui placeholders e precisa de adapter de descoberta PNCP", "json")]
+    selection_limit = _selection_limit(base)
+    if selection_limit is not None:
+        return _collect_selected_rest_endpoint(context, base, endpoint_name, endpoint, selection_limit)
     access = base.get("acesso", {})
     params = dict(access.get("params") or {})
     pagination = access.get("paginacao") or (
@@ -1296,9 +1750,291 @@ def _collect_pncp_documents(context: _VersionContext, base: dict[str, Any]) -> l
     return output
 
 
+def _collect_resource_set(context: _VersionContext, base: dict[str, Any]) -> list[dict[str, Any]]:
+    """Coleta um conjunto pequeno e determinístico de recursos declarados."""
+    access = base.get("acesso") or {}
+    resources = access.get("recursos") or access.get("resources") or []
+    output: list[dict[str, Any]] = []
+    for index, resource in enumerate(resources, start=1):
+        if isinstance(resource, str):
+            resource = {"url": resource}
+        if not isinstance(resource, dict) or not resource.get("url"):
+            output.append(
+                _failed_record(
+                    context,
+                    base,
+                    f"{base['base_id']}:resource:{index}",
+                    "resource_set",
+                    "recurso sem URL declarada",
+                )
+            )
+            continue
+
+        url = _clean_url(str(resource["url"]))
+        resource_id = _safe_component(str(resource.get("id") or f"{index:03d}"))
+        kind = str(resource.get("tipo") or _extension_for("", url)).lower().lstrip(".")
+        logical_id = f"{base['base_id']}:resource:{resource_id}"
+        if kind == "json":
+            resource_access = {
+                **access,
+                "endpoint": url,
+                "params": resource.get("params") or {},
+                "paginacao": resource.get("paginacao") or {},
+            }
+            resource_base = {**base, "acesso": resource_access}
+            output.extend(
+                _collect_rest_endpoint(
+                    context,
+                    resource_base,
+                    resource_id,
+                    url,
+                )
+            )
+        else:
+            output.append(
+                _collect_http_item(
+                    context,
+                    base,
+                    url,
+                    logical_id,
+                    f"{base['base_id']}_{resource_id}",
+                    expected_type=kind,
+                )
+            )
+    return output or [
+        _failed_record(
+            context,
+            base,
+            f"{base['base_id']}:resource-set",
+            "resource_set",
+            "nenhum recurso declarado",
+        )
+    ]
+
+
+def _collect_provider_base(context: _VersionContext, base: dict[str, Any]) -> list[dict[str, Any]]:
+    """Materializa referências explícitas usando o mesmo provider da curadoria."""
+    access = base.get("acesso") or {}
+    provider_name = str(access.get("provider") or "").strip()
+    if not provider_name:
+        return [_failed_record(context, base, f"{base['base_id']}:provider", "provider", "provider não declarado")]
+
+    provider = get_provider(provider_name)
+    for logical_id, item in list(context.items.items()):
+        if item.get("base_id") == base.get("base_id") and item.get("status") != "ok":
+            context.items.pop(logical_id, None)
+    sources = access.get("sources") or []
+    candidates = []
+    discovered = False
+    target = int(base.get("volume_alvo") or 1)
+    resource_type = str(access.get("resource_type") or "").casefold()
+    resumed_source_ids: set[str] = set()
+    selected_entries = getattr(context, "selection", {}).get(str(base["base_id"]))
+    if not sources and selected_entries:
+        sources = [
+            entry["source_ref"]
+            for entry in selected_entries
+            if isinstance(entry, dict) and isinstance(entry.get("source_ref"), dict)
+        ]
+        resumed_source_ids = {
+            SourceRef.from_dict(source_value).stable_id
+            for source_value in sources
+        }
+    if not sources:
+        existing_sources: dict[str, dict[str, Any]] = {}
+        for item in context.items.values():
+            if item.get("base_id") != base.get("base_id") or not int(item.get("unidades_logicas", 0) or 0):
+                continue
+            source_value = item.get("source_ref")
+            if not isinstance(source_value, dict):
+                continue
+            try:
+                source_ref = SourceRef.from_dict(source_value)
+            except (TypeError, ValueError, KeyError):
+                continue
+            if source_ref.resource_type.casefold() == resource_type:
+                existing_sources[source_ref.stable_id] = source_ref.to_dict()
+        if len(existing_sources) >= target:
+            sources = [existing_sources[key] for key in sorted(existing_sources)[:target]]
+            resumed_source_ids = {
+                SourceRef.from_dict(source_value).stable_id
+                for source_value in sources
+            }
+    if not sources:
+        _wait_rate_limit(context, base)
+        candidates = provider.search(
+            {
+                **access,
+                "resource_type": access.get("resource_type"),
+                "volume_alvo": target,
+                "selecao": base.get("selecao") or {},
+            }
+        )
+        sources = [candidate.source_ref.to_dict() for candidate in candidates]
+        discovered = True
+        if not sources:
+            return [
+                _failed_record(
+                    context,
+                    base,
+                    f"{base['base_id']}:provider:search",
+                    provider_name,
+                    "nenhuma SourceRef encontrada",
+                )
+                ]
+
+    sources = sources[:target]
+    if discovered or str(base["base_id"]) not in getattr(context, "selection", {}):
+        _set_selection(context, str(base["base_id"]), sources)
+        _checkpoint_write(context)
+
+    if resumed_source_ids:
+        cached_records = [
+            item
+            for item in context.items.values()
+            if item.get("base_id") == base.get("base_id")
+            and item.get("status") == "ok"
+            and isinstance(item.get("source_ref"), dict)
+            and SourceRef.from_dict(item["source_ref"]).stable_id in resumed_source_ids
+        ]
+        cached_source_ids = {
+            SourceRef.from_dict(item["source_ref"]).stable_id
+            for item in cached_records
+        }
+        if cached_source_ids == resumed_source_ids:
+            return sorted(cached_records, key=lambda item: str(item.get("logical_id") or ""))
+        sources = [
+            source_value
+            for source_value in sources
+            if SourceRef.from_dict(source_value).stable_id not in cached_source_ids
+        ]
+
+    output: list[dict[str, Any]] = []
+    seen_artifact_urls: set[str] = set()
+    for index, source_value in enumerate(sources, start=1):
+        try:
+            source_ref = SourceRef.from_dict(
+                {**source_value, "provider": source_value.get("provider", provider_name)}
+            )
+            candidate = next(
+                (item for item in candidates if item.source_ref.stable_id == source_ref.stable_id),
+                None,
+            )
+            if (
+                candidate is not None
+                and resource_type in {"contratacao", "contratação", "contrato"}
+                and candidate.metadata
+            ):
+                payload = {
+                    key: value for key, value in candidate.metadata.items() if not str(key).startswith("_")
+                }
+                body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
+                saved = _save_version_bytes(
+                    context,
+                    body,
+                    str(base["base_id"]),
+                    f"{_safe_component(source_ref.stable_id)}_publication",
+                    ".json",
+                )
+                logical_id = f"{base['base_id']}:{source_ref.stable_id}:publication"
+                record = _base_record(
+                    context,
+                    base,
+                    logical_id,
+                    str(candidate.metadata.get("_source_url") or source_ref.stable_id),
+                    saved,
+                    tipo="json",
+                    registros=1,
+                )
+                record["source_ref"] = source_ref.to_dict()
+                record["artifact_id"] = f"{source_ref.stable_id}:publication"
+                record["provider"] = provider_name
+                record["unidades_logicas"] = 1
+                context.items[logical_id] = record
+                _checkpoint_write(context)
+                output.append(record)
+                continue
+            resolved = provider.resolve(source_ref)
+            for artifact in provider.list_artifacts(resolved):
+                if artifact.url in seen_artifact_urls:
+                    continue
+                seen_artifact_urls.add(artifact.url)
+                logical_id = f"{base['base_id']}:{artifact.artifact_id}"
+                if artifact.artifact_type.casefold() == "json":
+                    resource_base = {
+                        **base,
+                        # A seleção limita a busca de unidades lógicas; no detalhe,
+                        # cada artefato já representa uma única unidade resolvida.
+                        "selecao": {},
+                        "acesso": {
+                            **access,
+                            "endpoint": artifact.url,
+                            "params": {},
+                            "paginacao": {},
+                        },
+                    }
+                    records = _collect_rest_endpoint(
+                        context,
+                        resource_base,
+                        _safe_component(artifact.artifact_id),
+                        artifact.url,
+                    )
+                else:
+                    records = [
+                        _collect_http_item(
+                            context,
+                            base,
+                            artifact.url,
+                            logical_id,
+                            Path(artifact.filename).stem if artifact.filename else f"{base['base_id']}_{index:03d}",
+                            expected_type=artifact.artifact_type,
+                        )
+                    ]
+                for record in records:
+                    record["source_ref"] = source_ref.to_dict()
+                    record["artifact_id"] = artifact.artifact_id
+                    record["provider"] = provider_name
+                    record["unidades_logicas"] = int(artifact.metadata.get("logical_unit", True))
+                    context.items[record["logical_id"]] = record
+                    _checkpoint_write(context)
+                    output.append(record)
+        except Exception as exc:
+            output.append(
+                _failed_record(
+                    context,
+                    base,
+                    f"{base['base_id']}:provider:{index}",
+                    provider_name,
+                    f"{type(exc).__name__}: {exc}",
+                )
+            )
+    if discovered and len(sources) < target:
+        output.append(
+            _failed_record(
+                context,
+                base,
+                f"{base['base_id']}:provider:alvo",
+                provider_name,
+                f"alvo de {target} unidades não atingido; somente {len(sources)} encontradas",
+            )
+        )
+    return output
+
 def _collect_base(context: _VersionContext, base: dict[str, Any]) -> list[dict[str, Any]]:
     access = base.get("acesso", {})
     kind = str(access.get("tipo", "")).lower()
+    if kind == "not_configured":
+        return [
+            _failed_record(
+                context,
+                base,
+                f"{base['base_id']}:not-configured",
+                "not_configured",
+                "coletor oficial ainda não configurado",
+                "not_configured",
+                status="not_configured",
+            )
+        ]
     if kind in {"http_pdf", "http_misto", "http_csv"}:
         urls = access.get("urls") or ([access["url"]] if access.get("url") else [])
         return [_collect_http_item(context, base, _clean_url(url), f"{base['base_id']}:url:{index}", f"{base['base_id']}_{index:03d}") for index, url in enumerate(urls, start=1)]
@@ -1311,6 +2047,10 @@ def _collect_base(context: _VersionContext, base: dict[str, Any]) -> list[dict[s
             if endpoint:
                 output.extend(_collect_rest_endpoint(context, base, str(endpoint_name), str(endpoint)))
         return output or [_failed_record(context, base, f"{base['base_id']}:rest", "rest_api", "endpoint não declarado")]
+    if kind in {"resource_set", "pncp_resource_set"}:
+        return _collect_resource_set(context, base)
+    if kind == "provider":
+        return _collect_provider_base(context, base)
     if kind in {"arquivo_local", "processamento_local"}:
         return _collect_local_base(context, base)
     return [_failed_record(context, base, f"{base['base_id']}:adapter", kind, f"tipo de acesso não suportado: {kind}")]
@@ -1334,26 +2074,55 @@ def _build_inventory(
     for base in manifest.get("bases", []):
         base_records = [record for record in records if record.get("base_id") == base["base_id"]]
         successful_base = [record for record in base_records if record.get("status") == "ok" and record.get("path")]
-        observed_records = sum(int(record.get("registros", 0) or 0) for record in successful_base)
-        observed = observed_records or len(successful_base)
+        base_failures = [record for record in base_records if record.get("status") != "ok"]
+        observed_records = sum(
+            int(
+                record.get(
+                    "unidades_logicas",
+                    record.get("registros", 0),
+                )
+                or 0
+            )
+            for record in successful_base
+        )
+        has_record_counts = any(
+            "unidades_logicas" in record or "registros" in record
+            for record in successful_base
+        )
+        observed = observed_records if has_record_counts else len(successful_base)
         formatos: dict[str, int] = {}
         for record in successful_base:
             tipo = str(record.get("tipo") or "bin")
             formatos[tipo] = formatos.get(tipo, 0) + 1
         target = base.get("volume_alvo")
+        target_value = int(target) if target is not None else None
+        if any(record.get("status") == "not_configured" for record in base_records):
+            base_status = "not_configured"
+        elif not base_records:
+            base_status = "empty"
+        elif not successful_base:
+            base_status = "failed"
+        elif base_failures or (target_value is not None and observed < target_value):
+            base_status = "partial"
+        else:
+            base_status = "complete"
         by_base.append({
             "base_id": base["base_id"],
+            "escopo": base.get("escopo", "experimental"),
             "natureza": base.get("natureza"),
+            "status": base_status,
             "arquivos": len(successful_base),
             "itens": observed,
             "formatos": formatos,
             "bytes": sum(int(record.get("bytes", 0) or 0) for record in successful_base),
             "volume_alvo": target,
+            "volume_obtido": observed,
             "volume_observado": observed,
-            "divergencia_alvo": observed - int(target) if target is not None else None,
+            "divergencia_alvo": observed - target_value if target_value is not None else None,
+            "failure_count": len(base_failures),
         })
     total_items = sum(
-        int(record.get("registros", 0) or 0) or 1
+        int(record.get("unidades_logicas", record.get("registros", 0)) or 0)
         for record in successful
     )
     return {
@@ -1364,8 +2133,14 @@ def _build_inventory(
         "version": f"v{version}",
         "coletado_em": collected_at,
         "manifest_hash": manifest_hash if manifest_bound else None,
-        "completo": not failures,
-        "totais": {"arquivos": len(successful), "itens": total_items, "bytes": sum(int(record.get("bytes", 0) or 0) for record in successful), "falhas": len(failures)},
+        "completo": not failures and all(base["status"] == "complete" for base in by_base),
+        "totais": {
+            "arquivos": len(successful),
+            "itens": total_items,
+            "bytes": sum(int(record.get("bytes", 0) or 0) for record in successful),
+            "falhas": len(failures),
+            "failure_count": len(failures),
+        },
         "por_base": by_base,
         "arquivos": records,
         "falhas": [{"origem": record.get("origem"), "erro": record.get("erro", "falha sem detalhe"), "logical_id": record.get("logical_id")} for record in failures],
@@ -1383,15 +2158,15 @@ def _render_corpus_inventory(inventory: dict[str, Any]) -> None:
     totals = inventory["totais"]
     lines = [
         "# Inventário do corpus", "", f"- Tipo: `{inventory.get('inventory_type', 'manifest')}`", f"- Oficial: `{inventory.get('official', False)}`", f"- Vinculado ao manifesto: `{inventory.get('manifest_bound', False)}`", f"- Cenário: `{inventory.get('scenario_id') or '—'}`", f"- Versão: `{inventory.get('version')}`",
-        f"- Coletado em: `{inventory.get('coletado_em')}`", f"- Arquivos: **{totals.get('arquivos', 0)}**", f"- Itens/registros: **{totals.get('itens', 0)}**", f"- Bytes: **{totals.get('bytes', 0)}**", f"- Falhas: **{totals.get('falhas', 0)}**", "",
-        "## Bases", "", "| Base | Natureza | Arquivos | Itens | Formatos | Bytes | Alvo | Divergência |", "|---|---|---:|---:|---|---:|---:|---:|",
+        f"- Coletado em: `{inventory.get('coletado_em')}`", f"- Completo: **{inventory.get('completo', False)}**", f"- Arquivos: **{totals.get('arquivos', 0)}**", f"- Itens/registros: **{totals.get('itens', 0)}**", f"- Bytes: **{totals.get('bytes', 0)}**", f"- Falhas: **{totals.get('falhas', 0)}**", "",
+        "## Bases", "", "| Base | Escopo | Natureza | Status | Arquivos | Itens | Formatos | Bytes | Alvo | Divergência |", "|---|---|---|---|---:|---:|---|---:|---:|---:|",
     ]
     for base in inventory.get("por_base", []):
         formatos = base.get("formatos") or {}
         formatos_text = ", ".join(f"{tipo}: {quantidade}" for tipo, quantidade in formatos.items()) if isinstance(formatos, dict) else ", ".join(formatos)
         alvo = base.get("volume_alvo") if base.get("volume_alvo") is not None else "—"
         divergencia = base.get("divergencia_alvo") if base.get("divergencia_alvo") is not None else "—"
-        lines.append(f"| `{base['base_id']}` | {base.get('natureza') or '—'} | {base.get('arquivos', 0)} | {base.get('itens', 0)} | {formatos_text or '—'} | {base.get('bytes', 0)} | {alvo} | {divergencia} |")
+        lines.append(f"| `{base['base_id']}` | {base.get('escopo') or '—'} | {base.get('natureza') or '—'} | {base.get('status') or '—'} | {base.get('arquivos', 0)} | {base.get('itens', 0)} | {formatos_text or '—'} | {base.get('bytes', 0)} | {alvo} | {divergencia} |")
     lines.extend(["", "## Falhas", ""])
     failures = inventory.get("falhas", [])
     lines.extend((f"- `{failure.get('origem')}`: {failure.get('erro')}" for failure in failures) if failures else ["Nenhuma falha registrada."])
@@ -1463,6 +2238,16 @@ def _promote_version(context: _VersionContext) -> None:
     destination = _version_path(context.version)
     if destination.exists():
         raise FileExistsError(f"versão imutável já existe: {destination}")
+    for logical_id, record in context.items.items():
+        if record.get("status") != "ok":
+            continue
+        path = _path_from_record(record)
+        if path is None or not path.is_file():
+            raise RuntimeError(f"arquivo coletado ausente antes da promoção: {logical_id}")
+        if not record.get("sha256"):
+            raise RuntimeError(f"arquivo coletado sem SHA-256 antes da promoção: {logical_id}")
+        if _file_sha256(path) != record["sha256"]:
+            raise RuntimeError(f"SHA-256 divergente antes da promoção: {logical_id}")
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(context.staging_path), str(destination))
     old_prefix = _relative_path(context.staging_path).rstrip("/") + "/"
@@ -1470,6 +2255,7 @@ def _promote_version(context: _VersionContext) -> None:
     for record in context.items.values():
         if isinstance(record.get("path"), str) and record["path"].startswith(old_prefix):
             record["path"] = new_prefix + record["path"][len(old_prefix):]
+            record["source_file"] = record["path"]
     _checkpoint_write(context, state="promoted")
 
 
@@ -1481,7 +2267,10 @@ def _find_complete_matching_manifest(manifest_hash: str) -> dict[str, Any] | Non
     return None
 
 
-def _find_resumable_version(manifest_hash: str) -> int | None:
+def _find_resumable_version(
+    manifest_hash: str,
+    manifest: dict[str, Any] | None = None,
+) -> int | None:
     checkpoint_root = INVENTORY_ROOT / "checkpoints"
     if not checkpoint_root.exists():
         return None
@@ -1504,7 +2293,17 @@ def _find_resumable_version(manifest_hash: str) -> int | None:
             and checkpoint.get("state") in {"staging", "incomplete"}
             and staging_path.exists()
         ):
-            return version
+            if manifest is None:
+                return version
+            validation = _validate_checkpoint(
+                checkpoint,
+                manifest,
+                manifest_hash,
+                version,
+                staging_path,
+            )
+            if validation.ok:
+                return version
     return None
 
 
@@ -1519,6 +2318,8 @@ def _run_manifest_command(
     logger.event("manifest_load", "started", manifest=str(manifest_path))
     manifest = load_manifest(manifest_path)
     manifest_hash = _manifest_hash(manifest_path)
+    if official and not base_ids:
+        manifest = _manifest_for_scope(manifest, official=True)
     if base_ids:
         if official:
             raise ValueError("--base-id só pode ser usado em uma execução experimental")
@@ -1545,7 +2346,7 @@ def _run_manifest_command(
                 )
             )
             return 0
-    resumable_version = _find_resumable_version(manifest_hash)
+    resumable_version = _find_resumable_version(manifest_hash, manifest)
     previous = None
     if command == "update":
         latest = _latest_version()
@@ -1562,40 +2363,87 @@ def _run_manifest_command(
         if isinstance(record, dict) and record.get("logical_id")
     }
     previous_version = _version_number(str(previous["version"])) if previous and previous.get("version") else None
-    context = _load_version_context(
-        manifest,
-        manifest_hash,
-        version,
-        previous_items=previous_items,
-        previous_version=previous_version,
-    )
-    logger.event(
-        "version_resolution",
-        "resumed" if resumable_version is not None else "started",
-        version=f"v{version}",
-    )
-    for base in manifest["bases"]:
-        started = time.perf_counter()
-        logger.event("base_collection", "started", base_id=base["base_id"])
-        try:
-            _collect_base(context, base)
-        except Exception as exc:
+    version_lock = _VersionLock(version)
+    version_lock.acquire()
+    try:
+        context = _load_version_context(
+            manifest,
+            manifest_hash,
+            version,
+            previous_items=previous_items,
+            previous_version=previous_version,
+        )
+        logger.event(
+            "version_resolution",
+            "resumed" if resumable_version is not None else "started",
+            version=f"v{version}",
+        )
+        for base in manifest["bases"]:
+            started = time.perf_counter()
+            logger.event("base_collection", "started", base_id=base["base_id"])
+            try:
+                _collect_base(context, base)
+            except Exception as exc:
+                logger.event(
+                    "base_collection",
+                    "failed",
+                    base_id=base["base_id"],
+                    duration_ms=round((time.perf_counter() - started) * 1000, 2),
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                raise
             logger.event(
                 "base_collection",
-                "failed",
+                "completed",
                 base_id=base["base_id"],
                 duration_ms=round((time.perf_counter() - started) * 1000, 2),
-                error=f"{type(exc).__name__}: {exc}",
+                items=sum(1 for item in context.items.values() if item.get("base_id") == base["base_id"]),
             )
-            raise
-        logger.event(
-            "base_collection",
-            "completed",
-            base_id=base["base_id"],
-            duration_ms=round((time.perf_counter() - started) * 1000, 2),
-            items=sum(1 for item in context.items.values() if item.get("base_id") == base["base_id"]),
+
+        inventory = _build_inventory(
+            manifest,
+            version,
+            manifest_hash,
+            context.collected_at,
+            context.items,
+            inventory_type="manifest" if official else "experimental",
+            official=official,
         )
-    _promote_version(context)
+        validation = validate_inventory_contract(manifest, inventory, official=official)
+        if not validation.ok:
+            _checkpoint_write(context, state="incomplete")
+            inventory_path = _write_inventory(inventory)
+            _render_corpus_inventory(inventory)
+            logger.event(
+                "validation",
+                "failed",
+                version=inventory["version"],
+                errors=list(validation.errors),
+            )
+            logger.event(
+                "inventory",
+                "completed",
+                version=inventory["version"],
+                inventory_path=_relative_path(inventory_path),
+                totals=inventory["totais"],
+                complete=False,
+            )
+            summary = {
+                "version": inventory["version"],
+                "inventario": _relative_path(inventory_path),
+                "diff": None,
+                "totais": inventory["totais"],
+                "completo": False,
+                "validation_errors": list(validation.errors),
+                "run_id": logger.run_id,
+                "log": _relative_path(logger.path),
+            }
+            print(json.dumps(summary, ensure_ascii=False))
+            return 2
+        logger.event("validation", "passed", version=inventory["version"])
+        _promote_version(context)
+    finally:
+        version_lock.release()
     logger.event("version_promotion", "completed", version=f"v{version}")
     inventory = _build_inventory(
         manifest,
@@ -1664,7 +2512,7 @@ def _manifest_main(argv: list[str]) -> int:
     if args.command == "update" and args.dry_run:
         if args.base_ids:
             parser.error("--base-id não é compatível com update --dry-run")
-        return _dry_run_update(args.manifest.resolve())
+        return _dry_run_update(args.manifest.resolve(), official=args.official)
     run_kwargs = {"official": args.official}
     if args.base_ids:
         run_kwargs["base_ids"] = args.base_ids
