@@ -1,35 +1,28 @@
-"""Recuperação híbrida sobre os índices persistidos por :mod:`src.index`.
-
-O índice atual persiste vetores e metadados, mas não uma implementação BM25.
-Por isso, a busca lexical lê o JSONL normalizado e calcula BM25 em memória,
-sem reindexar nem gerar embeddings durante a busca.
-"""
-
 from __future__ import annotations
 
 import json
 import math
 import re
+import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
+from functools import lru_cache
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import config
-from src.obs import Stage, default_logger
+from src.obs import Stage, default_logger, registrar
+from src.schema import Natureza
 
 
 DEFAULT_RRF_K = 60
 DEFAULT_TOP_K = 10
+DEFAULT_FETCH_K = 50
 _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
-_NATUREZA_TO_BASE = {
-    "normativa": "editais_normativo",
-    "estruturada": "contratos_estruturado",
-    "conversacional": "atas_conversacional",
-    "agregada": "pca_agregado",
-}
+MANIFEST_PATH = config.ROOT_DIR / "corpus_manifest.yaml"
+_NATUREZAS = frozenset(item.value for item in Natureza)
 
 EmbedFn = Callable[[list[str]], list[list[float]]]
 RerankFn = Callable[[str, list["RetrievalResult"]], Sequence[Any]]
@@ -79,17 +72,51 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return records
 
 
-def _selected_base_ids(bases: Iterable[Any] | None) -> set[str] | None:
+@lru_cache(maxsize=4)
+def _manifest_bases(manifest_path: Path = MANIFEST_PATH) -> dict[str, dict[str, Any]]:
+    """``base_id`` -> declaração da base no manifesto (natureza, escopo...)."""
+    if not manifest_path.exists():
+        return {}
+    from src.fetch_corpus import load_manifest
+
+    return {str(base["base_id"]): base for base in load_manifest(manifest_path)["bases"]}
+
+
+def _split_selection(bases: Iterable[Any] | None) -> tuple[set[str], set[str]] | None:
+    """Separa a seleção do roteador em (naturezas, base_ids explícitos).
+
+    Um item que é nome de natureza (``Natureza`` ou "estruturada") seleciona
+    todas as bases daquela natureza; qualquer outro valor é tratado como
+    ``base_id``.
+    """
     if bases is None:
         return None
     if isinstance(bases, str):
         bases = [bases]
-    selected: set[str] = set()
+    naturezas: set[str] = set()
+    base_ids: set[str] = set()
     for base in bases:
-        value = getattr(base, "value", base)
-        value = str(value)
-        selected.add(_NATUREZA_TO_BASE.get(value, value))
-    return selected
+        value = str(getattr(base, "value", base))
+        (naturezas if value in _NATUREZAS else base_ids).add(value)
+    return naturezas, base_ids
+
+
+def _record_base_id(record: Mapping[str, Any], metadata: Mapping[str, Any]) -> str:
+    return str(record.get("base_id") or metadata.get("base_id") or "")
+
+
+def _record_natureza(record: Mapping[str, Any], metadata: Mapping[str, Any]) -> str | None:
+    """Natureza do registro; sem o campo, vem do manifesto pelo ``base_id``."""
+    natureza = record.get("natureza") or metadata.get("natureza")
+    if natureza:
+        return str(getattr(natureza, "value", natureza))
+    declarada = _manifest_bases().get(_record_base_id(record, metadata), {}).get("natureza")
+    return str(declarada) if declarada else None
+
+
+def _record_escopo(record: Mapping[str, Any], metadata: Mapping[str, Any]) -> str | None:
+    escopo = _manifest_bases().get(_record_base_id(record, metadata), {}).get("escopo")
+    return str(escopo) if escopo else None
 
 
 def _metadata_value(metadata: Mapping[str, Any], key: str) -> Any:
@@ -136,7 +163,22 @@ def _parse_number(value: Any) -> Decimal | None:
     if not candidate:
         return None
     if "," in candidate:
-        candidate = candidate.replace(".", "").replace(",", ".")
+        if candidate.count(",") != 1:
+            return None
+        integer, fraction = candidate.split(",")
+        if "." in integer:
+            if not re.fullmatch(r"[+-]?[1-9]\d{0,2}(?:\.\d{3})+", integer):
+                return None
+            integer = integer.replace(".", "")
+        candidate = f"{integer}.{fraction}"
+    elif candidate.count(".") > 1:
+        if not re.fullmatch(r"[+-]?[1-9]\d{0,2}(?:\.\d{3})+", candidate):
+            return None
+        candidate = candidate.replace(".", "")
+    elif candidate.count(".") == 1:
+        integer, fraction = candidate.split(".")
+        if len(fraction) == 3 and re.fullmatch(r"[+-]?[1-9]\d{0,2}", integer):
+            candidate = f"{integer}{fraction}"
     try:
         return Decimal(candidate)
     except InvalidOperation:
@@ -154,7 +196,15 @@ def _comparable_values(left: Any, right: Any) -> tuple[Any, Any]:
 
 
 def _condicoes(expected: Any) -> list[tuple[str, Any]]:
-    """Normaliza o valor de um filtro numa lista de condições (operator, value)."""
+    """Normaliza o valor de um filtro numa lista de condições (operator, value).
+
+    Mantém os formatos já suportados (valor direto = igualdade; dict com
+    "operator"/"op" e "value"; tupla/lista de 2 elementos (operator, value))
+    e acrescenta um formato novo: lista de dicts, para expressar várias
+    condições sobre a MESMA chave com semântica E — ex. uma faixa de valor
+    (>= mínimo e <= máximo) ou um intervalo de datas (>= início do ano e <
+    início do ano seguinte), usado por ``src/query_analysis.py``.
+    """
     if isinstance(expected, Mapping):
         operator = str(expected.get("operator", expected.get("op", "==")))
         return [(operator, expected.get("value"))]
@@ -164,7 +214,7 @@ def _condicoes(expected: Any) -> list[tuple[str, Any]]:
                 (str(item.get("operator", item.get("op", "=="))), item.get("value"))
                 for item in expected
             ]
-        if len(expected) == 2 and not isinstance(expected[0], Mapping):
+        if len(expected) == 2:
             return [(str(expected[0]), expected[1])]
     return [("==", expected)]
 
@@ -176,10 +226,27 @@ def _condicao_satisfeita(actual: Any, operator: str, value: Any) -> bool:
         if operator == "!=":
             return not _values_equal(actual, value)
         if operator in {">", ">=", "<", "<="}:
-            left, right = _comparable_values(actual, value)
+            left_date, right_date = _parse_date(actual), _parse_date(value)
+            if left_date is not None or right_date is not None:
+                if left_date is None or right_date is None:
+                    return False
+                left, right = left_date, right_date
+            else:
+                left_number, right_number = _parse_number(actual), _parse_number(value)
+                if left_number is not None or right_number is not None:
+                    if left_number is None or right_number is None:
+                        return False
+                    left, right = left_number, right_number
+                else:
+                    left, right = actual, value
             if type(left) is not type(right):
                 return False
-            comparisons = {">": left > right, ">=": left >= right, "<": left < right, "<=": left <= right}
+            comparisons = {
+                ">": left > right,
+                ">=": left >= right,
+                "<": left < right,
+                "<=": left <= right,
+            }
             return comparisons[operator]
         if operator == "in":
             candidates = value if isinstance(value, (list, tuple, set)) else [value]
@@ -211,8 +278,10 @@ def _records_for(
     bases: Iterable[Any] | None,
     filters: Mapping[str, Any] | None,
     records: Iterable[Mapping[str, Any]] | None = None,
+    escopos: Iterable[str] | None = None,
 ) -> list[dict[str, Any]]:
-    selected = _selected_base_ids(bases)
+    selection = _split_selection(bases)
+    allowed_scopes = set(escopos) if escopos is not None else None
     if records is None:
         paths = sorted(index_dir.glob("*/vectors.jsonl"))
         raw = [record for path in paths for record in _read_jsonl(path)]
@@ -225,12 +294,16 @@ def _records_for(
         if not isinstance(metadata, Mapping):
             metadata = {}
         chunk_id = str(record.get("chunk_id") or metadata.get("chunk_id") or "")
-        if (
-            not chunk_id
-            or chunk_id in seen_ids
-            or (selected is not None and record.get("base_id") not in selected)
-            or not _matches_filters(metadata, filters)
-        ):
+        if not chunk_id or chunk_id in seen_ids or not _matches_filters(metadata, filters):
+            continue
+        if selection is not None:
+            naturezas, base_ids = selection
+            if (
+                _record_natureza(record, metadata) not in naturezas
+                and _record_base_id(record, metadata) not in base_ids
+            ):
+                continue
+        if allowed_scopes is not None and _record_escopo(record, metadata) not in allowed_scopes:
             continue
         seen_ids.add(chunk_id)
         filtered.append(record)
@@ -276,11 +349,14 @@ def dense_retrieve(
     filters: Mapping[str, Any] | None = None,
     embed_fn: EmbedFn | None = None,
     records: Iterable[Mapping[str, Any]] | None = None,
+    escopos: Iterable[str] | None = None,
+    run_id: str = "sem-run-id",
+    query_id: str = "sem-query-id",
 ) -> list[RetrievalResult]:
     """Recupera os vetores mais próximos usando o índice persistido."""
     if top_k <= 0 or not query.strip():
         return []
-    candidates = _records_for(index_dir, bases, filters, records)
+    candidates = _records_for(index_dir, bases, filters, records, escopos)
     if not candidates:
         return []
     query_vector = (embed_fn or (lambda texts: [_default_embed(texts[0])]))([query])[0]
@@ -288,19 +364,65 @@ def dense_retrieve(
         str(item.get("chunk_id")): str(item.get("text", ""))
         for item in _read_jsonl(documents_file)
     }
-    scored = [
-        _result(
-            record,
-            _cosine(query_vector, record.get("embedding", [])),
-            str(record.get("text", "")) or normalized_text.get(str(record.get("chunk_id")), ""),
+    scored: list[RetrievalResult] = []
+    incompatible_embeddings: list[dict[str, Any]] = []
+    missing_embeddings: list[dict[str, str]] = []
+    for record in candidates:
+        embedding = record.get("embedding", [])
+        metadata = record.get("metadata")
+        chunk_id = str(record.get("chunk_id") or (
+            metadata.get("chunk_id", "") if isinstance(metadata, Mapping) else ""
+        ))
+        if embedding is None:
+            missing_embeddings.append({"chunk_id": chunk_id})
+            continue
+        if len(embedding) != len(query_vector):
+            incompatible_embeddings.append(
+                {
+                    "chunk_id": chunk_id,
+                    "expected_dimension": len(query_vector),
+                    "actual_dimension": len(embedding),
+                }
+            )
+            continue
+        scored.append(
+            _result(
+                record,
+                _cosine(query_vector, embedding),
+                str(record.get("text", "")) or normalized_text.get(str(record.get("chunk_id")), ""),
+            )
         )
-        for record in candidates
-    ]
+    if incompatible_embeddings:
+        registrar(
+            run_id=run_id,
+            query_id=query_id,
+            stage=Stage.RETRIEVAL_DENSO,
+            status="aviso",
+            latencia_ms=0,
+            input=query,
+            output=f"{len(incompatible_embeddings)} embedding(s) incompatível(is) excluído(s)",
+            extra={"embedding_dimension_mismatches": incompatible_embeddings},
+        )
+    if missing_embeddings:
+        registrar(
+            run_id=run_id,
+            query_id=query_id,
+            stage=Stage.RETRIEVAL_DENSO,
+            status="aviso",
+            latencia_ms=0,
+            input=query,
+            output=f"{len(missing_embeddings)} embedding(s) ausente(s)/nulo(s) ignorado(s)",
+            extra={"missing_embeddings": missing_embeddings},
+        )
     return sorted(scored, key=lambda item: (-item.score, item.chunk_id))[:top_k]
 
 
 def _tokens(text: str) -> list[str]:
-    return [token.lower() for token in _TOKEN_RE.findall(text)]
+    """Tokens em minúsculas e sem acento: "médico" casa com "MEDICO" do catálogo."""
+    sem_acento = "".join(
+        char for char in unicodedata.normalize("NFKD", text) if not unicodedata.combining(char)
+    )
+    return [token.lower() for token in _TOKEN_RE.findall(sem_acento)]
 
 
 def bm25_retrieve(
@@ -312,14 +434,15 @@ def bm25_retrieve(
     bases: Iterable[Any] | None = None,
     filters: Mapping[str, Any] | None = None,
     records: Iterable[Mapping[str, Any]] | None = None,
+    escopos: Iterable[str] | None = None,
 ) -> list[RetrievalResult]:
     """Recupera chunks lexicalmente com BM25, sem dependências adicionais."""
     if top_k <= 0 or not query.strip():
         return []
     candidates = (
-        _records_for(index_dir, bases, filters, records)
+        _records_for(index_dir, bases, filters, records, escopos)
         if records is not None
-        else _records_for(index_dir, bases, filters, _read_jsonl(documents_file))
+        else _records_for(index_dir, bases, filters, _read_jsonl(documents_file), escopos)
     )
     documents = [(record, str(record.get("text", ""))) for record in candidates]
     query_terms = _tokens(query)
@@ -395,10 +518,20 @@ def retrieve(
     filters: Mapping[str, Any] | None = None,
     embed_fn: EmbedFn | None = None,
     reranker: RerankFn | None = None,
+    escopos: Iterable[str] | None = None,
+    fetch_k: int | None = None,
     run_id: str = "sem-run-id",
     query_id: str = "sem-query-id",
 ) -> list[RetrievalResult]:
     """Executa dense + BM25 + RRF e aplica reranker somente se fornecido.
+
+    ``escopos`` restringe a busca às bases com esse ``escopo`` no manifesto
+    (ex.: ``("oficial",)``); ``None`` não filtra por escopo.
+
+    ``fetch_k`` é quantos candidatos a busca densa e a BM25 devolvem, cada uma,
+    antes da fusão; o RRF escolhe os ``top_k`` finais entre eles. Com
+    ``fetch_k == top_k``, um chunk que as duas buscas põem logo abaixo do corte
+    nunca chega à fusão. Padrão: ``max(5 * top_k, DEFAULT_FETCH_K)``.
 
     Cada etapa registra seu stage (``retrieval_denso``, ``retrieval_bm25``,
     ``fusao_rrf``, ``rerank``) em ``logs/pipeline-AAAA-MM-DD.jsonl``.
@@ -412,10 +545,13 @@ def retrieve(
         else:
             bases = getattr(route, "bases_selecionadas", getattr(route, "bases", None))
             route_filters = getattr(route, "filters", getattr(route, "filtros", route_filters))
+    fetch_k = fetch_k if fetch_k is not None else max(5 * top_k, DEFAULT_FETCH_K)
     extra = {
-        "bases": sorted(_selected_base_ids(bases) or []),
+        "bases": sorted(str(getattr(b, "value", b)) for b in ([bases] if isinstance(bases, str) else bases or [])),
+        "escopos": sorted(escopos) if escopos is not None else None,
         "filtros": dict(route_filters or {}),
         "k": top_k,
+        "fetch_k": fetch_k,
     }
 
     def _span(stage: Stage, **mais: Any):
@@ -428,14 +564,25 @@ def retrieve(
             query,
             index_dir=index_dir,
             documents_file=documents_file,
-            top_k=top_k,
+            top_k=fetch_k,
             bases=bases,
             filters=route_filters,
             embed_fn=embed_fn,
+            escopos=escopos,
+            run_id=run_id,
+            query_id=query_id,
         )
         span.set_result(_resumo(dense))
     with _span(Stage.RETRIEVAL_BM25) as span:
-        sparse = bm25_retrieve(query, index_dir=index_dir, documents_file=documents_file, top_k=top_k, bases=bases, filters=route_filters)
+        sparse = bm25_retrieve(
+            query,
+            index_dir=index_dir,
+            documents_file=documents_file,
+            top_k=fetch_k,
+            bases=bases,
+            filters=route_filters,
+            escopos=escopos,
+        )
         span.set_result(_resumo(sparse))
     with _span(Stage.FUSAO_RRF, rrf_k=DEFAULT_RRF_K) as span:
         fused = reciprocal_rank_fusion([dense, sparse], top_k=top_k)

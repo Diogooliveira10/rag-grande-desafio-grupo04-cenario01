@@ -9,7 +9,7 @@ função compatível com o contrato ``PipelineFn`` de ``eval/run_eval.py``
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 from src.obs import new_query_id, new_run_id
 from src.generate import ClienteLLM, gerar_resposta
@@ -17,6 +17,10 @@ from src.query_analysis import analisar_query, filtros_para_retrieve
 from src.retrieve import DEFAULT_TOP_K, RerankFn, RetrievalResult, retrieve
 from src.router import inferir_motivo_recusa, rotear_pergunta
 from src.schema import Chunk, ChunkMetadata
+
+# Só as bases de escopo "oficial" no manifesto respondem perguntas; fixtures de
+# teste e amostras experimentais ficam de fora da busca.
+ESCOPOS_CONSULTADOS = ("oficial",)
 
 
 def _chunk_from_retrieval(result: RetrievalResult) -> Chunk:
@@ -31,8 +35,12 @@ def responder(
     reranker: Optional[RerankFn] = None,
     cliente: Optional[ClienteLLM] = None,
     run_id: Optional[str] = None,
+    escopos: Optional[Sequence[str]] = ESCOPOS_CONSULTADOS,
 ) -> dict[str, Any]:
     """Roda query_analysis + roteamento + recuperação híbrida + geração para uma pergunta.
+
+    ``escopos=None`` consulta também as bases experimentais (ex.:
+    ``exemplos_teste``), útil para desenvolver com um índice parcial.
 
     Quando o roteador não seleciona nenhuma base (recusa, fora de escopo ou
     "não identificado"), a recuperação é pulada; o motivo da recusa é inferido
@@ -61,6 +69,7 @@ def responder(
             top_k=top_k,
             filters=filtros_para_retrieve(analise.filtros),
             reranker=reranker,
+            escopos=escopos,
             run_id=run_id,
             query_id=query_id,
         )
@@ -80,4 +89,12 @@ def responder(
     return resposta.model_dump(mode="json")
 
 
-__all__ = ["responder"]
+def responder_incluindo_experimentais(query: str) -> dict[str, Any]:
+    """``responder`` sem o recorte de escopo, no contrato ``PipelineFn`` do eval::
+
+        py .\\eval\\run_eval.py run --pipeline src.pipeline:responder_incluindo_experimentais
+    """
+    return responder(query, escopos=None)
+
+
+__all__ = ["responder", "responder_incluindo_experimentais"]

@@ -1,3 +1,10 @@
+"""Testes de fiação: query_analysis -> retrieve dentro de src.pipeline.responder.
+
+Não testam retrieve.py nem generate.py de verdade (isso é responsabilidade dos
+testes deles) — só garantem que responder() chama analisar_query() e repassa
+os filtros extraídos pro retrieve(), e que uma recusa do roteador continua
+pulando a recuperação (comportamento existente, não deve quebrar).
+"""
 from __future__ import annotations
 
 from src import pipeline
@@ -30,7 +37,7 @@ def test_responder_passa_filtros_extraidos_para_retrieve(monkeypatch):
             confidence=0.9,
         )
 
-    def fake_retrieve(query, route, *, top_k, filters, reranker, run_id, query_id):
+    def fake_retrieve(query, route, *, top_k, filters, reranker, escopos, run_id, query_id):
         chamadas_retrieve["filters"] = filters
         metadata = ChunkMetadata(
             source_file="f.json", chunk_id="c1", base_id="contratos_estruturado", doc_type="estruturada"
@@ -64,7 +71,7 @@ def test_responder_sem_filtro_nenhum_passa_dict_vazio(monkeypatch):
             bases_selecionadas=[Natureza.ESTRUTURADA], justificativa="teste", confidence=0.9
         )
 
-    def fake_retrieve(query, route, *, top_k, filters, reranker, run_id, query_id):
+    def fake_retrieve(query, route, *, top_k, filters, reranker, escopos, run_id, query_id):
         chamadas_retrieve["filters"] = filters
         return []
 
