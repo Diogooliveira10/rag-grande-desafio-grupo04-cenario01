@@ -17,6 +17,21 @@ Typer e Rich fornecem a interface e a formatação de algumas CLIs. InquirerPy �
 usado na revisão interativa de propostas. Para embeddings remotos, configure o
 provedor por `.env` ou pelas opções `--provider`, `--endpoint` e `--model`.
 
+### Acentos no terminal do Windows
+
+No Windows em português, o Python escreve em cp1252 e o PowerShell lê em cp850;
+com pipe ou redirecionamento (`| Select-Object`, `> saida.txt`), "Preços" vira
+"Pre�os". Use UTF-8 nos dois lados, na sessão atual:
+
+```powershell
+$env:PYTHONUTF8 = "1"
+[Console]::OutputEncoding = [Text.Encoding]::UTF8; $OutputEncoding = [Text.Encoding]::UTF8
+```
+
+Para deixar permanente, defina `PYTHONUTF8=1` nas variáveis de ambiente do
+usuário e, no VS Code, crie um perfil de terminal PowerShell que rode a segunda
+linha ao abrir (`terminal.integrated.profiles.windows`, com `-NoExit -Command`).
+
 ### OCR de PDFs escaneados (opcional)
 
 Parte das atas do PNCP é PDF escaneado, sem camada de texto. Com o Tesseract
