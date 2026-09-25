@@ -235,3 +235,34 @@ O processamento de um CSV real foi validado de ponta a ponta nos estágios de pr
 - `2844328` — `teste(corpus): adiciona testes e relatório atual de validação`
 
 O commit foi enviado para a branch remota `origin/joao-reis`.
+
+## Atualização — 25/09/2026
+
+### Atividades realizadas
+
+Integrei as alterações da branch `main` à branch de trabalho e, após o merge, revisei o manifesto e os testes de coleta e ingestão para adequá-los à versão integrada. Também organizei ajustes de documentação da CLI e do inventário do corpus v2 e adicionei um exemplo sintético de e-mail em Markdown para servir como dado de demonstração.
+
+Avancei na coleta declarativa do corpus a partir do manifesto. Foi criada uma interface comum para provedores e implementada a integração com o PNCP, separando a lógica específica dessa fonte da lógica geral de coleta. A configuração passou a descrever parâmetros de consulta e paginação, e a coleta foi atualizada para enumerar documentos e registrar os resultados no inventário. Também foram ampliados os testes de coleta e dos provedores.
+
+Na preparação documental, implementei cache incremental para reaproveitar resultados quando os documentos e suas configurações não mudam. Depois, ajustei o fluxo para localizar e preparar a versão mais recente do corpus, em vez de depender de uma versão fixa. Atualizei a documentação de uso e acrescentei cobertura de teste para esse comportamento.
+
+Também consolidei os testes do corpus sob a pasta `tests/`, organizei fixtures e arquivos de validação e ajustei testes de manifesto, coleta, preparação, provedores, indexação e recuperação. Os guias da CLI foram atualizados para refletir os comandos e o inventário v2.
+
+
+### Uso de inteligência artificial
+
+Utilizei o Codex como apoio para explorar o histórico e a estrutura do repositório, planejar e implementar partes da coleta por provedores e da preparação incremental, elaborar e atualizar testes e revisar a documentação. Também usei a ferramenta para resumir as alterações e manter este acompanhamento atualizado. Revisei as sugestões e os diffs antes de incorporá-los; as decisões sobre o escopo, as fontes e os critérios do corpus permaneceram sob minha responsabilidade.
+
+### Resultado da sessão
+
+Os principais commits realizados em 25/09 registram a integração de fontes PNCP por provedores, a preparação incremental, a consolidação dos testes e a atualização da documentação:
+
+- `b3bef09` — `feat: adiciona coleta declarativa por provedores PNCP`;
+- `8bd97ba` — `feat: adiciona cache incremental na preparação de documentos`;
+- `13f9613` — `test: consolida suíte em tests e arquiva testes legados`;
+- `a7cae5e` — `Adiciona exemplo de email sintético em Markdown`;
+- `618a734` — `Corrige manifesto e testes após merge da main`;
+- `fe02d9c` — `docs: atualiza guias da CLI e inventário v2`;
+- `8f73716` — `test: ativa testes dos módulos de corpus`;
+- `20628e5` — `feat: vincula preparação à versão mais recente do corpus`.
+
