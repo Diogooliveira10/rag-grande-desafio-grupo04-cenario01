@@ -69,6 +69,28 @@ class RouteDecision(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
 
 
+class QueryFilters(BaseModel):
+    """Filtros estruturados extraídos da pergunta pela etapa query_analysis."""
+
+    ano: Optional[int] = None
+    valor_min: Optional[float] = None
+    valor_max: Optional[float] = None
+    orgao: Optional[str] = None
+
+    def esta_vazio(self) -> bool:
+        return all(
+            valor is None
+            for valor in (self.ano, self.valor_min, self.valor_max, self.orgao)
+        )
+
+
+class QueryAnalysisResult(BaseModel):
+    """Saída da etapa query_analysis — filtros identificados na pergunta original."""
+
+    query_original: str
+    filtros: QueryFilters
+
+
 class SourceRef(BaseModel):
     chunk_id: str
     base_id: str

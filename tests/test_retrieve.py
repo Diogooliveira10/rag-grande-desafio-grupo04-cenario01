@@ -719,3 +719,109 @@ def test_fetch_k_deixa_chegar_a_fusao_o_chunk_que_as_duas_buscas_poem_abaixo_do_
 
     assert "alvo" not in [r.chunk_id for r in sem_folga]
     assert com_folga[0].chunk_id == "alvo"
+
+
+# --------------------------------------------------------------------------
+# Filtros de múltiplas condições sobre a mesma chave (faixas), usados por
+# src/query_analysis.py — ex.: "entre X e Y", ou um ano virando um intervalo
+# [1º de janeiro, 1º de janeiro do ano seguinte) em data_vigencia.
+# --------------------------------------------------------------------------
+
+
+def test_filtro_de_faixa_de_valor_com_lista_de_condicoes():
+    records = [
+        _record("baixo", text="ambulancia", metadata_extra={"valor": "50.000,00"}),
+        _record("dentro", text="ambulancia", metadata_extra={"valor": "150.000,00"}),
+        _record("alto", text="ambulancia", metadata_extra={"valor": "500.000,00"}),
+    ]
+
+    results = bm25_retrieve(
+        "ambulancia",
+        records=records,
+        filters={
+            "valor": [
+                {"operator": ">=", "value": "100.000,00"},
+                {"operator": "<=", "value": "200.000,00"},
+            ]
+        },
+    )
+
+    assert [item.chunk_id for item in results] == ["dentro"]
+
+
+def test_filtro_de_faixa_de_data_simula_filtro_de_ano():
+    """Um "ano" vira [1º de jan do ano, 1º de jan do ano seguinte) em data_vigencia."""
+    records = [
+        _record("antes", text="edital", metadata_extra={"data_vigencia": "2022-12-31"}),
+        _record("dentro_inicio", text="edital", metadata_extra={"data_vigencia": "2023-01-01"}),
+        _record("dentro_fim", text="edital", metadata_extra={"data_vigencia": "2023-12-31"}),
+        _record("depois", text="edital", metadata_extra={"data_vigencia": "2024-01-01"}),
+    ]
+
+    results = bm25_retrieve(
+        "edital",
+        records=records,
+        filters={
+            "data_vigencia": [
+                {"operator": ">=", "value": "2023-01-01"},
+                {"operator": "<", "value": "2024-01-01"},
+            ]
+        },
+    )
+
+    assert {item.chunk_id for item in results} == {"dentro_inicio", "dentro_fim"}
+
+
+def test_filtro_de_faixa_combinado_com_condicao_de_igualdade_em_outra_chave():
+    records = [
+        _record(
+            "fora_do_orgao",
+            text="ambulancia contrato",
+            metadata_extra={"valor": "150.000,00", "extras": {"orgao": "Secretaria de Educacao"}},
+        ),
+        _record(
+            "dentro_da_faixa_e_orgao",
+            text="ambulancia contrato",
+            metadata_extra={"valor": "150.000,00", "extras": {"orgao": "Secretaria de Saude"}},
+        ),
+        _record(
+            "fora_da_faixa",
+            text="ambulancia contrato",
+            metadata_extra={"valor": "999.000,00", "extras": {"orgao": "Secretaria de Saude"}},
+        ),
+    ]
+
+    results = bm25_retrieve(
+        "ambulancia",
+        records=records,
+        filters={
+            "valor": [
+                {"operator": ">=", "value": "100.000,00"},
+                {"operator": "<=", "value": "200.000,00"},
+            ],
+            "orgao": {"operator": "contains", "value": "Saude"},
+        },
+    )
+
+    assert [item.chunk_id for item in results] == ["dentro_da_faixa_e_orgao"]
+
+
+def test_lista_de_duas_condicoes_nao_e_confundida_com_tupla_operador_valor():
+    """(">=", 10) é 1 condição; [{"operator": ">=", ...}, {...}] são 2 — mesmo com len == 2."""
+    records = [
+        _record("dentro", text="ambulancia", metadata_extra={"valor": "150"}),
+        _record("fora", text="ambulancia", metadata_extra={"valor": "5"}),
+    ]
+
+    results = bm25_retrieve(
+        "ambulancia",
+        records=records,
+        filters={
+            "valor": [
+                {"operator": ">=", "value": "100"},
+                {"operator": "<=", "value": "300"},
+            ]
+        },
+    )
+
+    assert [item.chunk_id for item in results] == ["dentro"]

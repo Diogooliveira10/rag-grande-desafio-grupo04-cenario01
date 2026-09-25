@@ -1,10 +1,3 @@
-"""Recuperação híbrida sobre os índices persistidos por :mod:`src.index`.
-
-O índice atual persiste vetores e metadados, mas não uma implementação BM25.
-Por isso, a busca lexical lê o JSONL normalizado e calcula BM25 em memória,
-sem reindexar nem gerar embeddings durante a busca.
-"""
-
 from __future__ import annotations
 
 import json
@@ -202,65 +195,81 @@ def _comparable_values(left: Any, right: Any) -> tuple[Any, Any]:
     return left, right
 
 
+def _condicoes(expected: Any) -> list[tuple[str, Any]]:
+    """Normaliza o valor de um filtro numa lista de condições (operator, value).
+
+    Mantém os formatos já suportados (valor direto = igualdade; dict com
+    "operator"/"op" e "value"; tupla/lista de 2 elementos (operator, value))
+    e acrescenta um formato novo: lista de dicts, para expressar várias
+    condições sobre a MESMA chave com semântica E — ex. uma faixa de valor
+    (>= mínimo e <= máximo) ou um intervalo de datas (>= início do ano e <
+    início do ano seguinte), usado por ``src/query_analysis.py``.
+    """
+    if isinstance(expected, Mapping):
+        operator = str(expected.get("operator", expected.get("op", "==")))
+        return [(operator, expected.get("value"))]
+    if isinstance(expected, (tuple, list)):
+        if expected and all(isinstance(item, Mapping) for item in expected):
+            return [
+                (str(item.get("operator", item.get("op", "=="))), item.get("value"))
+                for item in expected
+            ]
+        if len(expected) == 2:
+            return [(str(expected[0]), expected[1])]
+    return [("==", expected)]
+
+
+def _condicao_satisfeita(actual: Any, operator: str, value: Any) -> bool:
+    try:
+        if operator in {"==", "="}:
+            return _values_equal(actual, value)
+        if operator == "!=":
+            return not _values_equal(actual, value)
+        if operator in {">", ">=", "<", "<="}:
+            left_date, right_date = _parse_date(actual), _parse_date(value)
+            if left_date is not None or right_date is not None:
+                if left_date is None or right_date is None:
+                    return False
+                left, right = left_date, right_date
+            else:
+                left_number, right_number = _parse_number(actual), _parse_number(value)
+                if left_number is not None or right_number is not None:
+                    if left_number is None or right_number is None:
+                        return False
+                    left, right = left_number, right_number
+                else:
+                    left, right = actual, value
+            if type(left) is not type(right):
+                return False
+            comparisons = {
+                ">": left > right,
+                ">=": left >= right,
+                "<": left < right,
+                "<=": left <= right,
+            }
+            return comparisons[operator]
+        if operator == "in":
+            candidates = value if isinstance(value, (list, tuple, set)) else [value]
+            return any(_values_equal(actual, candidate) for candidate in candidates)
+        if operator == "contains":
+            if isinstance(actual, str):
+                return str(value) in actual
+            return value in actual
+        return False
+    except (TypeError, ValueError, KeyError):
+        return False
+
+
 def _matches_filters(metadata: Mapping[str, Any], filters: Mapping[str, Any] | None) -> bool:
     if not filters:
         return True
     for key, expected in filters.items():
-        operator = "=="
-        value = expected
-        if isinstance(expected, Mapping):
-            operator = str(expected.get("operator", expected.get("op", "==")))
-            value = expected.get("value")
-        elif isinstance(expected, (tuple, list)) and len(expected) == 2:
-            operator, value = str(expected[0]), expected[1]
         actual = _metadata_value(metadata, key)
         if actual is None:
             return False
-        try:
-            if operator in {"==", "="}:
-                if not _values_equal(actual, value):
-                    return False
-            elif operator == "!=":
-                if _values_equal(actual, value):
-                    return False
-            elif operator in {">", ">=", "<", "<="}:
-                left_date, right_date = _parse_date(actual), _parse_date(value)
-                if left_date is not None or right_date is not None:
-                    if left_date is None or right_date is None:
-                        return False
-                    left, right = left_date, right_date
-                else:
-                    left_number, right_number = _parse_number(actual), _parse_number(value)
-                    if left_number is not None or right_number is not None:
-                        if left_number is None or right_number is None:
-                            return False
-                        left, right = left_number, right_number
-                    else:
-                        left, right = actual, value
-                if type(left) is not type(right):
-                    return False
-                comparisons = {
-                    ">": left > right,
-                    ">=": left >= right,
-                    "<": left < right,
-                    "<=": left <= right,
-                }
-                if not comparisons[operator]:
-                    return False
-            elif operator == "in":
-                candidates = value if isinstance(value, (list, tuple, set)) else [value]
-                if not any(_values_equal(actual, candidate) for candidate in candidates):
-                    return False
-            elif operator == "contains":
-                if isinstance(actual, str):
-                    if str(value) not in actual:
-                        return False
-                elif value not in actual:
-                    return False
-            else:
+        for operator, value in _condicoes(expected):
+            if not _condicao_satisfeita(actual, operator, value):
                 return False
-        except (TypeError, ValueError, KeyError):
-            return False
     return True
 
 
