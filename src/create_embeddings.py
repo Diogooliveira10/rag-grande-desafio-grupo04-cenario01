@@ -107,7 +107,11 @@ def _read_cache(path: Path) -> dict[str, dict[str, Any]]:
                 raise ValueError(
                     f"registro inválido no cache, linha {line_number}: {cache_path}"
                 )
-            digest = str(record.get("content_sha256") or "")
+            digest = str(
+                record.get("chunk_content_sha256")
+                or record.get("content_sha256")
+                or ""
+            )
             vector = record.get("embedding")
             if digest and isinstance(vector, list) and vector:
                 cache[digest] = record
@@ -238,7 +242,8 @@ def _materialize_record(
     """Combina o vetor reutilizado com toda a proveniência do chunk atual."""
     record = dict(cached)
     record.update({key: value for key, value in chunk.items() if key != "text"})
-    record["content_sha256"] = digest
+    record.pop("content_sha256", None)
+    record["chunk_content_sha256"] = digest
     record["embedding_input_sha256"] = _embedding_input_sha256(chunk)
     record["embedding_cache_schema"] = EMBEDDING_CACHE_SCHEMA
     return record
@@ -370,7 +375,7 @@ def create_embeddings(
             if not isinstance(vector, list) or not vector:
                 raise RuntimeError(f"embedding vazio para o conteúdo {digest[:12]}")
             by_digest[digest] = {
-                "content_sha256": digest,
+                "chunk_content_sha256": digest,
                 "embedding_input_sha256": input_digest,
                 "embedding_cache_schema": EMBEDDING_CACHE_SCHEMA,
                 "embedding_provider": provider,

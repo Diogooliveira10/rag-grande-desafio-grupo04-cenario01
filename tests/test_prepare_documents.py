@@ -106,7 +106,7 @@ def test_prepare_documents_extracts_manifest_declared_structured_metadata(tmp_pa
     record = json.loads(output.read_text(encoding="utf-8").splitlines()[0])
     assert record["natureza"] == "estruturada"
     assert record["doc_type"] == "json"
-    assert record["origem"].startswith("https://pncp.gov.br")
+    assert record["origem"] == "PNCP - API de consulta de contratações/publicação"
     assert record["data_vigencia"] == "2025-12-31"
     assert record["extras"]["orgao"] == "Secretaria X"
     assert record["extras"]["valor"] == 500000
@@ -281,3 +281,54 @@ def test_normative_documents_split_at_sections(tmp_path):
     assert all(record["parent_chunk_id"] == records[0]["parent_chunk_id"] for record in records)
     assert any("CLÁUSULA PRIMEIRA" in record["text"] for record in records)
     assert any("CLÁUSULA SEGUNDA" in record["text"] for record in records)
+
+
+def test_prepare_documents_reuses_incremental_extraction_and_invalidates_chunks(tmp_path):
+    input_dir = tmp_path / "source"
+    input_dir.mkdir()
+    source = input_dir / "notes.txt"
+    source.write_text("texto de teste " * 120, encoding="utf-8")
+    output = tmp_path / "documents.jsonl"
+    report = tmp_path / "extraction_report.json"
+
+    first = prepare_documents(
+        input_dir,
+        output,
+        report,
+        MANIFEST,
+        base_id="exemplos_teste",
+        chunk_size=100,
+        overlap=10,
+    )
+    first_output = output.read_bytes()
+
+    second = prepare_documents(
+        input_dir,
+        output,
+        report,
+        MANIFEST,
+        base_id="exemplos_teste",
+        chunk_size=100,
+        overlap=10,
+    )
+    assert first["extraction_cache_misses"] == 1
+    assert second["extraction_cache_hits"] == 1
+    assert second["extraction_cache_misses"] == 0
+    assert second["chunk_cache_hits"] == 1
+    assert second["chunk_cache_misses"] == 0
+    assert output.read_bytes() == first_output
+    assert (tmp_path / "documents.units.jsonl").exists()
+
+    changed_chunking = prepare_documents(
+        input_dir,
+        output,
+        report,
+        MANIFEST,
+        base_id="exemplos_teste",
+        chunk_size=60,
+        overlap=5,
+    )
+    assert changed_chunking["extraction_cache_hits"] == 1
+    assert changed_chunking["extraction_cache_misses"] == 0
+    assert changed_chunking["chunk_cache_hits"] == 0
+    assert changed_chunking["chunk_cache_misses"] == 1

@@ -41,9 +41,18 @@ class ChunkMetadata(BaseModel):
     chunk_id: str
     base_id: str
     doc_type: str
+    document_id: Optional[str] = None
+    parent_chunk_id: Optional[str] = None
     natureza: Optional[Natureza] = None
     sensitivity: Sensibilidade = Sensibilidade.PUBLICO
     data_vigencia: Optional[date] = None
+    origem: Optional[str] = None
+    coletado_em: Optional[str] = None
+    manifest_hash: Optional[str] = None
+    sha256: Optional[str] = None
+    document_content_sha256: Optional[str] = None
+    chunk_content_sha256: Optional[str] = None
+    chunking_strategy: Optional[str] = None
     extras: dict = Field(default_factory=dict)  # orgao, modalidade, valor, municipio...
 
 

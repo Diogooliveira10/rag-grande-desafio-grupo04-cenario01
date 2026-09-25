@@ -33,6 +33,11 @@ def sha256_file(path: Path) -> str:
 
 def chunk_text(text: str, max_chars: int = 1200, overlap: int = 150) -> Iterator[str]:
     """Divide texto em blocos determinísticos, respeitando parágrafos."""
+    if max_chars < 1:
+        raise ValueError("max_chars deve ser >= 1")
+    if overlap < 0 or overlap >= max_chars:
+        raise ValueError("overlap deve estar entre 0 e max_chars-1")
+
     normalized = re.sub(r"\n{3,}", "\n\n", text).strip()
     if not normalized:
         return
@@ -63,10 +68,17 @@ def ingest(
     manifest_path: Path = PROJECT_ROOT / "corpus_manifest.yaml",
     report_file: Path | None = None,
     base_id: str | None = None,
+    inventory_path: Path | None = None,
+    allow_uninventoried: bool = False,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     """Gera JSONL oficial sem alterar os arquivos em ``data/raw``."""
     from src.prepare_documents import prepare_documents
+
+    if inventory_path is None and not allow_uninventoried:
+        raise ValueError(
+            "ingest exige --inventory; use allow_uninventoried=True apenas para diagnóstico explícito"
+        )
 
     report_path = report_file or output_file.with_name("extraction_report.json")
     return prepare_documents(
@@ -75,6 +87,7 @@ def ingest(
         report_path,
         manifest_path,
         base_id=base_id,
+        inventory_path=inventory_path,
         chunk_size=max_chars,
         overlap=overlap,
         dry_run=dry_run,
@@ -88,6 +101,12 @@ def main() -> int:
     parser.add_argument("--manifest", type=Path, default=PROJECT_ROOT / "corpus_manifest.yaml")
     parser.add_argument("--report", type=Path, help="relatório JSON da preparação")
     parser.add_argument("--base-id", help="base declarada no manifesto")
+    parser.add_argument("--inventory", type=Path, help="inventário oficial da versão promovida")
+    parser.add_argument(
+        "--allow-uninventoried",
+        action="store_true",
+        help="permite o modo legado sem inventário; não usar no corpus oficial",
+    )
     parser.add_argument("--chunk-size", type=int, default=1200, help="tamanho máximo de cada chunk")
     parser.add_argument("--overlap", type=int, default=150, help="sobreposição entre chunks")
     parser.add_argument("--dry-run", action="store_true", help="conta documentos sem gravar a saída")
@@ -105,6 +124,8 @@ def main() -> int:
         manifest_path=args.manifest.resolve(),
         report_file=args.report.resolve() if args.report else None,
         base_id=args.base_id,
+        inventory_path=args.inventory.resolve() if args.inventory else None,
+        allow_uninventoried=args.allow_uninventoried,
         dry_run=args.dry_run,
     )
     if args.dry_run:
