@@ -818,7 +818,7 @@ def test_load_version_context_rejeita_manifest_diferente_no_mesmo_checkpoint(pro
     manifest = {"scenario_id": "c", "version": 1, "bases": []}
     fc._load_version_context(manifest, "sha256:abc", 1)
 
-    with pytest.raises(RuntimeError, match="outro manifesto"):
+    with pytest.raises(RuntimeError, match="manifest_hash incompatível"):
         fc._load_version_context(manifest, "sha256:DIFERENTE", 1)
 
 
