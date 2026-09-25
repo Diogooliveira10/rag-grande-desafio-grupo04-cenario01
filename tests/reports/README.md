@@ -1,17 +1,11 @@
 # Relatórios de validação
 
-Execute:
+Execute a partir da raiz do repositório:
 
 ```powershell
 py tests/run_corpus_validation.py
 ```
 
-O comando gera `corpus-validation-AAAAMMDD-HHMMSS±HHMM.md` nesta pasta, com:
+O comando cria um relatório Markdown com horário no nome. Ele registra o resultado da suíte pytest, a compilação dos módulos, as verificações do manifesto oficial e as evidências dos caminhos arquiteturais conferidos pelo runner.
 
-- data e hora de início e fim;
-- resultado da suíte `pytest`;
-- compilação dos módulos;
-- smoke check das quatro bases do manifesto;
-- evidências dos caminhos arquiteturais ainda em migração.
-
-O runner é offline: ele não baixa o corpus real nem escreve em `data/raw`.
+A validação é offline: não baixa o corpus real nem grava em `data/raw/`. Os relatórios gerados são ignorados pelo Git; este guia permanece versionado.
