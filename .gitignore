@@ -43,5 +43,8 @@ tests/reports/corpus-validation-*.md
 # Resultados gerados pelas checagens
 data/source_catalog/runs/
 
+# Relatórios de execução do eval (golden set em si é versionado)
+eval/runs/
+
 # Claude
 .claude/

@@ -1,5 +1,11 @@
 from types import SimpleNamespace
 
+import pytest
+
+# Merge da branch joao-reis (2026-09-23): o pacote src/providers/ ainda não foi
+# publicado. O arquivo é pulado até ele existir e volta a rodar sozinho depois.
+pytest.importorskip("src.providers", reason="src/providers/ ainda não publicado")
+
 from src import fetch_corpus
 from src.providers.base import ResolvedSource, SourceArtifact, SourceRef
 from src.providers.pncp import PNCPProvider

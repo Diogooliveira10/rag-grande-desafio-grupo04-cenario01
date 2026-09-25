@@ -76,6 +76,144 @@ O principal commit realizado foi:
 
 Esse commit alterou o coletor, adicionou o teste offline e registrou o log de validação, totalizando 994 linhas adicionadas em três arquivos.
 
+## Atualização — 21/09/2026
+
+### Atividades realizadas
+
+Nesta sessão, concentrei meu trabalho em uma rodada extensa de desenvolvimento,
+testes, refatorações, documentação e preparação de dados na branch
+`joao-reis`. Foram realizados 56 commits de minha autoria, envolvendo 87
+arquivos únicos. A maior parte foi dedicada a testes e validações; os demais
+commits trataram de funcionalidades, documentação, refatoração, configuração e
+dados.
+
+Na infraestrutura, organizei as dependências e configurações necessárias para
+interfaces de linha de comando, processamento documental e geração de
+embeddings. Também consolidei configurações de provedores, modelos, endpoints,
+timeouts e demais parâmetros utilizados pelo pipeline.
+
+Centralizei comportamentos de rede que estavam distribuídos na aplicação.
+Implementei uma política comum de retry, tratamento de falhas e repetição de
+requisições, além de componentes compartilhados para download e acesso a fontes
+externas. Também refatorei a integração com fontes públicas para utilizar
+clientes compartilhados e interfaces mais consistentes.
+
+A coleta passou a seguir uma estrutura orientada por manifesto e por versões,
+com separação entre staging, objetos deduplicados, inventário e resultados
+experimentais. O coletor também passou a permitir a seleção de bases durante a
+execução. Componentes legados que ficaram redundantes após essa reorganização
+foram removidos ou substituídos por camadas compartilhadas.
+
+### Manifesto, fontes e formatos
+
+Atualizei o `corpus_manifest.yaml` para declarar explicitamente as bases
+oficiais e os exemplos locais, suas naturezas, formatos, regras de seleção,
+licenças e características de acesso. Também adicionei uma fonte CSV pública
+real da SEPLAG-RJ para validar o pipeline com dados tabulares publicados, em vez
+de depender apenas de dados artificiais.
+
+O pipeline passou a tratar de maneira integrada documentos PDF, páginas HTML,
+arquivos JSON, JSONL e CSV. Para os testes rápidos, foram versionados 20 PDFs e
+fixtures reais de HTML, JSON, JSONL e CSV. Esses arquivos permitem reproduzir o
+processamento sem depender continuamente de serviços externos.
+
+### Preparação documental e metadados
+
+Criei o fluxo de preparação em `src/prepare_documents.py`, responsável por
+transformar os arquivos coletados em unidades adequadas para indexação e
+recuperação. O processamento considera o formato original, a configuração do
+manifesto e as particularidades da fonte.
+
+Implementei chunking adaptativo: registros estruturados podem permanecer
+inteiros, enquanto documentos normativos podem ser divididos por páginas,
+cláusulas ou artigos quando esses elementos são identificados. Cada unidade
+preserva informações de rastreabilidade como `base_id`, `natureza`, `doc_type`,
+origem, SHA-256, vigência, sensibilidade, caminho relativo e hash do manifesto.
+
+O contrato de schema foi alinhado para que `doc_type` represente o formato do
+arquivo original, enquanto `natureza` representa a categoria semântica da base.
+Também mantive uma fachada compatível em `src/ingest.py` para evitar que a
+evolução do pipeline quebrasse os fluxos anteriores.
+
+### Curadoria, busca e documentação
+
+Estruturei ferramentas de curadoria do manifesto e descoberta de fontes,
+separando a sugestão de novas fontes da incorporação oficial ao manifesto.
+Também implementei busca remota no PNCP e busca local sobre o inventário já
+coletado, criando dois fluxos complementares para localizar documentos.
+
+Atualizei o README e a documentação visual em `docs/`, incluindo exemplos de
+curadoria, busca remota, busca local e simulação de atualização. A documentação
+passou a explicar o fluxo completo de coleta, preparação, busca, curadoria e
+geração de embeddings.
+
+### Embeddings e testes
+
+Implementei a geração incremental de embeddings com cache. O processo verifica a
+compatibilidade entre conteúdo, metadados, provedor, endpoint, modelo e dimensão
+do vetor antes de reutilizar um resultado. Também adicionei validação explícita
+da dimensionalidade para impedir a mistura silenciosa de espaços vetoriais
+incompatíveis.
+
+Ao final, foram publicados em `data/embeddings/` 516 embeddings versionados, com
+dimensão 1024:
+
+- 446 chunks provenientes de PDFs;
+- 18 provenientes de HTML;
+- 1 proveniente de JSON;
+- 1 proveniente de JSONL;
+- 50 provenientes de CSV.
+
+Os testes foram ampliados para cobrir manifesto, coleta, curadoria, busca
+remota, busca local, schema, preparação documental e geração de embeddings. A
+validação final registrou 30 testes principais aprovados e 13 testes adicionais
+do coletor aprovados.
+
+### Resultado da sessão
+
+Os principais commits da sessão foram organizados incrementalmente entre
+infraestrutura, preparação documental, embeddings, suporte a CSV, documentação
+e publicação dos dados:
+
+- `8a20900` — configuração de provedores e dependências de embeddings;
+- `df5f10f` — preparação de documentos e metadados;
+- `1dba49d` — geração incremental de embeddings;
+- `cf5e635` — suporte ao CSV real do corpus;
+- `ee38992` — documentação dos embeddings versionados;
+- `2c047f1` — publicação dos embeddings na árvore versionada.
+
+A branch `joao-reis` foi atualizada com `pull` e `push` para
+`origin/joao-reis`, sem enviar alterações para outra branch.
+
+### Pendências
+
+A nova versão oficial `v2` do corpus ainda não foi promovida para
+`data/raw/v2/` e `data/inventory/v2.json`. Existe apenas uma coleta parcial na
+área intermediária de staging, mantida fora do versionamento.
+
+Os dados brutos permanecem fora do Git, enquanto os exemplos, os metadados de
+preparação e os embeddings derivados estão disponíveis no repositório. As
+alterações locais de `data/inventory/v1.json` e `data/CORPUS_INVENTORY.md` ainda
+precisam ser reconciliadas antes de serem incorporadas.
+
+De forma geral, a sessão consolidou a base técnica do pipeline: aquisição,
+seleção por manifesto, versionamento, deduplicação, preparação documental,
+metadados, rastreabilidade, curadoria, busca remota e local, geração incremental
+de embeddings, testes automatizados e documentação.
+
+### Uso de inteligência artificial
+
+Utilizei ferramentas de inteligência artificial, especialmente o Codex, como
+apoio ao desenvolvimento. A IA foi utilizada para auxiliar na análise da
+estrutura do repositório, no planejamento de refatorações, na elaboração de
+trechos de código, na criação de testes, na revisão de metadados, na
+organização da documentação e na análise do histórico de commits.
+
+As sugestões geradas foram revisadas e adaptadas ao projeto antes de serem
+incorporadas. As alterações foram conferidas manualmente, comparadas com o
+manifesto e com os requisitos do desafio, e validadas por meio da suíte de
+testes. A decisão sobre o que seria incluído no corpus, quais fontes seriam
+aceitas e quais arquivos seriam publicados permaneceu sob controle da equipe.
 ## Atualização — 23/09/2026
 
 ### Atividades realizadas

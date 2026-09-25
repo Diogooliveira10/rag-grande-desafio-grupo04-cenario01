@@ -1,0 +1,269 @@
+r"""Gera embeddings e constrói o índice vetorial por base.
+
+Uso:
+    py .\src\index.py
+    py .\src\index.py --input data/normalized/documents.jsonl --output index
+    py .\src\index.py --dry-run
+
+Lê o JSONL normalizado (saída de ``ingest.py``), agrupa os chunks por
+``base_id`` e grava, para cada base, um índice vetorial plano
+(``index/<base_id>/vectors.jsonl``) mais um manifesto
+(``index/<base_id>/manifest.json``) com o modelo usado, a dimensão dos
+vetores e a proveniência da fonte. Chunks sem texto (ex.: PDFs ainda
+pendentes de extração) são pulados e contados à parte.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import sys
+from collections import defaultdict
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable, Iterator
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+import config  # noqa: E402
+
+EmbedFn = Callable[[list[str]], list[list[float]]]
+
+DEFAULT_INPUT = config.NORMALIZED_DATA_DIR / "documents.jsonl"
+DEFAULT_OUTPUT_DIR = config.INDEX_DIR
+DEFAULT_BATCH_SIZE = 64
+
+# Campos obrigatórios de ChunkMetadata (src/schema.py); "extras" e
+# "data_vigencia" são opcionais e não entram nessa checagem.
+REQUIRED_METADATA_FIELDS = {"source_file", "chunk_id", "base_id", "doc_type", "sensitivity"}
+
+
+@dataclass(frozen=True)
+class NormalizedChunk:
+    """Um registro do JSONL normalizado, pronto para embedding."""
+
+    chunk_id: str
+    document_id: str
+    base_id: str
+    text: str
+    source_file: str
+    sha256: str
+    metadata: dict[str, Any]
+
+
+def _chunk_metadata(record: dict[str, Any]) -> dict[str, Any]:
+    """Monta o metadado no formato de ChunkMetadata (src/schema.py).
+
+    src/prepare_documents.py grava um contrato plano (sem ``"metadata"``
+    aninhado): ``doc_type`` é o formato do arquivo (json/pdf/html) e
+    ``natureza`` é a classificação Adaptive RAG — ambos viram campos de
+    ChunkMetadata diretamente.
+    """
+    if "metadata" in record:  # compat: formato antigo, já aninhado
+        return record["metadata"]
+    return {
+        "source_file": record.get("source_file", ""),
+        "chunk_id": record["chunk_id"],
+        "base_id": record["base_id"],
+        "doc_type": record.get("doc_type", record.get("formato", "")),
+        "natureza": record.get("natureza"),
+        "sensitivity": record.get("sensitivity", "publico"),
+        "data_vigencia": record.get("data_vigencia"),
+        "extras": record.get("extras", {}),
+    }
+
+
+def read_normalized_chunks(input_file: Path) -> Iterator[NormalizedChunk]:
+    with input_file.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            record = json.loads(line)
+            yield NormalizedChunk(
+                chunk_id=record["chunk_id"],
+                document_id=record["document_id"],
+                base_id=record["base_id"],
+                text=record.get("text", ""),
+                source_file=record.get("source_file", record.get("source_path", "")),
+                sha256=record.get("sha256", ""),
+                metadata=_chunk_metadata(record),
+            )
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _relative(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(PROJECT_ROOT.resolve()).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def batched(items: list[Any], size: int) -> Iterator[list[Any]]:
+    for start in range(0, len(items), size):
+        yield items[start : start + size]
+
+
+def _default_embed_fn(model: str) -> EmbedFn:
+    """Cliente OpenAI-compatível apontando para o servidor Ollama da turma."""
+    from openai import OpenAI
+
+    client = OpenAI(base_url=config.OLLAMA_URL, api_key=config.OLLAMA_API_KEY)
+
+    def embed(texts: list[str]) -> list[list[float]]:
+        response = client.embeddings.create(model=model, input=texts)
+        return [item.embedding for item in response.data]
+
+    return embed
+
+
+def build_index(
+    input_file: Path,
+    output_dir: Path,
+    embed_fn: EmbedFn,
+    *,
+    model: str,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+) -> dict[str, Any]:
+    """Agrupa os chunks por base, gera embeddings e grava o índice em disco."""
+    by_base: dict[str, list[NormalizedChunk]] = defaultdict(list)
+    skipped_sem_texto = 0
+    for chunk in read_normalized_chunks(input_file):
+        if not chunk.text.strip():
+            skipped_sem_texto += 1
+            continue
+        by_base[chunk.base_id].append(chunk)
+
+    missing_by_chunk = {
+        chunk.chunk_id: sorted(REQUIRED_METADATA_FIELDS - set(chunk.metadata))
+        for chunks in by_base.values()
+        for chunk in chunks
+        if REQUIRED_METADATA_FIELDS - set(chunk.metadata)
+    }
+    if missing_by_chunk:
+        raise ValueError(f"chunks com metadado obrigatório ausente: {missing_by_chunk}")
+
+    source_hash = file_sha256(input_file)
+    built_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    bases_summary: list[dict[str, Any]] = []
+    for base_id in sorted(by_base):
+        chunks = by_base[base_id]
+        base_dir = output_dir / base_id
+        base_dir.mkdir(parents=True, exist_ok=True)
+        vectors_path = base_dir / "vectors.jsonl"
+        dimension: int | None = None
+        with vectors_path.open("w", encoding="utf-8", newline="\n") as handle:
+            for batch in batched(chunks, batch_size):
+                embeddings = embed_fn([chunk.text for chunk in batch])
+                if len(embeddings) != len(batch):
+                    raise RuntimeError(
+                        f"embed_fn retornou {len(embeddings)} vetores para {len(batch)} textos"
+                    )
+                for chunk, embedding in zip(batch, embeddings):
+                    if dimension is None:
+                        dimension = len(embedding)
+                    elif len(embedding) != dimension:
+                        raise RuntimeError(
+                            f"dimensão inconsistente no chunk {chunk.chunk_id}: "
+                            f"esperado {dimension}, recebido {len(embedding)}"
+                        )
+                    record = {
+                        "chunk_id": chunk.chunk_id,
+                        "document_id": chunk.document_id,
+                        "base_id": chunk.base_id,
+                        "embedding": embedding,
+                        "source_file": chunk.source_file,
+                        "sha256": chunk.sha256,
+                        "metadata": chunk.metadata,
+                    }
+                    handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+        manifest = {
+            "base_id": base_id,
+            "embedding_model": model,
+            "dimension": dimension or 0,
+            "total_chunks": len(chunks),
+            "source_file": _relative(input_file),
+            "source_sha256": source_hash,
+            "built_at": built_at,
+        }
+        (base_dir / "manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        bases_summary.append(manifest)
+
+    global_manifest = {
+        "embedding_model": model,
+        "source_file": _relative(input_file),
+        "source_sha256": source_hash,
+        "built_at": built_at,
+        "chunks_sem_texto_ignorados": skipped_sem_texto,
+        "bases": bases_summary,
+    }
+    (output_dir / "manifest.json").write_text(
+        json.dumps(global_manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    return global_manifest
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--input", type=Path, default=DEFAULT_INPUT, help="JSONL normalizado de entrada")
+    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_DIR, help="diretório de saída do índice")
+    parser.add_argument("--model", default=config.EMBEDDING_MODEL, help="modelo de embeddings")
+    parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE, help="chunks por chamada de embeddings")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="conta chunks por base sem chamar o modelo de embeddings",
+    )
+    args = parser.parse_args()
+
+    if not args.input.exists():
+        parser.error(f"arquivo normalizado não encontrado: {args.input} (rode src/ingest.py primeiro)")
+    if args.batch_size < 1:
+        parser.error("--batch-size deve ser >= 1")
+
+    if args.dry_run:
+        by_base: dict[str, int] = defaultdict(int)
+        skipped = 0
+        for chunk in read_normalized_chunks(args.input):
+            if not chunk.text.strip():
+                skipped += 1
+                continue
+            by_base[chunk.base_id] += 1
+        summary = {
+            "chunks_por_base": dict(sorted(by_base.items())),
+            "chunks_sem_texto_ignorados": skipped,
+        }
+        print(json.dumps(summary, ensure_ascii=False))
+        return 0
+
+    embed_fn = _default_embed_fn(args.model)
+    manifest = build_index(args.input, args.output, embed_fn, model=args.model, batch_size=args.batch_size)
+    summary = {
+        "bases": [
+            {"base_id": base["base_id"], "total_chunks": base["total_chunks"], "dimension": base["dimension"]}
+            for base in manifest["bases"]
+        ],
+        "chunks_sem_texto_ignorados": manifest["chunks_sem_texto_ignorados"],
+    }
+    print(json.dumps(summary, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

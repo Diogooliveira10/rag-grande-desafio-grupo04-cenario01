@@ -18,10 +18,14 @@ Contexto completo do desafio, dos outros dois cenários e dos padrões de engenh
 | --- | --- | --- | --- | --- |
 | `editais_normativo` / `fontes_normativas` | Normativa | Lei 14.133/2021, decretos estaduais, editais de licitação | Planalto, REDELOG-RJ, CGE-RJ, PNCP | PDF/HTML por URL |
 | `contratos_estruturado` | Estruturada | Contratos e contratações, UF=RJ, período fechado | PNCP — API de consulta v3 | REST paginado |
-| `atas_conversacional` | Conversacional | Atas de registro de preço, e-mails de compras (base sintética) | PNCP + base sintética | Texto |
-| `pca_agregado` | Agregada | Plano de Contratações Anual, valores homologados por item | PNCP | REST |
+| `atas_conversacional` | Conversacional | Atas de registro de preço; e-mails de compras (base sintética, pendente: será fornecida pelo tutor) | PNCP + base sintética | Texto |
+| `pca_agregado` | Agregada | Plano de Contratações Anual 2025 do Estado do RJ, transformado em indicadores | PNCP | REST (CSV + JSON) |
 
 A definição declarativa de cada base — fonte, tipo de acesso, volume-alvo, campo de vigência, licença — vive em [corpus_manifest.yaml](corpus_manifest.yaml), que é a fonte única de verdade sobre o que entra no corpus. `data/raw/` nunca é versionado; qualquer pessoa reconstrói o corpus rodando o coletor contra o manifesto.
+
+Só as bases com `escopo: oficial` no manifesto (uma por natureza) respondem perguntas; as marcadas como `experimental` ficam fora da busca (`ESCOPOS_CONSULTADOS` em [src/pipeline.py](src/pipeline.py)).
+
+**Base agregada.** O CSV do PCA traz um item planejado por linha (~39,5 mil no Estado do RJ em 2025). Em vez de um chunk por linha, a preparação calcula indicadores com [src/pca_indicators.py](src/pca_indicators.py): visão geral, e totais, participação e ranking por categoria, unidade responsável, classe de catálogo e mês, além de rankings das 30 maiores unidades e classes. Cada indicador vira **um chunk** com os números já calculados (cerca de 1.000 no total). Assim o LLM cita valores prontos, em vez de tentar somar linhas.
 
 > A API do PNCP **não tem busca textual**. Filtro por objeto é feito localmente, e o recorte de dados é sempre determinístico (mesmo manifesto ⇒ mesmo corpus).
 
@@ -33,7 +37,7 @@ A pergunta que o roteador responde não é "sobre o que o usuário falou", e sim
 - *"Quais contratos de licenciamento de software foram assinados acima de R$ 500 mil em 2025?"* → estruturada, com filtro numérico extraído da pergunta.
 - *"Sou MEI, posso participar de pregão eletrônico? Tem algum aberto pra material de escritório?"* → normativa (tratamento a ME/EPP) **e** estruturada (contratações em aberto) na mesma pergunta.
 
-As personas de referência, com as nove perguntas classificadas por rota esperada e tipo, estão em [PERSONAS.md](PERSONAS.md).
+As seis personas de referência, com as 18 perguntas classificadas por rota esperada e tipo (mais uma pergunta de falha esperada), estão em [PERSONAS.md](PERSONAS.md) — e viraram o golden set que `eval/run_eval.py` roda contra o pipeline. `src/router.py` já implementa esse roteamento de forma determinística (regex sobre o texto normalizado da pergunta, sem chamar o LLM).
 
 ## Política de sensibilidade
 
@@ -42,6 +46,13 @@ Classificação feita na **ingestão** (metadado `sensitivity` em cada chunk), n
 - **Responder:** valores de contrato, nome de empresa fornecedora, CNPJ de pessoa jurídica, objeto contratado — público por lei.
 - **Mascarar:** CPF de pessoa física contratada, telefone e e-mail pessoal de servidor que aparecem em atas.
 - **Recusar:** dados bancários de fornecedor, credenciais vazadas em e-mail, juízo sobre a legalidade de um contrato específico (o sistema apresenta dados, não acusa). Ver `RefusalReason` em [src/schema.py](src/schema.py).
+
+Como é aplicada ([src/sensitivity.py](src/sensitivity.py), chamado por [src/generate.py](src/generate.py)):
+
+- **Mascaramento determinístico (regex), em dois pontos:** no contexto antes do prompt (o LLM nunca vê o dado) e na resposta final (caso o dado venha da própria pergunta). CPF formatado é sempre mascarado; CPF só com dígitos e telefone sem DDD entre parênteses/`+55` só quando rotulados (`CPF:`, `Tel.:`), para não mascarar ids de processo. E-mails de domínio institucional (`.gov.br`, `.jus.br`, `.mp.br`, `.leg.br`, `.def.br`, `.mil.br`) são preservados; os demais viram `[e-mail omitido]`. CNPJ não é tocado.
+- **Chunks `sensitivity=restrito` são descartados** antes da geração; se só sobrarem restritos, a resposta é recusa `sem_evidencia`.
+- O log de geração registra quantos dados foram mascarados por tipo (`mascaramentos`) e quantos chunks restritos foram descartados — nunca o valor original.
+- Testes em [tests/test_sensitivity.py](tests/test_sensitivity.py).
 
 ## Pipeline
 
@@ -60,6 +71,10 @@ flowchart TD
 
 Estágios (mesmos nomes usados no campo `stage` do log estruturado): `query_analysis`, `roteamento`, `retrieval_denso`, `retrieval_bm25`, `fusao_rrf`, `rerank`, `geracao`, `validacao`, `feedback`. Detalhes de decisão e divisão de responsabilidades em [ARQUITETURA.md](ARQUITETURA.md).
 
+**Implementado:** `roteamento` ([src/router.py](src/router.py)), `retrieval_denso`/`retrieval_bm25`/`fusao_rrf` ([src/retrieve.py](src/retrieve.py), rerank ainda é opcional/plugável) e `geracao` ([src/generate.py](src/generate.py), com guardrails determinísticos antes do LLM e parsing defensivo da saída). [src/pipeline.py](src/pipeline.py) une os três estágios numa única função (`responder`). Toda etapa registra log estruturado via [src/obs.py](src/obs.py) (JSONL em `logs/pipeline-AAAA-MM-DD.jsonl`, com `run_id`, `stage`, latência e tokens).
+
+Uma pergunta via `responder` gera, no log, uma linha por stage — `roteamento`, `retrieval_denso`, `retrieval_bm25`, `fusao_rrf`, `rerank` (só com reranker) e `geracao` — todas com o mesmo `run_id` e `query_id`. `geracao` traz `tokens` e `modelo` a partir de `response.usage` do SDK OpenAI. Etapa que falha grava `status: "erro"` com `extra.error_type`. Dados pessoais da pergunta são mascarados antes de ir para o log. Testes em [tests/test_pipeline_logs.py](tests/test_pipeline_logs.py); os testes gravam log num diretório temporário ([tests/conftest.py](tests/conftest.py)), nunca em `logs/`.
+
 ## Estrutura do repositório
 
 ```
@@ -67,16 +82,31 @@ Estágios (mesmos nomes usados no campo `stage` do log estruturado): `query_anal
 ├── docs/                         ← guia da interface CLI e capturas de tela
 ├── CORPUS_INVENTORY.md           ← inventário legível do corpus coletado
 ├── data/
-│   ├── raw/                     ← corpus bruto coletado (ignorado pelo Git)
+│   ├── raw/vN/                  ← versão imutável de cada coleta (staging em raw/.staging/ até promoção)
+│   ├── normalized/              ← chunks normalizados (JSONL), saída de src/prepare_documents.py (ignorado pelo Git)
+│   ├── embeddings/               ← embeddings versionados (cache + partes), gerados por src/create_embeddings.py
+│   ├── inventory/                ← inventário por versão (JSON), checkpoints e diffs entre versões
 │   ├── runs/                    ← relatórios de execução de cada coleta
 ├── tests/fixtures/               ← amostras locais para testes offline
 ├── tests/                       ← testes de contrato (pytest), offline
+├── app/
+│   └── cli.py                   ← interface de linha de comando: rota e resposta completa do pipeline
 ├── src/
 │   ├── fetch_corpus.py          ← coleta determinística e versionada do corpus
 │   ├── manifest_curator.py      ← descoberta e propostas para o manifesto
 │   ├── source_lookup.py         ← busca remota nas fontes suportadas
 │   ├── corpus_search.py         ← busca local no inventário
-│   ├── ingest.py                ← normalização de brutos em chunks (JSONL)
+│   ├── ingest.py                ← fachada compatível; delega a extração para prepare_documents.py
+│   ├── prepare_documents.py     ← extração por formato (PDF/HTML/CSV/JSON/JSONL), chunking e metadados canônicos
+│   ├── pca_indicators.py        ← indicadores agregados do PCA (1 indicador = 1 chunk) para a base agregada
+│   ├── create_embeddings.py     ← embeddings com cache, multi-provedor e escrita incremental
+│   ├── index.py                 ← índice vetorial por base a partir do JSONL normalizado
+│   ├── router.py                ← roteamento determinístico (Adaptive RAG)
+│   ├── retrieve.py              ← recuperação híbrida: denso + BM25 + RRF, filtros de metadado, rerank plugável
+│   ├── generate.py              ← geração com guardrails e parsing defensivo da saída do LLM
+│   ├── sensitivity.py           ← política de sensibilidade: mascaramento de CPF/telefone/e-mail e filtro de restritos
+│   ├── pipeline.py              ← une roteamento + recuperação + geração numa função (responder)
+│   ├── obs.py                   ← logging estruturado (JSONL) e contagem de tokens
 │   └── schema.py                ← modelos Pydantic (chunk, roteamento, resposta, recusa)
 ├── llm_ecoa.py                  ← exemplo mínimo de geração e embedding via endpoint compartilhado
 ├── corpus_manifest.yaml         ← o que entra no corpus (fonte única de verdade)
@@ -265,6 +295,16 @@ As opções de provedor são `ecoa`, `ollama`, `openai` e `custom`. O cache regi
 provedor, endpoint e modelo para impedir a mistura de espaços vetoriais
 diferentes.
 
+`src/index.py` é um caminho alternativo e mais simples: lê o mesmo
+`documents.jsonl`, mas particiona o índice por `base_id` em vez de gravar um
+único `embeddings.jsonl` com cache. Útil quando `retrieve.py` só precisa
+carregar uma base por vez.
+
+```bash
+py .\src\index.py --dry-run     # só conta chunks por base, sem chamar o modelo de embeddings
+py .\src\index.py               # gera embeddings de verdade, via o endpoint compartilhado
+```
+
 **5. Testar o endpoint de LLM/embeddings compartilhado**
 
 ```bash
@@ -276,6 +316,27 @@ python llm_ecoa.py
 ```bash
 pytest tests/ -m "not llm"      # camadas unitária e de contrato, offline
 ```
+
+**7. Fazer perguntas ao sistema (app)**
+
+```bash
+py app/cli.py rota "Sou MEI, posso participar de pregão eletrônico?"       # só mostra as bases escolhidas pelo roteador
+py app/cli.py perguntar "Quais contratos de ambulâncias foram publicados?"  # pipeline completo, resposta em JSON
+py app/cli.py perguntar "Pergunta 1?" "Pergunta 2?"                       # várias perguntas de uma vez
+py app/cli.py perguntar                                                    # sem argumento, pede a pergunta no terminal
+```
+
+`perguntar` chama `src.pipeline:responder`, então a resposta já passa pelas recusas, pelo mascaramento de dados pessoais e pelo log de cada etapa. Sem índice montado (`index/`), a resposta é uma recusa `sem_evidencia`.
+
+**8. Rodar a avaliação (golden set das personas)**
+
+```bash
+py .\eval\run_eval.py check                                     # valida o golden set, sem pipeline
+py .\eval\run_eval.py run --pipeline eval.adapters:rota_apenas   # só roteamento (src/router.py), rápido e offline
+py .\eval\run_eval.py run --pipeline src.pipeline:responder      # pipeline completo: roteamento + recuperação + geração
+```
+
+`eval/adapters.py:rota_apenas` avalia só o estágio de roteamento, sem chamar o LLM — útil para checar regressão rápida. `src/pipeline.py:responder` roda o pipeline completo (roteamento + recuperação híbrida via `retrieve.py` + geração via `generate.py`), chamando o LLM de verdade a cada pergunta do golden set.
 
 ### Endpoint de modelos (compartilhado com toda a turma)
 

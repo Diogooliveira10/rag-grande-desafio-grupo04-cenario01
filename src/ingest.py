@@ -23,6 +23,8 @@ from typing import Any, Iterator
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_INPUT = PROJECT_ROOT / "data" / "raw" / "v1"
 DEFAULT_OUTPUT = PROJECT_ROOT / "data" / "normalized" / "documents.jsonl"
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
