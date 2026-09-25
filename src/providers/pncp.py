@@ -345,7 +345,45 @@ class PNCPProvider:
         return ResolvedSource(source_ref=source_ref, artifacts=artifacts)
 
     def list_artifacts(self, source: ResolvedSource) -> tuple[SourceArtifact, ...]:
-        return source.artifacts
+        """Para atas, acrescenta os PDFs anunciados na listagem ``/arquivos``.
+
+        A listagem é consultada aqui só para descobrir as URLs; ela continua
+        sendo coletada como artefato JSON próprio. Se a consulta falhar, a ata
+        segue só com os artefatos JSON e a falha aparece na coleta da listagem.
+        """
+        if source.source_ref.resource_type.casefold() not in {"ata", "ata_registro_preco"}:
+            return source.artifacts
+        listing = next(
+            (artifact for artifact in source.artifacts if artifact.artifact_id.endswith(":arquivos")),
+            None,
+        )
+        if listing is None:
+            return source.artifacts
+        response = self.client.request_url(listing.url, "json", attempts=3, timeout=30.0)
+        if response.get("status") not in {"disponivel", "nao_modificado"}:
+            return source.artifacts
+        documents: list[SourceArtifact] = []
+        for document in self._records(response.get("json")):
+            sequence = self._first(document, "sequencialDocumento")
+            url = document.get("url")
+            if sequence in (None, "") or not url:
+                continue
+            documents.append(
+                SourceArtifact(
+                    artifact_id=f"{source.source_ref.stable_id}:arquivo:{sequence}",
+                    source_ref=source.source_ref,
+                    url=str(url),
+                    artifact_type="pdf",
+                    content_type="application/pdf",
+                    filename=f"ata_arquivo_{sequence}.pdf",
+                    metadata={
+                        "logical_unit": False,
+                        "titulo": document.get("titulo"),
+                        "tipo_documento": document.get("tipoDocumentoNome"),
+                    },
+                )
+            )
+        return source.artifacts + tuple(documents)
 
     def search(self, query: dict[str, Any]) -> list[SourceCandidate]:
         """Descobre referências PNCP sem gravar arquivos."""

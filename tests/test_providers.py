@@ -141,6 +141,55 @@ def test_pncp_provider_filtra_atas_por_cnpj_do_orgao():
     assert [ata.source_ref.key["cnpj"] for ata in atas] == ["11111111000100", "22222222000100"]
 
 
+_ATA = SourceRef(
+    "pncp",
+    "ata",
+    {"cnpj": "42498600000171", "ano_compra": 2023, "sequencial_compra": 1187, "sequencial_ata": 1},
+)
+
+
+class _ListagemFake:
+    api_base = "https://pncp.test/api/pncp"
+
+    def __init__(self, response):
+        self.response = response
+        self.urls = []
+
+    def request_url(self, url, kind, *, attempts, timeout):
+        self.urls.append(url)
+        return self.response
+
+
+def test_pncp_provider_lista_os_pdfs_da_ata():
+    client = _ListagemFake(
+        {
+            "status": "disponivel",
+            "json": [
+                {"sequencialDocumento": 1, "titulo": "Ata nº 00178", "url": "https://pncp.test/arquivos/1"},
+                {"sequencialDocumento": 2, "titulo": "Ata retificada", "url": "https://pncp.test/arquivos/2"},
+                {"sequencialDocumento": 3, "titulo": "Sem URL"},
+            ],
+        }
+    )
+    provider = PNCPProvider(client)
+
+    artifacts = provider.list_artifacts(provider.resolve(_ATA))
+
+    assert client.urls == [artifacts[1].url]
+    assert artifacts[1].artifact_id.endswith(":arquivos")
+    pdfs = [artifact for artifact in artifacts if artifact.artifact_type == "pdf"]
+    assert [pdf.url for pdf in pdfs] == ["https://pncp.test/arquivos/1", "https://pncp.test/arquivos/2"]
+    assert [pdf.artifact_id for pdf in pdfs] == [f"{_ATA.stable_id}:arquivo:1", f"{_ATA.stable_id}:arquivo:2"]
+    assert all(pdf.metadata["logical_unit"] is False for pdf in pdfs)
+
+
+def test_pncp_provider_mantem_a_ata_sem_pdfs_se_a_listagem_falhar():
+    provider = PNCPProvider(_ListagemFake({"status": "indisponivel", "erro": "timeout"}))
+    resolved = provider.resolve(_ATA)
+
+    assert provider.list_artifacts(resolved) == resolved.artifacts
+
+
 def test_pncp_provider_searches_pca_units():
     class FakeClient:
         api_base = "https://pncp.test/api/pncp"
