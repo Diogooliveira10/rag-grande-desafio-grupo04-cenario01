@@ -55,17 +55,18 @@ py -m src.fetch_corpus fetch `
 ```
 
 Essa coleta cria uma versão e um inventário sob `data/emails-sinteticos/`.
-Depois, prepare os documentos da versão criada, ajustando `v1` se a coleta tiver
-gerado outra versão:
+Depois, prepare os documentos a partir do inventário mais recente dessa raiz:
 
 ```powershell
 py -m src.prepare_documents `
-  --input "data/emails-sinteticos/raw/v1/emails_sinteticos" `
+  --latest `
+  --data-root "data/emails-sinteticos" `
   --manifest corpus_manifest.yaml `
-  --base-id emails_sinteticos `
-  --inventory "data/emails-sinteticos/inventory/v1.json" `
-  --output "data/emails-sinteticos/normalized/emails.jsonl"
+  --base-id emails_sinteticos
 ```
+
+A saída fica em `data/emails-sinteticos/normalized/vN/emails_sinteticos/`,
+com a versão e o inventário identificados no relatório.
 
 `fetch` é a etapa que versiona e inventaria os arquivos. Use-a quando quiser
 incorporar a coleção ao histórico do corpus; para uma prévia local, basta o
