@@ -221,6 +221,23 @@ bases:
     chunking_sugerido: "Texto por seção, com overlap"
     metadados_extras: [nome_arquivo, fixture]
 
+  # Exemplo sintético local para validar emails em Markdown sem dados pessoais reais.
+  - base_id: emails_sinteticos
+    escopo: experimental
+    natureza: conversacional
+    fonte: "Email sintético de fixture para testes locais"
+    acesso:
+      tipo: arquivo_local
+      origem: "docs/email_sintetico_exemplo.md"
+      rate_limit_seg: 0
+    selecao_deterministica: true
+    volume_alvo: 1
+    formato: md
+    licenca: "Conteúdo sintético criado para testes"
+    sensitivity_default: publico
+    deduplicacao: "SHA-256"
+    chunking_sugerido: "Preservar cabeçalhos e blocos da conversa"
+
   # Amostra real opcional em CSV, publicada pelo Portal de Dados Abertos do RJ.
   - base_id: licitacoes_siga_csv
     escopo: experimental
