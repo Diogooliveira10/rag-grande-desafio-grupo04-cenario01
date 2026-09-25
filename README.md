@@ -65,11 +65,11 @@ Estágios (mesmos nomes usados no campo `stage` do log estruturado): `query_anal
 ```
 ├── acompanhamento/              ← relato individual + resumo do dia, a cada encontro
 ├── docs/                         ← guia da interface CLI e capturas de tela
+├── CORPUS_INVENTORY.md           ← inventário legível do corpus coletado
 ├── data/
 │   ├── raw/                     ← corpus bruto coletado (ignorado pelo Git)
 │   ├── runs/                    ← relatórios de execução de cada coleta
-│   └── CORPUS_INVENTORY.md      ← inventário legível do corpus coletado
-├── testes/test-fontes/          ← verificação de disponibilidade das fontes e downloader compartilhado
+├── tests/fixtures/               ← amostras locais para testes offline
 ├── tests/                       ← testes de contrato (pytest), offline
 ├── src/
 │   ├── fetch_corpus.py          ← coleta determinística e versionada do corpus
@@ -171,7 +171,7 @@ py -m src.fetch_corpus fetch `
   --base-id exemplos_teste
 
 pytest tests/ -m "not llm"
-pytest testes/test_fetch_corpus.py -q
+pytest tests/test_fetch_corpus.py -q
 ```
 
 Os PDFs são amostras de entrada para inspeção e testes locais. A base usa
