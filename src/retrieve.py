@@ -174,17 +174,17 @@ def _parse_number(value: Any) -> Decimal | None:
             return None
         integer, fraction = candidate.split(",")
         if "." in integer:
-            if not re.fullmatch(r"[+-]?\d{1,3}(?:\.\d{3})+", integer):
+            if not re.fullmatch(r"[+-]?[1-9]\d{0,2}(?:\.\d{3})+", integer):
                 return None
             integer = integer.replace(".", "")
         candidate = f"{integer}.{fraction}"
     elif candidate.count(".") > 1:
-        if not re.fullmatch(r"[+-]?\d{1,3}(?:\.\d{3})+", candidate):
+        if not re.fullmatch(r"[+-]?[1-9]\d{0,2}(?:\.\d{3})+", candidate):
             return None
         candidate = candidate.replace(".", "")
     elif candidate.count(".") == 1:
         integer, fraction = candidate.split(".")
-        if len(fraction) == 3 and re.fullmatch(r"[+-]?\d{1,3}", integer):
+        if len(fraction) == 3 and re.fullmatch(r"[+-]?[1-9]\d{0,2}", integer):
             candidate = f"{integer}{fraction}"
     try:
         return Decimal(candidate)
@@ -341,6 +341,8 @@ def dense_retrieve(
     embed_fn: EmbedFn | None = None,
     records: Iterable[Mapping[str, Any]] | None = None,
     escopos: Iterable[str] | None = None,
+    run_id: str = "sem-run-id",
+    query_id: str = "sem-query-id",
 ) -> list[RetrievalResult]:
     """Recupera os vetores mais próximos usando o índice persistido."""
     if top_k <= 0 or not query.strip():
@@ -355,13 +357,17 @@ def dense_retrieve(
     }
     scored: list[RetrievalResult] = []
     incompatible_embeddings: list[dict[str, Any]] = []
+    missing_embeddings: list[dict[str, str]] = []
     for record in candidates:
         embedding = record.get("embedding", [])
+        metadata = record.get("metadata")
+        chunk_id = str(record.get("chunk_id") or (
+            metadata.get("chunk_id", "") if isinstance(metadata, Mapping) else ""
+        ))
+        if embedding is None:
+            missing_embeddings.append({"chunk_id": chunk_id})
+            continue
         if len(embedding) != len(query_vector):
-            metadata = record.get("metadata")
-            chunk_id = str(record.get("chunk_id") or (
-                metadata.get("chunk_id", "") if isinstance(metadata, Mapping) else ""
-            ))
             incompatible_embeddings.append(
                 {
                     "chunk_id": chunk_id,
@@ -379,14 +385,25 @@ def dense_retrieve(
         )
     if incompatible_embeddings:
         registrar(
-            run_id="sem-run-id",
-            query_id="sem-query-id",
+            run_id=run_id,
+            query_id=query_id,
             stage=Stage.RETRIEVAL_DENSO,
             status="aviso",
             latencia_ms=0,
             input=query,
             output=f"{len(incompatible_embeddings)} embedding(s) incompatível(is) excluído(s)",
             extra={"embedding_dimension_mismatches": incompatible_embeddings},
+        )
+    if missing_embeddings:
+        registrar(
+            run_id=run_id,
+            query_id=query_id,
+            stage=Stage.RETRIEVAL_DENSO,
+            status="aviso",
+            latencia_ms=0,
+            input=query,
+            output=f"{len(missing_embeddings)} embedding(s) ausente(s)/nulo(s) ignorado(s)",
+            extra={"missing_embeddings": missing_embeddings},
         )
     return sorted(scored, key=lambda item: (-item.score, item.chunk_id))[:top_k]
 
@@ -543,6 +560,8 @@ def retrieve(
             filters=route_filters,
             embed_fn=embed_fn,
             escopos=escopos,
+            run_id=run_id,
+            query_id=query_id,
         )
         span.set_result(_resumo(dense))
     with _span(Stage.RETRIEVAL_BM25) as span:
