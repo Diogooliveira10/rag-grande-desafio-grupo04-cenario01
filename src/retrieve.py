@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import config
-from src.obs import Stage, default_logger
+from src.obs import Stage, default_logger, registrar
 from src.schema import Natureza
 
 
@@ -170,7 +170,22 @@ def _parse_number(value: Any) -> Decimal | None:
     if not candidate:
         return None
     if "," in candidate:
-        candidate = candidate.replace(".", "").replace(",", ".")
+        if candidate.count(",") != 1:
+            return None
+        integer, fraction = candidate.split(",")
+        if "." in integer:
+            if not re.fullmatch(r"[+-]?\d{1,3}(?:\.\d{3})+", integer):
+                return None
+            integer = integer.replace(".", "")
+        candidate = f"{integer}.{fraction}"
+    elif candidate.count(".") > 1:
+        if not re.fullmatch(r"[+-]?\d{1,3}(?:\.\d{3})+", candidate):
+            return None
+        candidate = candidate.replace(".", "")
+    elif candidate.count(".") == 1:
+        integer, fraction = candidate.split(".")
+        if len(fraction) == 3 and re.fullmatch(r"[+-]?\d{1,3}", integer):
+            candidate = f"{integer}{fraction}"
     try:
         return Decimal(candidate)
     except InvalidOperation:
@@ -209,7 +224,19 @@ def _matches_filters(metadata: Mapping[str, Any], filters: Mapping[str, Any] | N
                 if _values_equal(actual, value):
                     return False
             elif operator in {">", ">=", "<", "<="}:
-                left, right = _comparable_values(actual, value)
+                left_date, right_date = _parse_date(actual), _parse_date(value)
+                if left_date is not None or right_date is not None:
+                    if left_date is None or right_date is None:
+                        return False
+                    left, right = left_date, right_date
+                else:
+                    left_number, right_number = _parse_number(actual), _parse_number(value)
+                    if left_number is not None or right_number is not None:
+                        if left_number is None or right_number is None:
+                            return False
+                        left, right = left_number, right_number
+                    else:
+                        left, right = actual, value
                 if type(left) is not type(right):
                     return False
                 comparisons = {
@@ -326,14 +353,41 @@ def dense_retrieve(
         str(item.get("chunk_id")): str(item.get("text", ""))
         for item in _read_jsonl(documents_file)
     }
-    scored = [
-        _result(
-            record,
-            _cosine(query_vector, record.get("embedding", [])),
-            str(record.get("text", "")) or normalized_text.get(str(record.get("chunk_id")), ""),
+    scored: list[RetrievalResult] = []
+    incompatible_embeddings: list[dict[str, Any]] = []
+    for record in candidates:
+        embedding = record.get("embedding", [])
+        if len(embedding) != len(query_vector):
+            metadata = record.get("metadata")
+            chunk_id = str(record.get("chunk_id") or (
+                metadata.get("chunk_id", "") if isinstance(metadata, Mapping) else ""
+            ))
+            incompatible_embeddings.append(
+                {
+                    "chunk_id": chunk_id,
+                    "expected_dimension": len(query_vector),
+                    "actual_dimension": len(embedding),
+                }
+            )
+            continue
+        scored.append(
+            _result(
+                record,
+                _cosine(query_vector, embedding),
+                str(record.get("text", "")) or normalized_text.get(str(record.get("chunk_id")), ""),
+            )
         )
-        for record in candidates
-    ]
+    if incompatible_embeddings:
+        registrar(
+            run_id="sem-run-id",
+            query_id="sem-query-id",
+            stage=Stage.RETRIEVAL_DENSO,
+            status="aviso",
+            latencia_ms=0,
+            input=query,
+            output=f"{len(incompatible_embeddings)} embedding(s) incompatível(is) excluído(s)",
+            extra={"embedding_dimension_mismatches": incompatible_embeddings},
+        )
     return sorted(scored, key=lambda item: (-item.score, item.chunk_id))[:top_k]
 
 
