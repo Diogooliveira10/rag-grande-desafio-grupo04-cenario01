@@ -62,9 +62,8 @@ As tarefas são distribuídas entre os integrantes a cada encontro, de acordo co
 
 ### Pendências em aberto
 
-- Declarar as bases `pca_agregado` e `atas_conversacional` no `corpus_manifest.yaml` e coletá-las quando a API do PNCP estabilizar (ver `CORPUS_INVENTORY.md`).
-- Fazer `src/retrieve.py` consultar todas as bases de uma natureza, e não só uma.
-- Definir qual `CORPUS_INVENTORY.md` é o oficial (raiz ou `data/`).
+- Rodar a coleta oficial com as bases `pca_agregado` e `atas_conversacional`, já declaradas no manifesto (ver `CORPUS_INVENTORY.md`).
+- Gerar os embeddings e o índice oficiais das bases `atas_conversacional` e `pca_agregado` (a base agregada vira ~1.000 indicadores com `src/pca_indicators.py`).
 - Obter a base sintética de e-mails de compras fornecida pelo desafio.
 
 ---

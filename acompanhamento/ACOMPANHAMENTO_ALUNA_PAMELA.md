@@ -41,3 +41,30 @@
 - Normaliza letras maiúsculas, minúsculas e acentos.
 - Não acessa os índices nem chama o LLM. Ele apenas decide para quais bases a busca deverá ir.
 Também foi criado tests/test_router.py, com 7 testes cobrindo esses comportamentos.
+
+
+## Encontro 5 - 2026-09-23
+
+### Relato individual - Pâmela de Freitas
+
+- Ela possui os comandos rota e perguntar.
+- Implementei uma CLI simples para testar o projeto em terminal.
+- rota valida em quais bases a pergunta deve buscar.
+- perguntar executa o pipeline completo.
+- Também aceita várias perguntas em uma mesma execução.
+- A validação foi confirmada no terminal
+
+Exemplos de uso:
+
+- python app/cli.py --help
+
+- python app/cli.py rota 
+- e aí abre um input pra fazer a pergunta no terminal
+
+- python app/cli.py perguntar
+- e aí abre um input pra fazer a pergunta no terminal
+
+Ou direto com a pergunta:
+
+- python app/cli.py rota "Quais contratos de software foram assinados acima de 500 mil?"
+- python app/cli.py perguntar "Quais contratos de software foram assinados acima de 500 mil?"

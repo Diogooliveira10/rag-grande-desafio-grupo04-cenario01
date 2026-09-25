@@ -1,25 +1,8 @@
-r"""Verifica a disponibilidade das fontes do Cenário 1.
+r"""Curadoria e consultas auxiliares das fontes do corpus.
 
-Uso:
-    py -m src.source_catalog
-    py -m src.source_catalog --atualizar-md --salvar-json --baixar-arquivos
-    py -m src.source_catalog discover
-    py -m src.source_catalog propose --manifest corpus_manifest.yaml
-    py -m src.source_catalog manifest-diff --proposal data/proposals/manifest-proposal.json
-    py -m src.source_catalog apply --proposal data/proposals/manifest-proposal.json
-    py .\testes\test-fontes\testar_fontes_cenario01.py  # compatibilidade
-    py .\testes\test-fontes\testar_fontes_cenario01.py --atualizar-md
-    py .\testes\test-fontes\testar_fontes_cenario01.py --atualizar-md --salvar-json
-    py .\testes\test-fontes\testar_fontes_cenario01.py --atualizar-md --salvar-json --baixar-arquivos
-
-Exemplos de recorte:
-    py -m src.source_catalog --ano 2025 --uf RJ --modalidade 1
-    py -m src.source_catalog --ano 2025 --uf RJ --modalidade 6
-
-O script usa somente a biblioteca padrão do Python. Endpoints que dependem de
-identificadores reais são encadeados a partir de uma contratação/ata/PCA
-encontrados nas consultas públicas. Falhas HTTP transitórias do PNCP (429/5xx)
-são diferenciadas de consultas válidas sem amostra.
+A interface pública usa subcomandos: ``discover``, ``lookup``, ``propose``,
+``review``, ``manifest-diff`` e ``apply``. A coleta oficial pertence ao
+``fetch_corpus``; este módulo não deve gravar arquivos em ``data/raw``.
 """
 
 from __future__ import annotations
@@ -44,12 +27,12 @@ except ImportError:  # permite executar o módulo diretamente
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-LEGACY_TEST_DIR = PROJECT_ROOT / "testes" / "test-fontes"
-MARKDOWN_PATH = LEGACY_TEST_DIR / "fontes_cenario01.md"
+CATALOG_OUTPUT_DIR = PROJECT_ROOT / "data" / "source_catalog"
+MARKDOWN_PATH = CATALOG_OUTPUT_DIR / "sources.md"
 JSON_PREFIX = "resultados_fontes_cenario01"
 DATA_DIR = PROJECT_ROOT / "data"
-RAW_DIR = DATA_DIR / "raw" / "v1"
-OUTPUT_DIR = DATA_DIR / "runs"
+RAW_DIR = CATALOG_OUTPUT_DIR / "raw"
+OUTPUT_DIR = CATALOG_OUTPUT_DIR / "runs"
 DOWNLOAD_LIMIT = 30 * 1024 * 1024
 
 PNCP_HOST = "https://pncp.gov.br"
@@ -859,7 +842,7 @@ def update_markdown(
             "",
             "Estados principais: `disponivel` = resposta válida; `indisponivel_temporariamente` = 429/5xx após retries; `erro_requisicao` = 4xx não transitório; `bloqueado_por_fonte` = endpoint encadeado não pôde ser testado; `nao_aplicavel` = fonte local; `indisponivel` = falha de rede/timeout.",
             "",
-            "Para repetir sem alterar este arquivo, execute `py .\\testes\\testar_fontes.py --atualizar-md --salvar-json --baixar-arquivos`.",
+            "Esta tabela é histórica; use `py -m src.source_catalog lookup pncp` para novas consultas.",
             "",
         ]
     )
@@ -936,91 +919,29 @@ def _exit_code(results: list[dict[str, Any]]) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Ponto de entrada compatível; a CLI pública é a interface de curadoria."""
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if arguments and arguments[0] in {"discover", "lookup", "propose", "review", "manifest-diff", "apply"}:
-        try:
-            from .manifest_curator import main as curator_main
-        except ImportError:  # permite executar o módulo diretamente
-            from manifest_curator import main as curator_main
+    try:
+        from .manifest_curator import main as curator_main
+    except ImportError:
+        from manifest_curator import main as curator_main
+    if not arguments or arguments[0] in {
+        "-h",
+        "--help",
+        "discover",
+        "lookup",
+        "propose",
+        "review",
+        "manifest-diff",
+        "apply",
+    }:
         return curator_main(arguments)
-
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--atualizar-md", action="store_true", help="atualiza a tabela de resultados em fontes_cenario01.md")
-    parser.add_argument("--salvar-json", action="store_true", help="salva resultados_fontes_cenario01_AAAA-MM-DD_HH-MM-SSZ.json")
-    parser.add_argument("--baixar-arquivos", action="store_true", help="baixa HTML, HTM, ASPX, PDF, JSON e JSONL em data/raw/v1/arquivos/")
-    parser.add_argument("--ano", type=int, default=2025, help="ano de referência das consultas (padrão: 2025)")
-    parser.add_argument("--uf", default="RJ", help="UF da consulta de contratações (padrão: RJ)")
-    parser.add_argument(
-        "--modalidade",
-        type=int,
-        default=1,
-        help="código PNCP da modalidade; mantém 1 como no script original (padrão: 1)",
+    print(
+        "A interface antiga foi removida. Use um subcomando: discover, lookup, "
+        "propose, review, manifest-diff ou apply.",
+        file=sys.stderr,
     )
-    parser.add_argument("--tamanho-pagina", type=int, default=10, help="quantidade pequena de registros por página (padrão: 10)")
-    parser.add_argument("--tentativas", type=int, default=3, help="tentativas por URL para 429/5xx/rede (padrão: 3)")
-    parser.add_argument("--timeout", type=float, default=30.0, help="timeout por tentativa em segundos (padrão: 30)")
-    parser.add_argument(
-        "--classificacao-superior",
-        default="979",
-        help="código de Classe/Grupo exigido pela consulta geral de PCA (padrão: 979, usado no manual oficial)",
-    )
-    parser.add_argument("--data-inicial", type=_validate_yyyymmdd, default=None, help="recorte explícito YYYYMMDD")
-    parser.add_argument("--data-final", type=_validate_yyyymmdd, default=None, help="recorte explícito YYYYMMDD")
-    args = parser.parse_args(arguments)
-
-    if (args.data_inicial is None) != (args.data_final is None):
-        parser.error("--data-inicial e --data-final devem ser usados juntos")
-    if args.data_inicial and args.data_inicial > args.data_final:
-        parser.error("--data-inicial não pode ser posterior a --data-final")
-    if not 1 <= args.tamanho_pagina <= 500:
-        parser.error("--tamanho-pagina deve estar entre 1 e 500")
-    if args.tentativas < 1:
-        parser.error("--tentativas deve ser >= 1")
-    if args.timeout <= 0:
-        parser.error("--timeout deve ser > 0")
-
-    config = CheckConfig(
-        ano=args.ano,
-        uf=args.uf.strip().upper(),
-        modalidade=args.modalidade,
-        tamanho_pagina=args.tamanho_pagina,
-        timeout=args.timeout,
-        attempts=args.tentativas,
-        classificacao_superior=args.classificacao_superior,
-        data_inicial=args.data_inicial,
-        data_final=args.data_final,
-    )
-
-    checked_at, results = run_checks(config)
-    downloads = download_artifacts(checked_at, results, config) if args.baixar_arquivos else []
-    print(f"Verificação executada em {checked_at}")
-    for result in results:
-        http = result.get("http_status") or "—"
-        attempts = result.get("tentativas", 0)
-        print(f"[{result['status']}] HTTP {http} ({attempts} tentativa(s)) — {result['nome']}")
-        if result.get("erro"):
-            print(f"  erro: {result['erro']}")
-        elif result.get("observacao"):
-            print(f"  observação: {result['observacao']}")
-        elif result.get("previa"):
-            print(f"  prévia: {result['previa']}")
-
-    if args.atualizar_md:
-        update_markdown(checked_at, results, downloads)
-        print(f"Markdown atualizado: {MARKDOWN_PATH.name}")
-    if args.salvar_json:
-        json_path = save_json(checked_at, results, downloads)
-        print(f"JSON salvo: {json_path.name}")
-    for download in downloads:
-        print(f"[download:{download['status']}] {download['nome']}")
-        if download.get("arquivo"):
-            print(f"  arquivo: {download['arquivo']}")
-        if download.get("observacao"):
-            print(f"  observação: {download['observacao']}")
-        elif download.get("erro"):
-            print(f"  erro: {download['erro']}")
-
-    return _exit_code(results + downloads)
+    return 2
 
 
 if __name__ == "__main__":

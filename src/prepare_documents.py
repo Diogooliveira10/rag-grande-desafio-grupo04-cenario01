@@ -10,7 +10,7 @@ Exemplo rápido, sem acessar as bases remotas:
       --input tests/fixtures/pdf `
       --manifest corpus_manifest.yaml `
       --base-id exemplos_teste `
-      --output data/attempts/corpus_fetch/demo/normalized/examples.jsonl
+      --output data/normalized/v2/documents.jsonl
 
 Para dados extraídos de uma coleta já inventariada, acrescente
 ``--inventory data/inventory/v1.json`` para recuperar a origem e o horário
@@ -25,7 +25,7 @@ import hashlib
 import io
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
@@ -33,6 +33,7 @@ from typing import Any, Iterator
 
 from src.fetch_corpus import load_manifest
 from src.ingest import chunk_text, sha256_file
+from src.pca_indicators import eh_csv_pca, indicadores_pca
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -56,6 +57,8 @@ _CANONICAL_UNIT_FIELDS = {
     "logical_id",
     "data_vigencia",
 }
+EXTRACTION_SCHEMA_VERSION = "prepare-extraction-v1"
+CHUNKING_SCHEMA_VERSION = "prepare-chunking-v1"
 
 
 class _VisibleTextParser(HTMLParser):
@@ -105,6 +108,7 @@ class SourceUnit:
     text: str
     status: str
     extras: dict[str, Any]
+    extraction_fingerprint: str = ""
 
 
 def _relative_path(path: Path) -> str:
@@ -117,6 +121,40 @@ def _relative_path(path: Path) -> str:
 
 def _manifest_hash(path: Path) -> str:
     return f"sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
+
+
+def _fingerprint(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _extraction_fingerprint(base: dict[str, Any]) -> str:
+    return _fingerprint(
+        {
+            "schema": EXTRACTION_SCHEMA_VERSION,
+            "base_id": base.get("base_id"),
+            "natureza": base.get("natureza"),
+            "sensitivity_default": base.get("sensitivity_default"),
+            "campo_vigencia": base.get("campo_vigencia"),
+            "metadados_extras": base.get("metadados_extras"),
+            "chunking_sugerido": base.get("chunking_sugerido"),
+        }
+    )
+
+
+def _chunking_fingerprint(unit: SourceUnit, chunk_size: int, overlap: int) -> str:
+    return _fingerprint(
+        {
+            "schema": CHUNKING_SCHEMA_VERSION,
+            "document_id": unit.document_id,
+            "document_content_sha256": hashlib.sha256(unit.text.encode("utf-8")).hexdigest(),
+            "chunk_size": chunk_size,
+            "overlap": overlap,
+            "chunking_sugerido": unit.chunking_sugerido,
+            "natureza": unit.natureza,
+            "formato": unit.formato,
+        }
+    )
 
 
 def _read_text(path: Path) -> str:
@@ -206,7 +244,10 @@ def _normalize_date_value(value: Any) -> Any:
     if value in (None, ""):
         return value
     text = str(value).strip()
-    for pattern in ("%Y-%m-%d", "%d/%m/%Y", "%d/%m/%Y %H:%M:%S"):
+    # Só o ano (ex.: anoPca do PCA): o plano vale até o fim do ano.
+    if re.fullmatch(r"\d{4}", text):
+        return f"{text}-12-31"
+    for pattern in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%d/%m/%Y", "%d/%m/%Y %H:%M:%S"):
         try:
             return datetime.strptime(text, pattern).date().isoformat()
         except ValueError:
@@ -275,10 +316,23 @@ def _base_for(manifest: dict[str, Any], input_dir: Path, base_id: str | None) ->
     raise ValueError("informe --base-id quando a pasta não identifica uma única base")
 
 
-def _load_inventory_provenance(path: Path | None) -> dict[tuple[str, str], dict[str, str]]:
+def _load_inventory_provenance(
+    path: Path | None,
+    *,
+    expected_manifest_hash: str | None = None,
+) -> dict[tuple[str, str], dict[str, str]]:
     if path is None:
         return {}
     payload = json.loads(path.read_text(encoding="utf-8"))
+    inventory_manifest_hash = payload.get("manifest_hash")
+    if (
+        expected_manifest_hash
+        and inventory_manifest_hash
+        and inventory_manifest_hash != expected_manifest_hash
+    ):
+        raise ValueError(
+            "manifest_hash do inventário não corresponde ao manifesto utilizado"
+        )
     records = payload.get("arquivos", [])
     if not isinstance(records, list):
         raise ValueError("inventário precisa conter uma lista em 'arquivos'")
@@ -400,6 +454,131 @@ def _make_unit(
     )
 
 
+def _unit_to_record(unit: SourceUnit) -> dict[str, Any]:
+    return {
+        "source_file": unit.source_file,
+        "logical_id": unit.logical_id,
+        "document_id": unit.document_id,
+        "base_id": unit.base_id,
+        "natureza": unit.natureza,
+        "doc_type": unit.doc_type,
+        "sensitivity": unit.sensitivity,
+        "origem": unit.origem,
+        "manifest_hash": unit.manifest_hash,
+        "bytes": unit.bytes,
+        "data_vigencia": unit.data_vigencia,
+        "chunking_sugerido": unit.chunking_sugerido,
+        "formato": unit.formato,
+        "sha256": unit.sha256,
+        "text": unit.text,
+        "status": unit.status,
+        "extras": unit.extras,
+        "extraction_fingerprint": unit.extraction_fingerprint,
+    }
+
+
+def _unit_from_record(record: dict[str, Any]) -> SourceUnit:
+    return SourceUnit(
+        source_file=str(record["source_file"]),
+        logical_id=str(record["logical_id"]),
+        document_id=str(record["document_id"]),
+        base_id=str(record["base_id"]),
+        natureza=str(record["natureza"]),
+        doc_type=str(record["doc_type"]),
+        sensitivity=str(record["sensitivity"]),
+        origem=str(record.get("origem") or ""),
+        manifest_hash=str(record.get("manifest_hash") or ""),
+        bytes=int(record.get("bytes", 0) or 0),
+        data_vigencia=(
+            str(record["data_vigencia"])
+            if record.get("data_vigencia") not in (None, "")
+            else None
+        ),
+        chunking_sugerido=str(record.get("chunking_sugerido") or "chunking_generico"),
+        formato=str(record["formato"]),
+        sha256=str(record["sha256"]),
+        text=str(record.get("text") or ""),
+        status=str(record.get("status") or "ok"),
+        extras=dict(record.get("extras") or {}),
+        extraction_fingerprint=str(record.get("extraction_fingerprint") or ""),
+    )
+
+
+def _extraction_state_path(output_path: Path) -> Path:
+    return output_path.with_name(f"{output_path.stem}.units{output_path.suffix}")
+
+
+def _load_units_state(path: Path) -> tuple[dict[tuple[str, str, str], list[SourceUnit]], bool]:
+    if not path.exists():
+        return {}, False
+    index: dict[tuple[str, str, str], list[SourceUnit]] = {}
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            unit = _unit_from_record(json.loads(line))
+            key = (unit.source_file, unit.sha256, unit.extraction_fingerprint)
+            index.setdefault(key, []).append(unit)
+    except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError):
+        return {}, True
+    return index, False
+
+
+def _load_chunk_state(
+    path: Path,
+) -> tuple[dict[tuple[str, str, str], list[dict[str, Any]]], bool]:
+    if not path.exists():
+        return {}, False
+    index: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            if not {
+                "document_id",
+                "document_content_sha256",
+                "chunking_fingerprint",
+            }.issubset(record):
+                continue
+            key = (
+                str(record["document_id"]),
+                str(record["document_content_sha256"]),
+                str(record["chunking_fingerprint"]),
+            )
+            index.setdefault(key, []).append(record)
+    except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError):
+        return {}, True
+    for records in index.values():
+        records.sort(key=lambda record: int(record.get("chunk_index", 0) or 0))
+    return index, False
+
+
+def _refresh_unit_provenance(
+    unit: SourceUnit,
+    path: Path,
+    base: dict[str, Any],
+    manifest_hash: str,
+    fallback_collected_at: str,
+    inventory_provenance: dict[tuple[str, str], dict[str, str]],
+) -> SourceUnit:
+    origin, collected_at = _file_provenance(
+        base, path, unit.sha256, inventory_provenance, fallback_collected_at
+    )
+    common = _unit_common(path, base, unit.sha256, manifest_hash, collected_at, origin)
+    extras = dict(unit.extras)
+    extras.update(common)
+    return replace(
+        unit,
+        origem=origin,
+        manifest_hash=manifest_hash,
+        bytes=path.stat().st_size,
+        sensitivity=str(base.get("sensitivity_default") or unit.sensitivity),
+        chunking_sugerido=str(base.get("chunking_sugerido") or unit.chunking_sugerido),
+        extras=extras,
+    )
+
+
 def _pdf_units(
     path: Path,
     base: dict[str, Any],
@@ -487,6 +666,37 @@ def _file_units(
                 },
             )
         return
+
+    if suffix == ".csv" and str(base.get("natureza")) == "agregada":
+        records = [record for _, record in _csv_records(path)]
+        if records and eh_csv_pca(records[0]):
+            # Base agregada: um chunk por indicador calculado, não por linha do
+            # CSV (ver src/pca_indicators.py).
+            source_file = _relative_path(path)
+            for indicador in indicadores_pca(
+                records,
+                orgao=str(base.get("orgao") or base.get("fonte") or "o órgão"),
+                ano=base.get("ano"),
+            ):
+                yield _make_unit(
+                    path,
+                    base,
+                    digest,
+                    indicador.texto,
+                    f"{base_document_id}:indicador-{indicador.id}",
+                    "csv",
+                    "ok",
+                    manifest_hash,
+                    collected_at,
+                    origin,
+                    {
+                        "indicador": indicador.id,
+                        "dimensao": indicador.dimensao,
+                        "logical_id": f"{base['base_id']}:{source_file}:indicador-{indicador.id}",
+                        **indicador.metadados,
+                    },
+                )
+            return
 
     if suffix == ".csv":
         for record_number, record in _csv_records(path):
@@ -598,6 +808,7 @@ def _chunks_for_unit(unit: SourceUnit, chunk_size: int, overlap: int) -> tuple[l
         or "1 registro" in hint
         or "1 licitação" in hint
         or "1 licitacao" in hint
+        or "1 indicador" in hint
         or (unit.formato in {"json", "jsonl"} and unit.natureza in {"estruturada", "agregada", "conversacional"})
     ):
         return [unit.text.strip()], "registro_inteiro"
@@ -612,9 +823,11 @@ def _chunk_records(unit: SourceUnit, chunk_size: int, overlap: int) -> list[dict
     chunks, chunking_strategy = _chunks_for_unit(unit, chunk_size, overlap)
     records: list[dict[str, Any]] = []
     unit_extras = _extras_for_unit(unit)
+    document_content_digest = hashlib.sha256(unit.text.encode("utf-8")).hexdigest()
+    chunking_fingerprint = _chunking_fingerprint(unit, chunk_size, overlap)
     for index, text in enumerate(chunks, start=1):
-        content_digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
-        chunk_id = f"{unit.document_id}:chunk-{index}-{content_digest[:12]}"
+        chunk_content_digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        chunk_id = f"{unit.document_id}:chunk-{index}-{chunk_content_digest[:12]}"
         records.append(
             {
                 "chunk_id": chunk_id,
@@ -628,6 +841,7 @@ def _chunk_records(unit: SourceUnit, chunk_size: int, overlap: int) -> list[dict
                 "chunk_index": index,
                 "chunk_count": len(chunks),
                 "chunking_strategy": chunking_strategy,
+                "chunking_fingerprint": chunking_fingerprint,
                 "source_file": unit.source_file,
                 "origem": unit.origem,
                 "manifest_fonte": unit.extras.get("manifest_fonte"),
@@ -637,7 +851,8 @@ def _chunk_records(unit: SourceUnit, chunk_size: int, overlap: int) -> list[dict
                 "data_vigencia": unit.data_vigencia,
                 "formato": unit.formato,
                 "sha256": unit.sha256,
-                "content_sha256": content_digest,
+                "document_content_sha256": document_content_digest,
+                "chunk_content_sha256": chunk_content_digest,
                 "status_extracao": unit.status,
                 "nome_arquivo": unit.extras.get("nome_arquivo"),
                 "acesso_tipo": unit.extras.get("acesso_tipo"),
@@ -652,10 +867,98 @@ def _chunk_records(unit: SourceUnit, chunk_size: int, overlap: int) -> list[dict
     return records
 
 
+def _refresh_cached_chunks(
+    cached: list[dict[str, Any]],
+    unit: SourceUnit,
+) -> list[dict[str, Any]]:
+    """Atualiza proveniência sem recalcular a segmentação nem o texto."""
+
+    unit_extras = _extras_for_unit(unit)
+    document_content_digest = hashlib.sha256(unit.text.encode("utf-8")).hexdigest()
+    refreshed: list[dict[str, Any]] = []
+    for cached_record in cached:
+        record = dict(cached_record)
+        record.update(
+            {
+                "document_id": unit.document_id,
+                "logical_id": unit.logical_id,
+                "base_id": unit.base_id,
+                "natureza": unit.natureza,
+                "doc_type": unit.doc_type,
+                "sensitivity": unit.sensitivity,
+                "parent_chunk_id": unit.document_id,
+                "source_file": unit.source_file,
+                "origem": unit.origem,
+                "manifest_fonte": unit.extras.get("manifest_fonte"),
+                "manifest_hash": unit.manifest_hash,
+                "bytes": unit.bytes,
+                "coletado_em": unit.extras.get("coletado_em"),
+                "data_vigencia": unit.data_vigencia,
+                "formato": unit.formato,
+                "sha256": unit.sha256,
+                "document_content_sha256": document_content_digest,
+                "status_extracao": unit.status,
+                "nome_arquivo": unit.extras.get("nome_arquivo"),
+                "acesso_tipo": unit.extras.get("acesso_tipo"),
+                "extras": {
+                    key: value
+                    for key, value in unit_extras.items()
+                    if key not in {"manifest_fonte", "coletado_em", "nome_arquivo", "acesso_tipo"}
+                },
+            }
+        )
+        refreshed.append(record)
+    return refreshed
+
+
 def _input_files(input_dir: Path) -> tuple[list[Path], int]:
     paths = sorted(path for path in input_dir.rglob("*") if path.is_file())
     supported = [path for path in paths if path.suffix.lower() in SUPPORTED_SUFFIXES]
     return supported, len(paths) - len(supported)
+
+
+def _input_files_from_inventory(
+    input_dir: Path,
+    inventory_path: Path,
+    base_id: str,
+) -> tuple[list[Path], int]:
+    """Resolve somente arquivos promovidos e listados no inventário."""
+    payload = json.loads(inventory_path.read_text(encoding="utf-8"))
+    records = payload.get("arquivos", [])
+    if not isinstance(records, list):
+        raise ValueError("inventário precisa conter uma lista em 'arquivos'")
+
+    selected: list[Path] = []
+    ignored = 0
+    seen: set[Path] = set()
+    for record in records:
+        if not isinstance(record, dict) or record.get("status") != "ok":
+            continue
+        if str(record.get("base_id") or "") != base_id:
+            continue
+        raw_path = record.get("source_file") or record.get("path")
+        if not raw_path:
+            raise ValueError(f"registro do inventário sem source_file: {record.get('logical_id')}")
+        path = Path(str(raw_path))
+        if not path.is_absolute():
+            path = PROJECT_ROOT / path
+        path = path.resolve()
+        try:
+            path.relative_to(input_dir.resolve())
+        except ValueError as error:
+            raise ValueError(
+                f"arquivo do inventário fora do diretório de entrada: {path}"
+            ) from error
+        if not path.is_file():
+            raise FileNotFoundError(f"arquivo do inventário não encontrado: {path}")
+        if path in seen:
+            continue
+        seen.add(path)
+        if path.suffix.lower() in SUPPORTED_SUFFIXES:
+            selected.append(path)
+        else:
+            ignored += 1
+    return sorted(selected), ignored
 
 
 def _atomic_write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
@@ -694,31 +997,80 @@ def prepare_documents(
     manifest = load_manifest(manifest_path)
     summary_manifest_hash = _manifest_hash(manifest_path)
     base = _base_for(manifest, input_dir, base_id)
-    inventory_provenance = _load_inventory_provenance(inventory_path)
+    inventory_provenance = _load_inventory_provenance(
+        inventory_path,
+        expected_manifest_hash=summary_manifest_hash,
+    )
     fallback_collected_at = datetime.now(timezone.utc).isoformat()
-    paths, ignored = _input_files(input_dir)
+    if inventory_path is not None:
+        paths, ignored = _input_files_from_inventory(
+            input_dir,
+            inventory_path,
+            str(base["base_id"]),
+        )
+    else:
+        paths, ignored = _input_files(input_dir)
+    units_state_path = _extraction_state_path(output_path)
+    units_cache, units_cache_invalid = _load_units_state(units_state_path)
+    chunks_cache, chunks_cache_invalid = _load_chunk_state(output_path)
     records: list[dict[str, Any]] = []
     documents: list[dict[str, Any]] = []
+    state_units: list[SourceUnit] = []
     failures: list[dict[str, str]] = []
     status_counts: dict[str, int] = {}
+    extraction_cache_hits = 0
+    extraction_cache_misses = 0
+    chunk_cache_hits = 0
+    chunk_cache_misses = 0
 
     for path in paths:
+        digest = sha256_file(path)
+        source_file = _relative_path(path)
+        extraction_fingerprint = _extraction_fingerprint(base)
+        cache_key = (source_file, digest, extraction_fingerprint)
         try:
-            units = list(
-                _file_units(
-                    path,
-                    base,
-                    summary_manifest_hash,
-                    fallback_collected_at,
-                    inventory_provenance,
-                )
-            )
+            if cache_key in units_cache:
+                units = list(units_cache[cache_key])
+                if any(unit.manifest_hash != summary_manifest_hash for unit in units):
+                    units = [
+                        _refresh_unit_provenance(
+                            unit,
+                            path,
+                            base,
+                            summary_manifest_hash,
+                            fallback_collected_at,
+                            inventory_provenance,
+                        )
+                        for unit in units
+                    ]
+                extraction_cache_hits += 1
+            else:
+                units = [
+                    replace(unit, extraction_fingerprint=extraction_fingerprint)
+                    for unit in _file_units(
+                        path,
+                        base,
+                        summary_manifest_hash,
+                        fallback_collected_at,
+                        inventory_provenance,
+                    )
+                ]
+                extraction_cache_misses += 1
+            state_units.extend(units)
         except Exception as error:
-            failures.append({"source_file": _relative_path(path), "erro": f"{type(error).__name__}: {error}"})
+            failures.append({"source_file": source_file, "erro": f"{type(error).__name__}: {error}"})
             continue
         for unit in units:
             status_counts[unit.status] = status_counts.get(unit.status, 0) + 1
-            chunks = _chunk_records(unit, chunk_size, overlap)
+            document_content_digest = hashlib.sha256(unit.text.encode("utf-8")).hexdigest()
+            chunking_fingerprint = _chunking_fingerprint(unit, chunk_size, overlap)
+            chunk_cache_key = (unit.document_id, document_content_digest, chunking_fingerprint)
+            if chunk_cache_key in chunks_cache:
+                chunks = _refresh_cached_chunks(chunks_cache[chunk_cache_key], unit)
+                chunk_cache_hits += 1
+            else:
+                chunks = _chunk_records(unit, chunk_size, overlap)
+                chunk_cache_misses += 1
             records.extend(chunks)
             documents.append(
                 {
@@ -753,9 +1105,16 @@ def prepare_documents(
         "base_id": base["base_id"],
         "natureza": base["natureza"],
         "manifest_hash": summary_manifest_hash,
+        "extraction_cache_hits": extraction_cache_hits,
+        "extraction_cache_misses": extraction_cache_misses,
+        "chunk_cache_hits": chunk_cache_hits,
+        "chunk_cache_misses": chunk_cache_misses,
+        "incremental_state": _relative_path(units_state_path),
+        "incremental_state_invalid": units_cache_invalid or chunks_cache_invalid,
     }
     if not dry_run:
         _atomic_write_jsonl(output_path, records)
+        _atomic_write_jsonl(units_state_path, [_unit_to_record(unit) for unit in state_units])
         _atomic_write_json(
             report_path,
             {

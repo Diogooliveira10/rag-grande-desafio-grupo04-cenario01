@@ -1,3 +1,5 @@
+import pytest
+
 from src.router import rotear_pergunta
 from src.schema import Natureza
 
@@ -52,3 +54,15 @@ def test_pergunta_vazia():
 
     assert decisao.bases_selecionadas == []
     assert decisao.confidence == 0.0
+
+@pytest.mark.parametrize(
+    "pergunta",
+    [
+        "Quanto a Polícia Militar planeja gastar em 2025?",
+        "Qual o valor total do PCA 2025?",
+        "Quais classes têm o maior valor no plano de contratações anual?",
+        "Qual o maior valor planejado para material médico?",
+    ],
+)
+def test_perguntas_sobre_o_pca_vao_para_a_base_agregada(pergunta):
+    assert Natureza.AGREGADA in rotear_pergunta(pergunta).bases_selecionadas

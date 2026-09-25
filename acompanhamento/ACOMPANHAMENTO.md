@@ -95,3 +95,69 @@ O grupo também avançou na compreensão dos entregáveis iniciais, principalmen
 ## **Uso de assistentes de IA:**
 
 - Foram utilizados assistentes de IA como apoio ao desenvolvimento, revisão de código, identificação e correção de problemas, elaboração de testes e esclarecimento de dúvidas técnicas. As implementações foram analisadas e validadas pela equipe de acordo com os requisitos e a arquitetura do projeto.
+
+## Encontro 5 - 2026-09-23
+
+## **Entregamos hoje:**
+
+- Foi realizada uma nova análise do projeto atualizado, com foco na compatibilidade do `src/retrieve.py` com os novos arquivos, módulos, contratos e integrações adicionados ao projeto.
+
+- Foi desenvolvida a suíte de testes automatizados `tests/test_retrieve.py`, utilizando mocks, dados controlados e testes isolados para validar o comportamento do módulo sem dependência de serviços externos, APIs ou modelos reais. Foram contemplados cenários de query vazia, recuperação densa, BM25, recuperação híbrida, fusão por RRF, ranking, deduplicação por `chunk_id`, filtros de metadata, diferentes formatos de datas e valores monetários brasileiros, leitura de valores em `metadata.extras`, operadores inválidos, validação de `k`, reranking opcional e limite de `top_k`.
+
+- A suíte de testes do `retrieve.py` foi estruturada seguindo princípios de Clean Code, com funções auxiliares para criação de registros controlados, parametrização de cenários, nomes descritivos e testes isolados e determinísticos. Foram validados **26 testes específicos do módulo**.
+
+- Foi criada a suíte `tests/test_ingest.py`, com **20 testes**, cobrindo a divisão dos documentos em chunks, geração e validação do hash SHA-256, geração do JSONL e do relatório, funcionamento do modo `--dry-run`, validação da linha de comando e verificação dos metadados obrigatórios em todos os chunks, conforme definido no tópico 2.5 do projeto.
+
+- Foi implementada a política de sensibilidade em `src/sensitivity.py`, contemplando o mascaramento de CPF, telefone e e-mail pessoal, com preservação de e-mails pertencentes a órgãos públicos, além do descarte de chunks classificados como restritos. A política foi integrada ao `src/generate.py` em dois pontos do fluxo: antes do envio do contexto ao LLM e novamente sobre a resposta final. Foram criados **27 testes em `tests/test_sensitivity.py`** e a política foi documentada no README.
+
+- Foi concluída a implementação do logging do pipeline, conforme o tópico 2.4. As etapas de roteamento, busca densa, BM25, fusão por RRF, reranking e geração passaram a registrar informações utilizando o formato definido em `src/obs.py`, com as etapas vinculadas pelo mesmo `run_id`. Na etapa de geração, também são registrados modelo e tokens, mantendo o mascaramento de dados pessoais nos logs.
+
+- Durante a implementação do logging, foi identificado e corrigido um problema no `generate.py`: o módulo utilizava uma função `chat_completion` que não existia no `llm_ecoa.py`, fazendo com que o pipeline real terminasse em recusa. Após a correção, foram criados **9 testes em `tests/test_pipeline_logs.py`** e um `tests/conftest.py` para impedir que os testes gravassem informações no diretório real de logs.
+
+- Foi realizada a validação integrada das alterações ao longo do dia. Ao final, a suíte ficou com **237 testes aprovados e 13 pulados** (os pulados aguardam código ainda não publicado em `src/`).
+
+- Durante a validação das bases, foi identificado que a base agregada (`pca_agregado`) não está presente no manifesto principal e que o `retrieve.py` procura uma base conversacional (`atas_conversacional`) que também não está disponível atualmente. Foram realizadas tentativas de consulta aos endpoints de PCA e de atas do PNCP, porém as APIs apresentaram instabilidade, com respostas HTTP 500 e 504. As tentativas foram registradas manualmente no `CORPUS_INVENTORY.md`, incluindo horário e resultado. Posteriormente, foi verificado que o serviço `/api/pncp/v1` do PNCP respondia normalmente, e as duas bases passaram a ser coletadas por ele.
+
+- Também foram comparados os dois arquivos `CORPUS_INVENTORY.md` existentes no projeto, um na raiz e outro em `data/`. Foi identificado que os arquivos possuem conteúdos diferentes e que o inventário da raiz corresponde ao `data/inventory/v1.json`. Ao final, o inventário da raiz foi definido como oficial e o de `data/`, uma coleta antiga sem vínculo com o manifesto, foi removido.
+
+- Foi atualizada a seção de divisão de responsabilidades e coordenação do `ARQUITETURA.md`, registrando que a distribuição das tarefas ocorre a cada encontro de acordo com as necessidades e revisões do projeto, além do registro das pendências atualmente identificadas.
+
+- Foi implementada uma CLI simples para execução e validação do projeto pelo terminal, disponibilizando os comandos `rota` e `perguntar`. O comando `rota` permite validar quais bases devem ser consultadas para uma determinada pergunta, enquanto `perguntar` executa o pipeline completo. A CLI também permite executar múltiplas perguntas em uma mesma execução e foi validada diretamente no terminal.
+
+- Também foi adicionada a suíte offline de validação do corpus, incluindo fixtures em JSON, um manifesto de smoke test e testes para `fetch_corpus`, ingestão, providers, curadoria do manifesto e preparação dos documentos. Foi criado ainda o runner `tests/run_corpus_validation.py` e realizada a documentação dos relatórios de validação.
+
+- Foi concluída a implementação dos testes do `fetch_corpus.py`. Foi criado o `tests/test_fetch_corpus.py` do zero, considerando a versão reescrita do módulo, com **20 testes aprovados** cobrindo o parsing do manifesto, deduplicação por conteúdo utilizando SHA-256, imutabilidade de versões promovidas, associação de checkpoints e resumos ao hash do manifesto e os coletores `arquivo_local`, `http_pdf` e `rest_api`.
+
+- Foram feitos os merges das branches da Pâmela, do João, do Marco e do Diogo no `main`. Nos conflitos de `tests/test_ingest.py` e `tests/test_fetch_corpus.py`, criados em mais de uma branch, os testes dos dois lados foram mantidos. Um teste do João revelou um laço infinito no `chunk_text` do `src/ingest.py`, que foi corrigido. Os testes que dependem de código ainda não publicado foram marcados com `skip` e o motivo.
+
+- Foi feita a revisão do `src/retrieve.py` com os dados reais: a busca associava cada natureza a uma única base fixa, e só 19 de 516 chunks eram alcançáveis. A seleção passou a usar a natureza de cada chunk, e foi criado o filtro por `escopo`, para que o pipeline consulte só as bases oficiais. O BM25 passou a ignorar acentos, e foi criado o parâmetro `fetch_k`, para que o chunk certo chegue à fusão RRF.
+
+- O `corpus_manifest.yaml` passou a declarar as quatro bases oficiais, uma por natureza, com o campo `escopo`. As bases `atas_conversacional` e `pca_agregado` foram declaradas com endereços fixos do PNCP, e a coleta de verificação baixou os arquivos sem falhas. O `src/artifact_downloader.py` foi corrigido para reconhecer arquivos CSV.
+
+- Foi implementada a base agregada. Em vez de um chunk por item do PCA (seriam 42.758), o novo `src/pca_indicators.py` calcula na ingestão cerca de 1.000 indicadores (visão geral, totais por categoria, unidade, classe e mês, rankings e resumos), cada um com os valores já calculados. O roteador passou a reconhecer perguntas sobre o PCA, e foi corrigido um bug no padrão de "maior", sem mudança no resultado do golden set (15 de 19).
+
+- Foi realizado o primeiro teste do pipeline completo com dados e LLM reais, numa área de teste: 5 de 5 perguntas sobre o PCA trouxeram o indicador certo em primeiro lugar na busca híbrida, e as respostas geradas trouxeram os valores corretos citando as fontes (ex.: valor total do PCA 2025 do Estado do RJ, R$ 61.119.549.484,04).
+
+## **Ficou pendente:**
+
+- Avaliação posterior dos dois comportamentos identificados durante os testes do `src/retrieve.py`, relacionados a embeddings com dimensões incompatíveis e comparação lexical em determinados valores monetários inválidos.
+
+- Continuidade da integração e validação dos módulos do pipeline, incluindo os testes e mecanismos de avaliação do sistema.
+
+- Foi iniciada a implementação da parte de **front-end** do projeto, que terá continuidade nos próximos encontros.
+
+- A **base de e-mails sintética** ainda não foi disponibilizada e será enviada pelo tutor. A integração e validação dessa base ficarão para a próxima aula.
+
+- Rodar a coleta oficial e gerar o índice das bases `pca_agregado` e `atas_conversacional`, já declaradas no manifesto e verificadas numa área de teste.
+
+- Converter os embeddings publicados em `data/embeddings/` para o formato do índice lido pelo `retrieve.py`, ou reindexar.
+
+- Publicar o código de `src/` de que dependem os 13 testes pulados, unificar as pastas `testes/` e `tests/` e fazer o `fetch_corpus` gravar o inventário na raiz.
+
+## **Bloqueios em aberto:**
+
+- A API de consulta do PNCP (`/api/consulta/v1`) apresentou instabilidade nas consultas de PCA e de atas, com retornos HTTP 500 e 504. O bloqueio foi contornado com o serviço `/api/pncp/v1`, que respondia normalmente. As tentativas estão registradas no `CORPUS_INVENTORY.md`.
+
+## **Uso de assistentes de IA:**
+
+- Foram utilizados assistentes de IA como apoio à análise do código, desenvolvimento e revisão das suítes de testes, identificação de cenários de validação, esclarecimento de dúvidas técnicas, investigação de problemas de integração e apoio na estruturação das implementações. As alterações e resultados foram analisados e validados por meio dos testes automatizados e da execução do projeto.

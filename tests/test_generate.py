@@ -5,6 +5,7 @@ import json
 import pytest
 
 from src import generate as gen
+from src import obs
 from src.schema import Chunk, ChunkMetadata, ConfidenceLevel, Natureza, RefusalReason
 
 
@@ -117,6 +118,45 @@ def test_chunk_id_inventado_pelo_llm_e_descartado():
 
     resposta = gen.gerar_resposta("pergunta", [chunk], [Natureza.ESTRUTURADA], cliente=cliente_fake)
     assert [s.chunk_id for s in resposta.sources_used] == ["c1"]
+
+
+def test_chaves_alternativas_do_llm_sao_aceitas_e_registradas_no_log():
+    """Saída real do qwen3-8b: "sources" e "confidence" numérico no lugar do contrato."""
+    chunk = _chunk(chunk_id="c1")
+
+    def cliente_fake(mensagens):
+        return json.dumps({"answer": "resposta", "confidence": 0.95, "sources": ["c1"]})
+
+    resposta = gen.gerar_resposta("pergunta", [chunk], [Natureza.ESTRUTURADA], cliente=cliente_fake)
+
+    assert [s.chunk_id for s in resposta.sources_used] == ["c1"]
+    assert resposta.confidence_level == ConfidenceLevel.ALTA
+    [registro] = [
+        json.loads(linha)
+        for arquivo in obs.default_logger.logs_dir.glob("pipeline-*.jsonl")
+        for linha in arquivo.read_text(encoding="utf-8").splitlines()
+    ]
+    assert registro["extra"]["chaves_fora_do_contrato"] == ["confidence", "sources"]
+
+
+@pytest.mark.parametrize(
+    ("confianca", "nivel"),
+    [
+        (0.95, ConfidenceLevel.ALTA),
+        (0.8, ConfidenceLevel.ALTA),
+        (0.6, ConfidenceLevel.MEDIA),
+        (0.2, ConfidenceLevel.BAIXA),
+        ("media", ConfidenceLevel.MEDIA),
+        ("nao-sei", ConfidenceLevel.BAIXA),
+        (None, ConfidenceLevel.BAIXA),
+    ],
+)
+def test_confianca_numerica_ou_textual_vira_nivel(confianca, nivel):
+    def cliente_fake(mensagens):
+        return json.dumps({"answer": "resposta", "confidence": confianca, "sources": ["c1"]})
+
+    resposta = gen.gerar_resposta("pergunta", [_chunk()], [Natureza.ESTRUTURADA], cliente=cliente_fake)
+    assert resposta.confidence_level == nivel
 
 
 def test_saida_nao_json_cai_em_recusa_segura_sem_excecao():

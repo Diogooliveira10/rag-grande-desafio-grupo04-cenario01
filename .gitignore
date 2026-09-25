@@ -35,9 +35,13 @@ data/normalized/
 data/runs/
 data/inventory/checkpoints/
 data/attempts
+data/smoke/
+data/smoke_v2/
+data/source_catalog/
+tests/reports/corpus-validation-*.md
 
 # Resultados gerados pelas checagens
-testes/resultados/
+data/source_catalog/runs/
 
 # Relatórios de execução do eval (golden set em si é versionado)
 eval/runs/

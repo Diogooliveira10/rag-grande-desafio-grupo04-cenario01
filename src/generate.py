@@ -169,28 +169,64 @@ def _recusa(
     )
 
 
+# Nomes que o LLM usa no lugar das chaves do contrato (o qwen3-8b devolve
+# "sources" e "confidence": 0.95 apesar do prompt). O primeiro é o canônico.
+_ALIASES_CHAVES: dict[str, tuple[str, ...]] = {
+    "sources_used": ("sources_used", "sources", "fontes"),
+    "confidence_level": ("confidence_level", "confidence", "confianca", "confiança"),
+}
+
+# Cortes para converter uma confiança numérica (0 a 1) em ConfidenceLevel.
+_CONFIANCA_ALTA = 0.8
+_CONFIANCA_MEDIA = 0.5
+
+
+def _campo(dados: dict, chave: str, alternativas_usadas: list[str]) -> Any:
+    """Lê ``chave`` ou um de seus aliases, anotando quando veio por alias."""
+    for nome in _ALIASES_CHAVES[chave]:
+        if nome in dados:
+            if nome != chave:
+                alternativas_usadas.append(nome)
+            return dados[nome]
+    return None
+
+
+def _nivel_de_confianca(valor: Any) -> ConfidenceLevel:
+    if isinstance(valor, bool):
+        return ConfidenceLevel.BAIXA
+    try:
+        numero = float(valor)
+    except (TypeError, ValueError):
+        try:
+            return ConfidenceLevel(str(valor).lower())
+        except ValueError:
+            return ConfidenceLevel.BAIXA
+    if numero >= _CONFIANCA_ALTA:
+        return ConfidenceLevel.ALTA
+    if numero >= _CONFIANCA_MEDIA:
+        return ConfidenceLevel.MEDIA
+    return ConfidenceLevel.BAIXA
+
+
 def _parsear_resposta_llm(
     bruto: str,
     query: str,
     chunks: list[Chunk],
     bases_consultadas: list[Natureza],
-) -> tuple[RAGResponse, Optional[str]]:
-    """Devolve a resposta e, se a saída do LLM for inválida, o motivo."""
+) -> tuple[RAGResponse, Optional[str], list[str]]:
+    """Devolve a resposta, o motivo se a saída do LLM for inválida e as chaves
+    fora do contrato que foram aceitas como alias."""
     chunks_por_id = {c.metadata.chunk_id: c for c in chunks}
+    alternativas_usadas: list[str] = []
     try:
         dados = _extrair_json(bruto)
         answer = str(dados["answer"]).strip()
         is_refusal = bool(dados.get("is_refusal", False))
 
-        confidence_bruta = str(dados.get("confidence_level", "baixa")).lower()
-        try:
-            confidence_level = ConfidenceLevel(confidence_bruta)
-        except ValueError:
-            confidence_level = ConfidenceLevel.BAIXA
+        confidence_level = _nivel_de_confianca(_campo(dados, "confidence_level", alternativas_usadas))
 
-        
         sources_used: list[SourceRef] = []
-        for chunk_id in dados.get("sources_used") or []:
+        for chunk_id in _campo(dados, "sources_used", alternativas_usadas) or []:
             chunk = chunks_por_id.get(chunk_id)
             if chunk is None:
                 continue
@@ -222,10 +258,14 @@ def _parsear_resposta_llm(
             is_refusal=is_refusal,
             refusal_reason=refusal_reason,
         )
-        return resposta, None
+        return resposta, None, alternativas_usadas
     except Exception as exc:
         # Saída inválida do LLM vira recusa segura; o motivo vai para o log.
-        return _recusa(query, bases_consultadas, RefusalReason.SEM_EVIDENCIA), f"{type(exc).__name__}: {exc}"
+        return (
+            _recusa(query, bases_consultadas, RefusalReason.SEM_EVIDENCIA),
+            f"{type(exc).__name__}: {exc}",
+            alternativas_usadas,
+        )
 
 
 def _logar_evento(
@@ -320,9 +360,11 @@ def gerar_resposta(
         )
         return resposta
 
-    resposta, erro_parsing = _parsear_resposta_llm(bruto, query, chunks, bases_consultadas)
+    resposta, erro_parsing, chaves_alias = _parsear_resposta_llm(bruto, query, chunks, bases_consultadas)
     if erro_parsing:
         sensibilidade["erro_parsing"] = erro_parsing
+    if chaves_alias:
+        sensibilidade["chaves_fora_do_contrato"] = chaves_alias
     # Defesa em profundidade: o dado pode ter vindo da própria pergunta.
     answer_mascarada, mascaramentos_resposta = mascarar(resposta.answer)
     if mascaramentos_resposta:

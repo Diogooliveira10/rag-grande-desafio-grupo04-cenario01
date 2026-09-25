@@ -99,7 +99,7 @@ def test_sha256_file_confere_com_hashlib(tmp_path):
 def test_ingest_gera_jsonl_e_relatorio(tmp_path, corpus_dir):
     output = tmp_path / "out" / "documents.jsonl"
 
-    stats = ingest(corpus_dir, output, 200, 20, manifest_path=MANIFEST, base_id="exemplos_teste")
+    stats = ingest(corpus_dir, output, 200, 20, manifest_path=MANIFEST, base_id="exemplos_teste", allow_uninventoried=True)
 
     assert stats["arquivos"] == 3
     assert stats["falhas"] == 0
@@ -113,7 +113,7 @@ def test_ingest_gera_jsonl_e_relatorio(tmp_path, corpus_dir):
 
 def test_todo_chunk_tem_metadado_obrigatorio(tmp_path, corpus_dir):
     output = tmp_path / "documents.jsonl"
-    ingest(corpus_dir, output, 200, 20, manifest_path=MANIFEST, base_id="exemplos_teste")
+    ingest(corpus_dir, output, 200, 20, manifest_path=MANIFEST, base_id="exemplos_teste", allow_uninventoried=True)
 
     for linha in output.read_text(encoding="utf-8").splitlines():
         chunk = json.loads(linha)
@@ -126,7 +126,7 @@ def test_ingest_respeita_report_file_explicito(tmp_path, corpus_dir):
     output = tmp_path / "documents.jsonl"
     report = tmp_path / "relatorios" / "meu_relatorio.json"
 
-    ingest(corpus_dir, output, 200, 20, manifest_path=MANIFEST, report_file=report, base_id="exemplos_teste")
+    ingest(corpus_dir, output, 200, 20, manifest_path=MANIFEST, report_file=report, base_id="exemplos_teste", allow_uninventoried=True)
 
     assert report.exists()
     assert not output.with_name("extraction_report.json").exists()
@@ -135,7 +135,7 @@ def test_ingest_respeita_report_file_explicito(tmp_path, corpus_dir):
 def test_ingest_dry_run_nao_grava_nada(tmp_path, corpus_dir):
     output = tmp_path / "documents.jsonl"
 
-    stats = ingest(corpus_dir, output, 200, 20, manifest_path=MANIFEST, base_id="exemplos_teste", dry_run=True)
+    stats = ingest(corpus_dir, output, 200, 20, manifest_path=MANIFEST, base_id="exemplos_teste", allow_uninventoried=True, dry_run=True)
 
     assert stats["chunks"] > 0
     assert not output.exists()
@@ -145,7 +145,7 @@ def test_ingest_dry_run_nao_grava_nada(tmp_path, corpus_dir):
 def test_ingest_nao_altera_corpus_bruto(tmp_path, corpus_dir):
     antes = {p.name: sha256_file(p) for p in corpus_dir.iterdir()}
 
-    ingest(corpus_dir, tmp_path / "documents.jsonl", 200, 20, manifest_path=MANIFEST, base_id="exemplos_teste")
+    ingest(corpus_dir, tmp_path / "documents.jsonl", 200, 20, manifest_path=MANIFEST, base_id="exemplos_teste", allow_uninventoried=True)
 
     assert {p.name: sha256_file(p) for p in corpus_dir.iterdir()} == antes
 
@@ -185,6 +185,7 @@ def test_main_dry_run_imprime_estatisticas(monkeypatch, capsys, tmp_path, corpus
         "--output", str(output),
         "--manifest", str(MANIFEST),
         "--base-id", "exemplos_teste",
+        "--allow-uninventoried",
         "--dry-run",
     )
 
@@ -198,15 +199,6 @@ def test_main_dry_run_imprime_estatisticas(monkeypatch, capsys, tmp_path, corpus
 # --------------------------------------------------------------------------
 # Testes da branch joao-reis (merge de 2026-09-23)
 # --------------------------------------------------------------------------
-
-# O ingest com inventário obrigatório (parâmetros ``inventory_path`` e
-# ``allow_uninventoried``, filtro pelos arquivos do inventário) ainda não foi
-# publicado em src/. Remover o skip quando esse código entrar no main.
-AGUARDA_INGEST_COM_INVENTARIO = (
-    "depende do ingest com inventário obrigatório (inventory_path/allow_uninventoried), "
-    "ainda não publicado em src/ingest.py"
-)
-
 
 @pytest.mark.parametrize(
     ("max_chars", "overlap"),
@@ -235,7 +227,6 @@ def test_sha256_file_matches_file_contents(tmp_path: Path) -> None:
     assert sha256_file(path) == hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-@pytest.mark.skip(reason=AGUARDA_INGEST_COM_INVENTARIO)
 def test_ingest_delegates_to_prepare_documents_and_writes_report(tmp_path: Path) -> None:
     input_dir = tmp_path / "input"
     input_dir.mkdir()
@@ -280,7 +271,6 @@ bases:
     assert records[0]["text"].startswith("Primeiro parágrafo")
 
 
-@pytest.mark.skip(reason=AGUARDA_INGEST_COM_INVENTARIO)
 def test_ingest_requires_inventory_by_default(tmp_path: Path) -> None:
     input_dir = tmp_path / "input"
     input_dir.mkdir()
@@ -311,7 +301,6 @@ bases:
         )
 
 
-@pytest.mark.skip(reason=AGUARDA_INGEST_COM_INVENTARIO)
 def test_ingest_processes_only_inventory_files(tmp_path: Path) -> None:
     input_dir = tmp_path / "input"
     input_dir.mkdir()

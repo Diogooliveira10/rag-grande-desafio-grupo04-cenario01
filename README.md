@@ -18,10 +18,14 @@ Contexto completo do desafio, dos outros dois cenários e dos padrões de engenh
 | --- | --- | --- | --- | --- |
 | `editais_normativo` / `fontes_normativas` | Normativa | Lei 14.133/2021, decretos estaduais, editais de licitação | Planalto, REDELOG-RJ, CGE-RJ, PNCP | PDF/HTML por URL |
 | `contratos_estruturado` | Estruturada | Contratos e contratações, UF=RJ, período fechado | PNCP — API de consulta v3 | REST paginado |
-| `atas_conversacional` | Conversacional | Atas de registro de preço, e-mails de compras (base sintética) | PNCP + base sintética | Texto |
-| `pca_agregado` | Agregada | Plano de Contratações Anual, valores homologados por item | PNCP | REST |
+| `atas_conversacional` | Conversacional | Atas de registro de preço; e-mails de compras (base sintética, pendente: será fornecida pelo tutor) | PNCP + base sintética | Texto |
+| `pca_agregado` | Agregada | Plano de Contratações Anual 2025 do Estado do RJ, transformado em indicadores | PNCP | REST (CSV + JSON) |
 
 A definição declarativa de cada base — fonte, tipo de acesso, volume-alvo, campo de vigência, licença — vive em [corpus_manifest.yaml](corpus_manifest.yaml), que é a fonte única de verdade sobre o que entra no corpus. `data/raw/` nunca é versionado; qualquer pessoa reconstrói o corpus rodando o coletor contra o manifesto.
+
+Só as bases com `escopo: oficial` no manifesto (uma por natureza) respondem perguntas; as marcadas como `experimental` ficam fora da busca (`ESCOPOS_CONSULTADOS` em [src/pipeline.py](src/pipeline.py)).
+
+**Base agregada.** O CSV do PCA traz um item planejado por linha (~39,5 mil no Estado do RJ em 2025). Em vez de um chunk por linha, a preparação calcula indicadores com [src/pca_indicators.py](src/pca_indicators.py): visão geral, e totais, participação e ranking por categoria, unidade responsável, classe de catálogo e mês, além de rankings das 30 maiores unidades e classes. Cada indicador vira **um chunk** com os números já calculados (cerca de 1.000 no total). Assim o LLM cita valores prontos, em vez de tentar somar linhas.
 
 > A API do PNCP **não tem busca textual**. Filtro por objeto é feito localmente, e o recorte de dados é sempre determinístico (mesmo manifesto ⇒ mesmo corpus).
 
@@ -76,20 +80,14 @@ Uma pergunta via `responder` gera, no log, uma linha por stage — `roteamento`,
 ```
 ├── acompanhamento/              ← relato individual + resumo do dia, a cada encontro
 ├── docs/                         ← guia da interface CLI e capturas de tela
+├── CORPUS_INVENTORY.md           ← inventário legível do corpus coletado
 ├── data/
 │   ├── raw/vN/                  ← versão imutável de cada coleta (staging em raw/.staging/ até promoção)
 │   ├── normalized/              ← chunks normalizados (JSONL), saída de src/prepare_documents.py (ignorado pelo Git)
 │   ├── embeddings/               ← embeddings versionados (cache + partes), gerados por src/create_embeddings.py
 │   ├── inventory/                ← inventário por versão (JSON), checkpoints e diffs entre versões
 │   ├── runs/                    ← relatórios de execução de cada coleta
-│   └── config/                  ← dados de apoio ao manifesto (ex.: cnpjs_rj.json)
-├── index/                       ← índice vetorial por base, gerado por src/index.py (ignorado pelo Git)
-├── eval/
-│   ├── golden_set.jsonl         ← golden set derivado do PERSONAS.md (18 perguntas + 1 de falha esperada)
-│   ├── adapters.py              ← plugs de módulos do pipeline no harness (hoje: só o roteamento, offline)
-│   └── run_eval.py              ← roda o golden set contra um pipeline e grava relatório em eval/runs/
-├── CORPUS_INVENTORY.md          ← inventário legível da versão mais recente
-├── testes/test-fontes/          ← verificação de disponibilidade das fontes e downloader compartilhado
+├── tests/fixtures/               ← amostras locais para testes offline
 ├── tests/                       ← testes de contrato (pytest), offline
 ├── app/
 │   └── cli.py                   ← interface de linha de comando: rota e resposta completa do pipeline
@@ -100,6 +98,7 @@ Uma pergunta via `responder` gera, no log, uma linha por stage — `roteamento`,
 │   ├── corpus_search.py         ← busca local no inventário
 │   ├── ingest.py                ← fachada compatível; delega a extração para prepare_documents.py
 │   ├── prepare_documents.py     ← extração por formato (PDF/HTML/CSV/JSON/JSONL), chunking e metadados canônicos
+│   ├── pca_indicators.py        ← indicadores agregados do PCA (1 indicador = 1 chunk) para a base agregada
 │   ├── create_embeddings.py     ← embeddings com cache, multi-provedor e escrita incremental
 │   ├── index.py                 ← índice vetorial por base a partir do JSONL normalizado
 │   ├── router.py                ← roteamento determinístico (Adaptive RAG)
@@ -202,7 +201,7 @@ py -m src.fetch_corpus fetch `
   --base-id exemplos_teste
 
 pytest tests/ -m "not llm"
-pytest testes/test_fetch_corpus.py -q
+pytest tests/test_fetch_corpus.py -q
 ```
 
 Os PDFs são amostras de entrada para inspeção e testes locais. A base usa
