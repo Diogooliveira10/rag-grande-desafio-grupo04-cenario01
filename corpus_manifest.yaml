@@ -1,5 +1,5 @@
 scenario_id: contratacoes-rj
-version: "2026-09-23"
+version: "2026-09-25"
 description: "Contratações públicas do Estado do RJ, ano-base 2025"
 
 coleta:
@@ -93,7 +93,9 @@ bases:
       limite: 20
       chave: "numeroControlePNCPAta"
     volume_alvo: 20
-    formato: pdf
+    # O provider PNCP coleta, por ata, o JSON de metadados e a listagem
+    # /arquivos (também JSON); o PDF da ata ainda não é baixado.
+    formato: json
     licenca: "Dados abertos gov.br - atribuição"
     sensitivity_default: publico
     campo_vigencia: "dataVigenciaFim"
