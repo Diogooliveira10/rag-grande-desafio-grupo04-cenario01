@@ -165,6 +165,46 @@ class PNCPProvider:
                     break
         return candidates
 
+    def _ata_candidate(self, record: dict[str, Any]) -> SourceCandidate | None:
+        control_number = self._first(
+            record,
+            "numeroControlePNCPAta",
+            "numeroControlePncpAta",
+            "numeroControlePNCP",
+            "numeroControlePncp",
+        )
+        match = re.match(
+            r"^(\d{14})-\d+-(\d+)/(\d{4})-(\d+)$",
+            str(control_number or ""),
+        )
+        cnpj = self._first(record, "cnpj", "cnpjOrgao")
+        purchase_year = self._first(record, "anoCompra", "ano")
+        purchase_sequence = self._first(record, "sequencialCompra", "sequencial")
+        ata_sequence = self._first(record, "sequencialAta", "seqAta")
+        if match:
+            cnpj = cnpj or match.group(1)
+            purchase_sequence = purchase_sequence or match.group(2)
+            purchase_year = purchase_year or match.group(3)
+            ata_sequence = ata_sequence or match.group(4)
+        if not all(value not in (None, "") for value in (cnpj, purchase_year, purchase_sequence, ata_sequence)):
+            return None
+        source_ref = SourceRef(
+            provider=self.name,
+            resource_type="ata",
+            key={
+                "cnpj": str(cnpj),
+                "ano_compra": str(purchase_year),
+                "sequencial_compra": str(purchase_sequence),
+                "sequencial_ata": str(ata_sequence),
+            },
+        )
+        return SourceCandidate(
+            candidate_id=source_ref.stable_id,
+            source_ref=source_ref,
+            title=self._candidate_title(record, "Ata PNCP"),
+            metadata=record,
+        )
+
     def _search_atas(self, query: dict[str, Any], target: int) -> list[SourceCandidate]:
         params = dict(query.get("params") or {})
         year = int(params.get("ano") or query.get("ano") or 2025)
@@ -175,56 +215,25 @@ class PNCPProvider:
             "dataFinal": self._api_date(params.get("dataFinal") or f"{year}-12-31"),
             "tamanhoPagina": page_size,
         }
+        # /v1/atas ignora ``uf``: o recorte geográfico só é possível pelo CNPJ
+        # do órgão. Sem ``cnpjs``, a busca cobre atas de todo o país.
+        cnpjs = params.get("cnpjs") or params.get("cnpj") or [None]
+        if isinstance(cnpjs, (str, int)):
+            cnpjs = [cnpjs]
         candidates: list[SourceCandidate] = []
-        for page in range(1, max_pages + 1):
-            records = self._request_records("/v1/atas", {**request_params, "pagina": page})
-            if not records:
-                break
-            for record in records:
-                control_number = self._first(
-                    record,
-                    "numeroControlePNCPAta",
-                    "numeroControlePncpAta",
-                    "numeroControlePNCP",
-                    "numeroControlePncp",
+        for cnpj in cnpjs:
+            cnpj_params = {**request_params, "cnpj": str(cnpj)} if cnpj else request_params
+            for page in range(1, max_pages + 1):
+                records = self._request_records("/v1/atas", {**cnpj_params, "pagina": page})
+                if not records:
+                    break
+                candidates.extend(
+                    candidate for record in records if (candidate := self._ata_candidate(record)) is not None
                 )
-                match = re.match(
-                    r"^(\d{14})-\d+-(\d+)/(\d{4})-(\d+)$",
-                    str(control_number or ""),
-                )
-                cnpj = self._first(record, "cnpj", "cnpjOrgao")
-                purchase_year = self._first(record, "anoCompra", "ano")
-                purchase_sequence = self._first(record, "sequencialCompra", "sequencial")
-                ata_sequence = self._first(record, "sequencialAta", "seqAta")
-                if match:
-                    cnpj = cnpj or match.group(1)
-                    purchase_sequence = purchase_sequence or match.group(2)
-                    purchase_year = purchase_year or match.group(3)
-                    ata_sequence = ata_sequence or match.group(4)
-                if not all(value not in (None, "") for value in (cnpj, purchase_year, purchase_sequence, ata_sequence)):
-                    continue
-                source_ref = SourceRef(
-                    provider=self.name,
-                    resource_type="ata",
-                    key={
-                        "cnpj": str(cnpj),
-                        "ano_compra": str(purchase_year),
-                        "sequencial_compra": str(purchase_sequence),
-                        "sequencial_ata": str(ata_sequence),
-                    },
-                )
-                candidates.append(
-                    SourceCandidate(
-                        candidate_id=source_ref.stable_id,
-                        source_ref=source_ref,
-                        title=self._candidate_title(record, "Ata PNCP"),
-                        metadata=record,
-                    )
-                )
-            if len(candidates) >= target:
-                return candidates
-            if len(records) < page_size:
-                break
+                if len(candidates) >= target:
+                    return candidates
+                if len(records) < page_size:
+                    break
         return candidates
 
     def _search_pca(self, query: dict[str, Any], target: int) -> list[SourceCandidate]:

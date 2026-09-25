@@ -110,6 +110,37 @@ def test_pncp_provider_searches_and_sorts_contracts_and_atas():
     assert atas[0].source_ref.key["sequencial_compra"] == "000001"
 
 
+def test_pncp_provider_filtra_atas_por_cnpj_do_orgao():
+    class FakeClient:
+        consulta_base = "https://pncp.test/api/consulta"
+
+        def __init__(self):
+            self.params = []
+
+        def consulta_url(self, path, params):
+            self.params.append(dict(params))
+            return f"{self.consulta_base}{path}"
+
+        def request_url(self, url, kind, *, attempts, timeout):
+            cnpj = self.params[-1]["cnpj"]
+            return {
+                "status": "disponivel",
+                "json": {"data": [{"numeroControlePNCPAta": f"{cnpj}-1-000001/2025-000001"}]},
+            }
+
+    client = FakeClient()
+    atas = PNCPProvider(client).search(
+        {
+            "resource_type": "ata",
+            "volume_alvo": 2,
+            "params": {"tamanhoPagina": 10, "cnpjs": ["11111111000100", "22222222000100"]},
+        }
+    )
+
+    assert [params["cnpj"] for params in client.params] == ["11111111000100", "22222222000100"]
+    assert [ata.source_ref.key["cnpj"] for ata in atas] == ["11111111000100", "22222222000100"]
+
+
 def test_pncp_provider_searches_pca_units():
     class FakeClient:
         api_base = "https://pncp.test/api/pncp"

@@ -84,6 +84,9 @@ bases:
       params:
         dataInicial: "2025-01-01"
         dataFinal: "2025-12-31"
+        # /v1/atas não filtra por UF; o recorte RJ vem do CNPJ do órgão
+        # (Estado do Rio de Janeiro, o mesmo de pca_agregado).
+        cnpjs: ["42498600000171"]
         tamanhoPagina: 50
         maxPaginas: 10
       rate_limit_seg: 1.0
