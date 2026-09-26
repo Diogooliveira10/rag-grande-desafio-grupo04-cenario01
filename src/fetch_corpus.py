@@ -1659,7 +1659,7 @@ def _collect_local_base(context: _VersionContext, base: dict[str, Any]) -> list[
                 body = b"".join(json.dumps(record, ensure_ascii=False, sort_keys=True).encode("utf-8") + b"\n" for record in records)
                 extension, registros = ".jsonl", len(records)
             else:
-                extension, registros = path.suffix or ".bin", 0
+                extension, registros = path.suffix or ".bin", 1
             saved = _save_version_bytes(context, body, str(base["base_id"]), path.stem, extension)
             output.append(_base_record(context, base, logical_id, _relative_path(path), saved, tipo=extension.lstrip("."), registros=registros))
         except Exception as exc:

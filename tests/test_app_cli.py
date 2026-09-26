@@ -22,7 +22,7 @@ def rota_fake(monkeypatch):
 def responder_fake(monkeypatch):
     chamadas = []
 
-    def responder(pergunta):
+    def responder(pergunta, **kwargs):
         chamadas.append(pergunta)
         return {"query": pergunta, "answer": "resposta", "is_refusal": False}
 
@@ -71,7 +71,7 @@ def test_sem_argumento_pede_pergunta_no_terminal(responder_fake, monkeypatch):
 
 
 def test_erro_no_pipeline_vira_codigo_1_e_mensagem_no_stderr(monkeypatch, capsys):
-    def quebra(pergunta):
+    def quebra(pergunta, **kwargs):
         raise RuntimeError("índice não encontrado")
 
     monkeypatch.setattr(cli, "responder", quebra)
@@ -90,3 +90,14 @@ def test_rota_real_sem_mock_recusa_juizo_de_legalidade(capsys):
     """Integração offline: o roteador real não chama índice nem LLM."""
     cli.main(["rota", "Esse contrato foi fraude?"])
     assert _jsons(capsys.readouterr().out)[0]["bases_selecionadas"] == []
+
+
+def test_perguntar_consulta_so_bases_oficiais_por_padrao(monkeypatch):
+    escopos = []
+    monkeypatch.setattr(cli, "responder", lambda pergunta, **kwargs: escopos.append(kwargs["escopos"]) or {})
+
+    cli.main(["perguntar", "p1"])
+    cli.main(["perguntar", "--incluir-experimentais", "p2"])
+
+    assert escopos == [("oficial",), None]
+

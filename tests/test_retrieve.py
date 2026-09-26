@@ -1,15 +1,19 @@
 import json
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
+import src.retrieve as retrieve_module
 from src.retrieve import (
     RetrievalResult,
+    _parse_number,
     bm25_retrieve,
     dense_retrieve,
     reciprocal_rank_fusion,
     retrieve,
 )
+from src.obs import default_logger
 from src.schema import Natureza
 
 
@@ -90,17 +94,60 @@ def test_dense_retrieve_returns_empty_for_empty_index_without_embedding():
     assert called["count"] == 0
 
 
-def test_dense_retrieve_treats_incompatible_embedding_dimension_as_zero_score():
-    records = [_record("c1", text="ambulancia", embedding=[1.0, 0.0, 0.0])]
+def test_retrieve_excludes_and_logs_incompatible_embedding_dimensions(tmp_path, monkeypatch):
+    monkeypatch.setattr(default_logger, "logs_dir", tmp_path / "logs")
+    records = [
+        _record("invalid", text="software", embedding=[1.0, 0.0, 0.0]),
+        _record("valid", text="ambulancia", embedding=[1.0, 0.0]),
+    ]
+    monkeypatch.setattr(retrieve_module, "_records_for", lambda *args, **kwargs: records)
+
+    results = retrieve(
+        "ambulancia",
+        embed_fn=lambda texts: [[1.0, 0.0] for _ in texts],
+        run_id="run-real",
+        query_id="query-real",
+    )
+
+    assert [item.chunk_id for item in results] == ["valid"]
+    assert results[0].dense_score == pytest.approx(1.0)
+    logs = [
+        json.loads(line)
+        for line in default_logger.log_path().read_text(encoding="utf-8").splitlines()
+    ]
+    warning = next(log for log in logs if log["status"] == "aviso")
+    assert warning["run_id"] == "run-real"
+    assert warning["query_id"] == "query-real"
+    assert warning["extra"]["embedding_dimension_mismatches"] == [
+        {"chunk_id": "invalid", "expected_dimension": 2, "actual_dimension": 3}
+    ]
+
+
+def test_dense_retrieve_ignores_and_logs_null_embedding(tmp_path, monkeypatch):
+    monkeypatch.setattr(default_logger, "logs_dir", tmp_path / "logs")
+    missing = _record("missing", text="ambulancia")
+    missing["embedding"] = None
+    records = [
+        missing,
+        _record("valid", text="ambulancia", embedding=[1.0, 0.0]),
+    ]
 
     results = dense_retrieve(
         "ambulancia",
         records=records,
         embed_fn=lambda texts: [[1.0, 0.0] for _ in texts],
+        run_id="run-null",
+        query_id="query-null",
     )
 
-    assert len(results) == 1
-    assert results[0].score == pytest.approx(0.0)
+    assert [item.chunk_id for item in results] == ["valid"]
+    assert results[0].score == pytest.approx(1.0)
+    log = json.loads(default_logger.log_path().read_text(encoding="utf-8").splitlines()[0])
+    assert log["status"] == "aviso"
+    assert log["run_id"] == "run-null"
+    assert log["query_id"] == "query-null"
+    assert "ausente(s)/nulo(s)" in log["output"]
+    assert log["extra"]["missing_embeddings"] == [{"chunk_id": "missing"}]
 
 
 def test_bm25_retrieve_ranks_relevant_terms_and_deduplicates_chunk_ids():
@@ -196,8 +243,8 @@ def test_filters_support_equality_inequality_membership_and_contains(expected, m
 @pytest.mark.parametrize(
     ("operator", "expected_ids"),
     [
-        (">", {"c2", "c3"}),
-        (">=", {"c1", "c2", "c3"}),
+        (">", {"c2"}),
+        (">=", {"c1", "c2"}),
         ("<", set()),
         ("<=", {"c1"}),
     ],
@@ -216,6 +263,82 @@ def test_numeric_filters_compare_brazilian_and_plain_monetary_values(operator, e
     )
 
     assert {item.chunk_id for item in results} == expected_ids
+
+
+@pytest.mark.parametrize(
+    ("record_value", "filter_value"),
+    [
+        ("R$ 1.500", "1500"),
+        ("1.234.567", "1234567"),
+        ("500000", "500000"),
+        ("R$ 1.500,50", "1500.50"),
+        ("1.234.567,89", "1234567.89"),
+        ("1500,50", "1500.50"),
+        ("1500.50", "1500.50"),
+    ],
+)
+def test_numeric_filters_parse_brazilian_thousands_and_decimal_separators(record_value, filter_value):
+    records = [
+        _record("match", text="ambulancia", metadata_extra={"valor": record_value}),
+        _record("other", text="ambulancia", metadata_extra={"valor": "0"}),
+    ]
+
+    results = bm25_retrieve(
+        "ambulancia",
+        records=records,
+        filters={"valor": ("==", filter_value)},
+    )
+
+    assert [item.chunk_id for item in results] == ["match"]
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("0.125", "0.125"),
+        ("0.500", "0.500"),
+        ("1.500", "1500.0"),
+        ("1.234.567", "1234567.0"),
+        ("1500.50", "1500.50"),
+        ("1500,50", "1500.50"),
+    ],
+)
+def test_parse_number_distinguishes_thousands_and_decimal_separators(value, expected):
+    assert _parse_number(value) == Decimal(expected)
+
+
+@pytest.mark.parametrize(
+    ("record_value", "filter_value"),
+    [
+        ("R$ 1.500", "100"),
+        ("1.234.567", "1.000.000"),
+    ],
+)
+def test_numeric_filters_include_values_above_threshold(record_value, filter_value):
+    records = [_record("match", text="ambulancia", metadata_extra={"valor": record_value})]
+
+    results = bm25_retrieve(
+        "ambulancia",
+        records=records,
+        filters={"valor": (">", filter_value)},
+    )
+
+    assert [item.chunk_id for item in results] == ["match"]
+
+
+def test_numeric_filters_do_not_compare_invalid_values_lexically():
+    records = [
+        _record("invalid", text="ambulancia", metadata_extra={"valor": "not-a-number"}),
+        _record("valid", text="ambulancia", metadata_extra={"valor": "2000"}),
+    ]
+
+    results = bm25_retrieve(
+        "ambulancia",
+        records=records,
+        filters={"valor": (">", "1000")},
+    )
+
+    assert [item.chunk_id for item in results] == ["valid"]
 
 
 @pytest.mark.parametrize(
