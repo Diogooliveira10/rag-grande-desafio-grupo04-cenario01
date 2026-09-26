@@ -13,10 +13,10 @@ from typing import Any, Optional, Sequence
 
 from src.obs import new_query_id, new_run_id
 from src.generate import ClienteLLM, gerar_resposta
+from src.query_analysis import analisar_query, filtros_para_retrieve
 from src.retrieve import DEFAULT_TOP_K, RerankFn, RetrievalResult, retrieve
 from src.router import inferir_motivo_recusa, rotear_pergunta
 from src.schema import Chunk, ChunkMetadata
-
 
 # Só as bases de escopo "oficial" no manifesto respondem perguntas; fixtures de
 # teste e amostras experimentais ficam de fora da busca.
@@ -37,7 +37,7 @@ def responder(
     run_id: Optional[str] = None,
     escopos: Optional[Sequence[str]] = ESCOPOS_CONSULTADOS,
 ) -> dict[str, Any]:
-    """Roda roteamento + recuperação híbrida + geração para uma pergunta.
+    """Roda query_analysis + roteamento + recuperação híbrida + geração para uma pergunta.
 
     ``escopos=None`` consulta também as bases experimentais (ex.:
     ``exemplos_teste``), útil para desenvolver com um índice parcial.
@@ -47,11 +47,17 @@ def responder(
     da justificativa do roteador (``router.inferir_motivo_recusa``) e repassado
     para ``gerar_resposta``, que senão cairia sempre em SEM_EVIDENCIA.
 
+    ``query_analysis`` roda antes do roteamento e não influencia a decisão de
+    quais bases consultar — só extrai filtros (ano, valor, órgão) que o
+    ``retrieve`` aplica sobre os metadados dos chunks candidatos.
+
     ``run_id`` e ``query_id`` são repassados a todas as etapas, amarrando no
     log (``logs/pipeline-AAAA-MM-DD.jsonl``) os stages de uma mesma pergunta.
     """
     run_id = run_id or new_run_id()
     query_id = new_query_id()
+
+    analise = analisar_query(query, run_id=run_id, query_id=query_id)
     decisao = rotear_pergunta(query, run_id=run_id, query_id=query_id)
 
     chunks: list[Chunk] = []
@@ -61,6 +67,7 @@ def responder(
             query,
             decisao,
             top_k=top_k,
+            filters=filtros_para_retrieve(analise.filtros),
             reranker=reranker,
             escopos=escopos,
             run_id=run_id,

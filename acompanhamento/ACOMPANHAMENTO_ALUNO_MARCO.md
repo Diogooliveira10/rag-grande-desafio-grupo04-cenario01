@@ -60,3 +60,22 @@ Resolvi um ModuleNotFoundError da dependência rich que faltava no ambiente.
 Rodei os 20 testes, todos passando, fiz commit e push na branch marco/test-fetch-corpus e abri o PR.
 
 Uso de IA: usei o Claude pra montar o esqueleto dos testes e pra revisar o corpus_manifest.yaml contra o código. Quem rodou os testes, confirmou os resultados e decidiu o que citar no PR fui eu.
+
+
+## Encontro — 25/09/2026
+
+**Tarefa do dia:** criar a etapa `query_analysis` (item 6 das pendências do time: o roteador não gerava filtros de ano, valor e órgão para o retrieve).
+
+**O que fiz:**
+- Implementei `src/query_analysis.py`: extração determinística por regex (sem LLM), seguindo o mesmo padrão de `router.py`/`generate.py`. Extrai ano, valor (mínimo/máximo/faixa, formatos monetários em BRL — "R$ 500.000,00", "1,5 milhão", "200 mil") e órgão (heurística por palavras-gatilho como "secretaria", "prefeitura", "tribunal").
+- Adicionei `QueryFilters` e `QueryAnalysisResult` em `src/schema.py`.
+- Pluguei a etapa no `src/pipeline.py`: `responder()` agora roda `analisar_query()` antes do roteamento e repassa os filtros extraídos para o `retrieve()`.
+- Estendi `_matches_filters` em `src/retrieve.py` para aceitar múltiplas condições sobre a mesma chave (faixa de valor, e "ano" virando um intervalo em `data_vigencia`), sem alterar o comportamento já existente.
+- Escrevi testes novos: `tests/test_query_analysis.py`, `tests/test_pipeline_query_analysis.py`, e 4 testes de faixa em `tests/test_retrieve.py`.
+
+**Imprevisto:** durante o dia, o `main` do time avançou bastante em paralelo (reescrita de `retrieve.py` com escopos/manifesto/fetch_k pelo Diogo, novos campos em `schema.py`, etc.). Precisei reconciliar minha branch (`marco/query-analysis`) com essas mudanças antes de abrir o PR, preservando as features dos colegas.
+
+**Resultado:** branch `marco/query-analysis` mergeada com o `main` atual e com push feito; PR aberto. Suíte completa local: 322 passed, 1 failed pré-existente e sem relação com meu trabalho (`test_prepare_documents_extracts_pdf_text_and_required_metadata`, extração de PDF — falha já presente no `main` antes do meu merge, possivelmente ligada à versão do Python local).
+
+
+
