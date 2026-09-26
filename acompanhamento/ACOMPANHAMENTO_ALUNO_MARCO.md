@@ -75,7 +75,9 @@ Uso de IA: usei o Claude pra montar o esqueleto dos testes e pra revisar o corpu
 
 **Imprevisto:** durante o dia, o `main` do time avançou bastante em paralelo (reescrita de `retrieve.py` com escopos/manifesto/fetch_k pelo Diogo, novos campos em `schema.py`, etc.). Precisei reconciliar minha branch (`marco/query-analysis`) com essas mudanças antes de abrir o PR, preservando as features dos colegas.
 
-**Resultado:** branch `marco/query-analysis` mergeada com o `main` atual e com push feito; PR aberto. Suíte completa local: 322 passed, 1 failed pré-existente e sem relação com meu trabalho (`test_prepare_documents_extracts_pdf_text_and_required_metadata`, extração de PDF — falha já presente no `main` antes do meu merge, possivelmente ligada à versão do Python local).
+**Resultado:** branch `marco/query-analysis` mergeada com o `main` atual e com push feito; PR aberto. Na primeira rodada da suíte completa local: 322 passed, 1 failed (`test_prepare_documents_extracts_pdf_text_and_required_metadata`, extração de PDF), falha já presente no `main` antes do meu merge e que inicialmente suspeitei ser ligada à versão do Python local.
+
+**Correção da falha:** investigando o erro, identifiquei que a causa não era a versão do Python, e sim a dependência `pypdf` (listada no `requirements.txt`) que não estava instalada no meu ambiente. Depois de instalar o `pypdf`, rodei a suíte de novo e tudo passou; o código rodou perfeitamente, sem precisar de nenhuma alteração no código.
 
 
 
