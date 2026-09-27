@@ -172,6 +172,20 @@ O grupo também avançou na compreensão dos entregáveis iniciais, principalmen
 
 - A suíte `tests/test_retrieve.py` foi ampliada para contemplar os novos casos de borda e regressão. A suíte específica do módulo foi finalizada com **50 testes aprovados**, enquanto a suíte completa do projeto chegou a **274 testes aprovados**. Também foi executado `git diff --check`, sem identificação de problemas, e as alterações dessa etapa ficaram restritas aos arquivos `src/retrieve.py` e `tests/test_retrieve.py`.
 
+- Foi implementada a nova etapa `src/query_analysis.py`, responsável pela análise estruturada da consulta antes do roteamento. A extração foi desenvolvida de forma determinística, utilizando expressões regulares e heurísticas, sem dependência de LLM. A etapa identifica informações como **ano, valores monetários e órgão**, incluindo valores mínimos, máximos e faixas e formatos monetários em reais, como `R$ 500.000,00`, `1,5 milhão` e `200 mil`. Para identificação de órgãos, foram utilizadas palavras-gatilho como secretaria, prefeitura e tribunal.
+
+- Foram adicionados os modelos `QueryFilters` e `QueryAnalysisResult` ao `src/schema.py`, estruturando os filtros extraídos da consulta e permitindo sua utilização pelas demais etapas do pipeline.
+
+- A etapa de análise foi integrada ao `src/pipeline.py`. O fluxo de `responder()` passou a executar `analisar_query()` antes do roteamento e a repassar os filtros extraídos para o `retrieve()`, permitindo que informações presentes na pergunta sejam utilizadas efetivamente durante a recuperação.
+
+- O módulo `src/retrieve.py` também foi ampliado para permitir múltiplas condições sobre a mesma chave durante a aplicação dos filtros. Isso possibilita representar faixas de valores e tratar o filtro de ano como um intervalo aplicado sobre `data_vigencia`, mantendo o comportamento dos filtros já existentes.
+
+- Foram criados novos testes para a funcionalidade, incluindo `tests/test_query_analysis.py`, `tests/test_pipeline_query_analysis.py` e quatro novos testes de faixa em `tests/test_retrieve.py`, validando a extração dos filtros, sua integração ao pipeline e o comportamento da recuperação.
+
+- Durante a implementação do `query_analysis`, foi necessário reconciliar a branch de desenvolvimento com alterações que estavam avançando paralelamente na `main`, incluindo a reestruturação do `retrieve.py`, utilização de escopos e manifesto, alterações relacionadas ao `fetch_k` e novos campos no `schema.py`. A integração foi realizada preservando as funcionalidades desenvolvidas pelos diferentes integrantes.
+
+- A branch `marco/query-analysis` foi integrada à `main` atual, recebeu push e teve o respectivo Pull Request aberto. Na validação após a integração, a suíte completa apresentou **322 testes aprovados e 1 falha pré-existente**, relacionada ao teste `test_prepare_documents_extracts_pdf_text_and_required_metadata`. Essa falha já estava presente na `main` antes da integração e não possui relação com as alterações do `query_analysis`, sendo possivelmente relacionada à versão do Python utilizada no ambiente local.
+
 - Foi realizada uma nova validação do inventário do corpus, com regeneração do `CORPUS_INVENTORY.md` e comparação com o manifesto. O inventário da versão 2 foi considerado coerente, enquanto foram identificadas diferenças no manifesto após a coleta, incluindo a declaração das atas como PDF quando inicialmente apenas os JSONs eram coletados. O `corpus_manifest.yaml` foi atualizado para refletir a versão e os formatos efetivamente utilizados.
 
 - Durante a validação da base conversacional e das coletas reais do PNCP, foram identificados e tratados problemas relacionados ao ambiente e à coleta: suporte a caminhos longos no Windows, contagem incorreta de arquivos locais que não estavam em JSONL e filtragem das atas do PNCP. Foi identificado que o endpoint de atas ignorava o filtro por UF, fazendo com que registros de outros estados fossem retornados. A coleta passou a utilizar o CNPJ do órgão do Estado do Rio de Janeiro como filtro adicional, com atualização do `src/providers/pncp.py`, do manifesto e dos respectivos testes. Na nova coleta, foram obtidas **20 atas do RJ**.
@@ -198,11 +212,11 @@ O grupo também avançou na compreensão dos entregáveis iniciais, principalmen
 
 - Foram integradas as alterações da branch `main` à branch de trabalho e realizadas as revisões necessárias no manifesto, testes de coleta e ingestão e documentação após o merge. Também foi adicionado um exemplo sintético de e-mail em Markdown para demonstração.
 
-- A equipe deu continuidade ao desenvolvimento do **front-end** e iniciou o trabalho relacionado ao **query analysis**, avançando na integração das etapas necessárias para o fluxo completo do sistema.
+- A equipe deu continuidade ao desenvolvimento do **front-end** e ao trabalho de **query analysis**, avançando na integração das etapas necessárias para o fluxo completo do sistema.
 
 ## **Ficou pendente:**
 
-- Continuidade do desenvolvimento do **front-end** e do **query analysis**.
+- Continuidade do desenvolvimento do **front-end** e evolução das demais etapas do pipeline.
 
 - Execução da avaliação completa do **golden set** para validação mais ampla do comportamento do sistema.
 
@@ -210,7 +224,7 @@ O grupo também avançou na compreensão dos entregáveis iniciais, principalmen
 
 - A **base de e-mails sintética** continua pendente e será construída/disponibilizada em conjunto com o tutor. A integração e os testes dessa base serão realizados posteriormente.
 
-- Permanece identificado um comportamento no `update --dry-run`: quando a pasta `data/raw/vN/` não existe na máquina, o comando não reconhece corretamente o arquivo `data/inventory/vN.json`. O ponto foi identificado e permanece para avaliação.
+- Permanece identificado um comportamento no `update --dry-run`: quando a pasta `data/raw/vN/` não existe na máquina, o comando não reconhece corretamente o arquivo `data/inventory/vN.json`. O ponto permanece para avaliação.
 
 ## **Bloqueios em aberto:**
 
