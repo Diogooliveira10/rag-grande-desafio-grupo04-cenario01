@@ -160,3 +160,30 @@ def test_banco_padrao_escolhe_postgres_so_com_database_url(monkeypatch):
     assert banco.dialeto == "postgres"
     assert banco.descricao() == "postgres://host.neon.tech"  # sem usuário nem senha
     assert banco._sql("SELECT * FROM t WHERE a = ? AND b = ?") == "SELECT * FROM t WHERE a = %s AND b = %s"
+
+
+def test_sem_permissao_para_remontar_usa_a_base_existente(documents, banco, monkeypatch):
+    # Usuário só de leitura (rag_leitor no Neon): a base existe, mas não pode ser recriada.
+    structured_db.construir_banco(documents, banco)
+    escrever_documents(documents, contratacoes=[_contratacao("NOVA")])
+
+    def sem_permissao(*args, **kwargs):
+        raise PermissionError("permission denied for schema public")
+
+    monkeypatch.setattr(structured_db, "construir_banco", sem_permissao)
+    status = {}
+
+    structured_db.garantir_banco(documents, banco, status=status)
+
+    assert status == {"base_desatualizada": True, "erro_remontagem": "PermissionError"}
+    assert banco.consultar("SELECT COUNT(*) AS n FROM contratacoes")[0]["n"] == 3  # dados antigos continuam
+
+
+def test_sem_permissao_e_sem_base_nenhuma_o_erro_sobe(documents, tmp_path, monkeypatch):
+    banco = Banco(url="postgresql://leitor@host/db")
+    monkeypatch.setattr(structured_db, "_sha_registrado", lambda banco: None)
+    monkeypatch.setattr(Banco, "sessao", lambda self: __import__("contextlib").nullcontext(self))
+    monkeypatch.setattr(structured_db, "construir_banco", lambda *a, **k: (_ for _ in ()).throw(PermissionError("negado")))
+
+    with pytest.raises(PermissionError):
+        structured_db.garantir_banco(documents, banco)

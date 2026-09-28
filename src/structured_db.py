@@ -384,9 +384,19 @@ def _sha_registrado(banco: Banco) -> Optional[str]:
     return linhas[0]["valor"] if linhas else None
 
 
-def garantir_banco(documents_file: Path = DOCUMENTS_FILE, banco: Optional[Banco] = None) -> Banco:
+def garantir_banco(
+    documents_file: Path = DOCUMENTS_FILE,
+    banco: Optional[Banco] = None,
+    status: Optional[dict[str, Any]] = None,
+) -> Banco:
     """Devolve o banco pronto, remontando-o se não existe ou se o
-    ``documents.jsonl`` mudou desde a última montagem (SHA-256 no ``meta``)."""
+    ``documents.jsonl`` mudou desde a última montagem (SHA-256 no ``meta``).
+
+    Com um usuário só de leitura (ex.: ``rag_leitor`` no Neon), a remontagem
+    falha por permissão; se a base já existe, ela é usada como está e
+    ``status["base_desatualizada"]`` fica ``True`` (o chamador leva ao log).
+    Sem base nenhuma, o erro sobe.
+    """
     banco = banco or banco_padrao()
     documents_file = Path(documents_file)
     if not documents_file.exists():
@@ -395,9 +405,17 @@ def garantir_banco(documents_file: Path = DOCUMENTS_FILE, banco: Optional[Banco]
         construir_banco(documents_file, banco)
         return banco
     with banco.sessao():
-        atualizado = _sha_registrado(banco) == _sha256(documents_file)
-    if not atualizado:
+        registrado = _sha_registrado(banco)
+    if registrado == _sha256(documents_file):
+        return banco
+    try:
         construir_banco(documents_file, banco)
+    except Exception as erro:
+        if registrado is None:
+            raise
+        if status is not None:
+            status["base_desatualizada"] = True
+            status["erro_remontagem"] = type(erro).__name__
     return banco
 
 

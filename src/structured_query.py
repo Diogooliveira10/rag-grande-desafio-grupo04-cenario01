@@ -387,7 +387,7 @@ def consultar_estruturado(
             input=query,
             extra={"tabela": consulta.tabela, "tipo": consulta.tipo, "banco": banco.descricao()},
         ) as span:
-            structured_db.garantir_banco(documents_file, banco)
+            structured_db.garantir_banco(documents_file, banco, status=span.extra)
             with banco.sessao():
                 sql, cabecalho, linhas = executar_consulta(consulta, banco)
             chunks = _chunks(consulta, sql, cabecalho, linhas, banco)
