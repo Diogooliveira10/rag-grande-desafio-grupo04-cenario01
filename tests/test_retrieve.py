@@ -1,15 +1,19 @@
 import json
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
+import src.retrieve as retrieve_module
 from src.retrieve import (
     RetrievalResult,
+    _parse_number,
     bm25_retrieve,
     dense_retrieve,
     reciprocal_rank_fusion,
     retrieve,
 )
+from src.obs import default_logger
 from src.schema import Natureza
 
 
@@ -90,17 +94,60 @@ def test_dense_retrieve_returns_empty_for_empty_index_without_embedding():
     assert called["count"] == 0
 
 
-def test_dense_retrieve_treats_incompatible_embedding_dimension_as_zero_score():
-    records = [_record("c1", text="ambulancia", embedding=[1.0, 0.0, 0.0])]
+def test_retrieve_excludes_and_logs_incompatible_embedding_dimensions(tmp_path, monkeypatch):
+    monkeypatch.setattr(default_logger, "logs_dir", tmp_path / "logs")
+    records = [
+        _record("invalid", text="software", embedding=[1.0, 0.0, 0.0]),
+        _record("valid", text="ambulancia", embedding=[1.0, 0.0]),
+    ]
+    monkeypatch.setattr(retrieve_module, "_records_for", lambda *args, **kwargs: records)
+
+    results = retrieve(
+        "ambulancia",
+        embed_fn=lambda texts: [[1.0, 0.0] for _ in texts],
+        run_id="run-real",
+        query_id="query-real",
+    )
+
+    assert [item.chunk_id for item in results] == ["valid"]
+    assert results[0].dense_score == pytest.approx(1.0)
+    logs = [
+        json.loads(line)
+        for line in default_logger.log_path().read_text(encoding="utf-8").splitlines()
+    ]
+    warning = next(log for log in logs if log["status"] == "aviso")
+    assert warning["run_id"] == "run-real"
+    assert warning["query_id"] == "query-real"
+    assert warning["extra"]["embedding_dimension_mismatches"] == [
+        {"chunk_id": "invalid", "expected_dimension": 2, "actual_dimension": 3}
+    ]
+
+
+def test_dense_retrieve_ignores_and_logs_null_embedding(tmp_path, monkeypatch):
+    monkeypatch.setattr(default_logger, "logs_dir", tmp_path / "logs")
+    missing = _record("missing", text="ambulancia")
+    missing["embedding"] = None
+    records = [
+        missing,
+        _record("valid", text="ambulancia", embedding=[1.0, 0.0]),
+    ]
 
     results = dense_retrieve(
         "ambulancia",
         records=records,
         embed_fn=lambda texts: [[1.0, 0.0] for _ in texts],
+        run_id="run-null",
+        query_id="query-null",
     )
 
-    assert len(results) == 1
-    assert results[0].score == pytest.approx(0.0)
+    assert [item.chunk_id for item in results] == ["valid"]
+    assert results[0].score == pytest.approx(1.0)
+    log = json.loads(default_logger.log_path().read_text(encoding="utf-8").splitlines()[0])
+    assert log["status"] == "aviso"
+    assert log["run_id"] == "run-null"
+    assert log["query_id"] == "query-null"
+    assert "ausente(s)/nulo(s)" in log["output"]
+    assert log["extra"]["missing_embeddings"] == [{"chunk_id": "missing"}]
 
 
 def test_bm25_retrieve_ranks_relevant_terms_and_deduplicates_chunk_ids():
@@ -196,8 +243,8 @@ def test_filters_support_equality_inequality_membership_and_contains(expected, m
 @pytest.mark.parametrize(
     ("operator", "expected_ids"),
     [
-        (">", {"c2", "c3"}),
-        (">=", {"c1", "c2", "c3"}),
+        (">", {"c2"}),
+        (">=", {"c1", "c2"}),
         ("<", set()),
         ("<=", {"c1"}),
     ],
@@ -216,6 +263,82 @@ def test_numeric_filters_compare_brazilian_and_plain_monetary_values(operator, e
     )
 
     assert {item.chunk_id for item in results} == expected_ids
+
+
+@pytest.mark.parametrize(
+    ("record_value", "filter_value"),
+    [
+        ("R$ 1.500", "1500"),
+        ("1.234.567", "1234567"),
+        ("500000", "500000"),
+        ("R$ 1.500,50", "1500.50"),
+        ("1.234.567,89", "1234567.89"),
+        ("1500,50", "1500.50"),
+        ("1500.50", "1500.50"),
+    ],
+)
+def test_numeric_filters_parse_brazilian_thousands_and_decimal_separators(record_value, filter_value):
+    records = [
+        _record("match", text="ambulancia", metadata_extra={"valor": record_value}),
+        _record("other", text="ambulancia", metadata_extra={"valor": "0"}),
+    ]
+
+    results = bm25_retrieve(
+        "ambulancia",
+        records=records,
+        filters={"valor": ("==", filter_value)},
+    )
+
+    assert [item.chunk_id for item in results] == ["match"]
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("0.125", "0.125"),
+        ("0.500", "0.500"),
+        ("1.500", "1500.0"),
+        ("1.234.567", "1234567.0"),
+        ("1500.50", "1500.50"),
+        ("1500,50", "1500.50"),
+    ],
+)
+def test_parse_number_distinguishes_thousands_and_decimal_separators(value, expected):
+    assert _parse_number(value) == Decimal(expected)
+
+
+@pytest.mark.parametrize(
+    ("record_value", "filter_value"),
+    [
+        ("R$ 1.500", "100"),
+        ("1.234.567", "1.000.000"),
+    ],
+)
+def test_numeric_filters_include_values_above_threshold(record_value, filter_value):
+    records = [_record("match", text="ambulancia", metadata_extra={"valor": record_value})]
+
+    results = bm25_retrieve(
+        "ambulancia",
+        records=records,
+        filters={"valor": (">", filter_value)},
+    )
+
+    assert [item.chunk_id for item in results] == ["match"]
+
+
+def test_numeric_filters_do_not_compare_invalid_values_lexically():
+    records = [
+        _record("invalid", text="ambulancia", metadata_extra={"valor": "not-a-number"}),
+        _record("valid", text="ambulancia", metadata_extra={"valor": "2000"}),
+    ]
+
+    results = bm25_retrieve(
+        "ambulancia",
+        records=records,
+        filters={"valor": (">", "1000")},
+    )
+
+    assert [item.chunk_id for item in results] == ["valid"]
 
 
 @pytest.mark.parametrize(
@@ -567,3 +690,138 @@ def test_bm25_ignora_acentos_e_caixa():
     results = bm25_retrieve("uso médico e cirúrgico", records=records)
 
     assert [item.chunk_id for item in results] == ["c1"]
+
+
+def test_fetch_k_deixa_chegar_a_fusao_o_chunk_que_as_duas_buscas_poem_abaixo_do_corte(tmp_path):
+    """Caso real da base agregada: "valor total" ficou em 4º na densa e na BM25."""
+    base_dir = tmp_path / "pca_agregado"
+    base_dir.mkdir()
+    # densa: d1, d2, d3 à frente de "alvo"; BM25: b1, b2, b3 à frente de "alvo".
+    especificacao = [
+        ("d1", [1.0, 0.00], "x"), ("d2", [0.99, 0.01], "x"), ("d3", [0.98, 0.02], "x"),
+        ("alvo", [0.97, 0.03], "total total"),
+        # Na densa, os campeões da BM25 ficam bem abaixo (como nos dados reais).
+        *[(f"f{i}", [0.5, 0.5], "x") for i in range(6)],
+        ("b1", [0.0, 1.0], "total total total total"), ("b2", [0.0, 1.0], "total total total"),
+        ("b3", [0.0, 1.0], "total total total"),
+    ]
+    registros = [
+        {**_record(cid, text=texto, base_id="pca_agregado", embedding=vetor), "natureza": "agregada"}
+        for cid, vetor, texto in especificacao
+    ]
+    (base_dir / "vectors.jsonl").write_text("\n".join(json.dumps(r) for r in registros), encoding="utf-8")
+    documentos = tmp_path / "documents.jsonl"
+    documentos.write_text("\n".join(json.dumps(r) for r in registros), encoding="utf-8")
+    comum = dict(index_dir=tmp_path, documents_file=documentos, top_k=3, embed_fn=lambda t: [[1.0, 0.0]])
+
+    sem_folga = retrieve("total", None, fetch_k=3, **comum)
+    com_folga = retrieve("total", None, **comum)
+
+    assert "alvo" not in [r.chunk_id for r in sem_folga]
+    assert com_folga[0].chunk_id == "alvo"
+
+
+# --------------------------------------------------------------------------
+# Filtros de múltiplas condições sobre a mesma chave (faixas), usados por
+# src/query_analysis.py — ex.: "entre X e Y", ou um ano virando um intervalo
+# [1º de janeiro, 1º de janeiro do ano seguinte) em data_vigencia.
+# --------------------------------------------------------------------------
+
+
+def test_filtro_de_faixa_de_valor_com_lista_de_condicoes():
+    records = [
+        _record("baixo", text="ambulancia", metadata_extra={"valor": "50.000,00"}),
+        _record("dentro", text="ambulancia", metadata_extra={"valor": "150.000,00"}),
+        _record("alto", text="ambulancia", metadata_extra={"valor": "500.000,00"}),
+    ]
+
+    results = bm25_retrieve(
+        "ambulancia",
+        records=records,
+        filters={
+            "valor": [
+                {"operator": ">=", "value": "100.000,00"},
+                {"operator": "<=", "value": "200.000,00"},
+            ]
+        },
+    )
+
+    assert [item.chunk_id for item in results] == ["dentro"]
+
+
+def test_filtro_de_faixa_de_data_simula_filtro_de_ano():
+    """Um "ano" vira [1º de jan do ano, 1º de jan do ano seguinte) em data_vigencia."""
+    records = [
+        _record("antes", text="edital", metadata_extra={"data_vigencia": "2022-12-31"}),
+        _record("dentro_inicio", text="edital", metadata_extra={"data_vigencia": "2023-01-01"}),
+        _record("dentro_fim", text="edital", metadata_extra={"data_vigencia": "2023-12-31"}),
+        _record("depois", text="edital", metadata_extra={"data_vigencia": "2024-01-01"}),
+    ]
+
+    results = bm25_retrieve(
+        "edital",
+        records=records,
+        filters={
+            "data_vigencia": [
+                {"operator": ">=", "value": "2023-01-01"},
+                {"operator": "<", "value": "2024-01-01"},
+            ]
+        },
+    )
+
+    assert {item.chunk_id for item in results} == {"dentro_inicio", "dentro_fim"}
+
+
+def test_filtro_de_faixa_combinado_com_condicao_de_igualdade_em_outra_chave():
+    records = [
+        _record(
+            "fora_do_orgao",
+            text="ambulancia contrato",
+            metadata_extra={"valor": "150.000,00", "extras": {"orgao": "Secretaria de Educacao"}},
+        ),
+        _record(
+            "dentro_da_faixa_e_orgao",
+            text="ambulancia contrato",
+            metadata_extra={"valor": "150.000,00", "extras": {"orgao": "Secretaria de Saude"}},
+        ),
+        _record(
+            "fora_da_faixa",
+            text="ambulancia contrato",
+            metadata_extra={"valor": "999.000,00", "extras": {"orgao": "Secretaria de Saude"}},
+        ),
+    ]
+
+    results = bm25_retrieve(
+        "ambulancia",
+        records=records,
+        filters={
+            "valor": [
+                {"operator": ">=", "value": "100.000,00"},
+                {"operator": "<=", "value": "200.000,00"},
+            ],
+            "orgao": {"operator": "contains", "value": "Saude"},
+        },
+    )
+
+    assert [item.chunk_id for item in results] == ["dentro_da_faixa_e_orgao"]
+
+
+def test_lista_de_duas_condicoes_nao_e_confundida_com_tupla_operador_valor():
+    """(">=", 10) é 1 condição; [{"operator": ">=", ...}, {...}] são 2 — mesmo com len == 2."""
+    records = [
+        _record("dentro", text="ambulancia", metadata_extra={"valor": "150"}),
+        _record("fora", text="ambulancia", metadata_extra={"valor": "5"}),
+    ]
+
+    results = bm25_retrieve(
+        "ambulancia",
+        records=records,
+        filters={
+            "valor": [
+                {"operator": ">=", "value": "100"},
+                {"operator": "<=", "value": "300"},
+            ]
+        },
+    )
+
+    assert [item.chunk_id for item in results] == ["dentro"]

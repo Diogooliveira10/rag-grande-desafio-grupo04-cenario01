@@ -91,7 +91,9 @@ def test_retrieve_registra_denso_bm25_e_rrf(indice):
 
     assert resultados
     registros = _registros()
-    assert [r["stage"] for r in registros] == ["retrieval_denso", "retrieval_bm25", "fusao_rrf"]
+    assert [r["stage"] for r in registros] == [
+        "retrieval_denso", "retrieval_bm25", "fusao_rrf",
+    ]
     for r in registros:
         assert set(r) == CAMPOS_CONTRATO
         assert r["status"] == "ok"
@@ -184,7 +186,7 @@ def test_pipeline_amarra_todos_os_stages_pelo_mesmo_run_id(monkeypatch, indice):
     assert resposta["is_refusal"] is False
     registros = _registros()
     assert [r["stage"] for r in registros] == [
-        "roteamento", "retrieval_denso", "retrieval_bm25", "fusao_rrf", "geracao",
+        "query_analysis", "roteamento", "retrieval_denso", "retrieval_bm25", "fusao_rrf", "geracao",
     ]
     assert len({r["run_id"] for r in registros}) == 1
     assert len({r["query_id"] for r in registros}) == 1

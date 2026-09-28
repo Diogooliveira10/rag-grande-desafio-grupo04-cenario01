@@ -39,6 +39,12 @@ CUSTOM_EMBEDDING_MODEL = _env("CUSTOM_EMBEDDING_MODEL", EMBEDDING_MODEL)
 # Parâmetros de rede e armazenamento usados pela coleta e ingestão.
 REQUEST_TIMEOUT = float(_env("REQUEST_TIMEOUT", "30"))
 REQUEST_ATTEMPTS = int(_env("REQUEST_ATTEMPTS", "3"))
+
+# OCR de páginas de PDF sem texto (src/ocr.py). TESSERACT_CMD vazio procura o
+# executável no PATH e no local padrão do instalador do Windows.
+TESSERACT_CMD = _env("TESSERACT_CMD", "")
+OCR_LANG = _env("OCR_LANG", "por")
+OCR_DPI = int(_env("OCR_DPI", "300"))
 RAW_DATA_DIR = ROOT_DIR / "data" / "raw" / "v1"
 NORMALIZED_DATA_DIR = ROOT_DIR / "data" / "normalized"
 INDEX_DIR = ROOT_DIR / "index"

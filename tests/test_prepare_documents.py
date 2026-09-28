@@ -9,18 +9,12 @@ from src.prepare_documents import prepare_documents
 from src.schema import ChunkMetadata
 
 # Merge da branch joao-reis (2026-09-23): remover os skips quando o código entrar no main.
-AGUARDA_PREPARE_NOVO = (
-    "depende da versão do prepare_documents com document_content_sha256 e filtro pelo inventário, ainda não publicada em src/"
-)
-
-
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "corpus_manifest.yaml"
 PDF_ROOT = ROOT / "tests" / "fixtures" / "pdf"
 CSV_FIXTURE = ROOT / "tests" / "fixtures" / "formats" / "licitacoes_siga_real.csv"
 
 
-@pytest.mark.skip(reason=AGUARDA_PREPARE_NOVO)
 def test_prepare_documents_extracts_pdf_text_and_required_metadata(tmp_path):
     output = tmp_path / "documents.jsonl"
     report = tmp_path / "extraction_report.json"
@@ -113,7 +107,7 @@ def test_prepare_documents_extracts_manifest_declared_structured_metadata(tmp_pa
     record = json.loads(output.read_text(encoding="utf-8").splitlines()[0])
     assert record["natureza"] == "estruturada"
     assert record["doc_type"] == "json"
-    assert record["origem"].startswith("https://pncp.gov.br")
+    assert record["origem"] == "PNCP - API de consulta de contratações/publicação"
     assert record["data_vigencia"] == "2025-12-31"
     assert record["extras"]["orgao"] == "Secretaria X"
     assert record["extras"]["valor"] == 500000
@@ -163,7 +157,6 @@ def test_prepare_documents_uses_inventory_provenance_instead_of_file_mtime(tmp_p
     assert record["logical_id"] == "contratos_estruturado:numeroControlePNCP:RJ-123"
 
 
-@pytest.mark.skip(reason=AGUARDA_PREPARE_NOVO)
 def test_prepare_documents_processes_only_files_listed_in_inventory(tmp_path):
     input_dir = tmp_path / "source"
     input_dir.mkdir()
@@ -289,3 +282,152 @@ def test_normative_documents_split_at_sections(tmp_path):
     assert all(record["parent_chunk_id"] == records[0]["parent_chunk_id"] for record in records)
     assert any("CLÁUSULA PRIMEIRA" in record["text"] for record in records)
     assert any("CLÁUSULA SEGUNDA" in record["text"] for record in records)
+
+
+def test_prepare_documents_reuses_incremental_extraction_and_invalidates_chunks(tmp_path):
+    input_dir = tmp_path / "source"
+    input_dir.mkdir()
+    source = input_dir / "notes.txt"
+    source.write_text("texto de teste " * 120, encoding="utf-8")
+    output = tmp_path / "documents.jsonl"
+    report = tmp_path / "extraction_report.json"
+
+    first = prepare_documents(
+        input_dir,
+        output,
+        report,
+        MANIFEST,
+        base_id="exemplos_teste",
+        chunk_size=100,
+        overlap=10,
+    )
+    first_output = output.read_bytes()
+
+    second = prepare_documents(
+        input_dir,
+        output,
+        report,
+        MANIFEST,
+        base_id="exemplos_teste",
+        chunk_size=100,
+        overlap=10,
+    )
+    assert first["extraction_cache_misses"] == 1
+    assert second["extraction_cache_hits"] == 1
+    assert second["extraction_cache_misses"] == 0
+    assert second["chunk_cache_hits"] == 1
+    assert second["chunk_cache_misses"] == 0
+    assert output.read_bytes() == first_output
+    assert (tmp_path / "documents.units.jsonl").exists()
+
+    changed_chunking = prepare_documents(
+        input_dir,
+        output,
+        report,
+        MANIFEST,
+        base_id="exemplos_teste",
+        chunk_size=60,
+        overlap=5,
+    )
+    assert changed_chunking["extraction_cache_hits"] == 1
+    assert changed_chunking["extraction_cache_misses"] == 0
+    assert changed_chunking["chunk_cache_hits"] == 0
+    assert changed_chunking["chunk_cache_misses"] == 1
+
+
+def _pdf_em_branco(path: Path) -> Path:
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    with path.open("wb") as handle:
+        writer.write(handle)
+    return path
+
+
+@pytest.mark.parametrize("com_ocr", [True, False])
+def test_pagina_escaneada_usa_ocr_quando_disponivel(tmp_path, monkeypatch, com_ocr):
+    from src import prepare_documents as prepare
+
+    input_dir = tmp_path / "source"
+    input_dir.mkdir()
+    _pdf_em_branco(input_dir / "escaneado.pdf")
+    monkeypatch.setattr(prepare.ocr, "disponivel", lambda: com_ocr)
+    monkeypatch.setattr(prepare.ocr, "motor", lambda: "ocr-fake" if com_ocr else "sem-ocr")
+    monkeypatch.setattr(prepare.ocr, "texto_da_pagina", lambda path, index: "ATA DE REGISTRO DE PREÇOS Nº 79/2023")
+
+    output = tmp_path / "documents.jsonl"
+    summary = prepare_documents(input_dir, output, tmp_path / "report.json", MANIFEST, base_id="exemplos_teste")
+
+    records = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
+    if com_ocr:
+        assert summary["status_extracao"] == {"ok_ocr": 1}
+        assert records[0]["text"] == "ATA DE REGISTRO DE PREÇOS Nº 79/2023"
+        assert records[0]["extras"]["extracao"] == "ocr-fake"
+    else:
+        assert summary["status_extracao"] == {"sem_texto": 1}
+        assert records == []
+
+
+def test_pdf_da_ata_herda_vigencia_e_titulo_dos_artefatos_da_mesma_ata(tmp_path):
+    input_dir = tmp_path / "atas_conversacional"
+    input_dir.mkdir()
+    pdf = input_dir / "ata_arquivo_1.pdf"
+    shutil.copy(next(PDF_ROOT.glob("*.pdf")), pdf)
+    metadata = input_dir / "ata_metadata.json"
+    metadata.write_text(json.dumps({"dataVigenciaFim": "2026-10-22", "objetoCompra": "combustível"}), encoding="utf-8")
+    listing = input_dir / "ata_arquivos.json"
+    listing.write_text(
+        json.dumps(
+            [
+                {
+                    "url": "https://pncp.test/atas/1/arquivos/1",
+                    "titulo": "Ata de Registro de Preços nº 00178",
+                    "tipoDocumentoNome": "Ata de Registro de Preços",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    source_ref = {"provider": "pncp", "resource_type": "ata", "key": {"sequencial_ata": "1"}}
+    registros = [
+        (metadata, "json", "pncp:ata:1:metadata", "https://pncp.test/atas/1"),
+        (listing, "json", "pncp:ata:1:arquivos", "https://pncp.test/atas/1/arquivos"),
+        (pdf, "pdf", "pncp:ata:1:arquivo:1", "https://pncp.test/atas/1/arquivos/1"),
+    ]
+    inventory = tmp_path / "inventory.json"
+    inventory.write_text(
+        json.dumps(
+            {
+                "manifest_hash": f"sha256:{hashlib.sha256(MANIFEST.read_bytes()).hexdigest()}",
+                "arquivos": [
+                    {
+                        "base_id": "atas_conversacional",
+                        "status": "ok",
+                        "path": str(path),
+                        "source_file": str(path),
+                        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                        "tipo": tipo,
+                        "artifact_id": artifact_id,
+                        "source_ref": source_ref,
+                        "origem": origem,
+                        "coletado_em": "2026-09-25T00:00:00+00:00",
+                    }
+                    for path, tipo, artifact_id, origem in registros
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    output = tmp_path / "documents.jsonl"
+    prepare_documents(
+        input_dir, output, tmp_path / "report.json", MANIFEST,
+        base_id="atas_conversacional", inventory_path=inventory,
+    )
+
+    records = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
+    pdf_chunks = [record for record in records if record["doc_type"] == "pdf"]
+    assert pdf_chunks
+    assert {record["data_vigencia"] for record in pdf_chunks} == {"2026-10-22"}
+    assert {record["extras"]["titulo_documento"] for record in pdf_chunks} == {"Ata de Registro de Preços nº 00178"}

@@ -68,3 +68,18 @@ Ou direto com a pergunta:
 
 - python app/cli.py rota "Quais contratos de software foram assinados acima de 500 mil?"
 - python app/cli.py perguntar "Quais contratos de software foram assinados acima de 500 mil?"
+
+## Encontro 6 - 2026-09-25
+
+### Relato individual - Pâmela de Freitas
+
+- Concluí a coleta oficial das quatro bases. Tive resolver um erro de certificado SSL usando o bundle certifi do Python, a coleta terminou completa com 222 arquivos, 200 itens e zero falhas.
+
+- Preparei as bases e gerei um índice local com 3.130 chunks, todos com vetores de dimensão 1024.
+Fiz um teste real com retrieve, que retornou três resultados.Não rodei a avaliação completa do golden set.
+
+- Os dados brutos, os documentos normalizados e o índice continuam locais e ignorados pelo Git. Portanto, o commit dos inventários não entrega o índice pra vcs, para usarem o retrieve, cada um precisa gerar os artefatos na própria máquina
+
+### Uso de assistentes de IA:
+
+- Usei para ajudar no erro de certificado que estava dando em um dos documentos

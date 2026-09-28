@@ -1,9 +1,10 @@
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
 
-from src.index import REQUIRED_METADATA_FIELDS, build_index, read_normalized_chunks
+from src.index import REQUIRED_METADATA_FIELDS, build_index, read_normalized_chunks, stored_embed_fn
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 SAMPLE_INPUT = FIXTURES_DIR / "documents_sample.jsonl"
@@ -90,3 +91,41 @@ def test_build_index_falha_rapido_com_metadado_obrigatorio_ausente(tmp_path):
 
     with pytest.raises(ValueError, match="metadado obrigatório ausente"):
         build_index(input_file, tmp_path / "index", _fake_embed_fn(), model="fixture-model")
+
+
+def _stored_embeddings(path: Path, texts: list[str], model: str = "fixture-model") -> None:
+    lines = [
+        json.dumps(
+            {
+                "content_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                "embedding": [float(index), 1.0],
+                "embedding_model": model,
+            }
+        )
+        for index, text in enumerate(texts)
+    ]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_stored_embed_fn_reaproveita_vetores_pelo_hash_do_texto(tmp_path):
+    texts = [chunk.text for chunk in read_normalized_chunks(SAMPLE_INPUT) if chunk.text.strip()]
+    embeddings = tmp_path / "embeddings.jsonl"
+    _stored_embeddings(embeddings, texts)
+
+    embed_fn, model = stored_embed_fn(embeddings)
+    manifest = build_index(SAMPLE_INPUT, tmp_path / "index", embed_fn, model=model)
+
+    assert model == "fixture-model"
+    assert {base["dimension"] for base in manifest["bases"]} == {2}
+    assert embed_fn([texts[1]]) == [[1.0, 1.0]]
+
+
+def test_stored_embed_fn_recusa_texto_sem_vetor(tmp_path):
+    embeddings = tmp_path / "embeddings.jsonl"
+    _stored_embeddings(embeddings, ["texto original"])
+
+    embed_fn, _ = stored_embed_fn(embeddings)
+
+    with pytest.raises(KeyError, match="sem vetor"):
+        embed_fn(["texto alterado"])
+

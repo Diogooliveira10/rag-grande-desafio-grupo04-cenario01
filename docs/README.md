@@ -1,126 +1,72 @@
-# Interface de linha de comando
+# Documentação
 
-Este documento mostra como o professor ou outro integrante pode testar a
-extração, consultar fontes suportadas e revisar alterações no manifesto.
+Este diretório reúne guias de uso e referências do projeto.
 
-## Preparação
+- [Guia de comandos da CLI](CLI.md): instalação, coleta, inventário, curadoria,
+  preparação, busca local e embeddings.
+- [Emails sintéticos em Markdown](#emails-sintéticos-em-markdown): fixture de
+  exemplo e fluxo para preparar uma base local.
+- [Arquitetura atual e alvo](../ARQUITETURA.md): o que já está implementado e o
+  que ainda é parte do desenho do Adaptive RAG.
+- [Inventário do corpus](../CORPUS_INVENTORY.md): contagens da coleta v2 e da
+  extração disponível nesta cópia do repositório.
+- [Personas e perguntas de referência](../PERSONAS.md).
+- [Enunciado completo do Grande Desafio](../GRANDE_DESAFIO_CENARIOS.md).
 
-Na raiz do projeto:
+## Emails sintéticos em Markdown
+
+O arquivo [email_sintetico_exemplo.md](email_sintetico_exemplo.md) demonstra um
+email fictício com cabeçalho, corpo e mensagem citada. Use endereços reservados
+como `example.com` e deixe claro que o conteúdo é sintético.
+
+### Preparar uma pasta sem criar versão do corpus
+
+Coloque um arquivo `.md` por mensagem ou por conversa em uma pasta. O
+`prepare_documents` percorre a pasta recursivamente; se houver outros formatos
+suportados nela, eles também serão preparados. Para conferir sem gravar JSONL,
+relatório ou estado incremental, use `--dry-run`:
 
 ```powershell
-python -m pip install -r requirements.txt
-```
-
-A interface é executada no terminal. Typer organiza os comandos, Rich exibe
-tabelas e painéis, e InquirerPy fornece a seleção interativa no comando de
-revisão.
-
-## 1. Curadoria de fontes
-
-Descubra fontes sem alterar o manifesto:
-
-```powershell
-py -m src.source_catalog discover
-```
-
-Gere uma proposta:
-
-```powershell
-py -m src.source_catalog propose `
+py -m src.prepare_documents `
+  --input "docs" `
   --manifest corpus_manifest.yaml `
-  --discovery data/proposals/discovery-AAAA.json
-```
-
-Confira o diff:
-
-```powershell
-py -m src.source_catalog manifest-diff `
-  --manifest corpus_manifest.yaml `
-  --proposal data/proposals/manifest-proposal-AAAA.json
-```
-
-Revise com setas, espaço e Enter:
-
-```powershell
-py -m src.source_catalog review `
-  --proposal data/proposals/manifest-proposal-AAAA.json
-```
-
-Somente depois aplique a proposta:
-
-```powershell
-py -m src.source_catalog apply `
-  --manifest corpus_manifest.yaml `
-  --proposal data/proposals/manifest-proposal-AAAA-reviewed.json `
-  --new-version 2026-09-21
-```
-
-![Exemplo da curadoria de fontes](screenshots/01-curadoria.svg)
-
-O `apply` valida o `manifest_hash` da proposta. Se o manifesto tiver mudado
-desde a descoberta, a aplicação é recusada para evitar alterações obsoletas.
-
-## 2. Busca remota no PNCP
-
-A busca remota consulta o PNCP dentro de um recorte determinístico e lista os
-documentos associados:
-
-```powershell
-py -m src.source_catalog lookup pncp `
-  --query "contratação software" `
-  --uf RJ `
-  --year 2025 `
-  --max-pages 5 `
-  --max-results 20
-```
-
-Essa busca não altera o manifesto nem baixa arquivos para o corpus oficial.
-Ela retorna identificadores, metadados e URLs para uma decisão posterior.
-
-![Exemplo da busca remota no PNCP](screenshots/02-busca-remota.svg)
-
-## 3. Busca local no inventário
-
-A busca local consulta os metadados de uma versão já registrada:
-
-```powershell
-py -m src.corpus_search search local `
-  --corpus-version v1 `
-  --query "edital 90012" `
-  --base-id documentos_pncp
-```
-
-Ela pesquisa `logical_id`, `base_id`, caminho, origem, tipo e SHA-256. Ainda
-não pesquisa o texto interno dos PDFs.
-
-![Exemplo da busca local](screenshots/03-busca-local.svg)
-
-## 4. Prévia de atualização
-
-Antes de fazer requisições ou criar uma nova versão:
-
-```powershell
-py -m src.fetch_corpus update `
-  --manifest corpus_manifest.yaml `
-  --official `
+  --base-id emails_sinteticos `
+  --output "data/normalized/emails-preview.jsonl" `
+  --report "data/normalized/emails-preview-report.json" `
   --dry-run
 ```
 
-O preview mostra a versão anterior, a próxima versão, as bases e uma
-estimativa de requisições. Nenhum arquivo é alterado.
+Para preparar só os emails, aponte `--input` para uma pasta que contenha apenas
+os arquivos daquela base. Remova `--dry-run` quando quiser gravar o JSONL, o
+relatório e o estado incremental. Essa etapa não cria uma versão de coleta.
 
-![Exemplo do preview de atualização](screenshots/04-dry-run.svg)
+### Registrar e coletar uma base local versionada
 
-## 5. Coleta oficial
-
-Depois da revisão:
+A base `emails_sinteticos` já está declarada em `corpus_manifest.yaml` e aponta
+para o arquivo de exemplo deste diretório. Para trocar por uma coleção, altere
+`acesso.origem` para o caminho da pasta que contém os `.md`. Então execute a
+coleta experimental:
 
 ```powershell
-py -m src.fetch_corpus update `
+py -m src.fetch_corpus fetch `
   --manifest corpus_manifest.yaml `
-  --official
+  --data-root data/emails-sinteticos `
+  --base-id emails_sinteticos
 ```
 
-O resultado é uma nova versão imutável em `data/raw/`, acompanhada por
-inventário, diff e log. A pasta `data/raw/` continua fora do Git; o manifesto,
-os inventários e esta documentação são os artefatos reproduzíveis do projeto.
+Essa coleta cria uma versão e um inventário sob `data/emails-sinteticos/`.
+Depois, prepare os documentos da versão criada, ajustando `v1` se a coleta tiver
+gerado outra versão:
+
+```powershell
+py -m src.prepare_documents `
+  --input "data/emails-sinteticos/raw/v1/emails_sinteticos" `
+  --manifest corpus_manifest.yaml `
+  --base-id emails_sinteticos `
+  --inventory "data/emails-sinteticos/inventory/v1.json" `
+  --output "data/emails-sinteticos/normalized/emails.jsonl"
+```
+
+`fetch` é a etapa que versiona e inventaria os arquivos. Use-a quando quiser
+incorporar a coleção ao histórico do corpus; para uma prévia local, basta o
+primeiro comando com `--dry-run`.

@@ -5,11 +5,6 @@ from pathlib import Path
 from src import manifest_curator
 
 # Merge da branch joao-reis (2026-09-23): remover os skips quando o código entrar no main.
-AGUARDA_CURADOR_NOVO = (
-    "depende da versão do manifest_curator com referência ao provedor (source_ref), ainda não publicada em src/"
-)
-
-
 def _manifest(path: Path) -> None:
     path.write_text(
         """scenario_id: teste\nversion: \"2026-09-18\"\nbases:\n  - base_id: existente\n    natureza: normativa\n    fonte: \"Fonte existente\"\n    acesso:\n      tipo: http_pdf\n      urls: [\"https://example.test/existente.pdf\"]\n    volume_alvo: 1\n    formato: pdf\n""",
@@ -35,7 +30,6 @@ def test_build_proposal_only_returns_undeclared_http_sources(tmp_path):
     assert proposal["current_manifest_hash"] == manifest_curator.manifest_hash(manifest_path)
 
 
-@pytest.mark.skip(reason=AGUARDA_CURADOR_NOVO)
 def test_build_proposal_preserves_provider_source_ref(tmp_path):
     manifest_path = tmp_path / "corpus_manifest.yaml"
     _manifest(manifest_path)

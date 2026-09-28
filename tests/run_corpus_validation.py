@@ -4,7 +4,7 @@ Uso:
     py tests/run_corpus_validation.py
 
 O runner não coleta dados externos. Ele valida a suíte offline, o manifesto
-smoke e a composição atual dos módulos, deixando a coleta real para um comando
+oficial e a composição atual dos módulos, deixando a coleta real para um comando
 explícito do pipeline.
 """
 
@@ -37,26 +37,25 @@ def _run(label: str, command: Sequence[str]) -> tuple[int, str]:
 
 
 def _manifest_checks() -> tuple[bool, str]:
+    from src.corpus_validator import validate_manifest_contract
     from src.fetch_corpus import load_manifest
 
-    path = ROOT / "tests" / "fixtures" / "corpus_smoke.yaml"
+    path = ROOT / "corpus_manifest.yaml"
     manifest = load_manifest(path)
-    bases = {str(base["base_id"]): base for base in manifest["bases"]}
-    expected = {
-        "contratos_estruturado",
-        "editais_normativo",
-        "atas_conversacional",
-        "pca_agregado",
+    bases = {
+        str(base["base_id"]): base
+        for base in manifest["bases"]
+        if base.get("escopo") == "oficial"
     }
+    validation = validate_manifest_contract(manifest, official=True)
     actual = set(bases)
-    scopes_ok = all(base.get("escopo") == "oficial" for base in bases.values())
     access_types = {base_id: (base.get("acesso") or {}).get("tipo") for base_id, base in bases.items()}
-    ok = actual == expected and scopes_ok
+    ok = validation.ok
     details = (
         f"- arquivo: `{path.relative_to(ROOT)}`\n"
         f"- bases: `{', '.join(sorted(actual))}`\n"
-        f"- escopo oficial: `{scopes_ok}`\n"
-        f"- tipos de acesso: `{access_types}`"
+        f"- tipos de acesso: `{access_types}`\n"
+        f"- erros: `{list(validation.errors)}`"
     )
     return ok, details
 
@@ -74,7 +73,7 @@ def _architecture_checks() -> tuple[bool, list[str]]:
             for flag in ("--atualizar-md", "--salvar-json", "--baixar-arquivos")
         ),
         "source_lookup usa SourceRef/provider": "PNCPProvider" in source_lookup and "source_ref" in source_lookup,
-        "PNCPProvider.search ainda pendente": "NotImplementedError" in provider,
+        "PNCPProvider.search implementado": "NotImplementedError" not in provider,
         "fetch possui caminho genérico REST": "def _collect_rest_endpoint" in fetch,
         "fetch possui caminho provider": "def _collect_provider_base" in fetch,
         "prepare ainda importa compatibilidade ingest": "from src.ingest import" in prepare,
@@ -115,7 +114,7 @@ def main() -> int:
         f"- finalizado em (UTC): `{finished.isoformat(timespec='seconds')}`",
         f"- duração: `{(finished - started).total_seconds():.2f}s`",
         "",
-        "## Manifesto smoke",
+        "## Manifesto oficial v2",
         "",
         f"- resultado: **{'PASS' if manifest_ok else 'FAIL'}**",
         manifest_details,
@@ -131,9 +130,8 @@ def main() -> int:
         "## Interpretação",
         "",
         "A validação é offline e não baixa o corpus real. Ela confirma a suíte, o "
-        "manifesto smoke e os caminhos de execução presentes no código. "
-        "`PNCPProvider.search` e a dependência de `prepare_documents` em `ingest` "
-        "continuam registrados como pontos de migração arquitetural.",
+        "contrato do manifesto oficial v2 e os caminhos de execução presentes no código. "
+        "A coleta real é executada separadamente pelo pipeline.",
         "",
     ]
     report_path.write_text("\n".join(report), encoding="utf-8")

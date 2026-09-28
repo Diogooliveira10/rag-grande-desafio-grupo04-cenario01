@@ -1,5 +1,5 @@
 scenario_id: contratacoes-rj
-version: "2026-09-18"              # data da declaração desta versão do manifesto
+version: "2026-09-25"
 description: "Contratações públicas do Estado do RJ, ano-base 2025"
 
 coleta:
@@ -14,24 +14,33 @@ diretorios_locais:
   relatorios: "data/runs"
 bases:
   # ---------------------------------------------------------------------
+  # BASES CANÔNICAS — entram na execução oficial.
+  # ---------------------------------------------------------------------
   # NATUREZA: estruturada
   # ---------------------------------------------------------------------
   - base_id: contratos_estruturado
     escopo: oficial
     natureza: estruturada
-    fonte: "PNCP - API de consulta v1/v3 (/v1/contratos)"
+    fonte: "PNCP - API de consulta de contratações/publicação"
     acesso:
-      tipo: rest_api
-      endpoint: "https://pncp.gov.br/api/consulta/v1/contratos"
+      tipo: provider
+      provider: pncp
+      resource_type: contratacao
+      transporte: http_json
+      estrategia: paginated_collection
       params:
         dataInicial: "2025-01-01"
-        dataFinal: "2025-01-31"
-      paginacao:
-        campo: "pagina"
-        tamanho: 50
+        dataFinal: "2025-12-31"
+        modalidades: [1, 3, 4, 5, 6, 7, 8, 9, 11]
+        uf: "RJ"
       rate_limit_seg: 1.0
     selecao_deterministica: true
-    volume_alvo: 1200
+    selecao:
+      deterministica: true
+      limite: 160
+      chave: "numeroControlePNCP"
+      max_paginas: 2
+    volume_alvo: 160
     formato: json
     licenca: "Dados abertos gov.br - atribuição"
     sensitivity_default: publico
@@ -45,12 +54,14 @@ bases:
     fonte: "Planalto, REDELOG RJ, CGE-RJ e MPPI"
     acesso:
       tipo: http_misto
+      transporte: http_misto
+      estrategia: fixed_sources
       urls:
-        - "https://www.planalto.gov.br/ccivil_03/_ato2019-2022/2021/lei/l14133.htm"
+        - "https://legis.senado.gov.br/norma/33382036/publicacao/33383820"
         - "https://redelog.rj.gov.br/redelog/legislacao-licitacoes/"
         - "https://cge.rj.gov.br/legislacao/decretos/"
         - "https://www.mppi.mp.br/internet/wp-content/uploads/2021/04/L14133.pdf"
-      rate_limit_seg: 0.5
+      rate_limit_seg: 2.0
     selecao_deterministica: true
     volume_alvo: 4
     formatos: [html, htm, pdf]
@@ -60,6 +71,71 @@ bases:
     chunking_sugerido: "Split por cláusula, com overlap"
     metadados_extras: [numero_edital, orgao, data_publicacao, objeto]
 
+  - base_id: atas_conversacional
+    escopo: oficial
+    natureza: conversacional
+    fonte: "PNCP - atas de registro de preço"
+    acesso:
+      tipo: provider
+      provider: pncp
+      resource_type: ata
+      transporte: http_json
+      estrategia: paginated_collection
+      params:
+        dataInicial: "2025-01-01"
+        dataFinal: "2025-12-31"
+        # /v1/atas não filtra por UF; o recorte RJ vem do CNPJ do órgão
+        # (Estado do Rio de Janeiro, o mesmo de pca_agregado).
+        cnpjs: ["42498600000171"]
+        tamanhoPagina: 50
+        maxPaginas: 10
+      rate_limit_seg: 1.0
+    selecao_deterministica: true
+    selecao:
+      deterministica: true
+      limite: 20
+      chave: "numeroControlePNCPAta"
+    volume_alvo: 20
+    # O provider PNCP coleta, por ata, o JSON de metadados, a listagem
+    # /arquivos (JSON) e cada PDF anunciado nela.
+    formatos: [json, pdf]
+    licenca: "Dados abertos gov.br - atribuição"
+    sensitivity_default: publico
+    campo_vigencia: "dataVigenciaFim"
+    chunking_sugerido: "Texto por seção, com overlap"
+    metadados_extras: [numero_controle_pncp, orgao, objeto, data_vigencia]
+
+  - base_id: pca_agregado
+    escopo: oficial
+    natureza: agregada
+    fonte: "PNCP - Plano de Contratações Anual consolidado"
+    orgao: "Estado do Rio de Janeiro"
+    acesso:
+      tipo: provider
+      provider: pncp
+      resource_type: pca
+      transporte: http_misto
+      estrategia: units_by_organization_and_year
+      params:
+        cnpjs: ["42498600000171"]
+        anos: [2024, 2025]
+      rate_limit_seg: 1.0
+    selecao_deterministica: true
+    selecao:
+      deterministica: true
+      limite: 16
+      chave: "numeroControlePNCP"
+    volume_alvo: 16
+    formatos: [json, csv]
+    licenca: "Dados abertos gov.br - atribuição"
+    sensitivity_default: publico
+    campo_vigencia: "anoPca"
+    chunking_sugerido: "1 indicador agregado = 1 chunk"
+    metadados_extras: [orgao, ano, valor]
+
+  # ---------------------------------------------------------------------
+  # BASES AUXILIARES — somente por seleção experimental explícita.
+  # ---------------------------------------------------------------------
   - base_id: contratacoes_publicacao_rj
     escopo: experimental
     natureza: estruturada
@@ -83,6 +159,9 @@ bases:
     formato: json
     licenca: "Dados abertos gov.br - atribuição"
     sensitivity_default: publico
+    campo_vigencia: "dataPublicacao"
+    chunking_sugerido: "1 contratação = 1 chunk, serializado em linguagem natural"
+    metadados_extras: [orgao, modalidade, valor, municipio, ano]
 
   - base_id: documentos_pncp
     escopo: experimental
@@ -106,6 +185,9 @@ bases:
     formato: pdf
     licenca: "Dados abertos gov.br - atribuição"
     sensitivity_default: publico
+    campo_vigencia: "dataPublicacao"
+    chunking_sugerido: "Texto por seção, com overlap"
+    metadados_extras: [numero_controle_pncp, orgao, objeto, data_publicacao]
     local: "data/raw/vN/documentos_pncp"
     deduplicacao: "SHA-256"
 
@@ -123,65 +205,8 @@ bases:
     sensitivity_default: publico
     local: "data/raw/vN/respostas_api_jsonl"
     deduplicacao: "SHA-256"
-
-  # ---------------------------------------------------------------------
-  # NATUREZA: conversacional
-  # ---------------------------------------------------------------------
-  # Ata de Registro de Preços 00250/2025, com metadados, lista de arquivos e o
-  # PDF da ata. Recursos fixos (seleção determinística), validados pelo João
-  # (tests/fixtures/corpus_smoke.yaml) e respondendo HTTP 200 em 2026-09-23.
-  # O serviço /api/pncp/v1 estava no ar enquanto /api/consulta/v1/atas dava 504.
-  # PENDENTE: base sintética de e-mails de compras, a ser fornecida pelo desafio.
-  - base_id: atas_conversacional
-    escopo: oficial
-    natureza: conversacional
-    fonte: "PNCP - Ata de Registro de Preços 00250/2025"
-    acesso:
-      tipo: http_misto
-      urls:
-        - "https://pncp.gov.br/api/pncp/v1/orgaos/42498733000148/compras/2024/2138/atas/2"
-        - "https://pncp.gov.br/api/pncp/v1/orgaos/42498733000148/compras/2024/2138/atas/2/arquivos"
-        - "https://pncp.gov.br/pncp-api/v1/orgaos/42498733000148/compras/2024/2138/atas/2/arquivos/1"
-      rate_limit_seg: 1.0
-    selecao_deterministica: true
-    volume_alvo: 3
-    formato: pdf
-    formatos: [json, pdf]
-    licenca: "Dados abertos gov.br - atribuição"
-    sensitivity_default: publico
-    campo_vigencia: "dataVigenciaFim"
-    chunking_sugerido: "Texto por seção, com overlap"
-    metadados_extras: [numero_controle_pncp, orgao, objeto, data_vigencia]
-
-  # ---------------------------------------------------------------------
-  # NATUREZA: agregada
-  # ---------------------------------------------------------------------
-  # PCA 2025 do Estado do Rio de Janeiro (CNPJ 42498600000171): totais
-  # consolidados (JSON) e itens do plano (CSV, ~15 MB). Fixar o órgão resolve a
-  # restrição ao RJ sem depender de data/config/cnpjs_rj.json, já que a API de
-  # PCA não filtra por UF. Na preparação, o CSV vira ~1.000 indicadores
-  # agregados (src/pca_indicators.py), não um chunk por item.
-  - base_id: pca_agregado
-    escopo: oficial
-    natureza: agregada
-    fonte: "PNCP - PCA 2025 do Estado do Rio de Janeiro"
-    orgao: "Estado do Rio de Janeiro"
-    ano: 2025
-    acesso:
-      tipo: http_misto
-      urls:
-        - "https://pncp.gov.br/api/pncp/v1/orgaos/42498600000171/pca/2025/41/consolidado"
-        - "https://pncp.gov.br/api/pncp/v1/orgaos/42498600000171/pca/2025/csv"
-      rate_limit_seg: 1.0
-    selecao_deterministica: true
-    volume_alvo: 2
-    formato: csv
-    formatos: [json, csv]
-    licenca: "Dados abertos gov.br - atribuição"
-    sensitivity_default: publico
-    campo_vigencia: "anoPca"
-    chunking_sugerido: "1 indicador agregado = 1 chunk"
-    metadados_extras: [orgao, ano, valor, categoria]
+    chunking_sugerido: "1 resposta JSON = 1 chunk"
+    metadados_extras: [endpoint, status_http, pagina]
 
   # Base local opcional para testes rápidos, sem requisições externas.
   - base_id: exemplos_teste
@@ -198,6 +223,25 @@ bases:
     licenca: "Fixture de teste do repositorio"
     sensitivity_default: publico
     deduplicacao: "SHA-256"
+    chunking_sugerido: "Texto por seção, com overlap"
+    metadados_extras: [nome_arquivo, fixture]
+
+  # Exemplo sintético local para validar emails em Markdown sem dados pessoais reais.
+  - base_id: emails_sinteticos
+    escopo: experimental
+    natureza: conversacional
+    fonte: "Email sintético de fixture para testes locais"
+    acesso:
+      tipo: arquivo_local
+      origem: "docs/email_sintetico_exemplo.md"
+      rate_limit_seg: 0
+    selecao_deterministica: true
+    volume_alvo: 1
+    formato: md
+    licenca: "Conteúdo sintético criado para testes"
+    sensitivity_default: publico
+    deduplicacao: "SHA-256"
+    chunking_sugerido: "Preservar cabeçalhos e blocos da conversa"
 
   # Amostra real opcional em CSV, publicada pelo Portal de Dados Abertos do RJ.
   - base_id: licitacoes_siga_csv

@@ -139,25 +139,47 @@ def _write_json(payload: dict[str, Any], path: Path) -> Path:
 
 
 def _proposal_entry(source: dict[str, Any]) -> dict[str, Any]:
-    file_type = source.get("file_type", "json").lower()
-    base_id = _safe_base_id(str(source.get("source_id", "fonte_nova")), str(source["url"]))
-    return {
+    file_type = str(source.get("file_type", "json")).lower()
+    source_ref = source.get("source_ref")
+    if source_ref:
+        source_ref = dict(source_ref)
+        provider = str(source_ref.get("provider") or source.get("provider") or "").strip()
+        resource_type = str(source_ref.get("resource_type") or "resource").strip()
+        access = {
+            "tipo": "provider",
+            "provider": provider,
+            "resource_type": resource_type,
+            "sources": [source_ref],
+        }
+    else:
+        access = _infer_access(file_type, str(source["url"]))
+    base_id = _safe_base_id(
+        str(source.get("source_id", "fonte_nova")),
+        str(source.get("url") or source_ref or "fonte_nova"),
+    )
+    entry = {
+        "base_id": base_id,
+        "escopo": "experimental",
+        "natureza": _infer_natureza(file_type),
+        "fonte": source.get("nome", source.get("url")),
+        "acesso": access,
+        "selecao_deterministica": True,
+        "volume_alvo": 1,
+        "formato": file_type,
+        "licenca": "A confirmar pela equipe",
+        "sensitivity_default": "publico",
+    }
+    proposal = {
         "proposal_id": str(source.get("source_id") or base_id),
         "action": "add_base",
         "base_id": base_id,
         "reason": "Fonte descoberta pelo source_catalog e ausente do manifesto.",
-        "suggested_manifest_entry": {
-            "base_id": base_id,
-            "natureza": _infer_natureza(file_type),
-            "fonte": source.get("nome", source.get("url")),
-            "acesso": _infer_access(file_type, str(source["url"])),
-            "selecao_deterministica": True,
-            "volume_alvo": 1,
-            "formato": file_type,
-            "licenca": "A confirmar pela equipe",
-            "sensitivity_default": "publico",
-        },
+        "suggested_manifest_entry": entry,
     }
+    if source_ref:
+        proposal["source_ref"] = source_ref
+        proposal["artifacts"] = source.get("documents") or []
+    return proposal
 
 
 def build_proposal(manifest_path: Path, discovery_payload: dict[str, Any]) -> dict[str, Any]:
@@ -166,11 +188,16 @@ def build_proposal(manifest_path: Path, discovery_payload: dict[str, Any]) -> di
     declared = _declared_urls(manifest)
     proposals: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for source in discovery_payload.get("sources", []):
+    sources = discovery_payload.get("sources") or discovery_payload.get("results") or []
+    for source in sources:
         url = source.get("url")
-        if not _http_url(url) or url in declared or url in seen:
+        source_ref = source.get("source_ref")
+        if not _http_url(url) and not source_ref:
             continue
-        seen.add(url)
+        identity = str(url) if url else json.dumps(source_ref, sort_keys=True, ensure_ascii=False)
+        if url in declared or identity in seen:
+            continue
+        seen.add(identity)
         proposals.append(_proposal_entry(source))
     return {
         "proposal_type": "manifest_curation",

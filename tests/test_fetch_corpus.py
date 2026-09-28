@@ -5,15 +5,12 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
 import src.fetch_corpus as fetch_corpus
 from src import fetch_corpus as fc
 
 # Merge da branch joao-reis (2026-09-23): remover os skips quando o código entrar no main.
-AGUARDA_FETCH_CORPUS_NOVO = (
-    "depende da versão do fetch_corpus/manifesto da branch joao-reis (escopo oficial/experimental, status por base, promoção do staging), ainda não publicada em src/"
-)
-
-
 def _item(logical_id: str, base_id: str, sha256: str, tipo: str = "pdf", **extra) -> dict:
     return {
         "logical_id": logical_id,
@@ -37,7 +34,6 @@ def _fixture_documents() -> list[dict]:
     ]
 
 
-@pytest.mark.skip(reason=AGUARDA_FETCH_CORPUS_NOVO)
 def test_manifest_declares_real_bases_and_official_pdf_target():
     manifest = fetch_corpus.load_manifest(Path("corpus_manifest.yaml"))
     bases = {base["base_id"]: base for base in manifest["bases"]}
@@ -46,19 +42,27 @@ def test_manifest_declares_real_bases_and_official_pdf_target():
     assert len(bases) >= 4
     assert bases["documentos_pncp"]["volume_alvo"] >= 100
     assert bases["documentos_pncp"]["formato"] == "pdf"
-    assert bases["contratos_estruturado"]["acesso"]["endpoint"].endswith(
-        "/contratacoes/publicacao"
-    )
+    assert bases["contratos_estruturado"]["acesso"]["tipo"] == "provider"
+    assert bases["contratos_estruturado"]["acesso"]["resource_type"] == "contratacao"
+    assert bases["contratos_estruturado"]["volume_alvo"] == 160
+    assert bases["contratos_estruturado"]["selecao"]["limite"] == 160
     assert bases["pca_agregado"]["acesso"]["tipo"] == "provider"
     assert bases["pca_agregado"]["acesso"]["provider"] == "pncp"
-    assert bases["pca_agregado"]["acesso"]["sources"][0]["key"]["sequencial"] == 41
+    assert bases["pca_agregado"]["volume_alvo"] == 16
+    assert bases["pca_agregado"]["acesso"]["params"]["anos"] == [2024, 2025]
+    assert bases["atas_conversacional"]["acesso"]["tipo"] == "provider"
+    assert bases["atas_conversacional"]["volume_alvo"] == 20
     assert bases["editais_normativo"]["acesso"]["urls"]
     assert all("exemplo.gov.br" not in url for url in bases["editais_normativo"]["acesso"]["urls"])
 
 
-def test_smoke_manifest_covers_four_real_base_types():
-    manifest = fetch_corpus.load_manifest(Path("tests/fixtures/corpus_smoke.yaml"))
-    bases = {base["base_id"]: base for base in manifest["bases"]}
+def test_manifest_covers_four_official_base_types():
+    manifest = fetch_corpus.load_manifest(Path("corpus_manifest.yaml"))
+    bases = {
+        base["base_id"]: base
+        for base in manifest["bases"]
+        if base.get("escopo") == "oficial"
+    }
 
     assert set(bases) == {
         "contratos_estruturado",
@@ -66,12 +70,10 @@ def test_smoke_manifest_covers_four_real_base_types():
         "atas_conversacional",
         "pca_agregado",
     }
-    assert all(base["acesso"]["tipo"] == "resource_set" for base in bases.values())
-    assert {resource["tipo"] for base in bases.values() for resource in base["acesso"]["recursos"]} >= {
-        "json",
-        "pdf",
-        "csv",
-    }
+    assert bases["contratos_estruturado"]["acesso"]["tipo"] == "provider"
+    assert bases["editais_normativo"]["acesso"]["tipo"] == "http_misto"
+    assert bases["atas_conversacional"]["acesso"]["tipo"] == "provider"
+    assert bases["pca_agregado"]["acesso"]["tipo"] == "provider"
 
 
 def test_fixture_contract_has_at_least_twenty_offline_documents():
@@ -106,7 +108,6 @@ def test_inventory_aggregates_by_semantic_base_and_format():
     assert all(record["base_id"] != "pdf" for record in inventory["arquivos"])
 
 
-@pytest.mark.skip(reason=AGUARDA_FETCH_CORPUS_NOVO)
 def test_resource_set_collects_declared_json_and_binary_resources(monkeypatch):
     calls = []
 
@@ -121,7 +122,7 @@ def test_resource_set_collects_declared_json_and_binary_resources(monkeypatch):
     monkeypatch.setattr(fetch_corpus, "_collect_rest_endpoint", fake_json)
     monkeypatch.setattr(fetch_corpus, "_collect_http_item", fake_binary)
     base = {
-        "base_id": "ata_smoke",
+        "base_id": "ata_exemplo",
         "natureza": "conversacional",
         "acesso": {
             "tipo": "resource_set",
@@ -262,6 +263,78 @@ def test_fetch_resumes_matching_staging_checkpoint(monkeypatch, tmp_path):
     assert fetch_corpus._find_resumable_version("sha256:target") is None
 
 
+def test_version_lock_allows_only_one_writer(monkeypatch, tmp_path):
+    monkeypatch.setattr(fetch_corpus, "RAW_ROOT", tmp_path / "raw")
+
+    first = fetch_corpus._VersionLock(4)
+    second = fetch_corpus._VersionLock(4)
+    first.acquire()
+    try:
+        with pytest.raises(RuntimeError, match="já está sendo coletada"):
+            second.acquire()
+    finally:
+        first.release()
+
+    second.acquire()
+    second.release()
+
+
+def test_checkpoint_persists_and_validates_frozen_selection(monkeypatch, tmp_path):
+    project_root = tmp_path / "project"
+    staging = project_root / "data" / "raw" / ".staging" / "v1"
+    source = staging / "base" / "item.json"
+    source.parent.mkdir(parents=True)
+    body = b'{"id": 1}'
+    source.write_bytes(body)
+    digest = hashlib.sha256(body).hexdigest()
+    source_ref = {
+        "provider": "pncp",
+        "resource_type": "contratacao",
+        "key": {"id": "1"},
+    }
+    manifest = {
+        "scenario_id": "fixture",
+        "bases": [{"base_id": "base", "volume_alvo": 1, "natureza": "estruturada"}],
+    }
+    context = fetch_corpus._VersionContext(
+        manifest=manifest,
+        version=1,
+        manifest_hash="sha256:manifest",
+        staging_path=staging,
+        checkpoint_path=project_root / "data" / "inventory" / "checkpoints" / "v1.json",
+        collected_at="now",
+        items={
+            "base:item": {
+                "logical_id": "base:item",
+                "base_id": "base",
+                "status": "ok",
+                "path": "data/raw/.staging/v1/base/item.json",
+                "sha256": digest,
+                "unidades_logicas": 1,
+                "source_ref": source_ref,
+            }
+        },
+        hash_index={},
+        last_request_at={},
+    )
+    monkeypatch.setattr(fetch_corpus, "PROJECT_ROOT", project_root)
+
+    fetch_corpus._checkpoint_write(context)
+    payload = json.loads(context.checkpoint_path.read_text(encoding="utf-8"))
+
+    assert payload["selection"]["base"][0]["stable_id"] == "pncp:contratacao:id=1"
+    assert fetch_corpus._validate_checkpoint(
+        payload, manifest, "sha256:manifest", 1, staging
+    ).ok
+
+    payload["selection"]["base"].append(payload["selection"]["base"][0])
+    validation = fetch_corpus._validate_checkpoint(
+        payload, manifest, "sha256:manifest", 1, staging
+    )
+    assert not validation.ok
+    assert any("duplicada" in error for error in validation.errors)
+
+
 def test_data_root_isolates_raw_inventory_logs_and_report(monkeypatch, tmp_path):
     original = {
         name: getattr(fetch_corpus, name)
@@ -387,7 +460,6 @@ def test_failed_http_item_is_recorded_without_raising(monkeypatch, tmp_path):
     assert checkpoint["items"]["base_teste:url:1"]["status"] == "falhou"
 
 
-@pytest.mark.skip(reason=AGUARDA_FETCH_CORPUS_NOVO)
 def test_manifest_separates_official_bases_from_experimental_ones():
     manifest = fetch_corpus.load_manifest(Path("corpus_manifest.yaml"))
     bases = {base["base_id"]: base for base in manifest["bases"]}
@@ -408,7 +480,6 @@ def test_manifest_separates_official_bases_from_experimental_ones():
     )
 
 
-@pytest.mark.skip(reason=AGUARDA_FETCH_CORPUS_NOVO)
 def test_inventory_marks_not_configured_and_partial_bases_as_incomplete():
     manifest = {
         "scenario_id": "fixture",
@@ -459,7 +530,6 @@ def test_inventory_marks_not_configured_and_partial_bases_as_incomplete():
     assert inventory["completo"] is False
 
 
-@pytest.mark.skip(reason=AGUARDA_FETCH_CORPUS_NOVO)
 def test_promotion_moves_staging_paths_to_immutable_version(monkeypatch, tmp_path):
     project_root = tmp_path / "project"
     staging = project_root / "data" / "raw" / ".staging" / "v7"
@@ -507,7 +577,6 @@ def test_promotion_moves_staging_paths_to_immutable_version(monkeypatch, tmp_pat
     assert checkpoint_payload["state"] == "promoted"
 
 
-@pytest.mark.skip(reason=AGUARDA_FETCH_CORPUS_NOVO)
 def test_official_run_excludes_experimental_bases(monkeypatch, tmp_path):
     manifest = tmp_path / "manifest.yaml"
     manifest.write_text(
@@ -738,7 +807,7 @@ def test_load_version_context_rejeita_manifest_diferente_no_mesmo_checkpoint(pro
     manifest = {"scenario_id": "c", "version": 1, "bases": []}
     fc._load_version_context(manifest, "sha256:abc", 1)
 
-    with pytest.raises(RuntimeError, match="outro manifesto"):
+    with pytest.raises(RuntimeError, match="manifest_hash incompatível"):
         fc._load_version_context(manifest, "sha256:DIFERENTE", 1)
 
 
@@ -772,6 +841,27 @@ def test_collect_base_arquivo_local_e_idempotente(project):
     # segunda chamada: item já completo, não deve reprocessar (mesmo objeto de registro)
     segunda = fc._collect_base(context, base)
     assert segunda[0] is primeira[0]
+
+
+def test_collect_base_arquivo_local_conta_um_item_por_arquivo(project):
+    (project / "emails").mkdir()
+    (project / "emails" / "email_1.md").write_text("# E-mail 1", encoding="utf-8")
+    (project / "emails" / "email_2.md").write_text("# E-mail 2", encoding="utf-8")
+    base = {
+        "base_id": "emails",
+        "natureza": "conversacional",
+        "formato": "md",
+        "volume_alvo": 2,
+        "acesso": {"tipo": "arquivo_local", "origem": "emails"},
+    }
+    manifest = {"scenario_id": "c", "version": 1, "bases": [base]}
+    context = _novo_contexto(project, manifest)
+
+    items = {record["logical_id"]: record for record in fc._collect_base(context, base)}
+    [by_base] = fc._build_inventory(manifest, 1, "sha256:manifest", "now", items)["por_base"]
+
+    assert by_base["itens"] == 2
+    assert by_base["status"] == "complete"
 
 
 def test_collect_base_arquivo_local_ausente_gera_falha_sem_lancar(project):

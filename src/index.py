@@ -128,6 +128,35 @@ def _default_embed_fn(model: str) -> EmbedFn:
     return embed
 
 
+def stored_embed_fn(embeddings_file: Path) -> tuple[EmbedFn, str]:
+    """Reaproveita vetores já publicados (ex.: ``data/embeddings/embeddings.jsonl``).
+
+    Cada texto é localizado pelo SHA-256 do conteúdo (``content_sha256``), então
+    só é aceito um chunk cujo texto seja idêntico ao que gerou o vetor. Devolve
+    a função e o modelo registrado nos vetores.
+    """
+    vectors: dict[str, list[float]] = {}
+    models: set[str] = set()
+    with embeddings_file.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            vectors[record["content_sha256"]] = record["embedding"]
+            models.add(str(record.get("embedding_model", "")))
+    if len(models) != 1:
+        raise ValueError(f"{embeddings_file} mistura modelos de embedding: {sorted(models)}")
+
+    def embed(texts: list[str]) -> list[list[float]]:
+        digests = [hashlib.sha256(text.encode("utf-8")).hexdigest() for text in texts]
+        missing = [digest for digest in digests if digest not in vectors]
+        if missing:
+            raise KeyError(f"{len(missing)} chunk(s) sem vetor em {embeddings_file}: {missing[:3]}")
+        return [vectors[digest] for digest in digests]
+
+    return embed, models.pop()
+
+
 def build_index(
     input_file: Path,
     output_dir: Path,
@@ -230,6 +259,11 @@ def main() -> int:
         action="store_true",
         help="conta chunks por base sem chamar o modelo de embeddings",
     )
+    parser.add_argument(
+        "--embeddings",
+        type=Path,
+        help="reaproveita os vetores deste JSONL (ex.: data/embeddings/embeddings.jsonl) em vez de chamar o modelo",
+    )
     args = parser.parse_args()
 
     if not args.input.exists():
@@ -252,8 +286,13 @@ def main() -> int:
         print(json.dumps(summary, ensure_ascii=False))
         return 0
 
-    embed_fn = _default_embed_fn(args.model)
-    manifest = build_index(args.input, args.output, embed_fn, model=args.model, batch_size=args.batch_size)
+    if args.embeddings:
+        if not args.embeddings.exists():
+            parser.error(f"arquivo de embeddings não encontrado: {args.embeddings}")
+        embed_fn, model = stored_embed_fn(args.embeddings)
+    else:
+        embed_fn, model = _default_embed_fn(args.model), args.model
+    manifest = build_index(args.input, args.output, embed_fn, model=model, batch_size=args.batch_size)
     summary = {
         "bases": [
             {"base_id": base["base_id"], "total_chunks": base["total_chunks"], "dimension": base["dimension"]}

@@ -1,10 +1,3 @@
-"""Recuperação híbrida sobre os índices persistidos por :mod:`src.index`.
-
-O índice atual persiste vetores e metadados, mas não uma implementação BM25.
-Por isso, a busca lexical lê o JSONL normalizado e calcula BM25 em memória,
-sem reindexar nem gerar embeddings durante a busca.
-"""
-
 from __future__ import annotations
 
 import json
@@ -20,12 +13,13 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import config
-from src.obs import Stage, default_logger
+from src.obs import Stage, default_logger, registrar
 from src.schema import Natureza
 
 
 DEFAULT_RRF_K = 60
 DEFAULT_TOP_K = 10
+DEFAULT_FETCH_K = 50
 _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 MANIFEST_PATH = config.ROOT_DIR / "corpus_manifest.yaml"
 _NATUREZAS = frozenset(item.value for item in Natureza)
@@ -169,7 +163,22 @@ def _parse_number(value: Any) -> Decimal | None:
     if not candidate:
         return None
     if "," in candidate:
-        candidate = candidate.replace(".", "").replace(",", ".")
+        if candidate.count(",") != 1:
+            return None
+        integer, fraction = candidate.split(",")
+        if "." in integer:
+            if not re.fullmatch(r"[+-]?[1-9]\d{0,2}(?:\.\d{3})+", integer):
+                return None
+            integer = integer.replace(".", "")
+        candidate = f"{integer}.{fraction}"
+    elif candidate.count(".") > 1:
+        if not re.fullmatch(r"[+-]?[1-9]\d{0,2}(?:\.\d{3})+", candidate):
+            return None
+        candidate = candidate.replace(".", "")
+    elif candidate.count(".") == 1:
+        integer, fraction = candidate.split(".")
+        if len(fraction) == 3 and re.fullmatch(r"[+-]?[1-9]\d{0,2}", integer):
+            candidate = f"{integer}{fraction}"
     try:
         return Decimal(candidate)
     except InvalidOperation:
@@ -186,53 +195,81 @@ def _comparable_values(left: Any, right: Any) -> tuple[Any, Any]:
     return left, right
 
 
+def _condicoes(expected: Any) -> list[tuple[str, Any]]:
+    """Normaliza o valor de um filtro numa lista de condições (operator, value).
+
+    Mantém os formatos já suportados (valor direto = igualdade; dict com
+    "operator"/"op" e "value"; tupla/lista de 2 elementos (operator, value))
+    e acrescenta um formato novo: lista de dicts, para expressar várias
+    condições sobre a MESMA chave com semântica E — ex. uma faixa de valor
+    (>= mínimo e <= máximo) ou um intervalo de datas (>= início do ano e <
+    início do ano seguinte), usado por ``src/query_analysis.py``.
+    """
+    if isinstance(expected, Mapping):
+        operator = str(expected.get("operator", expected.get("op", "==")))
+        return [(operator, expected.get("value"))]
+    if isinstance(expected, (tuple, list)):
+        if expected and all(isinstance(item, Mapping) for item in expected):
+            return [
+                (str(item.get("operator", item.get("op", "=="))), item.get("value"))
+                for item in expected
+            ]
+        if len(expected) == 2:
+            return [(str(expected[0]), expected[1])]
+    return [("==", expected)]
+
+
+def _condicao_satisfeita(actual: Any, operator: str, value: Any) -> bool:
+    try:
+        if operator in {"==", "="}:
+            return _values_equal(actual, value)
+        if operator == "!=":
+            return not _values_equal(actual, value)
+        if operator in {">", ">=", "<", "<="}:
+            left_date, right_date = _parse_date(actual), _parse_date(value)
+            if left_date is not None or right_date is not None:
+                if left_date is None or right_date is None:
+                    return False
+                left, right = left_date, right_date
+            else:
+                left_number, right_number = _parse_number(actual), _parse_number(value)
+                if left_number is not None or right_number is not None:
+                    if left_number is None or right_number is None:
+                        return False
+                    left, right = left_number, right_number
+                else:
+                    left, right = actual, value
+            if type(left) is not type(right):
+                return False
+            comparisons = {
+                ">": left > right,
+                ">=": left >= right,
+                "<": left < right,
+                "<=": left <= right,
+            }
+            return comparisons[operator]
+        if operator == "in":
+            candidates = value if isinstance(value, (list, tuple, set)) else [value]
+            return any(_values_equal(actual, candidate) for candidate in candidates)
+        if operator == "contains":
+            if isinstance(actual, str):
+                return str(value) in actual
+            return value in actual
+        return False
+    except (TypeError, ValueError, KeyError):
+        return False
+
+
 def _matches_filters(metadata: Mapping[str, Any], filters: Mapping[str, Any] | None) -> bool:
     if not filters:
         return True
     for key, expected in filters.items():
-        operator = "=="
-        value = expected
-        if isinstance(expected, Mapping):
-            operator = str(expected.get("operator", expected.get("op", "==")))
-            value = expected.get("value")
-        elif isinstance(expected, (tuple, list)) and len(expected) == 2:
-            operator, value = str(expected[0]), expected[1]
         actual = _metadata_value(metadata, key)
         if actual is None:
             return False
-        try:
-            if operator in {"==", "="}:
-                if not _values_equal(actual, value):
-                    return False
-            elif operator == "!=":
-                if _values_equal(actual, value):
-                    return False
-            elif operator in {">", ">=", "<", "<="}:
-                left, right = _comparable_values(actual, value)
-                if type(left) is not type(right):
-                    return False
-                comparisons = {
-                    ">": left > right,
-                    ">=": left >= right,
-                    "<": left < right,
-                    "<=": left <= right,
-                }
-                if not comparisons[operator]:
-                    return False
-            elif operator == "in":
-                candidates = value if isinstance(value, (list, tuple, set)) else [value]
-                if not any(_values_equal(actual, candidate) for candidate in candidates):
-                    return False
-            elif operator == "contains":
-                if isinstance(actual, str):
-                    if str(value) not in actual:
-                        return False
-                elif value not in actual:
-                    return False
-            else:
+        for operator, value in _condicoes(expected):
+            if not _condicao_satisfeita(actual, operator, value):
                 return False
-        except (TypeError, ValueError, KeyError):
-            return False
     return True
 
 
@@ -313,6 +350,8 @@ def dense_retrieve(
     embed_fn: EmbedFn | None = None,
     records: Iterable[Mapping[str, Any]] | None = None,
     escopos: Iterable[str] | None = None,
+    run_id: str = "sem-run-id",
+    query_id: str = "sem-query-id",
 ) -> list[RetrievalResult]:
     """Recupera os vetores mais próximos usando o índice persistido."""
     if top_k <= 0 or not query.strip():
@@ -325,14 +364,56 @@ def dense_retrieve(
         str(item.get("chunk_id")): str(item.get("text", ""))
         for item in _read_jsonl(documents_file)
     }
-    scored = [
-        _result(
-            record,
-            _cosine(query_vector, record.get("embedding", [])),
-            str(record.get("text", "")) or normalized_text.get(str(record.get("chunk_id")), ""),
+    scored: list[RetrievalResult] = []
+    incompatible_embeddings: list[dict[str, Any]] = []
+    missing_embeddings: list[dict[str, str]] = []
+    for record in candidates:
+        embedding = record.get("embedding", [])
+        metadata = record.get("metadata")
+        chunk_id = str(record.get("chunk_id") or (
+            metadata.get("chunk_id", "") if isinstance(metadata, Mapping) else ""
+        ))
+        if embedding is None:
+            missing_embeddings.append({"chunk_id": chunk_id})
+            continue
+        if len(embedding) != len(query_vector):
+            incompatible_embeddings.append(
+                {
+                    "chunk_id": chunk_id,
+                    "expected_dimension": len(query_vector),
+                    "actual_dimension": len(embedding),
+                }
+            )
+            continue
+        scored.append(
+            _result(
+                record,
+                _cosine(query_vector, embedding),
+                str(record.get("text", "")) or normalized_text.get(str(record.get("chunk_id")), ""),
+            )
         )
-        for record in candidates
-    ]
+    if incompatible_embeddings:
+        registrar(
+            run_id=run_id,
+            query_id=query_id,
+            stage=Stage.RETRIEVAL_DENSO,
+            status="aviso",
+            latencia_ms=0,
+            input=query,
+            output=f"{len(incompatible_embeddings)} embedding(s) incompatível(is) excluído(s)",
+            extra={"embedding_dimension_mismatches": incompatible_embeddings},
+        )
+    if missing_embeddings:
+        registrar(
+            run_id=run_id,
+            query_id=query_id,
+            stage=Stage.RETRIEVAL_DENSO,
+            status="aviso",
+            latencia_ms=0,
+            input=query,
+            output=f"{len(missing_embeddings)} embedding(s) ausente(s)/nulo(s) ignorado(s)",
+            extra={"missing_embeddings": missing_embeddings},
+        )
     return sorted(scored, key=lambda item: (-item.score, item.chunk_id))[:top_k]
 
 
@@ -438,6 +519,7 @@ def retrieve(
     embed_fn: EmbedFn | None = None,
     reranker: RerankFn | None = None,
     escopos: Iterable[str] | None = None,
+    fetch_k: int | None = None,
     run_id: str = "sem-run-id",
     query_id: str = "sem-query-id",
 ) -> list[RetrievalResult]:
@@ -445,6 +527,11 @@ def retrieve(
 
     ``escopos`` restringe a busca às bases com esse ``escopo`` no manifesto
     (ex.: ``("oficial",)``); ``None`` não filtra por escopo.
+
+    ``fetch_k`` é quantos candidatos a busca densa e a BM25 devolvem, cada uma,
+    antes da fusão; o RRF escolhe os ``top_k`` finais entre eles. Com
+    ``fetch_k == top_k``, um chunk que as duas buscas põem logo abaixo do corte
+    nunca chega à fusão. Padrão: ``max(5 * top_k, DEFAULT_FETCH_K)``.
 
     Cada etapa registra seu stage (``retrieval_denso``, ``retrieval_bm25``,
     ``fusao_rrf``, ``rerank``) em ``logs/pipeline-AAAA-MM-DD.jsonl``.
@@ -458,11 +545,13 @@ def retrieve(
         else:
             bases = getattr(route, "bases_selecionadas", getattr(route, "bases", None))
             route_filters = getattr(route, "filters", getattr(route, "filtros", route_filters))
+    fetch_k = fetch_k if fetch_k is not None else max(5 * top_k, DEFAULT_FETCH_K)
     extra = {
         "bases": sorted(str(getattr(b, "value", b)) for b in ([bases] if isinstance(bases, str) else bases or [])),
         "escopos": sorted(escopos) if escopos is not None else None,
         "filtros": dict(route_filters or {}),
         "k": top_k,
+        "fetch_k": fetch_k,
     }
 
     def _span(stage: Stage, **mais: Any):
@@ -475,11 +564,13 @@ def retrieve(
             query,
             index_dir=index_dir,
             documents_file=documents_file,
-            top_k=top_k,
+            top_k=fetch_k,
             bases=bases,
             filters=route_filters,
             embed_fn=embed_fn,
             escopos=escopos,
+            run_id=run_id,
+            query_id=query_id,
         )
         span.set_result(_resumo(dense))
     with _span(Stage.RETRIEVAL_BM25) as span:
@@ -487,7 +578,7 @@ def retrieve(
             query,
             index_dir=index_dir,
             documents_file=documents_file,
-            top_k=top_k,
+            top_k=fetch_k,
             bases=bases,
             filters=route_filters,
             escopos=escopos,
