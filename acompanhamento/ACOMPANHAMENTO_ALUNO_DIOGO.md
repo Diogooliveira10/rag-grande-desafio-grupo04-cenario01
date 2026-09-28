@@ -74,3 +74,29 @@
 - Utilizei assistentes de IA como apoio na revisão técnica das correções, identificação de casos de borda e elaboração e revisão dos testes de regressão.
 - As alterações foram verificadas em conjunto com a implementação existente e validadas por meio da execução dos testes específicos, da suíte completa e do `git diff --check`.
 - As decisões finais sobre as correções, o comportamento esperado e os critérios de validação foram baseadas no comportamento real do código e nos requisitos definidos para o projeto.
+
+### Encontro 7 — 28/09/2026
+
+**Tarefa do dia:**
+Validar as pré-condições para execução do Golden Set completo com o pipeline real, verificando a disponibilidade e integridade do índice/base fornecido pela equipe, o ambiente Python e a execução da suíte de testes.
+
+**O que fiz:**
+
+- Baixei e avaliei o pacote `indice_rag.zip` disponibilizado pela equipe.
+- Validei a estrutura interna do pacote e a consistência entre a base normalizada e os índices vetoriais.
+- Confirmei a presença dos **3.130 chunks**, distribuídos entre:
+  - 40 atas;
+  - 160 contratos;
+  - 843 editais;
+  - 2.087 PCA.
+
+- Verifiquei a consistência dos IDs entre os documentos normalizados e os arquivos de índice.
+- Validei o checksum SHA-256 informado no manifesto da base.
+- Analisei a configuração do projeto para confirmar que o pipeline utiliza `data/normalized/documents.jsonl` e `index/`.
+- Verifiquei o README e confirmei que a orientação para não sobrescrever a base oficial com os arquivos de `exemplos_teste` está documentada.
+- Executei a suíte de testes com `-m "not llm"` e identifiquei erros de dependências durante a coleta, relacionados à ausência de `fastapi` e `certifi` no ambiente virtual.
+- Também identifiquei que o terminal estava utilizando o Python global em vez do interpretador do `.venv`, apesar do ambiente aparecer ativado.
+- Com isso, a execução do Golden Set completo ficou temporariamente bloqueada até a correção do ambiente e a disponibilização dos arquivos nas estruturas esperadas pelo pipeline.
+
+**Resultado:**
+A validação mostrou que o pacote do índice está internamente consistente, mas o ambiente local ainda precisa ser ajustado antes da execução oficial do Golden Set. O próximo passo é instalar as dependências no `.venv`, posicionar corretamente `documents.jsonl` e `index/`, validar o checksum e executar novamente a suíte de testes. Após essas verificações, será possível executar os **19 casos do Golden Set pelo pipeline real**.

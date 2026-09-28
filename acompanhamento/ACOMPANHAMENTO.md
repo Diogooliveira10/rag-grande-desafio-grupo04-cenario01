@@ -237,3 +237,51 @@ O grupo também avançou na compreensão dos entregáveis iniciais, principalmen
 - Foram utilizados assistentes de IA como apoio à revisão técnica do projeto após os merges, análise de problemas encontrados durante as coletas e preparações, desenvolvimento e revisão de testes, investigação de comportamentos de recuperação e geração, implementação de correções, configuração do OCR e atualização da documentação.
 
 - As sugestões e implementações foram revisadas antes das integrações, com validação por meio de testes automatizados, coletas reais, execução do pipeline, conferência dos dados produzidos e verificações de consistência do projeto. As decisões sobre comportamento esperado e critérios de validação foram tomadas com base nos requisitos do projeto e nos resultados observados durante os testes.
+
+## Encontro 7 - 2026-09-28
+
+## **Entregamos hoje:**
+
+- Foi realizada a validação das pré-condições para execução do **Golden Set**, incluindo a análise do pacote `indice_rag.zip` disponibilizado pela equipe. A base foi verificada e apresentou **3.130 chunks**, distribuídos entre atas, contratos, editais e PCA, com consistência entre os documentos normalizados, índices vetoriais, IDs e checksum SHA-256.
+
+- Durante a preparação para execução do Golden Set, foram identificados problemas no ambiente Python, incluindo dependências ausentes (`fastapi` e `certifi`) e utilização do interpretador Python global em vez do ambiente virtual `.venv`. Por esse motivo, a execução oficial dos **19 casos do Golden Set** ficou pendente até a correção do ambiente e organização dos arquivos nas estruturas esperadas pelo pipeline.
+
+- Foi concluída uma primeira versão do **front-end** e realizadas atualizações na documentação de arquitetura do projeto.
+
+- Também foram consolidadas as alterações relacionadas ao corpus e ao processo de ingestão da versão 3. Durante a integração, foi resolvido um conflito no `src/retrieve.py` para conciliar as alterações da `main` com a implementação existente.
+
+- A versão 3 do corpus foi promovida com **1.200 contratos únicos**, seus respectivos detalhes e sem falhas no inventário. O inventário registrou **1.295 arquivos e 1.243 itens lógicos** nas quatro bases. A cobertura completa do universo de contratos do RJ ainda não foi confirmada, pois o censo permanece incompleto.
+
+- Foram identificados e corrigidos problemas que faziam o pipeline terminar em recusa mesmo quando existiam informações relevantes para responder à pergunta. Um dos problemas estava relacionado aos filtros de recuperação, que podiam eliminar todos os chunks quando determinada base não possuía o campo utilizado pelo filtro. O comportamento foi ajustado para permitir a recuperação dos documentos e registrar no log quando um filtro é ignorado.
+
+- Também foi corrigida a geração das respostas. O prompt utilizado pelo LLM ultrapassava o limite do servidor compartilhado da turma, fazendo com que a instrução para responder em JSON fosse cortada. O contexto foi compactado e limitado, a instrução de formato passou a ser reforçada no final do prompt e foram adicionados limites configuráveis para o tamanho do contexto e dos chunks.
+
+- Foram realizados novos ajustes no `query_analysis` para evitar que os filtros escondessem informações relevantes. O sistema passou a tratar os filtros como opcionais quando determinado campo não existe no chunk, além de melhorar a identificação de valores, anos, períodos, contagens e valores em bilhões. Também foram corrigidos casos como períodos entre dois anos, números presentes em identificadores de leis e editais e expressões que poderiam ser confundidas com filtros monetários.
+
+- Foram adicionados novos testes para validar essas correções. A suíte do projeto chegou a **406 testes aprovados**, incluindo os novos cenários relacionados ao `query_analysis` e ao comportamento dos filtros e da geração.
+
+- Também foi realizado um ajuste adicional no `query_analysis` para diferenciar números com aparência de ano de valores monetários, evitando interpretar como ano números acompanhados de `R$`, `reais`, `mil`, `milhão` ou `bilhão`. Foram adicionados mais **5 casos de teste** para validar esse comportamento.
+
+## **Ficou pendente:**
+
+- Correção e preparação do ambiente `.venv`, incluindo a instalação das dependências necessárias e confirmação de que o projeto está utilizando o interpretador correto.
+
+- Organização dos arquivos `documents.jsonl` e `index/` nas estruturas esperadas pelo pipeline e nova validação do checksum da base.
+
+* Execução oficial dos **19 casos do Golden Set** utilizando o pipeline real.
+
+- Continuidade do desenvolvimento do **front-end** e das demais etapas de integração do sistema.
+
+- Continuidade da validação do corpus v3, considerando que o censo do universo de contratos do RJ ainda não está completo.
+
+## **Bloqueios em aberto:**
+
+- A execução do Golden Set permanece temporariamente bloqueada pela configuração do ambiente Python e pela preparação dos arquivos do índice na estrutura esperada pelo pipeline.
+
+- A base de e-mails sintéticos continua pendente. A base da estruturada em SQL está sendo construída para poder rodar.
+
+## **Uso de assistentes de IA:**
+
+- Foram utilizados assistentes de IA como apoio à análise do código, investigação de problemas no pipeline, desenvolvimento e revisão de testes, ajustes no query_analysis, recuperação, geração de respostas e documentação.
+
+- As alterações foram revisadas e validadas por meio da execução dos testes automatizados, análise dos resultados do pipeline e verificação dos comportamentos esperados antes da integração.
