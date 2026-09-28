@@ -232,6 +232,7 @@ def test_cliente_padrao_usa_sdk_do_llm_ecoa(monkeypatch):
 
     assert chamadas["model"] == gen.GENERATION_MODEL
     assert chamadas["messages"] == [{"role": "user", "content": "oi"}]
+    assert chamadas["response_format"] == {"type": "json_object"}
     assert json.loads(texto)["answer"] == "ok"
     assert tokens.total == 150
 

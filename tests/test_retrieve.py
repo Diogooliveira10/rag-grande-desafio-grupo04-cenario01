@@ -822,6 +822,91 @@ def test_filtro_de_faixa_combinado_com_condicao_de_igualdade_em_outra_chave():
     assert [item.chunk_id for item in results] == ["dentro_da_faixa_e_orgao"]
 
 
+# --------------------------------------------------------------------------
+# retrieve() aplica os filtros base a base: um filtro que a base não tem, ou
+# que zeraria a base, é ignorado — caso real do índice sem valor/data_vigencia.
+# --------------------------------------------------------------------------
+
+
+def _grava_indice(tmp_path, registros, *, documentos_planos=False):
+    for base_id in {r["base_id"] for r in registros}:
+        base_dir = tmp_path / base_id
+        base_dir.mkdir(exist_ok=True)
+        (base_dir / "vectors.jsonl").write_text(
+            "\n".join(json.dumps(r) for r in registros if r["base_id"] == base_id), encoding="utf-8"
+        )
+    documentos = tmp_path / "documents.jsonl"
+    if documentos_planos:
+        # Formato real de prepare_documents.py: metadados no próprio registro.
+        linhas = [{**r["metadata"], "text": r["text"]} for r in registros]
+    else:
+        linhas = registros
+    documentos.write_text("\n".join(json.dumps(r) for r in linhas), encoding="utf-8")
+    return dict(index_dir=tmp_path, documents_file=documentos, embed_fn=lambda t: [[1.0, 0.0]])
+
+
+def _logs_de_retrieval():
+    linhas = default_logger.log_path().read_text(encoding="utf-8").splitlines()
+    return [json.loads(l) for l in linhas if json.loads(l)["stage"] == "retrieval_denso"]
+
+
+def test_retrieve_ignora_filtro_de_campo_que_a_base_nao_tem(tmp_path, monkeypatch):
+    monkeypatch.setattr(default_logger, "logs_dir", tmp_path / "logs")
+    registros = [
+        _record("c1", text="software", embedding=[1.0, 0.0]),
+        _record("c2", text="software", embedding=[0.9, 0.1]),
+    ]
+    comum = _grava_indice(tmp_path, registros)
+
+    results = retrieve("software", None, filters={"valor": {"operator": ">=", "value": 500000}}, **comum)
+
+    assert {item.chunk_id for item in results} == {"c1", "c2"}
+    [log] = _logs_de_retrieval()
+    assert log["extra"]["filtros_ignorados"] == {"contratos_estruturado": {"sem_campo": ["valor"]}}
+
+
+def test_retrieve_ignora_filtro_que_zeraria_a_base(tmp_path, monkeypatch):
+    monkeypatch.setattr(default_logger, "logs_dir", tmp_path / "logs")
+    registros = [
+        _record("c1", text="software", embedding=[1.0, 0.0], metadata_extra={"valor": "100"}),
+        _record("c2", text="software", embedding=[0.9, 0.1], metadata_extra={"valor": "200"}),
+    ]
+    comum = _grava_indice(tmp_path, registros)
+
+    results = retrieve("software", None, filters={"valor": {"operator": ">=", "value": 500000}}, **comum)
+
+    assert {item.chunk_id for item in results} == {"c1", "c2"}
+    [log] = _logs_de_retrieval()
+    assert log["extra"]["filtros_ignorados"] == {"contratos_estruturado": {"zerou_resultados": ["valor"]}}
+
+
+def test_retrieve_mantem_filtro_onde_ele_existe_e_ignora_nas_outras_bases(tmp_path, monkeypatch):
+    monkeypatch.setattr(default_logger, "logs_dir", tmp_path / "logs")
+    registros = [
+        _record("barato", text="software", embedding=[1.0, 0.0], metadata_extra={"valor": "100"}),
+        _record("caro", text="software", embedding=[0.9, 0.1], metadata_extra={"valor": "900000"}),
+        _record("lei", text="software", base_id="editais_normativo", embedding=[0.8, 0.2]),
+    ]
+    comum = _grava_indice(tmp_path, registros, documentos_planos=True)
+
+    results = retrieve("software", None, filters={"valor": {"operator": ">=", "value": 500000}}, **comum)
+
+    assert {item.chunk_id for item in results} == {"caro", "lei"}
+    assert all(item.sparse_score is not None for item in results)
+    [log] = _logs_de_retrieval()
+    assert log["extra"]["filtros_ignorados"] == {"editais_normativo": {"sem_campo": ["valor"]}}
+
+
+def test_retrieve_sem_filtro_nao_registra_filtros_ignorados(tmp_path, monkeypatch):
+    monkeypatch.setattr(default_logger, "logs_dir", tmp_path / "logs")
+    comum = _grava_indice(tmp_path, [_record("c1", text="software", embedding=[1.0, 0.0])])
+
+    retrieve("software", None, **comum)
+
+    [log] = _logs_de_retrieval()
+    assert "filtros_ignorados" not in log["extra"]
+
+
 def test_lista_de_duas_condicoes_nao_e_confundida_com_tupla_operador_valor():
     """(">=", 10) é 1 condição; [{"operator": ">=", ...}, {...}] são 2 — mesmo com len == 2."""
     records = [

@@ -321,6 +321,55 @@ def _records_for(
     return filtered
 
 
+def _metadata_of(record: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Metadados do registro: o índice guarda em ``metadata``; o
+    ``documents.jsonl`` de ``prepare_documents.py`` guarda no próprio registro."""
+    metadata = record.get("metadata")
+    return metadata if isinstance(metadata, Mapping) else record
+
+
+def _filtrar_por_base(
+    records: Iterable[Mapping[str, Any]],
+    filters: Mapping[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, list[str]]]]:
+    """Aplica os filtros base a base, sem deixar um filtro zerar a busca.
+
+    Numa base, um filtro só vale se ao menos um chunk dela tem o campo (ex.:
+    ``valor`` não existe na base normativa). Se os filtros aplicáveis excluem
+    todos os chunks da base, ela entra sem filtro. Devolve os registros e,
+    por ``base_id``, as chaves ignoradas (``sem_campo`` / ``zerou_resultados``).
+    """
+    por_base: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        base_id = _record_base_id(record, _metadata_of(record))
+        por_base.setdefault(base_id, []).append(dict(record))
+    selecionados: list[dict[str, Any]] = []
+    ignorados: dict[str, dict[str, list[str]]] = {}
+    for base_id, registros in por_base.items():
+        metadados = [_metadata_of(record) for record in registros]
+        aplicaveis = {
+            key: value
+            for key, value in filters.items()
+            if any(_metadata_value(metadata, key) is not None for metadata in metadados)
+        }
+        motivo: dict[str, list[str]] = {}
+        sem_campo = sorted(set(filters) - set(aplicaveis))
+        if sem_campo:
+            motivo["sem_campo"] = sem_campo
+        passam = [
+            record
+            for record, metadata in zip(registros, metadados)
+            if _matches_filters(metadata, aplicaveis)
+        ]
+        if aplicaveis and not passam:
+            passam = registros
+            motivo["zerou_resultados"] = sorted(aplicaveis)
+        if motivo:
+            ignorados[base_id] = motivo
+        selecionados.extend(passam)
+    return selecionados, ignorados
+
+
 def _result(record: Mapping[str, Any], score: float, content: str = "") -> RetrievalResult:
     raw_metadata = record.get("metadata")
     metadata = dict(raw_metadata) if isinstance(raw_metadata, Mapping) else {}
@@ -562,6 +611,12 @@ def retrieve(
     ``fetch_k == top_k``, um chunk que as duas buscas põem logo abaixo do corte
     nunca chega à fusão. Padrão: ``max(5 * top_k, DEFAULT_FETCH_K)``.
 
+    Os filtros são aplicados base a base (``_filtrar_por_base``): numa base sem
+    o campo filtrado, ou em que o filtro excluiria todos os chunks, ele é
+    ignorado, e o log registra quais chaves foram ignoradas em
+    ``extra.filtros_ignorados``. ``dense_retrieve`` e ``bm25_retrieve``, chamados
+    diretamente, continuam aplicando os filtros de forma estrita.
+
     Cada etapa registra seu stage (``retrieval_denso``, ``retrieval_bm25``,
     ``fusao_rrf``, ``rerank``) em ``logs/pipeline-AAAA-MM-DD.jsonl``.
     """
@@ -575,6 +630,19 @@ def retrieve(
             bases = getattr(route, "bases_selecionadas", getattr(route, "bases", None))
             route_filters = getattr(route, "filters", getattr(route, "filtros", route_filters))
     fetch_k = fetch_k if fetch_k is not None else max(5 * top_k, DEFAULT_FETCH_K)
+    dense_records: list[dict[str, Any]] | None = None
+    sparse_records: list[dict[str, Any]] | None = None
+    filtros_ignorados: dict[str, dict[str, list[str]]] = {}
+    if route_filters:
+        # Seleção de bases e escopos antes, para decidir o filtro só entre as
+        # bases que o roteador escolheu.
+        dense_records, ignorados_denso = _filtrar_por_base(
+            _records_for(index_dir, bases, None, None, escopos), route_filters
+        )
+        sparse_records, ignorados_bm25 = _filtrar_por_base(
+            _records_for(index_dir, bases, None, _read_jsonl(documents_file), escopos), route_filters
+        )
+        filtros_ignorados = {**ignorados_bm25, **ignorados_denso}
     extra = {
         "bases": sorted(str(getattr(b, "value", b)) for b in ([bases] if isinstance(bases, str) else bases or [])),
         "escopos": sorted(escopos) if escopos is not None else None,
@@ -582,6 +650,8 @@ def retrieve(
         "k": top_k,
         "fetch_k": fetch_k,
     }
+    if filtros_ignorados:
+        extra["filtros_ignorados"] = filtros_ignorados
 
     def _span(stage: Stage, **mais: Any):
         return default_logger.span(
@@ -597,8 +667,9 @@ def retrieve(
             documents_file=documents_file,
             top_k=fetch_k,
             bases=bases,
-            filters=route_filters,
+            filters=None if dense_records is not None else route_filters,
             embed_fn=embed_da_consulta,
+            records=dense_records,
             escopos=escopos,
             run_id=run_id,
             query_id=query_id,
@@ -618,7 +689,8 @@ def retrieve(
             documents_file=documents_file,
             top_k=fetch_k,
             bases=bases,
-            filters=route_filters,
+            filters=None if sparse_records is not None else route_filters,
+            records=sparse_records,
             escopos=escopos,
         )
         span.set_result(_resumo(sparse))

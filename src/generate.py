@@ -41,10 +41,13 @@ def _cliente_padrao() -> ClienteLLM:
     import llm_ecoa
 
     def _chamar(mensagens: list[dict]) -> Any:
+        # json_object faz o Ollama restringir a saída a JSON válido; só o
+        # prompt não bastava para o qwen3-8b.
         return llm_ecoa.client.chat.completions.create(
             model=GENERATION_MODEL,
             messages=mensagens,
             temperature=0.2,
+            response_format={"type": "json_object"},
         )
 
     return _chamar
@@ -127,9 +130,58 @@ def _cabecalho(metadata: ChunkMetadata) -> str:
     return f"[{' | '.join(campos)}]"
 
 
+_VAZIOS = (None, "", [], {})
+
+
+def _sem_vazios(valor: Any) -> Any:
+    if isinstance(valor, dict):
+        limpo = {chave: _sem_vazios(item) for chave, item in valor.items()}
+        return {chave: item for chave, item in limpo.items() if item not in _VAZIOS}
+    if isinstance(valor, list):
+        return [item for item in (_sem_vazios(i) for i in valor) if item not in _VAZIOS]
+    return valor
+
+
+def _compactar(conteudo: str) -> str:
+    """Registro JSON (PNCP) vira JSON compacto, sem campos vazios; texto só
+    perde espaços repetidos. O JSON indentado gastava boa parte da janela."""
+    try:
+        dados = json.loads(conteudo)
+    except (TypeError, ValueError):
+        return " ".join(conteudo.split())
+    return json.dumps(_sem_vazios(dados), ensure_ascii=False, separators=(",", ":"))
+
+
+def _chunks_no_orcamento(chunks: list[Chunk]) -> list[Chunk]:
+    """Chunks, na ordem da recuperação, que cabem na janela do modelo.
+
+    Cada conteúdo é compactado e cortado em ``GENERATION_CHUNK_CHARS``; os
+    chunks entram até somar ``GENERATION_CONTEXT_CHARS`` (o primeiro sempre
+    entra). Sem isso, o Ollama descarta o começo do prompt.
+    """
+    selecionados: list[Chunk] = []
+    usados = 0
+    for chunk in chunks:
+        conteudo = _compactar(chunk.content)
+        if len(conteudo) > config.GENERATION_CHUNK_CHARS:
+            conteudo = conteudo[: config.GENERATION_CHUNK_CHARS].rstrip() + " [...]"
+        tamanho = len(_cabecalho(chunk.metadata)) + len(conteudo)
+        if selecionados and usados + tamanho > config.GENERATION_CONTEXT_CHARS:
+            break
+        selecionados.append(chunk.model_copy(update={"content": conteudo}))
+        usados += tamanho
+    return selecionados
+
+
 def _montar_prompt(query: str, chunks: list[Chunk]) -> list[dict]:
     contexto = "\n\n".join(f"{_cabecalho(c.metadata)}\n{c.content}" for c in chunks)
-    mensagem_usuario = f"Contexto:\n{contexto}\n\nPergunta: {query}"
+    # A instrução de formato se repete no fim: se o prompt passar da janela,
+    # o Ollama corta o começo, e o fim é o que o modelo ainda vê.
+    mensagem_usuario = (
+        f"Contexto:\n{contexto}\n\nPergunta: {query}\n\n"
+        "Responda somente com o objeto JSON no formato pedido, citando em "
+        "sources_used os chunk_id usados."
+    )
     return [
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": mensagem_usuario},
@@ -397,6 +449,10 @@ def gerar_resposta(
         _logar_evento(run_id, query_id, "sem_chunks", inicio, resposta, **sensibilidade)
         return resposta
 
+    chunks_prompt = _chunks_no_orcamento(chunks)
+    sensibilidade["chunks_no_prompt"] = len(chunks_prompt)
+    sensibilidade["chunks_fora_do_orcamento"] = len(chunks) - len(chunks_prompt)
+    chunks = chunks_prompt
     mensagens = _montar_prompt(query, chunks)
     cliente = cliente or _cliente_padrao()
 
