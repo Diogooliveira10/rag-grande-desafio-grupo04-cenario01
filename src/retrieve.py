@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import config
-from src.obs import Stage, default_logger, registrar
+from src.obs import Stage, TokenUsage, default_logger, registrar, token_usage_from_response
 from src.schema import Natureza
 
 
@@ -350,6 +350,24 @@ def _default_embed(query: str) -> list[float]:
     return _default_embed_fn(config.EMBEDDING_MODEL)([query])[0]
 
 
+def _embed_fn_com_uso(uso: list[TokenUsage]) -> EmbedFn:
+    """Embedding padrão (servidor da turma) que anota o ``usage`` de cada chamada.
+
+    Usado por ``retrieve`` para preencher ``tokens`` do stage
+    ``retrieval_denso``; quem passa ``embed_fn`` próprio fica sem contagem.
+    """
+    def embed(texts: list[str]) -> list[list[float]]:
+        # Cliente criado só na chamada: sem candidatos, dense_retrieve nem embeda.
+        from openai import OpenAI
+
+        client = OpenAI(base_url=config.OLLAMA_URL, api_key=config.OLLAMA_API_KEY)
+        response = client.embeddings.create(model=config.EMBEDDING_MODEL, input=texts)
+        uso.append(token_usage_from_response(response))
+        return [item.embedding for item in response.data]
+
+    return embed
+
+
 def dense_retrieve(
     query: str,
     *,
@@ -570,6 +588,8 @@ def retrieve(
             run_id=run_id, query_id=query_id, stage=stage, input=query, extra={**extra, **mais}
         )
 
+    uso_embedding: list[TokenUsage] = []
+    embed_da_consulta = embed_fn or _embed_fn_com_uso(uso_embedding)
     with _span(Stage.RETRIEVAL_DENSO) as span:
         dense = dense_retrieve(
             query,
@@ -578,12 +598,19 @@ def retrieve(
             top_k=fetch_k,
             bases=bases,
             filters=route_filters,
-            embed_fn=embed_fn,
+            embed_fn=embed_da_consulta,
             escopos=escopos,
             run_id=run_id,
             query_id=query_id,
         )
         span.set_result(_resumo(dense))
+        if uso_embedding:
+            span.modelo = config.EMBEDDING_MODEL
+            span.tokens = TokenUsage(
+                prompt=sum(u.prompt for u in uso_embedding),
+                completion=sum(u.completion for u in uso_embedding),
+                total=sum(u.total for u in uso_embedding),
+            )
     with _span(Stage.RETRIEVAL_BM25) as span:
         sparse = bm25_retrieve(
             query,

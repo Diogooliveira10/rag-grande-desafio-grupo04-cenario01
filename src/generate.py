@@ -223,11 +223,13 @@ def _parsear_resposta_llm(
     query: str,
     chunks: list[Chunk],
     bases_consultadas: list[Natureza],
-) -> tuple[RAGResponse, Optional[str], list[str]]:
-    """Devolve a resposta, o motivo se a saída do LLM for inválida e as chaves
-    fora do contrato que foram aceitas como alias."""
+) -> tuple[RAGResponse, Optional[str], list[str], list[str]]:
+    """Devolve a resposta, o motivo se a saída do LLM for inválida, as chaves
+    fora do contrato que foram aceitas como alias e os chunk_ids citados pelo
+    LLM que não estavam entre os chunks recuperados (descartados)."""
     chunks_por_id = {c.metadata.chunk_id: c for c in chunks}
     alternativas_usadas: list[str] = []
+    citacoes_descartadas: list[str] = []
     try:
         dados = _extrair_json(bruto)
         answer = str(dados["answer"]).strip()
@@ -239,6 +241,7 @@ def _parsear_resposta_llm(
         for chunk_id in _campo(dados, "sources_used", alternativas_usadas) or []:
             chunk = chunks_por_id.get(chunk_id)
             if chunk is None:
+                citacoes_descartadas.append(str(chunk_id))
                 continue
             sources_used.append(
                 SourceRef(
@@ -268,13 +271,14 @@ def _parsear_resposta_llm(
             is_refusal=is_refusal,
             refusal_reason=refusal_reason,
         )
-        return resposta, None, alternativas_usadas
+        return resposta, None, alternativas_usadas, citacoes_descartadas
     except Exception as exc:
         # Saída inválida do LLM vira recusa segura; o motivo vai para o log.
         return (
             _recusa(query, bases_consultadas, RefusalReason.SEM_EVIDENCIA),
             f"{type(exc).__name__}: {exc}",
             alternativas_usadas,
+            citacoes_descartadas,
         )
 
 
@@ -310,6 +314,42 @@ def _logar_evento(
             "bases_consultadas": [b.value for b in resposta.bases_consultadas],
             "num_sources": len(resposta.sources_used),
             **extra,
+        },
+    )
+
+
+def _logar_validacao(
+    run_id: str,
+    query_id: str,
+    inicio: float,
+    resposta: RAGResponse,
+    *,
+    erro_parsing: Optional[str],
+    citacoes_descartadas: list[str],
+    chaves_alias: list[str],
+    mascaramentos_resposta: dict[str, int],
+) -> None:
+    """Registra o stage ``validacao``: o que foi checado/corrigido na saída do LLM.
+
+    Separado de ``geracao`` (chamada ao LLM, tokens) para o log mostrar quanto
+    da resposta final veio de correção: JSON inválido virou recusa, citação de
+    chunk não recuperado foi descartada, dado pessoal foi mascarado.
+    """
+    registrar(
+        run_id=run_id,
+        query_id=query_id,
+        stage=Stage.VALIDACAO,
+        status="saida_invalida" if erro_parsing else "ok",
+        latencia_ms=(time.monotonic() - inicio) * 1000,
+        input=resposta.query,
+        output=f"{len(resposta.sources_used)} fontes válidas; {len(citacoes_descartadas)} descartadas",
+        extra={
+            "json_valido": erro_parsing is None,
+            "citacoes_descartadas": citacoes_descartadas,
+            "chaves_fora_do_contrato": chaves_alias,
+            "mascaramentos_resposta": mascaramentos_resposta,
+            "confidence_level": resposta.confidence_level.value,
+            "is_refusal": resposta.is_refusal,
         },
     )
 
@@ -370,7 +410,10 @@ def gerar_resposta(
         )
         return resposta
 
-    resposta, erro_parsing, chaves_alias = _parsear_resposta_llm(bruto, query, chunks, bases_consultadas)
+    inicio_validacao = time.monotonic()
+    resposta, erro_parsing, chaves_alias, citacoes_descartadas = _parsear_resposta_llm(
+        bruto, query, chunks, bases_consultadas
+    )
     if erro_parsing:
         sensibilidade["erro_parsing"] = erro_parsing
     if chaves_alias:
@@ -383,5 +426,12 @@ def gerar_resposta(
     _logar_evento(
         run_id, query_id, "saida_invalida" if erro_parsing else "ok", inicio, resposta,
         tokens=tokens, modelo=GENERATION_MODEL, **sensibilidade,
+    )
+    _logar_validacao(
+        run_id, query_id, inicio_validacao, resposta,
+        erro_parsing=erro_parsing,
+        citacoes_descartadas=citacoes_descartadas,
+        chaves_alias=chaves_alias,
+        mascaramentos_resposta=mascaramentos_resposta,
     )
     return resposta
