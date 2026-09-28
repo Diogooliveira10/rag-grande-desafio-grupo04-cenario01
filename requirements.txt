@@ -6,6 +6,9 @@ uvicorn[standard]>=0.35.0
 httpx>=0.28.0
 pytest>=9.1.1
 pypdf>=5.0.0
+# Bundle de certificados somado ao do sistema nos downloads HTTPS
+# (src/ssl_context.py).
+certifi>=2024.2.2
 # OCR de PDFs escaneados; o executável do Tesseract e o idioma "por" são
 # instalados à parte (ver docs/CLI.md).
 pypdfium2>=5.0.0
