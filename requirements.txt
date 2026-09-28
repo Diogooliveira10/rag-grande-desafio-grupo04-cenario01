@@ -1,8 +1,16 @@
 openai>=3.14.1
 python-dotenv>=1.2.3
 pydantic>=2.13.4
+fastapi>=0.116.0
+uvicorn[standard]>=0.35.0
+httpx>=0.28.0
 pytest>=9.1.1
 pypdf>=5.0.0
+# Bundle de certificados somado ao do sistema nos downloads HTTPS
+# (src/ssl_context.py).
+certifi>=2024.2.2
+# Base estruturada em Postgres/Neon (src/structured_db.py); sem DATABASE_URL usa SQLite.
+psycopg[binary]>=3.2
 # OCR de PDFs escaneados; o executável do Tesseract e o idioma "por" são
 # instalados à parte (ver docs/CLI.md).
 pypdfium2>=5.0.0

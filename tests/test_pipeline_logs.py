@@ -103,6 +103,42 @@ def test_retrieve_registra_denso_bm25_e_rrf(indice):
     assert registros[0]["output"].endswith("top base: contratos_estruturado")
 
 
+def test_retrieval_denso_registra_tokens_do_embedding_padrao(indice, monkeypatch):
+    import openai
+    import config
+
+    chamadas = []
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            self.embeddings = SimpleNamespace(create=self._create)
+
+        def _create(self, model, input):
+            chamadas.append(model)
+            return SimpleNamespace(
+                data=[SimpleNamespace(embedding=[1.0, 0.0]) for _ in input],
+                usage=SimpleNamespace(prompt_tokens=7, total_tokens=7),
+            )
+
+    monkeypatch.setattr(openai, "OpenAI", FakeOpenAI)
+    sem_embed_proprio = {k: v for k, v in indice.items() if k != "embed_fn"}
+
+    retrieve("contrato de ambulancias", None, **sem_embed_proprio)
+
+    denso = next(r for r in _registros() if r["stage"] == "retrieval_denso")
+    assert chamadas == [config.EMBEDDING_MODEL]
+    assert denso["tokens"] == {"prompt": 7, "completion": 0, "total": 7}
+    assert denso["modelo"] == config.EMBEDDING_MODEL
+
+
+def test_retrieval_denso_com_embed_fn_proprio_nao_inventa_tokens(indice):
+    retrieve("contrato", None, **indice)
+
+    denso = next(r for r in _registros() if r["stage"] == "retrieval_denso")
+    assert denso["tokens"] == {"prompt": 0, "completion": 0, "total": 0}
+    assert denso["modelo"] is None
+
+
 def test_retrieve_registra_rerank_quando_ha_reranker(indice):
     retrieve("contrato", None, reranker=lambda q, itens: list(reversed(itens)), **indice)
     assert _stages()[-1] == "rerank"
@@ -132,7 +168,7 @@ def test_geracao_registra_tokens_e_modelo():
     )
 
     assert resposta.answer == "ok"
-    [registro] = _registros()
+    registro, _validacao = _registros()
     assert set(registro) == CAMPOS_CONTRATO
     assert registro["stage"] == "geracao"
     assert registro["tokens"] == {"prompt": 120, "completion": 30, "total": 150}
@@ -146,9 +182,39 @@ def test_geracao_registra_saida_invalida_do_llm():
     )
     gen.gerar_resposta("pergunta", [chunk], [], cliente=lambda m: "isso não é json")
 
-    [registro] = _registros()
+    registro, validacao = _registros()
     assert registro["status"] == "saida_invalida"
     assert "erro_parsing" in registro["extra"]
+    assert validacao["stage"] == "validacao"
+    assert validacao["status"] == "saida_invalida"
+    assert validacao["extra"]["json_valido"] is False
+
+
+def test_validacao_registra_citacao_descartada_sem_tokens():
+    chunk = Chunk(
+        content="contrato de ambulancias",
+        metadata=ChunkMetadata(source_file="c1.json", chunk_id="c1", base_id="contratos_estruturado", doc_type="json"),
+    )
+    resposta = gen.gerar_resposta(
+        "pergunta", [chunk], [Natureza.ESTRUTURADA],
+        cliente=lambda mensagens: _resposta_sdk(sources=("c1", "inventado")), run_id="run1", query_id="q_1",
+    )
+
+    assert [s.chunk_id for s in resposta.sources_used] == ["c1"]
+    geracao, validacao = _registros()
+    assert set(validacao) == CAMPOS_CONTRATO
+    assert validacao["stage"] == "validacao"
+    assert validacao["status"] == "ok"
+    assert (validacao["run_id"], validacao["query_id"]) == (geracao["run_id"], geracao["query_id"])
+    assert validacao["extra"]["json_valido"] is True
+    assert validacao["extra"]["citacoes_descartadas"] == ["inventado"]
+    assert validacao["tokens"] == {"prompt": 0, "completion": 0, "total": 0}
+
+
+def test_recusa_sem_chamar_llm_nao_registra_validacao():
+    gen.gerar_resposta("pergunta", [], [Natureza.ESTRUTURADA], cliente=lambda m: _resposta_sdk())
+
+    assert _stages() == ["geracao"]
 
 
 def test_cliente_padrao_usa_sdk_do_llm_ecoa(monkeypatch):
@@ -166,6 +232,7 @@ def test_cliente_padrao_usa_sdk_do_llm_ecoa(monkeypatch):
 
     assert chamadas["model"] == gen.GENERATION_MODEL
     assert chamadas["messages"] == [{"role": "user", "content": "oi"}]
+    assert chamadas["response_format"] == {"type": "json_object"}
     assert json.loads(texto)["answer"] == "ok"
     assert tokens.total == 150
 
@@ -186,7 +253,7 @@ def test_pipeline_amarra_todos_os_stages_pelo_mesmo_run_id(monkeypatch, indice):
     assert resposta["is_refusal"] is False
     registros = _registros()
     assert [r["stage"] for r in registros] == [
-        "query_analysis", "roteamento", "retrieval_denso", "retrieval_bm25", "fusao_rrf", "geracao",
+        "query_analysis", "roteamento", "retrieval_denso", "retrieval_bm25", "fusao_rrf", "geracao", "validacao",
     ]
     assert len({r["run_id"] for r in registros}) == 1
     assert len({r["query_id"] for r in registros}) == 1

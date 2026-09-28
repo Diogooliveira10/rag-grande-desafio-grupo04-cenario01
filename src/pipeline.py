@@ -17,6 +17,7 @@ from src.query_analysis import analisar_query, filtros_para_retrieve
 from src.retrieve import DEFAULT_TOP_K, RerankFn, RetrievalResult, retrieve
 from src.router import inferir_motivo_recusa, rotear_pergunta
 from src.schema import Chunk, ChunkMetadata
+from src.structured_query import consultar_estruturado
 
 # Só as bases de escopo "oficial" no manifesto respondem perguntas; fixtures de
 # teste e amostras experimentais ficam de fora da busca.
@@ -49,7 +50,14 @@ def responder(
 
     ``query_analysis`` roda antes do roteamento e não influencia a decisão de
     quais bases consultar — só extrai filtros (ano, valor, órgão) que o
-    ``retrieve`` aplica sobre os metadados dos chunks candidatos.
+    ``retrieve`` aplica sobre os metadados dos chunks candidatos. Chunk sem o
+    campo não é descartado, e se os filtros zerarem o resultado a busca é
+    refeita sem eles.
+
+    Perguntas de conta (ranking, estatística, comparação, evolução,
+    agrupamento) sobre as bases estruturada/agregada também passam pela etapa
+    ``consulta_sql`` (``src/structured_query.py``), cujo resultado entra como
+    evidência antes dos chunks da busca.
 
     ``run_id`` e ``query_id`` são repassados a todas as etapas, amarrando no
     log (``logs/pipeline-AAAA-MM-DD.jsonl``) os stages de uma mesma pergunta.
@@ -63,17 +71,36 @@ def responder(
     chunks: list[Chunk] = []
     refusal_reason_hint = None
     if decisao.bases_selecionadas:
+        filtros = filtros_para_retrieve(analise.filtros)
         resultados = retrieve(
             query,
             decisao,
             top_k=top_k,
-            filters=filtros_para_retrieve(analise.filtros),
+            filters=filtros,
             reranker=reranker,
             escopos=escopos,
             run_id=run_id,
             query_id=query_id,
         )
+        if filtros and not resultados:
+            # Os filtros são heurísticos; se zeraram tudo, a busca sem eles
+            # ainda dá evidência ao generate (que decide se basta).
+            resultados = retrieve(
+                query,
+                decisao,
+                top_k=top_k,
+                filters=None,
+                reranker=reranker,
+                escopos=escopos,
+                run_id=run_id,
+                query_id=query_id,
+            )
         chunks = [_chunk_from_retrieval(item) for item in resultados]
+        # Ranking/estatística/comparação: o resultado SQL vai à frente, para
+        # caber no orçamento do prompt antes dos trechos da busca.
+        chunks = consultar_estruturado(
+            query, analise.filtros, decisao.bases_selecionadas, run_id=run_id, query_id=query_id
+        ) + chunks
     else:
         refusal_reason_hint = inferir_motivo_recusa(decisao.justificativa)
 

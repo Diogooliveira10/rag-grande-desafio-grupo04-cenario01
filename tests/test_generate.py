@@ -132,12 +132,13 @@ def test_chaves_alternativas_do_llm_sao_aceitas_e_registradas_no_log():
 
     assert [s.chunk_id for s in resposta.sources_used] == ["c1"]
     assert resposta.confidence_level == ConfidenceLevel.ALTA
-    [registro] = [
+    geracao, validacao = [
         json.loads(linha)
         for arquivo in obs.default_logger.logs_dir.glob("pipeline-*.jsonl")
         for linha in arquivo.read_text(encoding="utf-8").splitlines()
     ]
-    assert registro["extra"]["chaves_fora_do_contrato"] == ["confidence", "sources"]
+    assert geracao["extra"]["chaves_fora_do_contrato"] == ["confidence", "sources"]
+    assert validacao["extra"]["chaves_fora_do_contrato"] == ["confidence", "sources"]
 
 
 @pytest.mark.parametrize(
@@ -211,6 +212,69 @@ def test_erro_do_cliente_llm_nao_propaga_excecao():
     resposta = gen.gerar_resposta("pergunta", [_chunk()], [Natureza.ESTRUTURADA], cliente=cliente_com_erro)
     assert resposta.is_refusal is True
     assert resposta.refusal_reason == RefusalReason.SEM_EVIDENCIA
+
+# --------------------------------------------------------------------------
+# Orçamento do contexto: a janela do endpoint da turma é de 2048 tokens e o
+# Ollama corta o começo do prompt que passar disso.
+# --------------------------------------------------------------------------
+
+def test_registro_json_vai_compacto_e_sem_campos_vazios_para_o_prompt():
+    registro = json.dumps(
+        {"objetoCompra": "Licença de software", "linkSistemaOrigem": None, "fontes": [], "valor": 0},
+        indent=2,
+    )
+
+    [chunk] = gen._chunks_no_orcamento([_chunk(conteudo=registro)])
+
+    assert chunk.content == '{"objetoCompra":"Licença de software","valor":0}'
+
+
+def test_chunks_entram_ate_o_limite_do_orcamento(monkeypatch):
+    monkeypatch.setattr(gen.config, "GENERATION_CONTEXT_CHARS", 250)
+    monkeypatch.setattr(gen.config, "GENERATION_CHUNK_CHARS", 50)
+    chunks = [_chunk(chunk_id=f"c{i}", conteudo="x" * 200) for i in range(5)]
+
+    selecionados = gen._chunks_no_orcamento(chunks)
+
+    assert [c.metadata.chunk_id for c in selecionados] == ["c0", "c1"]
+    assert selecionados[0].content == "x" * 50 + " [...]"
+
+
+def test_primeiro_chunk_sempre_entra_mesmo_acima_do_orcamento(monkeypatch):
+    monkeypatch.setattr(gen.config, "GENERATION_CONTEXT_CHARS", 10)
+
+    assert len(gen._chunks_no_orcamento([_chunk(conteudo="y" * 300)])) == 1
+
+
+def test_instrucao_de_formato_fica_no_fim_do_prompt():
+    [_, usuario] = gen._montar_prompt("pergunta", [_chunk()])
+
+    assert usuario["content"].rstrip().endswith("os chunk_id usados.")
+    assert "Responda somente com o objeto JSON" in usuario["content"]
+
+
+def test_geracao_loga_quantos_chunks_couberam_no_prompt(tmp_path, monkeypatch):
+    monkeypatch.setattr(obs.default_logger, "logs_dir", tmp_path)
+    monkeypatch.setattr(gen.config, "GENERATION_CONTEXT_CHARS", 150)
+    monkeypatch.setattr(gen.config, "GENERATION_CHUNK_CHARS", 100)
+    chunks = [_chunk(chunk_id=f"c{i}", conteudo="z" * 100) for i in range(3)]
+    vistos = {}
+
+    def cliente(mensagens):
+        vistos["prompt"] = mensagens[1]["content"]
+        return json.dumps({"answer": "ok", "is_refusal": False, "confidence_level": "alta", "sources_used": ["c0"]})
+
+    gen.gerar_resposta("pergunta", chunks, [Natureza.ESTRUTURADA], cliente=cliente)
+
+    assert "chunk_id=c0" in vistos["prompt"] and "chunk_id=c2" not in vistos["prompt"]
+    registro = next(
+        r
+        for r in map(json.loads, obs.default_logger.log_path().read_text(encoding="utf-8").splitlines())
+        if r["stage"] == "geracao"
+    )
+    assert registro["extra"]["chunks_no_prompt"] == 1
+    assert registro["extra"]["chunks_fora_do_orcamento"] == 2
+
 
 def test_prompt_mostra_titulo_do_documento_e_vigencia():
     chunk = _chunk(chunk_id="c1")

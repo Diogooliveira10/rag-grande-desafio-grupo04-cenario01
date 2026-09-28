@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-import ssl
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,8 +13,10 @@ from urllib.request import Request, urlopen
 
 try:
     from .retry import retry_delay
+    from .ssl_context import criar_contexto_ssl
 except ImportError:  # permite executar o módulo diretamente
     from retry import retry_delay
+    from ssl_context import criar_contexto_ssl
 
 
 def _safe_filename(value: str) -> str:
@@ -137,7 +138,7 @@ class ArtifactDownloader:
         last_error = ""
         for attempt in range(1, max(1, attempts) + 1):
             try:
-                with urlopen(request, timeout=timeout, context=ssl.create_default_context()) as response:
+                with urlopen(request, timeout=timeout, context=criar_contexto_ssl()) as response:
                     body = response.read(self.download_limit + 1)
                     content_type = response.headers.get("Content-Type", "")
                     if len(body) > self.download_limit:

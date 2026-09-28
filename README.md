@@ -2,6 +2,19 @@
 
 **Residência TIC em Trilhas · PUC-Rio · Instituto ECOA**
 
+## API HTTP
+
+O backend FastAPI expõe `GET /health` e `POST /api/v1/query`. Para executar
+localmente:
+
+```bash
+uvicorn app.api:app --reload --host 127.0.0.1 --port 8000
+```
+
+Os servidores Vite locais em `localhost:5173` e `127.0.0.1:5173` já estão
+permitidos por CORS. Origens adicionais podem ser informadas, separadas por
+vírgula, em `CORS_ALLOW_ORIGINS`.
+
 Sistema de **Adaptive RAG** sobre contratações públicas do Estado do Rio de Janeiro: dado uma pergunta em linguagem natural, o sistema decide sozinho **onde buscar** (norma, registro estruturado, conversa ou número agregado) antes de buscar, recupera evidência híbrida (densa + BM25 + RRF + rerank) e gera uma resposta citando fontes — ou recusa, quando o caso exige.
 
 ## Por que este cenário
@@ -69,15 +82,28 @@ flowchart TD
     F --> G[geracao]
     G --> H[validacao]
     H --> I[feedback]
+    B -. perguntas de conta .-> S[consulta_sql]
+    S --> G
 ```
 
-Estágios (mesmos nomes usados no campo `stage` do log estruturado): `query_analysis`, `roteamento`, `retrieval_denso`, `retrieval_bm25`, `fusao_rrf`, `rerank`, `geracao`, `validacao`, `feedback`. Detalhes de decisão e divisão de responsabilidades em [ARQUITETURA.md](ARQUITETURA.md).
+Estágios (mesmos nomes usados no campo `stage` do log estruturado): `query_analysis`, `roteamento`, `retrieval_denso`, `retrieval_bm25`, `fusao_rrf`, `rerank`, `consulta_sql`, `geracao`, `validacao`, `feedback`. Detalhes de decisão e divisão de responsabilidades em [ARQUITETURA.md](ARQUITETURA.md).
 
-**Implementado:** `roteamento` ([src/router.py](src/router.py)), `retrieval_denso`/`retrieval_bm25`/`fusao_rrf` ([src/retrieve.py](src/retrieve.py), rerank ainda é opcional/plugável) e `geracao` ([src/generate.py](src/generate.py), com guardrails determinísticos antes do LLM e parsing defensivo da saída). [src/pipeline.py](src/pipeline.py) une os três estágios numa única função (`responder`). **Ainda não implementados:** `query_analysis` (o roteador ainda não extrai filtros de metadado da pergunta), `validacao` e `feedback`.
+**Implementado:**
+
+- `query_analysis` ([src/query_analysis.py](src/query_analysis.py)): extrai da pergunta, sem LLM, filtros de ano, valor (mínimo, máximo, faixa) e órgão.
+- `roteamento` ([src/router.py](src/router.py)): escolhe as bases antes de buscar.
+- `retrieval_denso` / `retrieval_bm25` / `fusao_rrf` ([src/retrieve.py](src/retrieve.py)): busca híbrida com filtros de metadado. Os filtros são aplicados base a base: numa base sem o campo filtrado, ou em que o filtro excluiria todos os chunks, ele é ignorado e o log registra isso em `extra.filtros_ignorados`. Se ainda assim os filtros zerarem o resultado, [src/pipeline.py](src/pipeline.py) refaz a busca sem eles.
+- `consulta_sql` ([src/structured_query.py](src/structured_query.py) + [src/structured_db.py](src/structured_db.py)): perguntas de conta sobre as bases estruturada e agregada (ranking, estatística com média e mediana, comparação entre esferas, evolução no tempo, agrupamento) são respondidas por uma consulta SQL pré-escrita e parametrizada — o LLM nunca escreve SQL. O resultado entra como chunk (`doc_type="sql"`, `chunk_id` começando com `sql:`) antes dos chunks da busca. Se o termo pedido não existe no objeto de nenhuma contratação, o resultado diz isso em vez de calcular sobre outro assunto. Falha no banco é registrada no log e a resposta segue só com a busca.
+- `geracao` ([src/generate.py](src/generate.py)): guardrails determinísticos antes do LLM, prompt limitado à janela do modelo (`GENERATION_CONTEXT_CHARS` no total e `GENERATION_CHUNK_CHARS` por chunk; o log registra `chunks_no_prompt` e `chunks_fora_do_orcamento`) e saída pedida em JSON (`response_format`).
+- `validacao` ([src/generate.py](src/generate.py)): checa a saída do LLM. JSON inválido vira recusa segura, citação de chunk que não foi recuperado é descartada (`extra.citacoes_descartadas`) e dado pessoal na resposta é mascarado.
+
+[src/pipeline.py](src/pipeline.py) une as etapas numa única função (`responder`).
+
+**Ainda não implementados:** `rerank` (o `retrieve` aceita um reranker plugável, mas nenhum é usado; o modelo de rerank da turma ainda não foi liberado) e `feedback`.
 
 O parsing da geração aceita as variações de chave que o modelo da turma produz na prática (`sources` em vez de `sources_used`, `confidence` numérico em vez de `confidence_level`) e registra no log, em `extra.chaves_fora_do_contrato`, quando isso acontece. Toda etapa registra log estruturado via [src/obs.py](src/obs.py) (JSONL em `logs/pipeline-AAAA-MM-DD.jsonl`, com `run_id`, `stage`, latência e tokens).
 
-Uma pergunta via `responder` gera, no log, uma linha por stage — `roteamento`, `retrieval_denso`, `retrieval_bm25`, `fusao_rrf`, `rerank` (só com reranker) e `geracao` — todas com o mesmo `run_id` e `query_id`. `geracao` traz `tokens` e `modelo` a partir de `response.usage` do SDK OpenAI. Etapa que falha grava `status: "erro"` com `extra.error_type`. Dados pessoais da pergunta são mascarados antes de ir para o log. Testes em [tests/test_pipeline_logs.py](tests/test_pipeline_logs.py); os testes gravam log num diretório temporário ([tests/conftest.py](tests/conftest.py)), nunca em `logs/`.
+Uma pergunta via `responder` gera, no log, uma linha por stage — `query_analysis`, `roteamento`, `retrieval_denso`, `retrieval_bm25`, `fusao_rrf`, `rerank` (só com reranker), `consulta_sql` (só em pergunta de conta), `geracao` e `validacao` (só quando o LLM foi chamado) — todas com o mesmo `run_id` e `query_id`. `geracao` traz `tokens` e `modelo` a partir de `response.usage` do SDK OpenAI; `retrieval_denso` traz os tokens do embedding da pergunta quando usa o embedding padrão do servidor. Etapa que falha grava `status: "erro"` com `extra.error_type`. Dados pessoais da pergunta são mascarados antes de ir para o log. Testes em [tests/test_pipeline_logs.py](tests/test_pipeline_logs.py); os testes gravam log num diretório temporário ([tests/conftest.py](tests/conftest.py)), nunca em `logs/`.
 
 ## Estrutura do repositório
 
@@ -98,12 +124,17 @@ Uma pergunta via `responder` gera, no log, uma linha por stage — `roteamento`,
 ├── tests/fixtures/               ← amostras locais para testes offline
 ├── tests/                       ← testes de contrato (pytest), offline
 ├── app/
-│   └── cli.py                   ← interface de linha de comando: rota e resposta completa do pipeline
+│   ├── cli.py                   ← interface de linha de comando: rota e resposta completa do pipeline
+│   └── api.py                   ← API HTTP (FastAPI): GET /health e POST /api/v1/query
 ├── src/
 │   ├── fetch_corpus.py          ← coleta determinística e versionada do corpus
 │   ├── providers/               ← provedores declarativos de fontes (pncp.py: contratações, atas + PDFs, PCA)
 │   ├── pncp_client.py           ← cliente HTTP do PNCP com tentativas e timeout
+│   ├── artifact_downloader.py   ← download de arquivos (PDF/HTML/CSV) com detecção de formato e deduplicação por SHA-256
+│   ├── retry.py                 ← espera entre tentativas HTTP (Retry-After do servidor ou backoff exponencial)
+│   ├── ssl_context.py           ← certificados HTTPS: os do sistema somados ao bundle do certifi
 │   ├── corpus_validator.py      ← validação do inventário contra o manifesto
+│   ├── source_catalog.py        ← curadoria das fontes (subcomandos discover, lookup, propose)
 │   ├── manifest_curator.py      ← descoberta e propostas para o manifesto
 │   ├── source_lookup.py         ← busca remota nas fontes suportadas
 │   ├── corpus_search.py         ← busca local no inventário
@@ -113,11 +144,14 @@ Uma pergunta via `responder` gera, no log, uma linha por stage — `roteamento`,
 │   ├── ocr.py                   ← OCR (Tesseract) das páginas de PDF escaneadas, usado por prepare_documents.py
 │   ├── create_embeddings.py     ← embeddings com cache, multi-provedor e escrita incremental
 │   ├── index.py                 ← índice vetorial por base; gera embeddings ou reaproveita os de data/embeddings/
+│   ├── query_analysis.py        ← extrai filtros de ano, valor e órgão da pergunta
+│   ├── structured_db.py         ← base estruturada em SQL (Postgres/Neon ou SQLite): tabelas contratacoes e pca_planos
+│   ├── structured_query.py      ← consultas SQL fixas (ranking, estatística, evolução, agrupamento) como evidência
 │   ├── router.py                ← roteamento determinístico (Adaptive RAG)
-│   ├── retrieve.py              ← recuperação híbrida: denso + BM25 + RRF, filtros de metadado, rerank plugável
-│   ├── generate.py              ← geração com guardrails e parsing defensivo da saída do LLM
+│   ├── retrieve.py              ← recuperação híbrida: denso + BM25 + RRF, filtros de metadado por base, rerank plugável
+│   ├── generate.py              ← geração com guardrails, prompt na janela do modelo e validação da saída do LLM
 │   ├── sensitivity.py           ← política de sensibilidade: mascaramento de CPF/telefone/e-mail e filtro de restritos
-│   ├── pipeline.py              ← une roteamento + recuperação + geração numa função (responder)
+│   ├── pipeline.py              ← une query_analysis + roteamento + recuperação + geração numa função (responder)
 │   ├── obs.py                   ← logging estruturado (JSONL) e contagem de tokens
 │   └── schema.py                ← modelos Pydantic (chunk, roteamento, resposta, recusa)
 ├── llm_ecoa.py                  ← exemplo mínimo de geração e embedding via endpoint compartilhado
@@ -341,9 +375,32 @@ dos chunks; para montar um índice de desenvolvimento a partir dele, prepare de
 novo os PDFs de `tests/fixtures/pdf/` (base `exemplos_teste`, 446 chunks):
 
 ```bash
-py -m src.prepare_documents --input tests/fixtures/pdf --manifest corpus_manifest.yaml --base-id exemplos_teste --output data/normalized/documents.jsonl
-py .\src\index.py --embeddings data/embeddings/embeddings.jsonl
+py -m src.prepare_documents --input tests/fixtures/pdf --manifest corpus_manifest.yaml --base-id exemplos_teste --output data/attempts/exemplos_teste/documents.jsonl
+py .\src\index.py --input data/attempts/exemplos_teste/documents.jsonl --output data/attempts/exemplos_teste/index --embeddings data/embeddings/embeddings.jsonl
 ```
+
+> **Atenção:** não use `--output data/normalized/documents.jsonl` nem o
+> `--output` padrão do `index.py` (`index/`) para a base `exemplos_teste`. O
+> `retrieve.py` busca o texto dos chunks em `data/normalized/documents.jsonl`;
+> sobrescrever esse arquivo com só os exemplos deixa as bases oficiais sem
+> texto, e o pipeline passa a recusar todas as perguntas. Da mesma forma,
+> indexar só os exemplos em `index/` reescreve o `index/manifest.json` global.
+
+**4.1 Base estruturada em SQL**
+
+A base SQL é montada a partir de `data/normalized/documents.jsonl` (registros JSON de `contratos_estruturado` e `pca_agregado`) e se remonta sozinha na primeira pergunta de conta depois que esse arquivo muda. Para montar ou consultar à mão:
+
+```bash
+py -m src.structured_db build
+py -m src.structured_db sql "SELECT modalidade, COUNT(*) AS n FROM contratacoes GROUP BY modalidade ORDER BY n DESC"
+```
+
+Onde a base fica depende de `DATABASE_URL` no `.env`:
+
+- **Vazio:** SQLite local em `data/structured/base_estruturada.sqlite` (fora do Git). Não precisa de conta nem de internet.
+- **Preenchido:** Postgres, por exemplo no [Neon](https://neon.tech). Cole a connection string do painel do Neon (`postgresql://...?sslmode=require`). A connection string tem senha: fica só no `.env`, nunca no repositório nem no log (o log mostra só o host).
+
+Tabelas: `contratacoes` (uma linha por contratação do PNCP: órgão, esfera, município, modalidade, objeto, valor estimado e homologado; `valor` = homologado, ou estimado quando o homologado é zero ou ausente) e `pca_planos` (um plano de contratações anual por unidade, com valor total e quantidade de itens). A tabela de PCA tem só os planos presentes no corpus — o total oficial do PCA do Estado está nos indicadores da base agregada, e o resultado SQL avisa isso. A tabela `contratacoes` não tem dados de fornecedor.
 
 **5. Testar o endpoint de LLM/embeddings compartilhado**
 
@@ -394,6 +451,8 @@ EMBEDDING_MODEL  = "xagi/qwen3-embedding:0.6b-q4_k_m"
 ```
 
 Como o endpoint é compartilhado por toda a turma: cache de embeddings em disco é obrigatório, índices devem ser persistidos e recarregados (nunca reindexados a cada execução), e lotes devem ser pequenos com pausa entre chamadas.
+
+O prompt da geração é limitado para caber na janela do modelo: `GENERATION_CONTEXT_CHARS` (padrão 3500) é o total de caracteres de contexto, e `GENERATION_CHUNK_CHARS` (padrão 900) é o máximo por chunk. Se o prompt passar da janela, o Ollama corta o começo sem avisar. Os dois limites podem ser ajustados no `.env` (ver [.env.example](.env.example)).
 
 Acompanhamento detalhado dia a dia em [acompanhamento/ACOMPANHAMENTO.md](acompanhamento/ACOMPANHAMENTO.md).
 

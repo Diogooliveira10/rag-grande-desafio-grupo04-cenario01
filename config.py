@@ -23,6 +23,12 @@ OLLAMA_URL = _env("OLLAMA_URL", "http://ecoa-llm.duckdns.org:11434/v1")
 OLLAMA_API_KEY = _env("OLLAMA_API_KEY", "ollama")
 GENERATION_MODEL = _env("GENERATION_MODEL", "qcwind/qwen3-8b-instruct-Q4-K-M")
 EMBEDDING_MODEL = _env("EMBEDDING_MODEL", "xagi/qwen3-embedding:0.6b-q4_k_m")
+# Orçamento do contexto da geração (src/generate.py). O Ollama da turma usa
+# janela de 2048 tokens e corta o INÍCIO do prompt que passar disso, levando
+# junto a instrução de responder em JSON. Os padrões deixam o prompt em torno
+# de 1.500 tokens, com folga para a resposta.
+GENERATION_CONTEXT_CHARS = int(_env("GENERATION_CONTEXT_CHARS", "3500"))
+GENERATION_CHUNK_CHARS = int(_env("GENERATION_CHUNK_CHARS", "900"))
 OLLAMA_LOCAL_URL = _env("OLLAMA_LOCAL_URL", "http://localhost:11434/v1")
 OLLAMA_LOCAL_API_KEY = _env("OLLAMA_LOCAL_API_KEY", "ollama")
 OLLAMA_LOCAL_EMBEDDING_MODEL = _env("OLLAMA_LOCAL_EMBEDDING_MODEL", EMBEDDING_MODEL)
@@ -48,4 +54,7 @@ OCR_DPI = int(_env("OCR_DPI", "300"))
 RAW_DATA_DIR = ROOT_DIR / "data" / "raw" / "v1"
 NORMALIZED_DATA_DIR = ROOT_DIR / "data" / "normalized"
 INDEX_DIR = ROOT_DIR / "index"
+# Base estruturada em SQL (src/structured_db.py). Vazio = SQLite local em
+# data/structured/; preenchido = Postgres (ex.: Neon). Nunca versionar o valor.
+DATABASE_URL = _env("DATABASE_URL", "")
 LOGS_DIR = ROOT_DIR / "logs"

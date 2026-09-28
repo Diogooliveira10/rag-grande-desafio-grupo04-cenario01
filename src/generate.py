@@ -41,10 +41,13 @@ def _cliente_padrao() -> ClienteLLM:
     import llm_ecoa
 
     def _chamar(mensagens: list[dict]) -> Any:
+        # json_object faz o Ollama restringir a saída a JSON válido; só o
+        # prompt não bastava para o qwen3-8b.
         return llm_ecoa.client.chat.completions.create(
             model=GENERATION_MODEL,
             messages=mensagens,
             temperature=0.2,
+            response_format={"type": "json_object"},
         )
 
     return _chamar
@@ -127,9 +130,58 @@ def _cabecalho(metadata: ChunkMetadata) -> str:
     return f"[{' | '.join(campos)}]"
 
 
+_VAZIOS = (None, "", [], {})
+
+
+def _sem_vazios(valor: Any) -> Any:
+    if isinstance(valor, dict):
+        limpo = {chave: _sem_vazios(item) for chave, item in valor.items()}
+        return {chave: item for chave, item in limpo.items() if item not in _VAZIOS}
+    if isinstance(valor, list):
+        return [item for item in (_sem_vazios(i) for i in valor) if item not in _VAZIOS]
+    return valor
+
+
+def _compactar(conteudo: str) -> str:
+    """Registro JSON (PNCP) vira JSON compacto, sem campos vazios; texto só
+    perde espaços repetidos. O JSON indentado gastava boa parte da janela."""
+    try:
+        dados = json.loads(conteudo)
+    except (TypeError, ValueError):
+        return " ".join(conteudo.split())
+    return json.dumps(_sem_vazios(dados), ensure_ascii=False, separators=(",", ":"))
+
+
+def _chunks_no_orcamento(chunks: list[Chunk]) -> list[Chunk]:
+    """Chunks, na ordem da recuperação, que cabem na janela do modelo.
+
+    Cada conteúdo é compactado e cortado em ``GENERATION_CHUNK_CHARS``; os
+    chunks entram até somar ``GENERATION_CONTEXT_CHARS`` (o primeiro sempre
+    entra). Sem isso, o Ollama descarta o começo do prompt.
+    """
+    selecionados: list[Chunk] = []
+    usados = 0
+    for chunk in chunks:
+        conteudo = _compactar(chunk.content)
+        if len(conteudo) > config.GENERATION_CHUNK_CHARS:
+            conteudo = conteudo[: config.GENERATION_CHUNK_CHARS].rstrip() + " [...]"
+        tamanho = len(_cabecalho(chunk.metadata)) + len(conteudo)
+        if selecionados and usados + tamanho > config.GENERATION_CONTEXT_CHARS:
+            break
+        selecionados.append(chunk.model_copy(update={"content": conteudo}))
+        usados += tamanho
+    return selecionados
+
+
 def _montar_prompt(query: str, chunks: list[Chunk]) -> list[dict]:
     contexto = "\n\n".join(f"{_cabecalho(c.metadata)}\n{c.content}" for c in chunks)
-    mensagem_usuario = f"Contexto:\n{contexto}\n\nPergunta: {query}"
+    # A instrução de formato se repete no fim: se o prompt passar da janela,
+    # o Ollama corta o começo, e o fim é o que o modelo ainda vê.
+    mensagem_usuario = (
+        f"Contexto:\n{contexto}\n\nPergunta: {query}\n\n"
+        "Responda somente com o objeto JSON no formato pedido, citando em "
+        "sources_used os chunk_id usados."
+    )
     return [
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": mensagem_usuario},
@@ -223,11 +275,13 @@ def _parsear_resposta_llm(
     query: str,
     chunks: list[Chunk],
     bases_consultadas: list[Natureza],
-) -> tuple[RAGResponse, Optional[str], list[str]]:
-    """Devolve a resposta, o motivo se a saída do LLM for inválida e as chaves
-    fora do contrato que foram aceitas como alias."""
+) -> tuple[RAGResponse, Optional[str], list[str], list[str]]:
+    """Devolve a resposta, o motivo se a saída do LLM for inválida, as chaves
+    fora do contrato que foram aceitas como alias e os chunk_ids citados pelo
+    LLM que não estavam entre os chunks recuperados (descartados)."""
     chunks_por_id = {c.metadata.chunk_id: c for c in chunks}
     alternativas_usadas: list[str] = []
+    citacoes_descartadas: list[str] = []
     try:
         dados = _extrair_json(bruto)
         answer = str(dados["answer"]).strip()
@@ -239,6 +293,7 @@ def _parsear_resposta_llm(
         for chunk_id in _campo(dados, "sources_used", alternativas_usadas) or []:
             chunk = chunks_por_id.get(chunk_id)
             if chunk is None:
+                citacoes_descartadas.append(str(chunk_id))
                 continue
             sources_used.append(
                 SourceRef(
@@ -268,13 +323,14 @@ def _parsear_resposta_llm(
             is_refusal=is_refusal,
             refusal_reason=refusal_reason,
         )
-        return resposta, None, alternativas_usadas
+        return resposta, None, alternativas_usadas, citacoes_descartadas
     except Exception as exc:
         # Saída inválida do LLM vira recusa segura; o motivo vai para o log.
         return (
             _recusa(query, bases_consultadas, RefusalReason.SEM_EVIDENCIA),
             f"{type(exc).__name__}: {exc}",
             alternativas_usadas,
+            citacoes_descartadas,
         )
 
 
@@ -310,6 +366,42 @@ def _logar_evento(
             "bases_consultadas": [b.value for b in resposta.bases_consultadas],
             "num_sources": len(resposta.sources_used),
             **extra,
+        },
+    )
+
+
+def _logar_validacao(
+    run_id: str,
+    query_id: str,
+    inicio: float,
+    resposta: RAGResponse,
+    *,
+    erro_parsing: Optional[str],
+    citacoes_descartadas: list[str],
+    chaves_alias: list[str],
+    mascaramentos_resposta: dict[str, int],
+) -> None:
+    """Registra o stage ``validacao``: o que foi checado/corrigido na saída do LLM.
+
+    Separado de ``geracao`` (chamada ao LLM, tokens) para o log mostrar quanto
+    da resposta final veio de correção: JSON inválido virou recusa, citação de
+    chunk não recuperado foi descartada, dado pessoal foi mascarado.
+    """
+    registrar(
+        run_id=run_id,
+        query_id=query_id,
+        stage=Stage.VALIDACAO,
+        status="saida_invalida" if erro_parsing else "ok",
+        latencia_ms=(time.monotonic() - inicio) * 1000,
+        input=resposta.query,
+        output=f"{len(resposta.sources_used)} fontes válidas; {len(citacoes_descartadas)} descartadas",
+        extra={
+            "json_valido": erro_parsing is None,
+            "citacoes_descartadas": citacoes_descartadas,
+            "chaves_fora_do_contrato": chaves_alias,
+            "mascaramentos_resposta": mascaramentos_resposta,
+            "confidence_level": resposta.confidence_level.value,
+            "is_refusal": resposta.is_refusal,
         },
     )
 
@@ -357,6 +449,10 @@ def gerar_resposta(
         _logar_evento(run_id, query_id, "sem_chunks", inicio, resposta, **sensibilidade)
         return resposta
 
+    chunks_prompt = _chunks_no_orcamento(chunks)
+    sensibilidade["chunks_no_prompt"] = len(chunks_prompt)
+    sensibilidade["chunks_fora_do_orcamento"] = len(chunks) - len(chunks_prompt)
+    chunks = chunks_prompt
     mensagens = _montar_prompt(query, chunks)
     cliente = cliente or _cliente_padrao()
 
@@ -370,7 +466,10 @@ def gerar_resposta(
         )
         return resposta
 
-    resposta, erro_parsing, chaves_alias = _parsear_resposta_llm(bruto, query, chunks, bases_consultadas)
+    inicio_validacao = time.monotonic()
+    resposta, erro_parsing, chaves_alias, citacoes_descartadas = _parsear_resposta_llm(
+        bruto, query, chunks, bases_consultadas
+    )
     if erro_parsing:
         sensibilidade["erro_parsing"] = erro_parsing
     if chaves_alias:
@@ -383,5 +482,12 @@ def gerar_resposta(
     _logar_evento(
         run_id, query_id, "saida_invalida" if erro_parsing else "ok", inicio, resposta,
         tokens=tokens, modelo=GENERATION_MODEL, **sensibilidade,
+    )
+    _logar_validacao(
+        run_id, query_id, inicio_validacao, resposta,
+        erro_parsing=erro_parsing,
+        citacoes_descartadas=citacoes_descartadas,
+        chaves_alias=chaves_alias,
+        mascaramentos_resposta=mascaramentos_resposta,
     )
     return resposta

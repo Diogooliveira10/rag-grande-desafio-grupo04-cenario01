@@ -22,6 +22,7 @@ class Stage(str, Enum):
     RETRIEVAL_DENSO = "retrieval_denso"
     RETRIEVAL_BM25 = "retrieval_bm25"
     FUSAO_RRF = "fusao_rrf"
+    CONSULTA_SQL = "consulta_sql"
     RERANK = "rerank"
     GERACAO = "geracao"
     VALIDACAO = "validacao"

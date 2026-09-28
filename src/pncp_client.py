@@ -7,7 +7,6 @@ Mantém a separação entre descoberta (`/api/consulta`) e recursos identificado
 from __future__ import annotations
 
 import json
-import ssl
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -17,8 +16,10 @@ from urllib.request import Request, urlopen
 
 try:
     from .retry import retry_delay
+    from .ssl_context import criar_contexto_ssl
 except ImportError:  # permite executar o módulo diretamente
     from retry import retry_delay
+    from ssl_context import criar_contexto_ssl
 
 
 def _preview(body: bytes, content_type: str, limit: int = 240) -> str:
@@ -85,7 +86,7 @@ class PncpClient:
                 headers=request_headers,
             )
             try:
-                with urlopen(request, timeout=timeout, context=ssl.create_default_context()) as response:
+                with urlopen(request, timeout=timeout, context=criar_contexto_ssl()) as response:
                     raw = response.read(self.read_limit + 1)
                     content_type = response.headers.get("Content-Type", "")
                     body = raw[: self.read_limit]
