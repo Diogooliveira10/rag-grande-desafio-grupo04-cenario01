@@ -352,9 +352,16 @@ dos chunks; para montar um índice de desenvolvimento a partir dele, prepare de
 novo os PDFs de `tests/fixtures/pdf/` (base `exemplos_teste`, 446 chunks):
 
 ```bash
-py -m src.prepare_documents --input tests/fixtures/pdf --manifest corpus_manifest.yaml --base-id exemplos_teste --output data/normalized/documents.jsonl
-py .\src\index.py --embeddings data/embeddings/embeddings.jsonl
+py -m src.prepare_documents --input tests/fixtures/pdf --manifest corpus_manifest.yaml --base-id exemplos_teste --output data/attempts/exemplos_teste/documents.jsonl
+py .\src\index.py --input data/attempts/exemplos_teste/documents.jsonl --output data/attempts/exemplos_teste/index --embeddings data/embeddings/embeddings.jsonl
 ```
+
+> **Atenção:** não use `--output data/normalized/documents.jsonl` nem o
+> `--output` padrão do `index.py` (`index/`) para a base `exemplos_teste`. O
+> `retrieve.py` busca o texto dos chunks em `data/normalized/documents.jsonl`;
+> sobrescrever esse arquivo com só os exemplos deixa as bases oficiais sem
+> texto, e o pipeline passa a recusar todas as perguntas. Da mesma forma,
+> indexar só os exemplos em `index/` reescreve o `index/manifest.json` global.
 
 **5. Testar o endpoint de LLM/embeddings compartilhado**
 
