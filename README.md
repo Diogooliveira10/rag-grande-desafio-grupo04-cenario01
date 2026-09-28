@@ -2,6 +2,20 @@
 
 **Residência TIC em Trilhas · PUC-Rio · Instituto ECOA**
 
+## API HTTP
+
+O backend FastAPI expõe `GET /health` e `POST /api/v1/query`. Para executar
+localmente:
+
+```bash
+uvicorn app.api:app --reload --host 127.0.0.1 --port 8000
+```
+
+As origens do frontend publicado e dos servidores Vite locais já estão
+permitidas por CORS. Origens adicionais podem ser informadas, separadas por
+vírgula, em `CORS_ALLOW_ORIGINS`. O arquivo `render.yaml` contém a configuração
+de deploy; a variável secreta `OPENAI_API_KEY` deve ser definida no provedor.
+
 Sistema de **Adaptive RAG** sobre contratações públicas do Estado do Rio de Janeiro: dado uma pergunta em linguagem natural, o sistema decide sozinho **onde buscar** (norma, registro estruturado, conversa ou número agregado) antes de buscar, recupera evidência híbrida (densa + BM25 + RRF + rerank) e gera uma resposta citando fontes — ou recusa, quando o caso exige.
 
 ## Por que este cenário
