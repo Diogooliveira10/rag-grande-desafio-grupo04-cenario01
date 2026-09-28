@@ -37,3 +37,12 @@
 ### Uso de assistente de IA
 
 - Utilizei um assistente de IA para apoiar a implementação inicial, a revisão das docstrings, a criação dos testes e a validação do módulo. Revisei o resultado, solicitei a simplificação dos comentários e executei os testes antes de versionar o código.
+
+## Encontro 5 - 2026-09-23
+
+### Relato individual - Eduarda
+
+- Estruturei as partes do frontend que serão implementadas no projeto, definindo os principais elementos e funcionalidades da interface.
+- Organizei o fluxo de interação do usuário, considerando a realização de perguntas, a apresentação das respostas geradas pelo sistema e a exibição das fontes consultadas.
+- Validei a estrutura planejada de acordo com os requisitos do projeto e com as funcionalidades já disponíveis no backend.
+- Registrei as definições realizadas para orientar a etapa de implementação e garantir a integração do frontend com o pipeline de Adaptive RAG.
