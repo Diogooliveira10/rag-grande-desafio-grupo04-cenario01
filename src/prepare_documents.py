@@ -36,6 +36,7 @@ from src import ocr
 from src.fetch_corpus import load_manifest
 from src.ingest import chunk_text, sha256_file
 from src.pca_indicators import eh_csv_pca, indicadores_pca
+from src.pncp_result_indicators import indicadores_resultados_homologados
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -324,7 +325,7 @@ def _load_inventory_provenance(
     path: Path | None,
     *,
     expected_manifest_hash: str | None = None,
-) -> dict[tuple[str, str], dict[str, str]]:
+) -> dict[tuple[str, str], dict[str, Any]]:
     if path is None:
         return {}
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -341,7 +342,7 @@ def _load_inventory_provenance(
     if not isinstance(records, list):
         raise ValueError("inventário precisa conter uma lista em 'arquivos'")
 
-    provenance: dict[tuple[str, str], dict[str, str]] = {}
+    provenance: dict[tuple[str, str], dict[str, Any]] = {}
     for record in records:
         if not isinstance(record, dict):
             continue
@@ -349,19 +350,33 @@ def _load_inventory_provenance(
         digest = str(record.get("sha256") or "")
         if not base_id or not digest:
             continue
+        relation = {
+            key: record[key]
+            for key in ("source_ref", "artifact_id", "resource_kind", "document_metadata")
+            if record.get(key) not in (None, "")
+        }
         entry = {
             "origem": str(record.get("origem") or ""),
             "coletado_em": str(record.get("coletado_em") or ""),
+            "relacoes": [relation] if relation else [],
         }
         key = (base_id, digest)
         previous = provenance.get(key)
         if previous is None:
             provenance[key] = entry
             continue
-        if previous["origem"] != entry["origem"]:
-            previous["origem"] = ""
-        if previous["coletado_em"] != entry["coletado_em"]:
-            previous["coletado_em"] = ""
+        for field in ("origem", "coletado_em"):
+            if previous[field] != entry[field]:
+                previous[field] = ""
+        known_relations = {
+            json.dumps(value, ensure_ascii=False, sort_keys=True)
+            for value in previous["relacoes"]
+        }
+        for value in entry["relacoes"]:
+            encoded = json.dumps(value, ensure_ascii=False, sort_keys=True)
+            if encoded not in known_relations:
+                previous["relacoes"].append(value)
+                known_relations.add(encoded)
     return provenance
 
 
@@ -402,6 +417,26 @@ def _load_related_context(path: Path | None, base: dict[str, Any]) -> dict[str, 
         by_suffix = {str(record.get("artifact_id", "")).rsplit(":", 1)[-1]: record for record in records}
         inherited = _declared_record_metadata(_json_file(by_suffix.get("metadata")), base)
         listing = _json_file(by_suffix.get("arquivos"))
+        linked_contracts_payload = _json_file(by_suffix.get("contratos_vinculados"))
+        linked_contracts = []
+        for _, contract in _json_records(linked_contracts_payload):
+            if not isinstance(contract, dict):
+                continue
+            identifiers = {
+                key: contract[key]
+                for key in (
+                    "numeroControlePNCP",
+                    "numeroControlePNCPContrato",
+                    "numeroContratoEmpenho",
+                    "anoContrato",
+                    "sequencialContrato",
+                )
+                if contract.get(key) not in (None, "")
+            }
+            if identifiers:
+                linked_contracts.append(identifiers)
+        if linked_contracts:
+            inherited["contratos_vinculados"] = linked_contracts
         documents = {
             str(document.get("url")): document
             for document in (listing if isinstance(listing, list) else [])
@@ -716,12 +751,32 @@ def _file_units(
             payload: Any = None
             try:
                 payload = json.loads(line)
-                text = json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2)
+                text = (
+                    str(payload.get("texto"))
+                    if isinstance(payload, dict) and payload.get("texto")
+                    else json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2)
+                )
                 status = "ok"
             except json.JSONDecodeError:
                 text = line.strip()
                 status = "json_invalido"
             source_file = _relative_path(path)
+            extras = _declared_record_metadata(payload, base)
+            if isinstance(payload, dict):
+                for key in (
+                    "dataset",
+                    "tipo_valor",
+                    "indicador",
+                    "dimensao",
+                    "recorte",
+                    "metadados",
+                    "source_ref",
+                    "artifact_id",
+                    "source_sha256",
+                    "source_url",
+                ):
+                    if key in payload:
+                        extras[key] = payload[key]
             yield _make_unit(
                 path,
                 base,
@@ -735,13 +790,17 @@ def _file_units(
                 origin,
                 {
                     "linha": line_number,
-                    "logical_id": _record_logical_id(
-                        str(base["base_id"]),
-                        source_file,
-                        payload,
-                        f"linha-{line_number}",
+                    "logical_id": (
+                        str(payload.get("logical_id"))
+                        if isinstance(payload, dict) and payload.get("logical_id")
+                        else _record_logical_id(
+                            str(base["base_id"]),
+                            source_file,
+                            payload,
+                            f"linha-{line_number}",
+                        )
                     ),
-                    **_declared_record_metadata(payload, base),
+                    **extras,
                 },
             )
         return
@@ -1137,12 +1196,102 @@ def prepare_documents(
                 ]
                 extraction_cache_misses += 1
             state_units.extend(units)
+            relations = inventory_provenance.get((str(base["base_id"]), digest), {}).get("relacoes") or []
+            if relations:
+                units = [
+                    replace(unit, extras={**unit.extras, "relacoes_pncp": relations})
+                    for unit in units
+                ]
             # Aplicado a cada execução (e fora do cache): depende de outros arquivos.
             units = [_with_related_context(unit, related_context.get(digest)) for unit in units]
         except Exception as error:
             failures.append({"source_file": source_file, "erro": f"{type(error).__name__}: {error}"})
             continue
         for unit in units:
+            status_counts[unit.status] = status_counts.get(unit.status, 0) + 1
+            document_content_digest = hashlib.sha256(unit.text.encode("utf-8")).hexdigest()
+            chunking_fingerprint = _chunking_fingerprint(unit, chunk_size, overlap)
+            chunk_cache_key = (unit.document_id, document_content_digest, chunking_fingerprint)
+            if chunk_cache_key in chunks_cache:
+                chunks = _refresh_cached_chunks(chunks_cache[chunk_cache_key], unit)
+                chunk_cache_hits += 1
+            else:
+                chunks = _chunk_records(unit, chunk_size, overlap)
+                chunk_cache_misses += 1
+            records.extend(chunks)
+            documents.append(
+                {
+                    "document_id": unit.document_id,
+                    "logical_id": unit.logical_id,
+                    "source_file": unit.source_file,
+                    "base_id": unit.base_id,
+                    "natureza": unit.natureza,
+                    "doc_type": unit.doc_type,
+                    "sensitivity": unit.sensitivity,
+                    "origem": unit.origem,
+                    "manifest_fonte": unit.extras.get("manifest_fonte"),
+                    "manifest_hash": unit.manifest_hash,
+                    "bytes": unit.bytes,
+                    "coletado_em": unit.extras.get("coletado_em"),
+                    "data_vigencia": unit.data_vigencia,
+                    "formato": unit.formato,
+                    "sha256": unit.sha256,
+                    "status_extracao": unit.status,
+                    "chunks": len(chunks),
+                    "extras": _extras_for_unit(unit),
+                }
+            )
+
+    derived_result_indicators = 0
+    if base.get("base_id") == "pca_agregado" and inventory_path is not None:
+        inventory_payload = json.loads(inventory_path.read_text(encoding="utf-8"))
+        for indicador in indicadores_resultados_homologados(inventory_payload, PROJECT_ROOT):
+            text = str(indicador.get("texto") or "").strip()
+            if not text:
+                continue
+            derived_result_indicators += 1
+            indicator_id = str(indicador["indicador"])
+            document_id = f"pca_agregado:pncp:{indicator_id}"
+            logical_id = document_id
+            source_file = f"{_relative_path(inventory_path)}#derivado:{indicator_id}"
+            content_digest = hashlib.sha256(
+                json.dumps(indicador, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            ).hexdigest()
+            extras = {
+                key: value
+                for key, value in indicador.items()
+                if key != "texto"
+            }
+            unit = SourceUnit(
+                source_file=source_file,
+                logical_id=logical_id,
+                document_id=document_id,
+                base_id="pca_agregado",
+                natureza=str(base["natureza"]),
+                doc_type="indicador_pncp",
+                sensitivity=str(base.get("sensitivity_default") or "publico"),
+                origem="PNCP: resultados de itens homologados",
+                manifest_hash=summary_manifest_hash,
+                bytes=len(text.encode("utf-8")),
+                data_vigencia=None,
+                chunking_sugerido=str(base.get("chunking_sugerido") or "chunking_generico"),
+                formato="json",
+                sha256=content_digest,
+                text=text,
+                status="ok",
+                extras={
+                    "source_file": source_file,
+                    "arquivo_bruto": source_file,
+                    "nome_arquivo": indicator_id,
+                    "manifest_fonte": base.get("fonte"),
+                    "manifest_hash": summary_manifest_hash,
+                    "origem": "PNCP: resultados de itens homologados",
+                    "acesso_tipo": (base.get("acesso") or {}).get("tipo"),
+                    "logical_id": logical_id,
+                    "coletado_em": fallback_collected_at,
+                    **extras,
+                },
+            )
             status_counts[unit.status] = status_counts.get(unit.status, 0) + 1
             document_content_digest = hashlib.sha256(unit.text.encode("utf-8")).hexdigest()
             chunking_fingerprint = _chunking_fingerprint(unit, chunk_size, overlap)
@@ -1184,6 +1333,7 @@ def prepare_documents(
         "ignorados": ignored,
         "falhas": len(failures),
         "status_extracao": status_counts,
+        "indicadores_resultados_homologados": derived_result_indicators,
         "base_id": base["base_id"],
         "natureza": base["natureza"],
         "manifest_hash": summary_manifest_hash,

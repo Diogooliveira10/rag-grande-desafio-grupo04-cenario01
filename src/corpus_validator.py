@@ -7,7 +7,7 @@ from typing import Any
 
 
 OFFICIAL_BASE_TARGETS = {
-    "contratos_estruturado": 160,
+    "contratos_estruturado": 1200,
     "editais_normativo": 4,
     "atas_conversacional": 20,
     "pca_agregado": 16,
@@ -72,6 +72,8 @@ def validate_manifest_contract(manifest: dict[str, Any], *, official: bool = Tru
                     errors.append(f"{base_id}: volume_alvo deve ser positivo")
             except (TypeError, ValueError):
                 errors.append(f"{base_id}: volume_alvo inválido")
+        if base.get("volume_regra", "exato") not in {"exato", "minimo"}:
+            errors.append(f"{base_id}: volume_regra deve ser 'exato' ou 'minimo'")
 
     return ValidationResult(tuple(errors))
 
@@ -114,7 +116,10 @@ def validate_inventory_contract(
             errors.append(f"{base_id}: status={record.get('status')!r}")
         target = base.get("volume_alvo")
         obtained = record.get("volume_obtido", record.get("itens"))
-        if target is not None and obtained != target:
+        rule = str(base.get("volume_regra") or "exato")
+        if target is not None and (
+            obtained < target if rule == "minimo" else obtained != target
+        ):
             errors.append(f"{base_id}: volume esperado={target} obtido={obtained}")
 
     return ValidationResult(tuple(errors))

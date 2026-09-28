@@ -322,10 +322,12 @@ As opções de provedor são `ecoa`, `ollama`, `openai` e `custom`. O cache regi
 provedor, endpoint e modelo para impedir a mistura de espaços vetoriais
 diferentes.
 
-`src/index.py` é um caminho alternativo e mais simples: lê o mesmo
-`documents.jsonl`, mas particiona o índice por `base_id` em vez de gravar um
-único `embeddings.jsonl` com cache. Útil quando `retrieve.py` só precisa
-carregar uma base por vez.
+`src/index.py` monta o índice usado pela busca: particiona por `base_id`, grava
+os metadados/vetores em `vectors.jsonl` e persiste um índice FAISS em
+`vectors.faiss` para a recuperação densa. Depois de atualizar os documentos ou
+o modelo de embeddings, rode esse comando novamente para reconstruir os
+índices. `src.create_embeddings` continua disponível para gerar artefatos com
+cache, mas a recuperação em `src.retrieve` lê os índices criados por `src.index`.
 
 ```bash
 py .\src\index.py --dry-run     # só conta chunks por base, sem chamar o modelo de embeddings

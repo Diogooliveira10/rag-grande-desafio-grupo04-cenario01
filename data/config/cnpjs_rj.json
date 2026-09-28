@@ -1,4 +1,1311 @@
 {
-  "_comentario": "TODO (pendente com o time): lista fixa e versionada de CNPJs de orgaos publicos do Estado do RJ. E o unico jeito de restringir a base pca_agregado ao RJ, pois a API /v1/pca/ nao devolve nenhum campo de UF. Preencher antes da proxima coleta -- ate la, pca_agregado roda e simplesmente retem zero registros (nao trava o fetch_corpus.py).",
-  "cnpjs": []
+  "completo": false,
+  "data_referencia": "2026-09-25",
+  "criterio": "CNPJs de órgãos cujas unidades contratantes estejam localizadas no RJ; a UF da unidade e a esfera do órgão são campos distintos.",
+  "fontes_evidencia": [
+    {
+      "cnpj": "42498600000171",
+      "nome": "Governo do Estado do Rio de Janeiro",
+      "status": "verificado_parcialmente",
+      "observacao": "Sondagem fornecida pela equipe: consulta PNCP de contratos por CNPJ; ainda não representa o cadastro completo de unidades estaduais, municipais e federais localizadas no RJ."
+    },
+    {
+      "cnpj": "00038166000105",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "00038166000105-2-000007/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "00091652000189",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "00091652000189-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "00394429000100",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "00394429000100-2-001265/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "00394445000101",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "00394445000101-2-000086/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "00394452000103",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "00394452000103-2-007687/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "00394460000141",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "00394460000141-2-001602/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "00394460005887",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "00394460005887-2-007102/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "00394494000136",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "00394494000136-2-000005/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "00394494010441",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "00394494010441-2-000004/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "00394502000144",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "00394502000144-2-001589/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "00394544000185",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "00394544000185-2-003289/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "00402552000126",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "00402552000126-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "00508903000188",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "00508903000188-2-002751/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "00509018000113",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "00509018000113-2-005827/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "00509968000148",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "00509968000148-2-000012/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "00662270000168",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "00662270000168-2-000056/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "01263896000164",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "01263896000164-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "02313673000127",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "02313673000127-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "02452608000182",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "02452608000182-2-000008/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "04539825000130",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "04539825000130-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "04939180000122",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "04939180000122-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "10779511000107",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "10779511000107-2-000071/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "10952708000104",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "10952708000104-2-000050/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "17572121000100",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "17572121000100-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "26989715000102",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "26989715000102-2-000014/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "26994558000123",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "26994558000123-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "27149095000166",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "27149095000166-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "27792373000107",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "27792373000107-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "27907518000160",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "27907518000160-2-000012/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "27964923000110",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "27964923000110-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "28305936000140",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "28305936000140-2-000254/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "28523215000106",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "28523215000106-2-000208/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "28538734000148",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "28538734000148-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "28614865000167",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "28614865000167-2-000014/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "28636579000100",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "28636579000100-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "28695658000184",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "28695658000184-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "28909604000174",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "28909604000174-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "29076130000190",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "29076130000190-2-000020/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "29112760000172",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "29112760000172-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "29115474000160",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "29115474000160-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "29131075000193",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "29131075000193-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "29138278000101",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "29138278000101-2-000009/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "29138385000130",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "29138385000130-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "29507878000108",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "29507878000108-2-000023/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "29831716000112",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "29831716000112-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "29844172000123",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "29844172000123-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "29979036000140",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "29979036000140-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "30051023000196",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "30051023000196-2-000333/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "30170757000194",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "30170757000194-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "30899549000120",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "30899549000120-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "31443526000170",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "31443526000170-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "31505027000160",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "31505027000160-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "31849524000185",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "31849524000185-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "32001836000105",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "32001836000105-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "32243347000151",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "32243347000151-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "32504706000187",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "32504706000187-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "32512501000143",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "32512501000143-2-000060/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "33287806000161",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "33287806000161-2-000078/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "33663683000116",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "33663683000116-2-000206/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "33781055000135",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "33781055000135-2-002189/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "33787094000140",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "33787094000140-2-000349/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "34023077000107",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "34023077000107-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "34143842000114",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "34143842000114-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "34260596000180",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "34260596000180-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "36288900000123",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "36288900000123-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "36507127000149",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "36507127000149-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "37115342000167",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "37115342000167-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "37115375000700",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "37115375000700-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "39563911000162",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "39563911000162-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "39758701000120",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "39758701000120-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "42414284000102",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "42414284000102-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "42441758000105",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "42441758000105-2-000021/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "42498733000148",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "42498733000148-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "42519488000108",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "42519488000108-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "45268662000185",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "45268662000185-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "00444232000139",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "00444232000139-2-000005/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "01648573000199",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "01648573000199-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "02246138000109",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "02246138000109-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "03101148000100",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "03101148000100-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "08772020000192",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "08772020000192-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "10268003000164",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "10268003000164-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "13828365000150",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "13828365000150-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "15126437000143",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "15126437000143-2-007127/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "21337238000187",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "21337238000187-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "26963660000161",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "26963660000161-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "28084705000153",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "28084705000153-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "28741098000157",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "28741098000157-2-000016/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "29053402000136",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "29053402000136-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "29115458000178",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "29115458000178-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "29138328000150",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "29138328000150-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "29172475000147",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "29172475000147-2-000005/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "30381552000158",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "30381552000158-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "32147670000121",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "32147670000121-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "32165706000108",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "32165706000108-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "32557811000184",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "32557811000184-2-000013/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "39244595000166",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "39244595000166-2-000002/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "42277434000183",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "42277434000183-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "01612089000100",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "01612089000100-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "01612355000102",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "01612355000102-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "01616171000102",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "01616171000102-2-000002/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "01704460000163",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "01704460000163-2-000004/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "02934539000143",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "02934539000143-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "03277610000125",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "03277610000125-2-001087/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "03405084000131",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "03405084000131-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "03681070000140",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "03681070000140-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "04884574000120",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "04884574000120-2-000032/2024",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "07900983000161",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "07900983000161-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "24413538000196",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "24413538000196-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "26474056000171",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "26474056000171-2-000017/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "28645786000113",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "28645786000113-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "28741080000155",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "28741080000155-2-000002/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "29063294000182",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "29063294000182-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "29138351000145",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "29138351000145-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "29991262000147",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "29991262000147-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "30467039000184",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "30467039000184-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "31502776000133",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "31502776000133-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "31844889000117",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "31844889000117-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "32012189000129",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "32012189000129-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "32504664000184",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "32504664000184-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "33661414000110",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "33661414000110-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "34046409000160",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "34046409000160-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "37115458000104",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "37115458000104-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "39217831000155",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "39217831000155-2-000002/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "42147611000107",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "42147611000107-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "42354068000119",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "42354068000119-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "42521088000137",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "42521088000137-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "00059311000126",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "00059311000126-2-000061/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "00396895000125",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "00396895000125-2-000032/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "01612981000190",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "01612981000190-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "01615882000162",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "01615882000162-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "04892707000100",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "04892707000100-2-000063/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "08734175000134",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "08734175000134-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "11294684000106",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "11294684000106-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "28521748000159",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "28521748000159-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "28531762000133",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "28531762000133-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "28549483000105",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "28549483000105-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "28576080000147",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "28576080000147-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "28916716000152",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "28916716000152-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "29052875000119",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "29052875000119-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "29111093000103",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "29111093000103-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "29115466000114",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "29115466000114-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "29128766000138",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "29128766000138-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "29138302000102",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "29138302000102-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "29138310000159",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "29138310000159-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "29172467000109",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "29172467000109-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "29178233000594",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "29178233000594-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "29846003000122",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "29846003000122-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "30134050000122",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "30134050000122-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "30407084000143",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "30407084000143-2-000006/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "30624696000198",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "30624696000198-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "30892350000170",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "30892350000170-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "32517906000174",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "32517906000174-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "34906284000100",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "34906284000100-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "35765033000107",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "35765033000107-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "36282655000147",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "36282655000147-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "39218821000134",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "39218821000134-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "39223706000158",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "39223706000158-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "39750948000108",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "39750948000108-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "39756648000128",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "39756648000128-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "39844436000100",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "39844436000100-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    },
+    {
+      "cnpj": "50634611000160",
+      "status": "observado_parcialmente",
+      "fonte": "PNCP /contratos, descoberta RJ retomável (checkpoint v3)",
+      "id_contrato_exemplo": "50634611000160-2-000001/2025",
+      "observacao": "Órgão observado em contrato que passou pelos filtros da descoberta até 2026-09-26. Evidência de presença no recorte, não prova cadastro exaustivo de órgãos/unidades no RJ."
+    }
+  ],
+  "cnpjs": [
+    "00038166000105",
+    "00059311000126",
+    "00091652000189",
+    "00394429000100",
+    "00394445000101",
+    "00394452000103",
+    "00394460000141",
+    "00394460005887",
+    "00394494000136",
+    "00394494010441",
+    "00394502000144",
+    "00394544000185",
+    "00396895000125",
+    "00402552000126",
+    "00444232000139",
+    "00508903000188",
+    "00509018000113",
+    "00509968000148",
+    "00662270000168",
+    "01263896000164",
+    "01612089000100",
+    "01612355000102",
+    "01612981000190",
+    "01615882000162",
+    "01616171000102",
+    "01648573000199",
+    "01704460000163",
+    "02246138000109",
+    "02313673000127",
+    "02452608000182",
+    "02934539000143",
+    "03101148000100",
+    "03277610000125",
+    "03405084000131",
+    "03681070000140",
+    "04539825000130",
+    "04884574000120",
+    "04892707000100",
+    "04939180000122",
+    "07900983000161",
+    "08734175000134",
+    "08772020000192",
+    "10268003000164",
+    "10779511000107",
+    "10952708000104",
+    "11294684000106",
+    "13828365000150",
+    "15126437000143",
+    "17572121000100",
+    "21337238000187",
+    "24413538000196",
+    "26474056000171",
+    "26963660000161",
+    "26989715000102",
+    "26994558000123",
+    "27149095000166",
+    "27792373000107",
+    "27907518000160",
+    "27964923000110",
+    "28084705000153",
+    "28305936000140",
+    "28521748000159",
+    "28523215000106",
+    "28531762000133",
+    "28538734000148",
+    "28549483000105",
+    "28576080000147",
+    "28614865000167",
+    "28636579000100",
+    "28645786000113",
+    "28695658000184",
+    "28741080000155",
+    "28741098000157",
+    "28909604000174",
+    "28916716000152",
+    "29052875000119",
+    "29053402000136",
+    "29063294000182",
+    "29076130000190",
+    "29111093000103",
+    "29112760000172",
+    "29115458000178",
+    "29115466000114",
+    "29115474000160",
+    "29128766000138",
+    "29131075000193",
+    "29138278000101",
+    "29138302000102",
+    "29138310000159",
+    "29138328000150",
+    "29138351000145",
+    "29138385000130",
+    "29172467000109",
+    "29172475000147",
+    "29178233000594",
+    "29507878000108",
+    "29831716000112",
+    "29844172000123",
+    "29846003000122",
+    "29979036000140",
+    "29991262000147",
+    "30051023000196",
+    "30134050000122",
+    "30170757000194",
+    "30381552000158",
+    "30407084000143",
+    "30467039000184",
+    "30624696000198",
+    "30892350000170",
+    "30899549000120",
+    "31443526000170",
+    "31502776000133",
+    "31505027000160",
+    "31844889000117",
+    "31849524000185",
+    "32001836000105",
+    "32012189000129",
+    "32147670000121",
+    "32165706000108",
+    "32243347000151",
+    "32504664000184",
+    "32504706000187",
+    "32512501000143",
+    "32517906000174",
+    "32557811000184",
+    "33287806000161",
+    "33661414000110",
+    "33663683000116",
+    "33781055000135",
+    "33787094000140",
+    "34023077000107",
+    "34046409000160",
+    "34143842000114",
+    "34260596000180",
+    "34906284000100",
+    "35765033000107",
+    "36282655000147",
+    "36288900000123",
+    "36507127000149",
+    "37115342000167",
+    "37115375000700",
+    "37115458000104",
+    "39217831000155",
+    "39218821000134",
+    "39223706000158",
+    "39244595000166",
+    "39563911000162",
+    "39750948000108",
+    "39756648000128",
+    "39758701000120",
+    "39844436000100",
+    "42147611000107",
+    "42277434000183",
+    "42354068000119",
+    "42414284000102",
+    "42441758000105",
+    "42498600000171",
+    "42498733000148",
+    "42519488000108",
+    "42521088000137",
+    "45268662000185",
+    "50634611000160"
+  ],
+  "pendencias": [
+    "Reconciliar todos os órgãos/unidades estaduais, municipais e federais com unidade localizada no RJ.",
+    "Guardar fonte oficial e data da reconciliação para cada entrada.",
+    "Somente então marcar completo=true e executar o censo.",
+    "A lista inclui CNPJs observados nas páginas PNCP já processadas; ainda faltam órgãos sem contratos elegíveis no recorte e a reconciliação por fonte oficial independente."
+  ],
+  "atualizado_em": "2026-09-26"
 }
