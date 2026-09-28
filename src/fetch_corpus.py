@@ -748,10 +748,22 @@ def _version_number(value: str | Path) -> int | None:
 
 
 def _available_versions() -> list[int]:
+    """Versões conhecidas: pastas ``data/raw/vN/`` e inventários ``data/inventory/vN.json``.
+
+    O inventário é versionado no Git e a pasta raw não, então numa máquina que
+    só clonou o repositório a versão aparece apenas pelo ``vN.json``.
+    """
     values: set[int] = set()
-    for root in (RAW_ROOT, INVENTORY_ROOT):
-        if root.exists():
-            values.update(number for child in root.iterdir() if (number := _version_number(child.name)) is not None)
+    if RAW_ROOT.exists():
+        values.update(
+            number for child in RAW_ROOT.iterdir() if child.is_dir() and (number := _version_number(child.name)) is not None
+        )
+    if INVENTORY_ROOT.exists():
+        values.update(
+            number
+            for child in INVENTORY_ROOT.iterdir()
+            if child.is_file() and child.suffix == ".json" and (number := _version_number(child.stem)) is not None
+        )
     return sorted(values)
 
 

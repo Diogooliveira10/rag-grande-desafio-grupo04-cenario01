@@ -263,6 +263,21 @@ def test_fetch_resumes_matching_staging_checkpoint(monkeypatch, tmp_path):
     assert fetch_corpus._find_resumable_version("sha256:target") is None
 
 
+def test_versions_come_from_inventory_json_without_raw_folder(monkeypatch, tmp_path):
+    # Máquina que só clonou o repositório: data/inventory/vN.json existe, data/raw/ não.
+    inventory_root = tmp_path / "inventory"
+    (inventory_root / "checkpoints").mkdir(parents=True)
+    (inventory_root / "v1.json").write_text("{}", encoding="utf-8")
+    (inventory_root / "v2.json").write_text("{}", encoding="utf-8")
+    (inventory_root / "checkpoints" / "v7.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(fetch_corpus, "INVENTORY_ROOT", inventory_root)
+    monkeypatch.setattr(fetch_corpus, "RAW_ROOT", tmp_path / "raw")
+
+    assert fetch_corpus._available_versions() == [1, 2]
+    assert fetch_corpus._latest_version() == 2
+    assert fetch_corpus._next_version() == 3
+
+
 def test_version_lock_allows_only_one_writer(monkeypatch, tmp_path):
     monkeypatch.setattr(fetch_corpus, "RAW_ROOT", tmp_path / "raw")
 
