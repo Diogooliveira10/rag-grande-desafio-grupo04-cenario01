@@ -83,3 +83,43 @@ Fiz um teste real com retrieve, que retornou três resultados.Não rodei a avali
 ### Uso de assistentes de IA:
 
 - Usei para ajudar no erro de certificado que estava dando em um dos documentos
+
+## Encontro 7 - 2026-09-28
+
+### Relato individual - Pâmela de Freitas
+
+Fiz um fix para arrumar o query_analyzer
+- o sistema voltou a responder certo
+- Ele tava com um erro que fazia toda pergunta terminar em recusa (sem_evidencia):
+- Os filtros zeravam a busca. "acima de 500 mil" virava filtro de valor, mas nenhum chunk do índice tem esse campo preenchido, então o sistema descartava tudo.
+- O LLM não respondia em JSON. O prompt era ~4x maior que o limite do servidor da turma (2048 tokens), e o servidor cortava o começo, onde estava a instrução "responda em JSON".
+ 
+O que mudou:
+ 
+- retrieve.py: o filtro é ignorado na base que não tem o campo, ou quando eliminaria todos os chunks. Isso fica registrado no log (filtros_ignorados).
+- generate.py: os chunks vão compactos e com tamanho limitado, para caber no limite; a instrução de formato se repete no fim do prompt; e o servidor é obrigado a devolver JSON (response_format).
+- config.py: dois limites novos e ajustáveis, GENERATION_CONTEXT_CHARS e GENERATION_CHUNK_CHARS.
+ 
+- ajustes no query_analysis:
+ 
+- O filtro escondia a resposta certa. Em "valor total do PCA em 2025", o indicador com a resposta (R$ 61,1 bi) sumia, porque não tem data_vigencia. Agora os filtros da pergunta são opcionais: chunk sem o campo continua na busca, e só sai quem tem o campo com valor fora do filtro.
+- Ano virava valor. "maior valor total… de 2025" virava valor_min=2025. Agora o número precisa vir logo depois do gatilho ("maior que 100 mil"), e um ano solto só conta como valor com "R$", "reais", "mil" ou "milhão".
+ 
+Aproveitei e corrigi também:
+ 
+- Período: "entre 2024 e 2025" agora vira o intervalo de 2024 a 2025 (antes pegava só 2024).
+- Contagem: "mais de 3 contratos" e "acima de 500 mil habitantes" não viram mais filtro de valor.
+- Ano de lei: "Lei 14.133/2021" e "edital 90005/2025" não viram mais filtro de ano.
+- Bilhões: "acima de 2 bilhões" passou a ser entendido.
+- Arquivos: query_analysis.py e schema.py, adicionei um campo ano_final para o período.
+- Testes: 70 novos no total (9 na parte 1 e 18 na parte 2; o resto veio da main); agora são 406 passando.
+ 
+Resultado: a busca acha os chunks certos, os filtros não escondem mais a resposta, e a IA responde no formato certo, citando as fontes.
+Mais um fix em query_analyzer:
+- Um número com cara de ano não conta como ano quando parece dinheiro: tem "R$" antes (R$ 2025); ou tem "reais", "mil", "milhão" ou "bilhão" depois (2000 reais, 2025 mil).
+- Nesses casos, o sistema pula esse número e continua procurando outro ano na pergunta.
+- Nos testes, acrescentei os 5 casos da tabela em tests/test_query_analysis.py.
+
+### Uso de assistentes de IA:
+
+Usei para ajudar a achar a melhor solução nos erros que estavam aparecendo
