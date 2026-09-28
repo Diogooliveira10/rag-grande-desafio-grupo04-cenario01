@@ -26,7 +26,7 @@ from rich.table import Table
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = PROJECT_ROOT / "corpus_manifest.yaml"
 PROPOSALS_ROOT = PROJECT_ROOT / "data" / "proposals"
-CURATION_COMMANDS = {"discover", "propose", "review", "manifest-diff", "apply"}
+CURATION_COMMANDS = {"discover", "propose", "normative-proposal", "review", "manifest-diff", "apply"}
 console = Console()
 app = typer.Typer(
     name="source_catalog",
@@ -239,6 +239,9 @@ def _yaml_lines(value: Any, indent: int = 0) -> list[str]:
 
 def _proposed_manifest_text(manifest_path: Path, proposal: dict[str, Any]) -> str:
     current = manifest_path.read_text(encoding="utf-8")
+    for item in proposal.get("proposals", []):
+        if item.get("action") == "update_base":
+            current = _patch_manifest_base_text(current, item)
     additions = [
         item["suggested_manifest_entry"]
         for item in proposal.get("proposals", [])
@@ -252,6 +255,164 @@ def _proposed_manifest_text(manifest_path: Path, proposal: dict[str, Any]) -> st
         text += "  - " + lines[0].lstrip() + "\n"
         text += "\n".join(lines[1:]) + "\n"
     return text
+
+
+def _render_yaml_entry(key: str, value: Any, indent: int) -> list[str]:
+    prefix = " " * indent
+    if isinstance(value, dict):
+        rendered_key = json.dumps(key, ensure_ascii=False) if ":" in key else key
+        lines = [f"{prefix}{rendered_key}:"]
+        for nested_key, nested_value in value.items():
+            lines.extend(_render_yaml_entry(str(nested_key), nested_value, indent + 2))
+        return lines
+    if isinstance(value, list):
+        if not value:
+            return [f"{prefix}{key}: []"]
+        lines = [f"{prefix}{key}:"]
+        lines.extend(f"{' ' * (indent + 2)}- {_yaml_scalar(item)}" for item in value)
+        return lines
+    return [f"{prefix}{key}: {_yaml_scalar(value)}"]
+
+
+def _replace_yaml_entry(
+    lines: list[str],
+    start: int,
+    end: int,
+    *,
+    key: str,
+    value: Any,
+    indent: int,
+) -> tuple[list[str], int]:
+    prefix = " " * indent
+    match = next(
+        (index for index in range(start, end) if lines[index].startswith(prefix + key + ":")),
+        None,
+    )
+    if match is None:
+        replacement = _render_yaml_entry(key, value, indent)
+        return lines[:end] + replacement + lines[end:], len(replacement)
+    replace_end = match + 1
+    while replace_end < end:
+        line = lines[replace_end]
+        if line.strip() and not line.lstrip().startswith("#"):
+            current_indent = len(line) - len(line.lstrip(" "))
+            if current_indent <= indent:
+                break
+        replace_end += 1
+    replacement = _render_yaml_entry(key, value, indent)
+    updated = lines[:match] + replacement + lines[replace_end:]
+    return updated, len(replacement) - (replace_end - match)
+
+
+def _patch_manifest_base_text(text: str, proposal_item: dict[str, Any]) -> str:
+    base_id = str(proposal_item.get("base_id") or "")
+    patch = proposal_item.get("patch")
+    if not base_id or not isinstance(patch, dict):
+        raise ValueError("proposta update_base precisa de base_id e patch")
+    lines = text.splitlines()
+    start = next(
+        (index for index, line in enumerate(lines) if line == f"  - base_id: {base_id}"),
+        None,
+    )
+    if start is None:
+        raise ValueError(f"base não encontrada no manifesto: {base_id}")
+    end = next(
+        (index for index in range(start + 1, len(lines)) if lines[index].startswith("  - base_id:")),
+        len(lines),
+    )
+
+    for key in ("fonte", "volume_alvo", "campo_vigencia", "metadados_extras"):
+        if key in patch:
+            lines, delta = _replace_yaml_entry(
+                lines, start, end, key=key, value=patch[key], indent=4
+            )
+            end += delta
+
+    access_patch = patch.get("acesso") or {}
+    if access_patch:
+        access_start = next(
+            (index for index in range(start, end) if lines[index] == "    acesso:"),
+            None,
+        )
+        if access_start is None:
+            raise ValueError(f"base {base_id} não declara acesso")
+        access_end = next(
+            (index for index in range(access_start + 1, end) if lines[index].startswith("    ") and not lines[index].startswith("      ") and lines[index].strip()),
+            end,
+        )
+        for key, value in access_patch.items():
+            lines, delta = _replace_yaml_entry(
+                lines, access_start + 1, access_end, key=str(key), value=value, indent=6
+            )
+            end += delta
+            access_end += delta
+    return "\n".join(lines) + "\n"
+
+
+def build_normative_proposal(manifest_path: Path) -> dict[str, Any]:
+    """Propose official legal sources and metadata for the existing normative base."""
+    try:
+        from .source_catalog import NORMATIVE_SOURCES
+    except ImportError:
+        from source_catalog import NORMATIVE_SOURCES
+
+    manifest = _load_manifest(manifest_path)
+    base = next(
+        (item for item in manifest.get("bases", []) if item.get("base_id") == "editais_normativo"),
+        None,
+    )
+    if base is None:
+        raise ValueError("manifesto não declara a base editais_normativo")
+    urls = [source["url"] for source in NORMATIVE_SOURCES]
+    metadata = {source["url"]: source["metadata"] for source in NORMATIVE_SOURCES}
+    return {
+        "proposal_type": "manifest_curation",
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "current_manifest_hash": manifest_hash(manifest_path),
+        "manifest": str(manifest_path),
+        "proposals": [
+            {
+                "proposal_id": "normativa_fontes_oficiais",
+                "action": "update_base",
+                "base_id": "editais_normativo",
+                "reason": "Usa os textos oficiais da Lei 14.133, LC 123 e decretos estaduais do RJ, com metadados temporais.",
+                "patch": {
+                    "fonte": "Lei 14.133 e LC 123 (Planalto); Decretos estaduais 48.816/2023 e 48.820/2023 (CGE-RJ); editais e termos de referência vinculados no PNCP",
+                    "acesso": {
+                        "urls": urls,
+                        "metadados_por_url": metadata,
+                        "linked_source_inventory_base": "contratos_estruturado",
+                        "documentos_edital_filtro": {
+                            "campos": ["titulo", "tipoDocumentoNome"],
+                            "termos": ["edital", "termo de referencia"],
+                        },
+                        "artefatos_relacionados": {"documentos_edital": "editais_normativo"},
+                    },
+                    "volume_alvo": len(urls),
+                    "campo_vigencia": "data_vigencia_inicio",
+                    "metadados_extras": [
+                        "numero_norma", "tipo_documento", "data_publicacao", "data_vigencia_inicio",
+                        "data_vigencia_fim", "ambito", "fonte_oficial", "id_contratacao",
+                        "numero_edital", "orgao", "objeto",
+                    ],
+                },
+            },
+            {
+                "proposal_id": "normativa_filtro_documentos_pncp",
+                "action": "update_base",
+                "base_id": "contratos_estruturado",
+                "reason": "Encaminha para a base Normativa somente anexos identificados como edital ou termo de referência.",
+                "patch": {
+                    "acesso": {
+                        "documentos_edital_filtro": {
+                            "campos": ["titulo", "tipoDocumentoNome"],
+                            "termos": ["edital", "termo de referencia"],
+                        }
+                    }
+                },
+            },
+        ],
+    }
 
 
 def manifest_diff(manifest_path: Path, proposal: dict[str, Any]) -> str:
@@ -268,7 +429,7 @@ def manifest_diff(manifest_path: Path, proposal: dict[str, Any]) -> str:
 
 
 def apply_proposal(manifest_path: Path, proposal: dict[str, Any], *, new_version: str | None = None) -> Path:
-    """Aplica somente propostas de adição após validar o hash atual."""
+    """Aplica propostas de adição ou atualização após validar o hash atual."""
     expected = proposal.get("current_manifest_hash")
     actual = manifest_hash(manifest_path)
     if expected != actual:
@@ -276,8 +437,8 @@ def apply_proposal(manifest_path: Path, proposal: dict[str, Any], *, new_version
             "manifesto mudou desde a proposta: "
             f"esperado {expected or 'ausente'}, encontrado {actual}"
         )
-    if any(item.get("action") != "add_base" for item in proposal.get("proposals", [])):
-        raise ValueError("esta versão do apply aceita somente action=add_base")
+    if any(item.get("action") not in {"add_base", "update_base"} for item in proposal.get("proposals", [])):
+        raise ValueError("apply aceita somente action=add_base ou action=update_base")
 
     text = _proposed_manifest_text(manifest_path, proposal)
     if new_version:
@@ -368,7 +529,7 @@ def _print_proposal(proposal: dict[str, Any]) -> None:
         table.add_row(
             str(item.get("proposal_id", "—")),
             str(item.get("action", "—")),
-            str(entry.get("base_id", "—")),
+            str(entry.get("base_id") or item.get("base_id") or "—"),
         )
     console.print(table)
 
@@ -417,7 +578,7 @@ def _review(proposal_path: Path, output_path: Path) -> Path:
     items = proposal.get("proposals", [])
     choices = [
         {
-            "name": f"{item.get('proposal_id', '—')} — {item.get('suggested_manifest_entry', {}).get('base_id', '—')}",
+            "name": f"{item.get('proposal_id', '—')} — {item.get('suggested_manifest_entry', {}).get('base_id') or item.get('base_id', '—')}",
             "value": index,
         }
         for index, item in enumerate(items)
@@ -508,6 +669,18 @@ def propose_command(
     )
     proposal = build_proposal(manifest.resolve(), discovery_payload)
     output_path = output or PROPOSALS_ROOT / f"manifest-proposal-{_timestamp()}.json"
+    _write_json(proposal, output_path)
+    _print_proposal(proposal)
+    console.print(f"[green]Proposta salva:[/] {output_path}")
+
+
+@app.command("normative-proposal")
+def normative_proposal_command(
+    manifest: Path = typer.Option(DEFAULT_MANIFEST, "--manifest"),
+    output: Optional[Path] = typer.Option(None, "--output"),
+) -> None:
+    proposal = build_normative_proposal(manifest.resolve())
+    output_path = output or PROPOSALS_ROOT / f"normative-proposal-{_timestamp()}.json"
     _write_json(proposal, output_path)
     _print_proposal(proposal)
     console.print(f"[green]Proposta salva:[/] {output_path}")

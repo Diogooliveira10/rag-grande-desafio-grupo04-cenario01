@@ -67,6 +67,24 @@ WEB_SOURCES = (
         "html",
     ),
     (
+        "lc_123",
+        "Planalto — Lei Complementar 123/2006",
+        "https://www.planalto.gov.br/ccivil_03/leis/lcp/lcp123.htm",
+        "html",
+    ),
+    (
+        "decreto_rj_48816",
+        "CGE-RJ — Decreto Estadual 48.816/2023",
+        "https://www.cge.rj.gov.br/wp-content/uploads/2024/01/Decreto-no-48.816.pdf",
+        "pdf",
+    ),
+    (
+        "decreto_rj_48820",
+        "CGE-RJ — Decreto Estadual 48.820/2023",
+        "https://www.cge.rj.gov.br/wp-content/uploads/2024/01/Decreto-no-48.820.pdf",
+        "pdf",
+    ),
+    (
         "redelog",
         "REDELOG RJ — legislação de licitações",
         "https://redelog.rj.gov.br/redelog/legislacao-licitacoes/",
@@ -115,6 +133,57 @@ WEB_SOURCES = (
         "https://www.mppi.mp.br/internet/wp-content/uploads/2021/04/L14133.pdf",
         "pdf",
     ),
+)
+
+NORMATIVE_SOURCES = (
+    {
+        "url": "https://www.planalto.gov.br/ccivil_03/_ato2019-2022/2021/lei/l14133.htm",
+        "metadata": {
+            "titulo": "Lei nº 14.133/2021",
+            "tipo_documento": "lei_federal",
+            "numero_norma": "Lei 14.133/2021",
+            "data_publicacao": "2021-04-01",
+            "data_vigencia_inicio": "2021-04-01",
+            "ambito": "federal",
+            "fonte_oficial": "Presidência da República — Planalto",
+        },
+    },
+    {
+        "url": "https://www.planalto.gov.br/ccivil_03/leis/lcp/lcp123.htm",
+        "metadata": {
+            "titulo": "Lei Complementar nº 123/2006",
+            "tipo_documento": "lei_federal",
+            "numero_norma": "LC 123/2006",
+            "data_publicacao": "2006-12-15",
+            "data_vigencia_inicio": "2006-12-15",
+            "ambito": "federal",
+            "fonte_oficial": "Presidência da República — Planalto",
+        },
+    },
+    {
+        "url": "https://www.cge.rj.gov.br/wp-content/uploads/2024/01/Decreto-no-48.816.pdf",
+        "metadata": {
+            "titulo": "Decreto Estadual nº 48.816/2023 — fase preparatória e pesquisa de preços",
+            "tipo_documento": "decreto_estadual",
+            "numero_norma": "Decreto 48.816/2023",
+            "data_publicacao": "2023-11-25",
+            "data_vigencia_inicio": "2023-11-25",
+            "ambito": "Poder Executivo estadual direto, autárquico e fundacional do RJ",
+            "fonte_oficial": "Controladoria Geral do Estado do Rio de Janeiro — Diário Oficial",
+        },
+    },
+    {
+        "url": "https://www.cge.rj.gov.br/wp-content/uploads/2024/01/Decreto-no-48.820.pdf",
+        "metadata": {
+            "titulo": "Decreto Estadual nº 48.820/2023 — contratação direta",
+            "tipo_documento": "decreto_estadual",
+            "numero_norma": "Decreto 48.820/2023",
+            "data_publicacao": "2023-11-28",
+            "data_vigencia_inicio": "2023-11-28",
+            "ambito": "Poder Executivo estadual direto, autárquico e fundacional do RJ",
+            "fonte_oficial": "Controladoria Geral do Estado do Rio de Janeiro — Diário Oficial",
+        },
+    },
 )
 
 # Falhas que devem tornar a execução não bem-sucedida.
@@ -931,6 +1000,7 @@ def main(argv: list[str] | None = None) -> int:
         "discover",
         "lookup",
         "propose",
+        "normative-proposal",
         "review",
         "manifest-diff",
         "apply",
@@ -938,7 +1008,7 @@ def main(argv: list[str] | None = None) -> int:
         return curator_main(arguments)
     print(
         "A interface antiga foi removida. Use um subcomando: discover, lookup, "
-        "propose, review, manifest-diff ou apply.",
+        "propose, normative-proposal, review, manifest-diff ou apply.",
         file=sys.stderr,
     )
     return 2
