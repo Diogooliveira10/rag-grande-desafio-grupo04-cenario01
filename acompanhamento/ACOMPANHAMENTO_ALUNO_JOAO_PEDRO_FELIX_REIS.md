@@ -266,3 +266,31 @@ Os principais commits realizados em 25/09 registram a integração de fontes PNC
 - `8f73716` — `test: ativa testes dos módulos de corpus`;
 - `20628e5` — `feat: vincula preparação à versão mais recente do corpus`.
 
+## Atualização — 28/09/2026
+
+### Atividades realizadas
+
+Consolidei as alterações do corpus e dos percursos de ingestão no commit `15d41ac` (`feat(corpus): preparar ingestão das bases v3`) e enviei esse commit somente para `origin/joao-reis`.
+
+Durante a integração, resolvi um conflito em `src/retrieve.py` para conciliar as alterações recebidas da `main` com a implementação existente na branch.
+
+### Resultado da execução v3
+
+Conforme o [registro da execução v3](../docs/registro_execucao_v3.md), o comando `update --official --use-discovered-contracts` promoveu a v3 em 28/09. A seleção determinística foi fixada às 14:46 e a promoção terminou às 16:03, com 1.200 contratos únicos, 1.200 detalhes correspondentes aos IDs selecionados e nenhuma falha no inventário. O inventário contabilizou 1.295 arquivos e 1.243 itens lógicos nas quatro bases. Embeddings e índices não foram executados.
+
+O censo do universo do RJ continua incompleto (`scan_complete=false`); portanto, os 1.200 contratos não demonstram cobertura de todos os contratos do estado. A promoção foi do corpus bruto: extração e normalização ainda não tinham sido executadas.
+
+### Validação
+
+`py -m py_compile src/retrieve.py src/index.py` terminou sem erros e `git diff --check` não apontou problemas. A suíte de testes não foi executada.
+
+### Uso de IA (inteligência artificial)
+
+Utilizei o Codex como apoio para conferir o estado das branches, identificar os commits recebidos de `main`, integrar as alterações, resolver o conflito em `src/retrieve.py`, validar a sintaxe e atualizar este registro. Revisei o resultado da integração e confirmei que apenas `joao-reis` foi atualizada.
+
+### Resultado da sessão
+
+- Commit do corpus: `15d41ac` — `feat(corpus): preparar ingestão das bases v3`;
+- merge da `main` em `joao-reis`: `36cb53b` — branch local/remota sincronizada;
+- branch `main`: sem commit ou push feito nesta sessão;
+
