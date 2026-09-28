@@ -275,6 +275,24 @@ def test_ano_isolado_nao_tem_ano_final():
 
 
 @pytest.mark.parametrize("pergunta", [
+    "contratos acima de 2000 reais",
+    "contratos ate R$ 2025",
+    "contratos acima de 2025 mil",
+    "planos acima de 2020 milhões",
+])
+def test_valor_monetario_nao_vira_ano(pergunta):
+    filtros = qa.analisar_query(pergunta).filtros
+    assert filtros.ano is None
+    assert filtros.valor_min is not None or filtros.valor_max is not None
+
+
+def test_ano_da_pergunta_nao_e_confundido_com_valor_monetario():
+    filtros = qa.analisar_query("contratos acima de 2000 reais em 2025").filtros
+    assert filtros.ano == 2025
+    assert filtros.valor_min == pytest.approx(2000.0)
+
+
+@pytest.mark.parametrize("pergunta", [
     "O que diz a Lei 14.133/2021 sobre pregão?",
     "Qual o objeto do edital 90005/2025?",
 ])
