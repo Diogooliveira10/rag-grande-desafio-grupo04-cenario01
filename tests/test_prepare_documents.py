@@ -5,7 +5,7 @@ import hashlib
 import shutil
 from pathlib import Path
 
-from src.prepare_documents import prepare_documents
+from src.prepare_documents import main as prepare_documents_main, prepare_documents
 from src.schema import ChunkMetadata
 
 # Merge da branch joao-reis (2026-09-23): remover os skips quando o código entrar no main.
@@ -335,6 +335,83 @@ def test_prepare_documents_reuses_incremental_extraction_and_invalidates_chunks(
     assert changed_chunking["chunk_cache_misses"] == 1
 
 
+def test_prepare_documents_latest_uses_highest_complete_inventory(tmp_path, capsys):
+    data_root = tmp_path / "corpus"
+    input_dir = data_root / "raw" / "v10"
+    input_dir.mkdir(parents=True)
+    source = input_dir / "contratos.json"
+    source.write_text(
+        '{"data": [{"numeroControlePNCP": "RJ-2026-1", "objeto": "compra de teste"}]}',
+        encoding="utf-8",
+    )
+    manifest_hash = f"sha256:{hashlib.sha256(MANIFEST.read_bytes()).hexdigest()}"
+
+    for version in ("v2", "v10"):
+        inventory_dir = data_root / "inventory"
+        inventory_dir.mkdir(parents=True, exist_ok=True)
+        inventory = {
+            "version": version,
+            "completo": True,
+            "manifest_hash": manifest_hash,
+            "por_base": [{"base_id": "contratos_estruturado", "status": "complete"}],
+            "arquivos": [],
+        }
+        if version == "v10":
+            inventory["arquivos"] = [{
+                "base_id": "contratos_estruturado",
+                "status": "ok",
+                "path": str(source),
+                "source_file": str(source),
+                "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                "origem": "https://example.test/contratos",
+                "coletado_em": "2026-09-25T00:00:00+00:00",
+            }]
+        (inventory_dir / f"{version}.json").write_text(
+            json.dumps(inventory),
+            encoding="utf-8",
+        )
+
+    assert prepare_documents_main([
+        "--latest",
+        "--data-root", str(data_root),
+        "--base-id", "contratos_estruturado",
+        "--manifest", str(MANIFEST),
+    ]) == 0
+
+    output_dir = data_root / "normalized" / "v10" / "contratos_estruturado"
+    report = json.loads((output_dir / "extraction_report.json").read_text(encoding="utf-8"))
+    summary = json.loads(capsys.readouterr().out)
+    assert (output_dir / "documents.jsonl").is_file()
+    assert summary["corpus_version"] == "v10"
+    assert summary["inventory"].endswith("v10.json")
+    assert report["resumo"]["corpus_version"] == "v10"
+    assert report["resumo"]["inventory"].endswith("v10.json")
+    assert report["manifest_hash"] == manifest_hash
+
+
+def test_prepare_documents_latest_rejects_manifest_mismatch(tmp_path):
+    data_root = tmp_path / "corpus"
+    (data_root / "inventory").mkdir(parents=True)
+    (data_root / "raw" / "v3").mkdir(parents=True)
+    (data_root / "inventory" / "v3.json").write_text(
+        json.dumps({
+            "version": "v3",
+            "completo": True,
+            "manifest_hash": "sha256:stale",
+            "por_base": [{"base_id": "contratos_estruturado", "status": "complete"}],
+            "arquivos": [],
+        }),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit):
+        prepare_documents_main([
+            "--latest",
+            "--data-root", str(data_root),
+            "--base-id", "contratos_estruturado",
+            "--manifest", str(MANIFEST),
+        ])
+    assert not (data_root / "normalized").exists()
 def _pdf_em_branco(path: Path) -> Path:
     from pypdf import PdfWriter
 

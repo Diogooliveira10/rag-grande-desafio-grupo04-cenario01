@@ -257,21 +257,25 @@ py -m src.prepare_documents `
   --dry-run
 ```
 
-Quando a entrada veio de uma coleta já registrada, informe também o inventário
-correspondente. O preparador usa `base_id + SHA-256` para recuperar a origem
-específica e o horário real de coleta de cada arquivo, e usa a `source_ref` do
-inventário para que o PDF de uma ata herde a vigência e o título do documento
-registrados nos JSONs da mesma ata:
+Para preparar uma base de uma coleta já registrada, informe o inventário
+correspondente. O preparador usa `base_id + SHA-256` para recuperar a origem e o
+horário real de coleta de cada arquivo, e usa a `source_ref` do inventário para
+que o PDF de uma ata herde a vigência e o título do documento registrados nos
+JSONs da mesma ata. Para sempre usar a versão completa mais recente, informe
+`--latest` e o `--base-id`; nesse modo, o inventário é selecionado
+automaticamente:
 
 ```bash
 py -m src.prepare_documents `
-  --input data/raw/v1/contratos_estruturado `
-  --manifest corpus_manifest.yaml `
+  --latest `
   --base-id contratos_estruturado `
-  --inventory data/inventory/v1.json `
-  --output data/attempts/corpus_fetch/demo/normalized/contratos.jsonl `
-  --report data/attempts/corpus_fetch/demo/normalized/contratos_report.json
+  --manifest corpus_manifest.yaml
 ```
+
+A saída fica em `data/normalized/vN/contratos_estruturado/`, onde `vN`
+corresponde à versão indicada no resumo e no relatório da execução. Para
+reproduzir uma versão histórica, informe manualmente o inventário e os arquivos
+brutos dessa mesma versão.
 
 O script separado trata PDF, HTML, TXT, Markdown, CSV, JSON e JSONL. O
 chunking é adaptativo conforme `chunking_sugerido` do manifesto: registros

@@ -4,17 +4,18 @@ O módulo mantém a coleta separada da ingestão: lê uma base já materializada
 ou uma fixture local, extrai texto por formato, preserva a proveniência e
 grava chunks JSONL com um contrato canônico de metadados em nível único.
 
-Exemplo rápido, sem acessar as bases remotas:
+Exemplo rápido com uma fixture local, sem acessar as bases remotas:
 
     py -m src.prepare_documents `
       --input tests/fixtures/pdf `
       --manifest corpus_manifest.yaml `
       --base-id exemplos_teste `
-      --output data/normalized/v2/documents.jsonl
+      --output data/normalized/exemplos_teste.jsonl
 
-Para dados extraídos de uma coleta já inventariada, acrescente
-``--inventory data/inventory/v1.json`` para recuperar a origem e o horário
-real de coleta de cada arquivo pelo SHA-256.
+Para preparar uma base coletada, use ``--latest --base-id <base-id>``. A CLI
+seleciona o inventário completo mais recente e grava em
+``data/normalized/vN/<base-id>/``. Para reproduzir uma versão histórica,
+informe manualmente os caminhos de entrada, inventário e saída da mesma versão.
 """
 
 from __future__ import annotations
@@ -1186,6 +1187,12 @@ def prepare_documents(
         "base_id": base["base_id"],
         "natureza": base["natureza"],
         "manifest_hash": summary_manifest_hash,
+        "corpus_version": (
+            inventory_path.stem
+            if inventory_path and re.fullmatch(r"v\d+", inventory_path.stem)
+            else None
+        ),
+        "inventory": _relative_path(inventory_path) if inventory_path else None,
         "extraction_cache_hits": extraction_cache_hits,
         "extraction_cache_misses": extraction_cache_misses,
         "chunk_cache_hits": chunk_cache_hits,
@@ -1211,11 +1218,53 @@ def prepare_documents(
     return summary
 
 
+def _latest_corpus_paths(
+    data_root: Path,
+    base_id: str,
+    manifest_path: Path,
+) -> tuple[str, Path, Path, Path]:
+    inventory_root = data_root / "inventory"
+    versioned_inventories = [
+        (int(match.group(1)), path)
+        for path in inventory_root.glob("v*.json")
+        if (match := re.fullmatch(r"v(\d+)\.json", path.name))
+    ]
+    if not versioned_inventories:
+        raise FileNotFoundError(f"nenhum inventário versionado encontrado em {inventory_root}")
+
+    version_number, inventory_path = max(versioned_inventories, key=lambda item: item[0])
+    version = f"v{version_number}"
+    inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+    if inventory.get("version") != version:
+        raise ValueError(f"versão declarada no inventário não corresponde ao arquivo {inventory_path}")
+    if inventory.get("completo") is not True:
+        raise ValueError(f"o inventário mais recente ({version}) está incompleto")
+    if inventory.get("manifest_hash") != _manifest_hash(manifest_path):
+        raise ValueError(
+            f"o inventário mais recente ({version}) não corresponde ao manifesto atual; "
+            "atualize a coleta antes de preparar os documentos"
+        )
+
+    bases = inventory.get("por_base", [])
+    base_inventory = next(
+        (item for item in bases if isinstance(item, dict) and item.get("base_id") == base_id),
+        None,
+    )
+    if base_inventory is None or base_inventory.get("status") != "complete":
+        raise ValueError(f"a base {base_id!r} não está completa no inventário mais recente ({version})")
+
+    input_dir = data_root / "raw" / version
+    if not input_dir.is_dir():
+        raise FileNotFoundError(f"arquivos brutos do inventário mais recente não encontrados: {input_dir}")
+    output_dir = data_root / "normalized" / version / base_id
+    return version, input_dir, inventory_path, output_dir
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
+    parser.add_argument("--input", type=Path)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--report", type=Path)
     parser.add_argument("--manifest", type=Path, default=PROJECT_ROOT / "corpus_manifest.yaml")
     parser.add_argument("--base-id", help="base declarada no manifesto; obrigatório quando houver ambiguidade")
     parser.add_argument(
@@ -1223,22 +1272,55 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="inventário da coleta; recupera origem e coletado_em específicos de cada arquivo",
     )
+    parser.add_argument(
+        "--latest",
+        action="store_true",
+        help="usa o inventário completo mais recente e caminhos versionados de raw/ e normalized/",
+    )
+    parser.add_argument(
+        "--data-root",
+        type=Path,
+        default=PROJECT_ROOT / "data",
+        help="raiz que contém inventory/, raw/ e normalized/ (usada com --latest)",
+    )
     parser.add_argument("--chunk-size", type=int, default=1200)
     parser.add_argument("--overlap", type=int, default=150)
     parser.add_argument("--dry-run", action="store_true", help="prepara e resume sem gravar JSONL")
     args = parser.parse_args(argv)
     try:
+        if args.latest:
+            if not args.base_id:
+                parser.error("--base-id é obrigatório com --latest")
+            if args.input or args.output or args.report or args.inventory:
+                parser.error("--latest define --input, --output, --report e --inventory automaticamente")
+            version, input_dir, inventory_path, output_dir = _latest_corpus_paths(
+                args.data_root.resolve(),
+                args.base_id,
+                args.manifest.resolve(),
+            )
+            output_path = output_dir / "documents.jsonl"
+            report_path = output_dir / "extraction_report.json"
+        else:
+            version = None
+            input_dir = args.input or DEFAULT_INPUT
+            output_path = args.output or DEFAULT_OUTPUT
+            report_path = args.report or DEFAULT_REPORT
+            inventory_path = args.inventory
+
         summary = prepare_documents(
-            args.input.resolve(),
-            args.output.resolve(),
-            args.report.resolve(),
+            input_dir.resolve(),
+            output_path.resolve(),
+            report_path.resolve(),
             args.manifest.resolve(),
             base_id=args.base_id,
-            inventory_path=args.inventory.resolve() if args.inventory else None,
+            inventory_path=inventory_path.resolve() if inventory_path else None,
             chunk_size=args.chunk_size,
             overlap=args.overlap,
             dry_run=args.dry_run,
         )
+        if version:
+            summary["corpus_version"] = version
+            summary["inventory"] = _relative_path(inventory_path)
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as error:
         parser.error(str(error))
     print(json.dumps(summary, ensure_ascii=False))

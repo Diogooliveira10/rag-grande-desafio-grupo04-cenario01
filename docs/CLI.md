@@ -152,26 +152,33 @@ até serem curados e coletados por `fetch_corpus` ou `update`.
 
 ## Preparar documentos
 
-Para documentos oficiais, passe a pasta bruta e o inventário da mesma versão.
-Isso preserva a origem e a data de coleta associadas a cada arquivo:
+Para preparar uma base usando sempre a versão completa mais recente, informe
+`--latest` e o identificador da base. A CLI seleciona o inventário de maior
+versão em `data/inventory/`, valida seu vínculo com o manifesto atual, lê os
+arquivos correspondentes de `data/raw/vN/` e grava os resultados em
+`data/normalized/vN/<base-id>/`:
 
 ```powershell
 py -m src.prepare_documents `
-  --input data/raw/v2 `
-  --inventory data/inventory/v2.json `
-  --manifest corpus_manifest.yaml `
-  --output data/normalized/v2/documents.jsonl `
-  --report data/normalized/v2/extraction_report.json
+  --latest `
+  --base-id contratos_estruturado `
+  --manifest corpus_manifest.yaml
 ```
 
-`--inventory` é opcional na interface de `prepare_documents`, mas deve ser
-informado para preparar uma versão oficial. `--dry-run` resume a preparação sem
-gravar o JSONL de documentos.
+O relatório registra `corpus_version`, o inventário utilizado e o hash do
+manifesto. Se a versão mais recente estiver incompleta, sem arquivos brutos ou
+vinculada a outro hash de manifesto, a CLI para com uma mensagem clara; ela não
+recua para uma versão antiga. `--dry-run` resume a preparação sem gravar os
+arquivos normalizados.
+
+Para reproduzir uma versão histórica específica, ainda é possível informar
+`--input`, `--inventory`, `--output` e `--report` manualmente. Use sempre o
+inventário e os arquivos brutos da mesma versão.
 
 `src.ingest` continua disponível como fluxo compatível. Ele exige `--inventory`
 por padrão; `--allow-uninventoried` libera explicitamente o modo legado de
-diagnóstico. Para gerar documentos oficiais, prefira `prepare_documents` com o
-inventário correspondente.
+diagnóstico. Para documentos oficiais, prefira `prepare_documents --latest`
+com o `--base-id` da base desejada.
 
 ## Busca local no inventário
 
@@ -187,15 +194,18 @@ caminho, tipo e hash. Ela não pesquisa o texto extraído de PDFs ou chunks.
 
 ## Gerar embeddings
 
-Prefira caminhos separados por versão. Exemplo para os documentos preparados
-acima:
+Use o mesmo valor de `corpus_version` registrado pelo comando
+`prepare_documents --latest` e a pasta da base preparada. Exemplo:
 
 ```powershell
 py -m src.create_embeddings `
-  --input data/normalized/v2/documents.jsonl `
-  --output data/normalized/v2/embeddings/embeddings.jsonl `
-  --report data/normalized/v2/embeddings/embedding_report.json
+  --input data/normalized/vN/contratos_estruturado/documents.jsonl `
+  --output data/normalized/vN/contratos_estruturado/embeddings/embeddings.jsonl `
+  --report data/normalized/vN/contratos_estruturado/embeddings/embedding_report.json
 ```
+
+Substitua `vN` pelo valor informado na preparação. Assim, os embeddings e o
+relatório permanecem junto da mesma versão dos documentos.
 
 O arquivo informado em `--output` também é o cache. Vetores são reutilizados
 quando o conteúdo, metadados relevantes, esquema, provedor, endpoint e modelo
