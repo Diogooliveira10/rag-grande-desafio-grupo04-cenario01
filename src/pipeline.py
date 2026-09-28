@@ -49,7 +49,9 @@ def responder(
 
     ``query_analysis`` roda antes do roteamento e não influencia a decisão de
     quais bases consultar — só extrai filtros (ano, valor, órgão) que o
-    ``retrieve`` aplica sobre os metadados dos chunks candidatos.
+    ``retrieve`` aplica sobre os metadados dos chunks candidatos. Chunk sem o
+    campo não é descartado, e se os filtros zerarem o resultado a busca é
+    refeita sem eles.
 
     ``run_id`` e ``query_id`` são repassados a todas as etapas, amarrando no
     log (``logs/pipeline-AAAA-MM-DD.jsonl``) os stages de uma mesma pergunta.
@@ -63,16 +65,30 @@ def responder(
     chunks: list[Chunk] = []
     refusal_reason_hint = None
     if decisao.bases_selecionadas:
+        filtros = filtros_para_retrieve(analise.filtros)
         resultados = retrieve(
             query,
             decisao,
             top_k=top_k,
-            filters=filtros_para_retrieve(analise.filtros),
+            filters=filtros,
             reranker=reranker,
             escopos=escopos,
             run_id=run_id,
             query_id=query_id,
         )
+        if filtros and not resultados:
+            # Os filtros são heurísticos; se zeraram tudo, a busca sem eles
+            # ainda dá evidência ao generate (que decide se basta).
+            resultados = retrieve(
+                query,
+                decisao,
+                top_k=top_k,
+                filters=None,
+                reranker=reranker,
+                escopos=escopos,
+                run_id=run_id,
+                query_id=query_id,
+            )
         chunks = [_chunk_from_retrieval(item) for item in resultados]
     else:
         refusal_reason_hint = inferir_motivo_recusa(decisao.justificativa)

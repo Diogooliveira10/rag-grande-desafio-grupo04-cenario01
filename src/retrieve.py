@@ -260,12 +260,23 @@ def _condicao_satisfeita(actual: Any, operator: str, value: Any) -> bool:
         return False
 
 
+def _filtro_opcional(expected: Any) -> bool:
+    """Filtro com ``"optional": True`` não descarta chunk que não tem o campo."""
+    if isinstance(expected, Mapping):
+        return bool(expected.get("optional"))
+    if isinstance(expected, (tuple, list)) and expected:
+        return all(isinstance(item, Mapping) and item.get("optional") for item in expected)
+    return False
+
+
 def _matches_filters(metadata: Mapping[str, Any], filters: Mapping[str, Any] | None) -> bool:
     if not filters:
         return True
     for key, expected in filters.items():
         actual = _metadata_value(metadata, key)
         if actual is None:
+            if _filtro_opcional(expected):
+                continue
             return False
         for operator, value in _condicoes(expected):
             if not _condicao_satisfeita(actual, operator, value):

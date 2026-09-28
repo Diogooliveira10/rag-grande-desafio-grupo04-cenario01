@@ -408,6 +408,22 @@ def test_filters_exclude_missing_empty_and_unexpected_metadata_values():
     ) == []
 
 
+def test_optional_filters_keep_chunks_without_the_field():
+    records = [
+        {"chunk_id": "sem-campo", "text": "ambulancia", "metadata": {}},
+        _record("dentro", text="ambulancia", metadata_extra={"valor": "150000"}),
+        _record("fora", text="ambulancia", metadata_extra={"valor": "50000"}),
+    ]
+
+    resultados = bm25_retrieve(
+        "ambulancia",
+        records=records,
+        filters={"valor": {"operator": ">=", "value": 100_000, "optional": True}},
+    )
+
+    assert {item.chunk_id for item in resultados} == {"sem-campo", "dentro"}
+
+
 def test_retrieve_uses_route_bases_and_filters_then_rrf_scores_the_fusion(tmp_path):
     base_dir = tmp_path / "contratos_estruturado"
     base_dir.mkdir()
