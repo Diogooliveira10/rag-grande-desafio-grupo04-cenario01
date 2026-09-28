@@ -54,4 +54,7 @@ OCR_DPI = int(_env("OCR_DPI", "300"))
 RAW_DATA_DIR = ROOT_DIR / "data" / "raw" / "v1"
 NORMALIZED_DATA_DIR = ROOT_DIR / "data" / "normalized"
 INDEX_DIR = ROOT_DIR / "index"
+# Base estruturada em SQL (src/structured_db.py). Vazio = SQLite local em
+# data/structured/; preenchido = Postgres (ex.: Neon). Nunca versionar o valor.
+DATABASE_URL = _env("DATABASE_URL", "")
 LOGS_DIR = ROOT_DIR / "logs"

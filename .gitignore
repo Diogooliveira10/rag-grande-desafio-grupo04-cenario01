@@ -38,6 +38,7 @@ data/attempts
 data/smoke/
 data/smoke_v2/
 data/source_catalog/
+data/structured/
 tests/reports/corpus-validation-*.md
 
 # Resultados gerados pelas checagens
