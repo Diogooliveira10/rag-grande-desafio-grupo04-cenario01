@@ -73,6 +73,8 @@ class QueryFilters(BaseModel):
     """Filtros estruturados extraídos da pergunta pela etapa query_analysis."""
 
     ano: Optional[int] = None
+    # Último ano de um período ("entre 2024 e 2025"); None = só ``ano``.
+    ano_final: Optional[int] = None
     valor_min: Optional[float] = None
     valor_max: Optional[float] = None
     orgao: Optional[str] = None
@@ -80,7 +82,7 @@ class QueryFilters(BaseModel):
     def esta_vazio(self) -> bool:
         return all(
             valor is None
-            for valor in (self.ano, self.valor_min, self.valor_max, self.orgao)
+            for valor in (self.ano, self.ano_final, self.valor_min, self.valor_max, self.orgao)
         )
 
 

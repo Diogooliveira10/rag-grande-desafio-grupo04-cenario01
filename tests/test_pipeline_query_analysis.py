@@ -56,8 +56,8 @@ def test_responder_passa_filtros_extraidos_para_retrieve(monkeypatch):
     resultado = pipeline.responder("contratos da Secretaria de Saude acima de 100 mil em 2023")
 
     filtros = chamadas_retrieve["filters"]
-    assert filtros["orgao"] == {"operator": "contains", "value": "Secretaria de Saude"}
-    assert filtros["valor"] == {"operator": ">=", "value": 100_000.0}
+    assert filtros["orgao"] == {"operator": "contains", "value": "Secretaria de Saude", "optional": True}
+    assert filtros["valor"] == {"operator": ">=", "value": 100_000.0, "optional": True}
     assert "data_vigencia" in filtros
     assert chamadas_retrieve["num_chunks"] == 1
     assert resultado["answer"] == "ok"
