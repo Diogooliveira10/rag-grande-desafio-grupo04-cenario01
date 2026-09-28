@@ -33,16 +33,31 @@ _ANO_RE = re.compile(r"(?<![/\d.])\b(19|20)\d{2}\b")
 _PERIODO_RE = re.compile(
     r"\b(?:entre|de)\s+(?P<inicio>(?:19|20)\d{2})\s+(?:e|a|ate)\s+(?P<fim>(?:19|20)\d{2})\b"
 )
+# Número com cara de ano que é dinheiro: "R$ 2025", "2000 reais", "2025 mil".
+_MOEDA_ANTES_RE = re.compile(r"r\$\s*$")
+_MOEDA_DEPOIS_RE = re.compile(r"\s*(?:reais|real|mil|milh(?:ao|oes)|bilh(?:ao|oes))\b")
+
+
+def _eh_valor_monetario(texto: str, match: re.Match) -> bool:
+    return bool(
+        _MOEDA_ANTES_RE.search(texto[: match.start()])
+        or _MOEDA_DEPOIS_RE.match(texto, match.end())
+    )
 
 
 def _extrair_periodo(texto_normalizado: str) -> tuple[Optional[int], Optional[int]]:
-    """(ano, ano_final): "entre 2024 e 2025" -> (2024, 2025); "em 2025" -> (2025, None)."""
+    """(ano, ano_final): "entre 2024 e 2025" -> (2024, 2025); "em 2025" -> (2025, None).
+
+    Números monetários ("acima de 2000 reais") não contam como ano.
+    """
     periodo = _PERIODO_RE.search(texto_normalizado)
     if periodo:
         inicio, fim = sorted((int(periodo.group("inicio")), int(periodo.group("fim"))))
         return inicio, (fim if fim != inicio else None)
-    match = _ANO_RE.search(texto_normalizado)
-    return (int(match.group()) if match else None), None
+    for match in _ANO_RE.finditer(texto_normalizado):
+        if not _eh_valor_monetario(texto_normalizado, match):
+            return int(match.group()), None
+    return None, None
 
 
 # --------------------------------------------------------------------------
