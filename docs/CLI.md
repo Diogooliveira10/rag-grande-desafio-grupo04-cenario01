@@ -52,7 +52,7 @@ mas o resultado fica no cache incremental da preparação.
 
 ## Coleta e versões do corpus
 
-`fetch_corpus` tem os subcomandos `fetch`, `update` e `inventory`.
+`fetch_corpus` tem os subcomandos `fetch`, `update`, `discover`, `discovery` e `inventory`.
 
 Para uma coleta inicial oficial ou para reutilizar uma versão completa com o
 mesmo hash do manifesto:
@@ -71,6 +71,24 @@ py -m src.fetch_corpus inventory `
   --official
 ```
 
+Para consultar as referências que a descoberta já registrou no checkpoint, sem
+fazer novas chamadas ao PNCP:
+
+```powershell
+py -m src.fetch_corpus discovery `
+  --checkpoint-version v3 `
+  --population contrato_assinado_rj_unidades `
+  --query 42498600000171 `
+  --limit 20 `
+  --official
+```
+
+`discovery` retorna o estado do censo e referências PNCP que correspondem à
+busca textual em seus IDs e campos. Sem `--query`, lista referências em páginas
+de até 500 resultados; use `--offset` para avançar. O comando é somente leitura:
+não chama a API, não baixa recursos e não promove versão. Ele não consulta o
+conteúdo completo dos contratos; isso exige a coleta posterior.
+
 `update` requer uma versão oficial anterior e prepara a próxima. Primeiro, é
 possível conferir a estimativa sem fazer requisições ou gravar arquivos:
 
@@ -88,6 +106,23 @@ py -m src.fetch_corpus update `
   --manifest corpus_manifest.yaml `
   --official
 ```
+
+Para promover uma atualização usando a seleção determinística de contratos já
+encontrados pela descoberta RJ, sem esperar o censo completo:
+
+```powershell
+py -m src.fetch_corpus update `
+  --manifest corpus_manifest.yaml `
+  --official `
+  --use-discovered-contracts
+```
+
+Essa opção exige ao menos o alvo de contratos no checkpoint retomável e escolhe
+os IDs PNCP em ordem estável. A execução coleta os detalhes dos contratos e
+reutiliza em staging os arquivos já promovidos das demais bases, sem refazer
+suas consultas nem baixar vínculos opcionais do contrato. Como a descoberta pode estar incompleta, a v3 representa o conjunto
+selecionado, não uma afirmação de cobertura integral do RJ. A promoção continua
+sujeita à validação normal do manifesto e do inventário.
 
 O `dry-run` de `update` precisa de uma versão anterior. Sem `--official`,
 `fetch` e `update` exigem `--data-root` e escrevem uma árvore isolada com
@@ -134,6 +169,232 @@ py -m src.source_catalog manifest-diff `
 py -m src.source_catalog review `
   --proposal data/proposals/manifest-proposal.json
 ```
+
+Para revisar as fontes da base Normativa existente e preparar também a coleta
+de editais/termos de referência ligados a um inventário Estruturado:
+
+```powershell
+py -m src.source_catalog normative-proposal `
+  --manifest corpus_manifest.yaml `
+  --output data/proposals/normativa-proposal.json
+py -m src.source_catalog manifest-diff `
+  --manifest corpus_manifest.yaml `
+  --proposal data/proposals/normativa-proposal.json
+py -m src.source_catalog review `
+  --proposal data/proposals/normativa-proposal.json
+py -m src.source_catalog apply `
+  --manifest corpus_manifest.yaml `
+  --proposal data/proposals/normativa-proposal-reviewed.json
+```
+
+`normative-proposal` atualiza a base oficial existente, sem criar outra base.
+Ela propõe Lei 14.133/2021 e LC 123/2006 do Planalto, os Decretos RJ
+48.816/2023 e 48.820/2023 da CGE-RJ, seus metadados temporais e o filtro de
+anexos PNCP para edital/termo de referência. A proposta também permite usar
+`fetch` em modo experimental, limitado à base Normativa, com um inventário
+Estruturado anterior como origem dos `SourceRef`s:
+
+```powershell
+py -m src.fetch_corpus fetch `
+  --manifest corpus_manifest.yaml `
+  --data-root data/attempts/normativa `
+  --base-id editais_normativo `
+  --source-inventory data/inventory/v2.json
+```
+
+Esse percurso baixa as quatro normas fixas e segue, pelo provider PNCP
+existente, somente os anexos de edital/termo de referência dos registros
+Estruturados encontrados no inventário informado. Ele grava uma tentativa
+isolada, não promove uma versão oficial e não inicia o censo Estruturado. Sem
+`--source-inventory`, o mesmo comando coleta apenas as quatro normas fixas.
+
+O mesmo percurso isolado aceita `pca_agregado` para usar referências da base
+Estruturada e, se presentes, referências PCA do inventário informado. Ele
+consulta todos os SourceRefs de contratos e PCA presentes no inventário, busca
+itens e resultados homologados das compras vinculadas e reaproveita os PCA já
+inventariados como valores planejados. Também conserva o detalhe do contrato
+como contexto não contável para manter a data de assinatura ligada aos
+resultados. Esse percurso não exige que o cadastro
+de CNPJs esteja marcado completo: cobre apenas as fontes presentes no inventário
+e não executa o censo PCA. Também não promove versão para a árvore oficial; a
+saída continua sendo uma tentativa experimental sob `--data-root`:
+
+No `pca_agregado`, detalhes e itens consultam o PNCP e usam Dados Abertos do
+Compras.gov.br como fallback para falhas de transporte. Resultados homologados
+usam diretamente a consulta oficial por identificador da compra, que retorna
+os resultados de todos os itens em lote; isso evita uma chamada separada por
+item. O inventário registra `acquisition_backend` e a URL efetivamente usada.
+Esse percurso cobre apenas os registros PNCP 14.133 disponíveis na API
+alternativa para essa consulta em lote.
+
+```powershell
+py -m src.fetch_corpus fetch `
+  --manifest corpus_manifest.yaml `
+  --data-root data/attempts/agregada `
+  --base-id pca_agregado `
+  --source-inventory data/inventory/v3.json
+```
+
+Para esse percurso, o inventário precisa conter referências PNCP de
+`contratos_estruturado` e pelo menos o número de `SourceRef`s PCA definido no
+alvo de `pca_agregado`. Ao preparar essa tentativa, o `prepare_documents`
+materializa indicadores de resultados homologados com média simples, média
+ponderada pela quantidade homologada, mediana, quartis, mínimo, máximo,
+quantidade total e valores totais informado/calculado. Os grupos preservam a
+descrição e a unidade como publicadas, além de município, esfera, modalidade e
+ano de assinatura do contrato; cada grupo também inclui uma série mensal por
+data do resultado e contagens de observações, compras, itens, contratos
+vinculados e fornecedores. Um
+indicador separado informa quantas compras vinculadas chegaram a detalhes,
+itens e resultados, distinguindo respostas vazias de falhas.
+
+As médias e os demais preços são de **valores unitários homologados**, não
+pagamentos. A média ponderada usa quantidade homologada; produtos com
+descrições ou unidades diferentes não são convertidos nem tratados como
+equivalentes. Os indicadores de PCA permanecem identificados como valores
+planejados e não são misturados aos resultados homologados.
+
+### Atas de registro de preço vinculadas à Estruturada
+
+Para seguir as compras da Estruturada e coletar suas atas e anexos PNCP sem
+iniciar uma busca global de atas, use o percurso isolado:
+
+```powershell
+py -m src.fetch_corpus fetch `
+  --manifest corpus_manifest.yaml `
+  --data-root data/attempts/conversacional-pncp `
+  --base-id atas_conversacional `
+  --source-inventory data/inventory/v3.json
+```
+
+O coletor usa os `SourceRef`s de `contratos_estruturado`, consulta as atas de
+cada contratação vinculada, resolve a identidade PNCP de cada ata e coleta
+metadados, listagem de arquivos, contratos vinculados e documentos anunciados
+(incluindo PDFs). Os artefatos de ata preservam o `SourceRef` da própria ata;
+os documentos preservam a relação com essa identidade. A execução é uma
+tentativa isolada e retomável, não promove uma versão oficial. Ela não consulta
+SIGA e não inclui e-mails sintéticos; estes precisam ser incorporados a partir
+dos arquivos fornecidos pelo desafio.
+
+### Materializar as camadas da Agregada
+
+Para uma versão já coletada, materialize fatos e indicadores em JSONL usando
+somente os arquivos apontados pelo inventário. O comando não acessa a rede nem
+promove uma versão. `source/` continua sendo o conteúdo original em `raw/`;
+este comando grava apenas as camadas derivadas sob um diretório da mesma versão:
+
+```powershell
+py -m src.materialize_pca_aggregate `
+  --inventory data/inventory/v3.json `
+  --project-root . `
+  --output data/derived/v3/pca_agregado
+```
+
+O resultado contém `facts/pca_items.jsonl` e
+`facts/homologated_items.jsonl`, além de `aggregates/pca_planned.jsonl` e
+`aggregates/homologated_item_prices.jsonl`. O relatório registra contagens,
+hashes e a versão/hash do manifesto de origem. PCA continua sendo valor
+planejado; resultados são valores unitários homologados. As descrições e
+unidades permanecem como publicadas.
+
+Para preparar documentos de consulta a partir dos indicadores materializados,
+aponte `prepare_documents` somente para a pasta `aggregates/`:
+
+```powershell
+py -m src.prepare_documents `
+  --manifest corpus_manifest.yaml `
+  --input data/derived/v3/pca_agregado/aggregates `
+  --base-id pca_agregado `
+  --output data/normalized/v3/pca_agregado/documents.jsonl `
+  --report data/normalized/v3/pca_agregado/extraction_report.json
+```
+
+Assim, os fatos ficam auditáveis e os documentos preparados contêm os
+indicadores, sem enviar cada linha de fonte bruta ao RAG. Use os caminhos da
+versão candidata em `data/attempts/agregada/` antes da promoção, ou os caminhos
+versionados de `data/` para uma versão já promovida. Este fluxo não gera
+embeddings.
+
+Quando a coleta isolada da Agregada terminar e o inventário experimental estiver
+concluído, promova seus artefatos para a próxima versão oficial sem repetir a
+coleta das outras bases:
+
+```powershell
+py -m src.fetch_corpus update `
+  --manifest corpus_manifest.yaml `
+  --official `
+  --adopt-attempt data/attempts/agregada_lote/inventory/v1.json
+```
+
+Esse comando exige uma tentativa concluída e confere no checkpoint se cada
+contrato selecionado tem detalhe, itens e consulta de resultados bem-sucedidos.
+Depois copia os arquivos para o staging oficial, carrega as demais bases da
+versão anterior e passa pela validação/promoção normal. Falhas de vínculo da
+contratação permanecem no inventário; uma tentativa incompleta não é promovida.
+
+### Carregar a Agregada em PostgreSQL/Neon
+
+Os JSONL derivados permanecem como snapshot versionado local. Para consultá-los
+em PostgreSQL/Neon, use o cliente `psql` instalado no ambiente; o carregador não
+adiciona driver Python e não substitui os arquivos da versão. Defina `DATABASE_URL`
+no ambiente sem colocar a credencial no comando ou no repositório. A carga cria o
+schema `pca_agregado`, preserva a versão em cada linha e é idempotente para IDs já
+carregados. A view `pca_agregado.homologated_items` expõe campos tipados para SQL
+analítico.
+
+Valide localmente os arquivos antes de conectar:
+
+```powershell
+py -m src.load_pca_aggregate_postgres `
+  --input data/derived/v4/pca_agregado `
+  --dry-run
+```
+
+Depois da revisão do relatório, carregue na instância apontada por `DATABASE_URL`:
+
+```powershell
+py -m src.load_pca_aggregate_postgres `
+  --input data/derived/v4/pca_agregado
+```
+
+Exemplo de consulta para inspecionar resultados homologados, sem interpretá-los
+como pagamentos:
+
+```sql
+SELECT municipio, modalidade,
+       COUNT(*) AS observacoes,
+       AVG(valor_unitario_homologado) AS media_simples,
+       SUM(valor_unitario_homologado * quantidade_homologada)
+         / NULLIF(SUM(quantidade_homologada), 0)
+         AS media_ponderada
+FROM pca_agregado.homologated_items
+WHERE corpus_version = 'v4'
+  AND ano_assinatura = 2025
+  AND unidade_medida ILIKE '%kg%'
+  AND descricao ILIKE '%arroz%'
+GROUP BY municipio, modalidade
+ORDER BY municipio, modalidade;
+```
+
+O `--dry-run` valida os JSONL e mostra contagens sem conexão de rede. A carga
+real no Neon é uma operação separada; ela não promove o corpus nem altera os
+artefatos versionados.
+
+Para extrair os documentos de uma tentativa, use os caminhos da versão e do
+inventário informados no resumo de `fetch`:
+
+```powershell
+py -m src.prepare_documents `
+  --manifest corpus_manifest.yaml `
+  --input data/attempts/normativa/raw/v1 `
+  --inventory data/attempts/normativa/inventory/v1.json `
+  --base-id editais_normativo `
+  --output data/attempts/normativa/normalized/v1/editais_normativo/documents.jsonl `
+  --report data/attempts/normativa/normalized/v1/editais_normativo/extraction_report.json
+```
+
+Substitua `v1` pela versão experimental retornada pelo coletor. Para uma versão
+oficial completa, `prepare_documents --latest` continua sendo o fluxo padrão.
 
 `review` salva por padrão um arquivo terminado em `-reviewed.json`. Só use
 `apply` depois de revisar a proposta: esse subcomando altera

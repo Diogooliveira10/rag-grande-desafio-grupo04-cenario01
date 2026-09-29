@@ -3,6 +3,7 @@ r"""Materializa o corpus declarado pelo manifesto.
 Uso:
     py -m src.fetch_corpus fetch --manifest corpus_manifest.yaml --official
     py -m src.fetch_corpus update --manifest corpus_manifest.yaml --official
+    py -m src.fetch_corpus discover --manifest corpus_manifest.yaml --official --max-pages 2
     py -m src.fetch_corpus inventory --corpus-version v1 --official
 
 As versões são coletadas com checkpoint, staging, inventário e deduplicação
@@ -22,6 +23,7 @@ import socket
 import shutil
 import sys
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,10 +38,12 @@ try:
     from .providers import get_provider
     from .providers.base import SourceRef
     from .corpus_validator import ValidationResult, validate_inventory_contract
+    from .retry import retry_delay
 except ImportError:
     from providers import get_provider
     from providers.base import SourceRef
     from corpus_validator import ValidationResult, validate_inventory_contract
+    from retry import retry_delay
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -908,6 +912,8 @@ class _VersionContext:
     previous_items: dict[str, dict[str, Any]] = field(default_factory=dict)
     previous_version: int | None = None
     selection: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    discovery: dict[str, dict[str, Any]] = field(default_factory=dict)
+    external_inputs: dict[str, str] = field(default_factory=dict)
 
 
 def _selection_from_items(items: dict[str, dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
@@ -959,20 +965,306 @@ def _set_selection(
     context.selection[base_id] = selected
 
 
+def _seed_discovered_contract_selection(
+    context: _VersionContext,
+    manifest: dict[str, Any],
+) -> int:
+    base_id = "contratos_estruturado"
+    base = next(
+        (item for item in manifest.get("bases", []) if item.get("base_id") == base_id),
+        None,
+    )
+    if base is None:
+        raise RuntimeError(f"manifesto não declara a base {base_id}")
+    base_discovery = context.discovery.get(base_id, {})
+    unit_state = base_discovery.get("unidades_orgaos_rj", {})
+    if not unit_state.get("verificacao_completa"):
+        raise RuntimeError("unidades RJ não foram verificadas; não é seguro selecionar contratos")
+    discovery_state = base_discovery.get("contrato_assinado_rj_unidades", {})
+    eligible_sources = discovery_state.get("eligible_sources") or {}
+    if not isinstance(eligible_sources, dict):
+        raise RuntimeError("checkpoint não contém referências de contratos elegíveis")
+
+    scopes = discovery_state.get("config", {}).get("verified_unit_scopes") or []
+    verified_scopes = {
+        (
+            str(scope.get("cnpj") or "").strip(),
+            str(scope.get("codigoUnidadeAdministrativa") or "").strip(),
+        )
+        for scope in scopes
+        if isinstance(scope, dict)
+    }
+    if not verified_scopes:
+        raise RuntimeError("checkpoint não contém unidades RJ verificadas para o censo de contratos")
+
+    contracts_by_id: dict[str, dict[str, Any]] = {}
+    for candidate_id, source_value in eligible_sources.items():
+        if not isinstance(source_value, dict):
+            continue
+        source_ref = SourceRef.from_dict(source_value)
+        if source_ref.provider.casefold() != "pncp" or source_ref.resource_type.casefold() != "contrato_assinado":
+            continue
+        contract_id = str(source_ref.key.get("numeroControlePNCP") or candidate_id).strip()
+        cnpj = str(source_ref.key.get("cnpj") or "").strip()
+        unit_code = str(source_ref.key.get("codigoUnidadeAdministrativa") or "").strip()
+        if not contract_id or (cnpj, unit_code) not in verified_scopes:
+            continue
+        contracts_by_id.setdefault(contract_id, source_ref.to_dict())
+
+    selection = base.get("selecao") or {}
+    target = max(
+        int(base.get("volume_alvo") or 1),
+        int(selection.get("limite") or selection.get("limit") or 1),
+    )
+    if len(contracts_by_id) < target:
+        raise RuntimeError(
+            f"checkpoint tem {len(contracts_by_id)} contratos elegíveis em unidades RJ verificadas; "
+            f"são necessários ao menos {target}"
+        )
+
+    selected = [contracts_by_id[contract_id] for contract_id in sorted(contracts_by_id)[:target]]
+    _set_selection(context, base_id, selected)
+    if len(context.selection[base_id]) < target:
+        raise RuntimeError("seleção determinística não atingiu o alvo de contratos únicos")
+    _checkpoint_write(context)
+    return len(context.selection[base_id])
+
+
+def _record_pncp_discovery_page(
+    context: _VersionContext,
+    base_id: str,
+    resource_type: str,
+    report: dict[str, Any],
+) -> None:
+    populations = context.discovery.setdefault(base_id, {})
+    state = populations.setdefault(
+        resource_type,
+        {
+            "completed_pages": [],
+            "completed_windows": [],
+            "eligible_sources": {},
+            "cnpjs_derivados": [],
+            "unidades_observadas_por_cnpj": {},
+            "publication_sources": {},
+            "total_paginas_por_janela": {},
+            "total_registros_nacionais_por_janela": {},
+        },
+    )
+    completed_pages = set(state.get("completed_pages") or [])
+    completed_pages.add(str(report["page_key"]))
+    state["completed_pages"] = sorted(completed_pages)
+
+    total_pages = report.get("total_paginas")
+    if total_pages is not None:
+        state.setdefault("total_paginas_por_janela", {})[str(report["window"])] = int(total_pages)
+    total_records = report.get("total_registros")
+    if total_records is not None:
+        state.setdefault("total_registros_nacionais_por_janela", {})[str(report["window"])] = int(total_records)
+
+    eligible_sources = state.setdefault("eligible_sources", {})
+    cnpjs = set(state.get("cnpjs_derivados") or [])
+    observed_units = state.setdefault("unidades_observadas_por_cnpj", {})
+    publication_count = int(state.get("total_publicacoes_observadas") or 0) + len(
+        report.get("publication_organizations") or []
+    )
+    for observation in report.get("publication_organizations") or []:
+        if not isinstance(observation, dict):
+            continue
+        cnpj = str(observation.get("cnpj") or "").strip()
+        unit = observation.get("unidadeOrgao") or {}
+        if not cnpj:
+            continue
+        cnpjs.add(cnpj)
+        if not isinstance(unit, dict):
+            continue
+        unit_code = str(
+            unit.get("codigoUnidadeAdministrativa")
+            or unit.get("codigoUnidade")
+            or unit.get("codigo")
+            or ""
+        ).strip()
+        if unit_code:
+            units = observed_units.setdefault(cnpj, {})
+            units.setdefault(
+                unit_code,
+                {
+                    "codigoUnidadeAdministrativa": unit_code,
+                    "ufSigla": str(unit.get("ufSigla") or "").upper(),
+                    **(
+                        {"codigoIbge": str(unit.get("codigoIbge") or unit.get("codigoMunicipioIbge"))}
+                        if unit.get("codigoIbge") or unit.get("codigoMunicipioIbge")
+                        else {}
+                    ),
+                },
+            )
+    for candidate in report.get("candidates") or []:
+        source_ref = candidate.source_ref
+        if source_ref.resource_type.casefold() in {"contratacao", "contratação"}:
+            state.setdefault("publication_sources", {})[source_ref.stable_id] = source_ref.to_dict()
+            cnpj = str(source_ref.key.get("cnpj") or "").strip()
+            if cnpj:
+                cnpjs.add(cnpj)
+            continue
+        contract_id = str(source_ref.key.get("numeroControlePNCP") or "").strip()
+        identity = contract_id or source_ref.stable_id
+        existing_value = eligible_sources.get(identity)
+        if existing_value is None:
+            eligible_sources[identity] = source_ref.to_dict()
+        else:
+            try:
+                existing_ref = SourceRef.from_dict(existing_value)
+            except (TypeError, ValueError, KeyError):
+                eligible_sources[identity] = source_ref.to_dict()
+            else:
+                existing_link = existing_ref.key.get("numeroControlePNCPCompra")
+                current_link = source_ref.key.get("numeroControlePNCPCompra")
+                if current_link and (
+                    not existing_link or str(current_link) < str(existing_link)
+                ):
+                    eligible_sources[identity] = source_ref.to_dict()
+        cnpj = str(source_ref.key.get("cnpj") or "").strip()
+        if cnpj:
+            cnpjs.add(cnpj)
+    state["cnpjs_derivados"] = sorted(cnpjs)
+    state["total_publicacoes_observadas"] = publication_count
+
+    if report.get("window_done"):
+        completed_windows = set(state.get("completed_windows") or [])
+        completed_windows.add(str(report["window"]))
+        state["completed_windows"] = sorted(completed_windows)
+    state["total_contratos_elegiveis"] = len(eligible_sources)
+    _checkpoint_write(context)
+
+
+def _pncp_discovery_config(base: dict[str, Any], population: dict[str, Any]) -> dict[str, Any]:
+    access = base.get("acesso") or {}
+    params = {**(access.get("params") or {}), **(population.get("params") or {})}
+    resource_type = str(
+        population.get("resource_type") or access.get("resource_type") or ""
+    ).casefold()
+    if resource_type in {"contrato_assinado", "contrato_pncp"} and population.get("censo_nacional"):
+        params["dataInicial"] = min(str(params.get("dataInicial") or "2021-01-01"), "2021-01-01")
+    return {
+        "provider": str(access.get("provider") or ""),
+        "resource_type": resource_type,
+        "params": params,
+        "dataInicial": str(params.get("dataInicial") or ""),
+        "dataFinal": str(params.get("dataFinal") or ""),
+        "anoAssinatura": str(params.get("anoAssinatura") or ""),
+        "tamanhoPagina": int(params.get("tamanhoPagina") or 500),
+        "filtro_uf": "RJ",
+        "filtro_tipo": "exclui_empenho",
+    }
+
+
+def _discovery_checkpoint_matches_manifest(
+    checkpoint: dict[str, Any],
+    manifest: dict[str, Any] | None,
+) -> bool:
+    if not manifest or checkpoint.get("scenario_id") != manifest.get("scenario_id"):
+        return False
+    if checkpoint.get("state") not in {"staging", "incomplete"}:
+        return False
+    if checkpoint.get("items"):
+        return False
+
+    contract_base = next(
+        (
+            base
+            for base in manifest.get("bases", [])
+            if isinstance(base, dict)
+            and base.get("base_id") == "contratos_estruturado"
+        ),
+        None,
+    )
+    if contract_base is None:
+        return False
+    access = contract_base.get("acesso") or {}
+    population = next(
+        (
+            item
+            for item in access.get("populations", [])
+            if isinstance(item, dict)
+            and item.get("resource_type") == "contrato_assinado"
+            and item.get("censo_nacional")
+        ),
+        None,
+    )
+    if population is None:
+        return False
+
+    discovery = checkpoint.get("discovery")
+    if not isinstance(discovery, dict):
+        return False
+    contract_discovery = discovery.get("contratos_estruturado")
+    if not isinstance(contract_discovery, dict):
+        return False
+    population_key = "contrato_assinado_rj_unidades"
+    population_state = contract_discovery.get(population_key)
+    if not isinstance(population_state, dict):
+        population_key = "contrato_assinado"
+        population_state = contract_discovery.get(population_key)
+    if not isinstance(population_state, dict):
+        return False
+    saved = population_state.get("config")
+    expected = _pncp_discovery_config(contract_base, population)
+    if population_key == "contrato_assinado_rj_unidades":
+        saved_scopes = saved.get("verified_unit_scopes") if isinstance(saved, dict) else None
+        unit_state = contract_discovery.get("unidades_orgaos_rj") or {}
+        current_scopes = unit_state.get("verified_unit_scopes")
+        if not unit_state.get("verificacao_completa") or saved_scopes != current_scopes:
+            return False
+        saved = {key: value for key, value in saved.items() if key != "verified_unit_scopes"}
+    return _discovery_configs_compatible(saved, expected)
+
+
+def _discovery_configs_compatible(saved: Any, expected: dict[str, Any]) -> bool:
+    if saved == expected:
+        return True
+
+    # Compatibilidade para checkpoints criados antes de guardar provider e params completos.
+    legacy_expected = {
+        key: expected[key]
+        for key in (
+            "dataInicial",
+            "dataFinal",
+            "anoAssinatura",
+            "tamanhoPagina",
+            "filtro_uf",
+            "filtro_tipo",
+        )
+    }
+    legacy_params = {"dataInicial", "dataFinal", "anoAssinatura", "tamanhoPagina"}
+    return (
+        saved == legacy_expected
+        and expected["provider"] == "pncp"
+        and expected["resource_type"] == "contrato_assinado"
+        and set(expected["params"]).issubset(legacy_params)
+    )
+
+
 def _validate_checkpoint(
     checkpoint: dict[str, Any],
     manifest: dict[str, Any] | None,
     manifest_hash: str,
     version: int,
     staging_path: Path,
+    *,
+    allow_discovery_manifest_drift: bool = False,
+    expected_external_inputs: dict[str, str] | None = None,
 ) -> ValidationResult:
     errors: list[str] = []
-    if checkpoint.get("manifest_hash") != manifest_hash:
+    if checkpoint.get("manifest_hash") != manifest_hash and not (
+        allow_discovery_manifest_drift
+        and _discovery_checkpoint_matches_manifest(checkpoint, manifest)
+    ):
         errors.append("manifest_hash incompatível")
     if checkpoint.get("version") not in {None, f"v{version}"}:
         errors.append("versão do checkpoint incompatível")
     if checkpoint.get("state") not in {"staging", "incomplete", "promoted"}:
         errors.append("estado do checkpoint inválido")
+    if checkpoint.get("external_inputs", {}) != (expected_external_inputs or {}):
+        errors.append("entradas externas incompatíveis")
 
     items = checkpoint.get("items", {})
     if not isinstance(items, dict):
@@ -1044,17 +1336,76 @@ def _validate_checkpoint(
                     seen.add(source_id)
                     if entry.get("stable_id") not in {None, source_id}:
                         errors.append(f"selection/{base_id}: stable_id divergente")
-                target = manifest_bases.get(base_id, {}).get("volume_alvo")
-                if target is not None and len(entries) > int(target):
+                base = manifest_bases.get(base_id, {})
+                target = base.get("volume_alvo")
+                if target is not None and base.get("volume_regra") != "minimo" and len(entries) > int(target):
                     errors.append(f"selection/{base_id}: excede volume_alvo")
                 missing = source_ids_by_base.get(base_id, set()) - seen
                 if missing:
                     errors.append(f"selection/{base_id}: item fora da seleção congelada")
 
     for base_id, observed in logical_by_base.items():
-        target = manifest_bases.get(base_id, {}).get("volume_alvo")
-        if target is not None and observed > int(target):
+        base = manifest_bases.get(base_id, {})
+        target = base.get("volume_alvo")
+        if target is not None and base.get("volume_regra") != "minimo" and observed > int(target):
             errors.append(f"{base_id}: unidades lógicas excedem volume_alvo")
+
+    discovery = checkpoint.get("discovery", {})
+    if not isinstance(discovery, dict):
+        errors.append("discovery do checkpoint não é um objeto")
+    else:
+        for base_id, populations in discovery.items():
+            if not isinstance(populations, dict):
+                errors.append(f"discovery/{base_id}: não é um objeto")
+                continue
+            for resource_type, state in populations.items():
+                if not isinstance(state, dict):
+                    errors.append(f"discovery/{base_id}/{resource_type}: estado inválido")
+                    continue
+                if not isinstance(state.get("completed_pages", []), list):
+                    errors.append(f"discovery/{base_id}/{resource_type}: completed_pages inválido")
+                eligible = state.get("eligible_sources", {})
+                if not isinstance(eligible, dict):
+                    errors.append(f"discovery/{base_id}/{resource_type}: eligible_sources inválido")
+                    continue
+                for stable_id, source_value in eligible.items():
+                    try:
+                        source_ref = SourceRef.from_dict(source_value)
+                    except (TypeError, ValueError, KeyError) as exc:
+                        errors.append(f"discovery/{base_id}/{resource_type}: SourceRef inválida: {exc}")
+                        continue
+                    identity = (
+                        str(source_ref.key.get("numeroControlePNCP") or "")
+                        if resource_type.casefold().startswith(("contrato_assinado", "contrato_pncp"))
+                        else source_ref.stable_id
+                    )
+                    if stable_id != identity:
+                        errors.append(f"discovery/{base_id}/{resource_type}: identidade divergente")
+                publication_sources = state.get("publication_sources", {})
+                if not isinstance(publication_sources, dict):
+                    errors.append(f"discovery/{base_id}/{resource_type}: publication_sources inválido")
+                else:
+                    for stable_id, source_value in publication_sources.items():
+                        try:
+                            source_ref = SourceRef.from_dict(source_value)
+                        except (TypeError, ValueError, KeyError) as exc:
+                            errors.append(
+                                f"discovery/{base_id}/{resource_type}: publication SourceRef inválida: {exc}"
+                            )
+                            continue
+                        if stable_id != source_ref.stable_id:
+                            errors.append(
+                                f"discovery/{base_id}/{resource_type}: publication stable_id divergente"
+                            )
+                unit_scopes = state.get("verified_unit_scopes", [])
+                if not isinstance(unit_scopes, list) or any(
+                    not isinstance(scope, dict)
+                    or not scope.get("cnpj")
+                    or not scope.get("codigoUnidadeAdministrativa")
+                    or str(scope.get("ufSigla") or "").upper() != "RJ"
+                    for scope in unit_scopes
+                ):
+                    errors.append(f"discovery/{base_id}/{resource_type}: verified_unit_scopes inválido")
     return ValidationResult(tuple(errors))
 
 
@@ -1068,11 +1419,20 @@ def _checkpoint_write(context: _VersionContext, state: str = "staging") -> None:
         "coletado_em": context.collected_at,
         "state": state,
         "selection": selection,
+        "discovery": context.discovery,
+        "external_inputs": context.external_inputs,
         "items": context.items,
     }
     temporary = context.checkpoint_path.with_suffix(".tmp")
     temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    temporary.replace(context.checkpoint_path)
+    for attempt in range(1, 5):
+        try:
+            temporary.replace(context.checkpoint_path)
+            break
+        except PermissionError:
+            if attempt == 4:
+                raise
+            time.sleep(retry_delay(attempt, None))
 
 
 def _load_version_context(
@@ -1082,6 +1442,8 @@ def _load_version_context(
     *,
     previous_items: dict[str, dict[str, Any]] | None = None,
     previous_version: int | None = None,
+    allow_discovery_manifest_drift: bool = False,
+    external_inputs: dict[str, str] | None = None,
 ) -> _VersionContext:
     staging_path = RAW_ROOT / ".staging" / f"v{version}"
     checkpoint_path = INVENTORY_ROOT / "checkpoints" / f"v{version}.json"
@@ -1096,14 +1458,18 @@ def _load_version_context(
             manifest_hash,
             version,
             staging_path,
+            allow_discovery_manifest_drift=allow_discovery_manifest_drift,
+            expected_external_inputs=external_inputs,
         )
         if not validation.ok:
             details = "; ".join(validation.errors)
             raise RuntimeError(f"checkpoint inválido para resume: {details}")
         items = dict(checkpoint.get("items", {}))
         selection = checkpoint.get("selection") or _selection_from_items(items)
+        discovery = dict(checkpoint.get("discovery") or {})
     else:
         selection = {}
+        discovery = {}
     staging_path.mkdir(parents=True, exist_ok=True)
     context = _VersionContext(
         manifest=manifest,
@@ -1121,6 +1487,8 @@ def _load_version_context(
         previous_items=previous_items or {},
         previous_version=previous_version,
         selection=selection,
+        discovery=discovery,
+        external_inputs=external_inputs or {},
         last_request_at={},
     )
     _checkpoint_write(context)
@@ -1210,7 +1578,13 @@ def _save_version_bytes(context: _VersionContext, body: bytes, base_id: str, fil
     object_path = _ensure_object(body, digest)
     destination_dir = context.staging_path / _safe_component(base_id)
     suffix = extension if extension.startswith(".") else f".{extension}"
-    path = destination_dir / f"{_safe_component(filename_prefix)}_{digest[:12]}{suffix}"
+    safe_prefix = _safe_component(filename_prefix)
+    max_path_length = 259 if os.name == "nt" else 4096
+    available_component_length = max_path_length - len(str(destination_dir)) - 1 - 5
+    max_component_length = min(120, max(1, available_component_length))
+    prefix_limit = max(1, max_component_length - len(digest[:12]) - len(suffix) - 1)
+    safe_prefix = safe_prefix[:prefix_limit].rstrip("._") or "item"
+    path = destination_dir / f"{safe_prefix}_{digest[:12]}{suffix}"
     storage_mode = _materialize_object(object_path, path, digest)
     relative = _relative_path(path)
     context.hash_index[digest] = relative
@@ -1427,7 +1801,7 @@ def _payload_records(payload: Any) -> list[Any]:
     if isinstance(payload, list):
         return payload
     if isinstance(payload, dict):
-        for key in ("data", "items", "results", "content"):
+        for key in ("data", "items", "results", "resultado", "content"):
             if isinstance(payload.get(key), list):
                 return payload[key]
     return []
@@ -1559,7 +1933,15 @@ def _collect_selected_rest_endpoint(
     return output
 
 
-def _collect_rest_endpoint(context: _VersionContext, base: dict[str, Any], endpoint_name: str, endpoint: str) -> list[dict[str, Any]]:
+def _collect_rest_endpoint(
+    context: _VersionContext,
+    base: dict[str, Any],
+    endpoint_name: str,
+    endpoint: str,
+    *,
+    fallback_factory: Callable[[], dict[str, Any]] | None = None,
+    fallback_state: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     endpoint = _clean_url(endpoint)
     if "{" in endpoint or "}" in endpoint:
         return [_failed_record(context, base, f"{base['base_id']}:{endpoint_name}:template", endpoint, "endpoint possui placeholders e precisa de adapter de descoberta PNCP", "json")]
@@ -1601,14 +1983,55 @@ def _collect_rest_endpoint(context: _VersionContext, base: dict[str, Any], endpo
             continue
         previous = _previous_record(context, logical_id)
         _wait_rate_limit(context, base)
+        fallback_used = False
+        fallback_attempted = False
+        fallback_trigger = ""
         try:
-            response = source_check.request_url(
-                url,
-                "json",
-                attempts=3,
-                timeout=30.0,
-                headers=_conditional_headers(previous),
-            )
+            circuit_open = bool(fallback_state and fallback_state.get("circuit_open"))
+            if circuit_open and fallback_factory:
+                fallback_attempted = True
+                fallback_trigger = "circuit_breaker_open"
+                response = fallback_factory()
+                fallback_used = (
+                    response.get("status") in {"disponivel", "nao_modificado"}
+                    and response.get("json") is not None
+                )
+            else:
+                response = source_check.request_url(
+                    url,
+                    "json",
+                    attempts=1 if fallback_factory else 3,
+                    timeout=15.0 if fallback_factory else 30.0,
+                    headers=(
+                        {}
+                        if previous and previous.get("acquisition_backend") == "compras_dados_abertos"
+                        else _conditional_headers(previous)
+                    ),
+                )
+                if fallback_factory and response.get("status") in {
+                    "indisponivel",
+                    "indisponivel_temporariamente",
+                }:
+                    fallback_attempted = True
+                    fallback_trigger = str(response.get("status"))
+                    if fallback_state is not None:
+                        failures = int(fallback_state.get("consecutive_transport_failures", 0)) + 1
+                        fallback_state["consecutive_transport_failures"] = failures
+                        if failures >= 2:
+                            fallback_state["circuit_open"] = True
+                    primary_error = str(response.get("erro") or response.get("status"))
+                    alternate = fallback_factory()
+                    if (
+                        alternate.get("status") in {"disponivel", "nao_modificado"}
+                        and alternate.get("json") is not None
+                    ):
+                        response = alternate
+                        fallback_used = True
+                    else:
+                        alternate_error = str(alternate.get("erro") or alternate.get("status"))
+                        response["erro"] = f"PNCP: {primary_error}; fallback Compras.gov.br: {alternate_error}"
+                elif fallback_state is not None:
+                    fallback_state["consecutive_transport_failures"] = 0
             if response.get("status") == "nao_modificado" and previous:
                 saved = _materialize_previous_record(context, str(base["base_id"]), f"{endpoint_name}_pagina_{page}", previous, ".json")
                 if saved is not None:
@@ -1617,14 +2040,41 @@ def _collect_rest_endpoint(context: _VersionContext, base: dict[str, Any], endpo
                         if response.get(key):
                             saved[key] = response[key]
                     output.append(_base_record(context, base, logical_id, url, saved, tipo="json", registros=int(previous.get("registros", 0) or 0)))
-                    break
+                    if not page_field or int(previous.get("registros", 0) or 0) < page_size:
+                        break
+                    page += 1
+                    continue
             payload = response.get("json")
             if payload is None:
-                output.append(_failed_record(context, base, logical_id, url, str(response.get("erro") or response.get("status") or "resposta JSON ausente"), "json"))
-                break
+                if response.get("status") == "disponivel" and response.get("http_status") == 204:
+                    payload = []
+                else:
+                    reason = (
+                        response.get("erro")
+                        or response.get("observacao")
+                        or f"resposta JSON ausente (status={response.get('status')}, HTTP={response.get('http_status')})"
+                    )
+                    failure = _failed_record(context, base, logical_id, url, str(reason), "json")
+                    if fallback_attempted:
+                        failure["fallback_backend"] = "compras_dados_abertos"
+                        failure["fallback_trigger"] = fallback_trigger
+                        context.items[logical_id] = failure
+                        _checkpoint_write(context)
+                    output.append(failure)
+                    break
             body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
             page_digest = hashlib.sha256(body).hexdigest()
             if page_digest in seen_pages:
+                output.append(
+                    _failed_record(
+                        context,
+                        base,
+                        f"{base['base_id']}:{endpoint_name}:pagina={page}:duplicada",
+                        url,
+                        "página repetida durante paginação; enumeração interrompida",
+                        "json",
+                    )
+                )
                 break
             seen_pages.add(page_digest)
             saved = _save_version_bytes(context, body, str(base["base_id"]), f"{endpoint_name}_pagina_{page}", ".json")
@@ -1632,11 +2082,17 @@ def _collect_rest_endpoint(context: _VersionContext, base: dict[str, Any], endpo
                 saved["reutilizado_de"] = f"v{context.previous_version}" if context.previous_version else previous.get("path")
                 saved["reuso_motivo"] = "SHA-256 idêntico"
             for key in ("etag", "last_modified", "url_final"):
-                if response.get(key):
+                if response.get(key) and not (
+                    fallback_used and key in {"etag", "last_modified"}
+                ):
                     saved[key] = response[key]
+            if fallback_used:
+                saved["acquisition_backend"] = "compras_dados_abertos"
+                saved["fallback_from"] = "pncp"
+                saved["fallback_trigger"] = fallback_trigger
             records = _payload_records(payload)
             output.append(_base_record(context, base, logical_id, url, saved, tipo="json", registros=len(records)))
-            if not page_field or not records or len(records) < page_size:
+            if fallback_used or not page_field or not records or len(records) < page_size:
                 break
             page += 1
         except Exception as exc:
@@ -1824,7 +2280,13 @@ def _collect_resource_set(context: _VersionContext, base: dict[str, Any]) -> lis
     ]
 
 
-def _collect_provider_base(context: _VersionContext, base: dict[str, Any]) -> list[dict[str, Any]]:
+def _collect_provider_base(
+    context: _VersionContext,
+    base: dict[str, Any],
+    *,
+    discovery_only: bool = False,
+    max_pages: int | None = None,
+) -> list[dict[str, Any]]:
     """Materializa referências explícitas usando o mesmo provider da curadoria."""
     access = base.get("acesso") or {}
     provider_name = str(access.get("provider") or "").strip()
@@ -1832,16 +2294,59 @@ def _collect_provider_base(context: _VersionContext, base: dict[str, Any]) -> li
         return [_failed_record(context, base, f"{base['base_id']}:provider", "provider", "provider não declarado")]
 
     provider = get_provider(provider_name)
+    fallback_request = getattr(provider, "request_agregada_fallback", None)
+    fallback_state = (
+        {"consecutive_transport_failures": 0, "circuit_open": False}
+        if base.get("base_id") == "pca_agregado" and provider_name.casefold() == "pncp"
+        else None
+    )
+
+    def fallback_factory_for(metadata: dict[str, Any]) -> Callable[[], dict[str, Any]] | None:
+        fallback = metadata.get("comprasgov_fallback")
+        if fallback_state is None or not callable(fallback_request) or not isinstance(fallback, dict):
+            return None
+        return lambda fallback=fallback: fallback_request(fallback)
+
     for logical_id, item in list(context.items.items()):
         if item.get("base_id") == base.get("base_id") and item.get("status") != "ok":
             context.items.pop(logical_id, None)
-    sources = access.get("sources") or []
+    sources = [] if discovery_only else access.get("sources") or []
     candidates = []
     discovered = False
     target = int(base.get("volume_alvo") or 1)
     resource_type = str(access.get("resource_type") or "").casefold()
+    populations = access.get("populations") or [
+        {
+            "resource_type": access.get("resource_type"),
+            "params": access.get("params") or {},
+            "censo": bool(access.get("censo")),
+            "exigir_cadastro_completo": bool(access.get("exigir_cadastro_completo")),
+            "volume_alvo": target,
+        }
+    ]
+    censo_mode = any(bool(population.get("censo")) for population in populations)
+    validate_configuration = getattr(provider, "validate_configuration", None)
+    if censo_mode and callable(validate_configuration):
+        for population in populations:
+            query = {
+                **access,
+                **population,
+                "resource_type": population.get("resource_type") or access.get("resource_type"),
+                "params": {**(access.get("params") or {}), **(population.get("params") or {})},
+            }
+            validate_configuration(query)
     resumed_source_ids: set[str] = set()
-    selected_entries = getattr(context, "selection", {}).get(str(base["base_id"]))
+    has_signed_contract_population = any(
+        str(population.get("resource_type") or "").casefold() == "contrato_assinado"
+        and population.get("censo_nacional")
+        for population in populations
+    )
+    preselected_entries = getattr(context, "selection", {}).get(str(base["base_id"]))
+    selected_entries = (
+        None
+        if discovery_only or (has_signed_contract_population and not preselected_entries)
+        else preselected_entries
+    )
     if not sources and selected_entries:
         sources = [
             entry["source_ref"]
@@ -1852,7 +2357,7 @@ def _collect_provider_base(context: _VersionContext, base: dict[str, Any]) -> li
             SourceRef.from_dict(source_value).stable_id
             for source_value in sources
         }
-    if not sources:
+    if not sources and not discovery_only:
         existing_sources: dict[str, dict[str, Any]] = {}
         for item in context.items.values():
             if item.get("base_id") != base.get("base_id") or not int(item.get("unidades_logicas", 0) or 0):
@@ -1866,22 +2371,112 @@ def _collect_provider_base(context: _VersionContext, base: dict[str, Any]) -> li
                 continue
             if source_ref.resource_type.casefold() == resource_type:
                 existing_sources[source_ref.stable_id] = source_ref.to_dict()
-        if len(existing_sources) >= target:
+        if len(existing_sources) >= target and not has_signed_contract_population:
             sources = [existing_sources[key] for key in sorted(existing_sources)[:target]]
             resumed_source_ids = {
                 SourceRef.from_dict(source_value).stable_id
                 for source_value in sources
             }
     if not sources:
-        _wait_rate_limit(context, base)
-        candidates = provider.search(
-            {
+        for population in populations:
+            _wait_rate_limit(context, base)
+            population_target = int(population.get("volume_alvo") or target)
+            query = {
                 **access,
-                "resource_type": access.get("resource_type"),
-                "volume_alvo": target,
+                **population,
+                "resource_type": population.get("resource_type") or access.get("resource_type"),
+                "params": {**(access.get("params") or {}), **(population.get("params") or {})},
+                "volume_alvo": population_target,
                 "selecao": base.get("selecao") or {},
             }
-        )
+            resource_name = str(query["resource_type"]).casefold()
+            if resource_name in {"contrato_assinado", "contrato_pncp"} and population.get("censo_nacional"):
+                query["params"]["dataInicial"] = min(
+                    str(query["params"].get("dataInicial") or "2021-01-01"),
+                    "2021-01-01",
+                )
+            checkpoint_discovery = bool(population.get("censo_nacional")) or bool(
+                population.get("discovery_checkpoint")
+            )
+            verified_unit_scopes: list[dict[str, Any]] = []
+            if resource_name in {"contrato_assinado", "contrato_pncp"}:
+                base_discovery = context.discovery.get(str(base["base_id"]), {})
+                unit_state = base_discovery.get("unidades_orgaos_rj", {})
+                if not unit_state.get("verificacao_completa"):
+                    raise RuntimeError(
+                        "unidades dos órgãos ainda não foram verificadas; execute discover e retome até concluir"
+                    )
+                verified_unit_scopes = list(unit_state.get("verified_unit_scopes") or [])
+                query["verified_unit_scopes"] = verified_unit_scopes
+                query["require_verified_unit_scopes"] = True
+            if checkpoint_discovery:
+                resource_key = str(
+                    population.get("discovery_key")
+                    or (
+                        "contratacao_publicacao_rj"
+                        if resource_name in {"contratacao", "contratação"}
+                        else (
+                            "contrato_assinado_rj_unidades"
+                            if resource_name in {"contrato_assinado", "contrato_pncp"}
+                            else resource_name
+                        )
+                    )
+                )
+                discovery_populations = context.discovery.setdefault(str(base["base_id"]), {})
+                discovery_state = discovery_populations.setdefault(resource_key, {})
+                discovery_config = _pncp_discovery_config(base, population)
+                if verified_unit_scopes:
+                    discovery_config["verified_unit_scopes"] = verified_unit_scopes
+                existing_config = discovery_state.get("config")
+                if existing_config is not None and not _discovery_configs_compatible(
+                    existing_config, discovery_config
+                ):
+                    raise RuntimeError(
+                        f"discovery {base['base_id']}/{resource_key} incompatível com os parâmetros atuais"
+                    )
+                discovery_state["config"] = discovery_config
+                discovery_state["total_contratos_elegiveis"] = len(
+                    discovery_state.get("eligible_sources") or {}
+                )
+                _checkpoint_write(context)
+                query["discovery_state"] = discovery_state
+                if discovery_only:
+                    query["discovery_only"] = True
+                    query["max_pages"] = max_pages
+                if population.get("verify_discovered_units"):
+                    query["verify_discovered_units"] = True
+                query["on_discovery_page"] = lambda report, base_id=str(base["base_id"]), key=resource_key: _record_pncp_discovery_page(
+                    context, base_id, key, report
+                )
+            candidates.extend(provider.search(query))
+            if checkpoint_discovery:
+                if query.get("verify_discovered_units"):
+                    verifier = getattr(provider, "verify_discovered_units", None)
+                    if not callable(verifier):
+                        raise RuntimeError("provider não oferece verificação oficial das unidades do órgão")
+                    unit_state = context.discovery.setdefault(str(base["base_id"]), {}).setdefault(
+                        "unidades_orgaos_rj", {}
+                    )
+                    unit_state["cnpjs_derivados"] = list(discovery_state.get("cnpjs_derivados") or [])
+                    unit_state["unidades_observadas_por_cnpj"] = dict(
+                        discovery_state.get("unidades_observadas_por_cnpj") or {}
+                    )
+                    unit_state.setdefault("verificacoes_orgaos", {})
+
+                    def _save_unit_verification(cnpj: str, result: dict[str, Any]) -> None:
+                        unit_state.setdefault("verificacoes_orgaos", {})[cnpj] = result
+                        _checkpoint_write(context)
+
+                    verifier(
+                        unit_state,
+                        on_organization_verified=_save_unit_verification,
+                        rate_limit_seg=access.get("rate_limit_seg", 0),
+                    )
+                    _checkpoint_write(context)
+                discovery_state["total_contratos_elegiveis"] = len(discovery_state.get("eligible_sources") or {})
+                _checkpoint_write(context)
+            if discovery_only:
+                return []
         sources = [candidate.source_ref.to_dict() for candidate in candidates]
         discovered = True
         if not sources:
@@ -1895,7 +2490,9 @@ def _collect_provider_base(context: _VersionContext, base: dict[str, Any]) -> li
                 )
                 ]
 
-    sources = sources[:target]
+    preserve_explicit_sources = bool(access.get("preserve_explicit_sources"))
+    if not censo_mode and not preserve_explicit_sources:
+        sources = sources[:target]
     if discovered or str(base["base_id"]) not in getattr(context, "selection", {}):
         _set_selection(context, str(base["base_id"]), sources)
         _checkpoint_write(context)
@@ -1923,6 +2520,8 @@ def _collect_provider_base(context: _VersionContext, base: dict[str, Any]) -> li
 
     output: list[dict[str, Any]] = []
     seen_artifact_urls: set[str] = set()
+    seen_download_urls: set[str] = set()
+    seen_related_artifact_ids: set[str] = set()
     for index, source_value in enumerate(sources, start=1):
         try:
             source_ref = SourceRef.from_dict(
@@ -1934,7 +2533,7 @@ def _collect_provider_base(context: _VersionContext, base: dict[str, Any]) -> li
             )
             if (
                 candidate is not None
-                and resource_type in {"contratacao", "contratação", "contrato"}
+                and source_ref.resource_type.casefold() in {"contratacao", "contratação"}
                 and candidate.metadata
             ):
                 payload = {
@@ -1961,7 +2560,8 @@ def _collect_provider_base(context: _VersionContext, base: dict[str, Any]) -> li
                 record["source_ref"] = source_ref.to_dict()
                 record["artifact_id"] = f"{source_ref.stable_id}:publication"
                 record["provider"] = provider_name
-                record["unidades_logicas"] = 1
+                record["unidades_logicas"] = 0
+                record["resource_kind"] = "contratacao_publicada"
                 context.items[logical_id] = record
                 _checkpoint_write(context)
                 output.append(record)
@@ -1971,31 +2571,60 @@ def _collect_provider_base(context: _VersionContext, base: dict[str, Any]) -> li
                 if artifact.url in seen_artifact_urls:
                     continue
                 seen_artifact_urls.add(artifact.url)
-                logical_id = f"{base['base_id']}:{artifact.artifact_id}"
+                resource_kind = str(artifact.metadata.get("resource_kind") or "")
+                allowed_resource_kinds = {
+                    str(value) for value in access.get("resource_kinds", [])
+                }
+                if allowed_resource_kinds and resource_kind not in allowed_resource_kinds:
+                    continue
+                related_base_id = str(
+                    (access.get("artefatos_relacionados") or {}).get(resource_kind) or ""
+                )
+                artifact_base = next(
+                    (
+                        candidate_base
+                        for candidate_base in context.manifest.get("bases", [])
+                        if str(candidate_base.get("base_id") or "") == related_base_id
+                    ),
+                    None,
+                ) if related_base_id else None
+                if related_base_id and artifact_base is None:
+                    raise ValueError(
+                        f"base relacionada {related_base_id!r} não declarada no manifesto"
+                    )
+                artifact_base = artifact_base or base
+                logical_id = f"{artifact_base['base_id']}:{artifact.artifact_id}"
                 if artifact.artifact_type.casefold() == "json":
                     resource_base = {
-                        **base,
+                        **artifact_base,
                         # A seleção limita a busca de unidades lógicas; no detalhe,
                         # cada artefato já representa uma única unidade resolvida.
                         "selecao": {},
                         "acesso": {
                             **access,
                             "endpoint": artifact.url,
-                            "params": {},
-                            "paginacao": {},
+                            "params": artifact.metadata.get("params") or {},
+                            "paginacao": artifact.metadata.get("paginacao") or {},
                         },
                     }
+                    fallback_factory = fallback_factory_for(artifact.metadata)
+                    fallback_options = (
+                        {"fallback_factory": fallback_factory, "fallback_state": fallback_state}
+                        if fallback_factory
+                        else {}
+                    )
                     records = _collect_rest_endpoint(
                         context,
                         resource_base,
                         _safe_component(artifact.artifact_id),
                         artifact.url,
+                        **fallback_options,
                     )
                 else:
                     records = [
                         _collect_http_item(
                             context,
-                            base,
+                            artifact_base,
                             artifact.url,
                             logical_id,
                             Path(artifact.filename).stem if artifact.filename else f"{base['base_id']}_{index:03d}",
@@ -2006,10 +2635,219 @@ def _collect_provider_base(context: _VersionContext, base: dict[str, Any]) -> li
                     record["source_ref"] = source_ref.to_dict()
                     record["artifact_id"] = artifact.artifact_id
                     record["provider"] = provider_name
-                    record["unidades_logicas"] = int(artifact.metadata.get("logical_unit", True))
+                    resource_kind = artifact.metadata.get("resource_kind") or source_ref.resource_type
+                    logical_unit = bool(artifact.metadata.get("logical_unit", True))
+                    if base.get("base_id") == "pca_agregado" and resource_kind == "contrato":
+                        # O contrato é contexto/proveniência para as estatísticas; a
+                        # unidade lógica da base agregada continua sendo o PCA.
+                        logical_unit = False
+                    record["unidades_logicas"] = int(logical_unit)
+                    record["resource_kind"] = resource_kind
                     context.items[record["logical_id"]] = record
                     _checkpoint_write(context)
                     output.append(record)
+                if resource_kind.startswith("documentos_"):
+                    related_base_id = str(
+                        (access.get("artefatos_relacionados") or {}).get(resource_kind) or ""
+                    )
+                    document_base = next(
+                        (
+                            candidate_base
+                            for candidate_base in context.manifest.get("bases", [])
+                            if str(candidate_base.get("base_id") or "") == related_base_id
+                        ),
+                        None,
+                    ) if related_base_id else None
+                    if related_base_id and document_base is None:
+                        raise ValueError(
+                            f"base relacionada {related_base_id!r} não declarada no manifesto"
+                        )
+                    for listing_record in records:
+                        listing_path = _path_from_record(listing_record)
+                        if listing_path is None or not listing_path.exists():
+                            continue
+                        try:
+                            listing_payload = json.loads(listing_path.read_text(encoding="utf-8"))
+                        except (OSError, json.JSONDecodeError):
+                            continue
+                        document_metadata_by_url: dict[str, dict[str, Any]] = {}
+                        document_filter = (
+                            access.get("documentos_edital_filtro")
+                            if resource_kind == "documentos_edital"
+                            else None
+                        ) or {}
+                        filter_terms = [
+                            unicodedata.normalize("NFKD", str(term).casefold())
+                            .encode("ascii", "ignore")
+                            .decode("ascii")
+                            for term in document_filter.get("termos", [])
+                            if str(term).strip()
+                        ]
+                        filter_fields = document_filter.get("campos") or [
+                            "titulo",
+                            "tipoDocumentoNome",
+                        ]
+                        for document in source_check.records_from_payload(listing_payload):
+                            if not isinstance(document, dict):
+                                continue
+                            searchable = " ".join(
+                                str(document.get(field) or "")
+                                for field in filter_fields
+                            ).casefold()
+                            searchable = (
+                                unicodedata.normalize("NFKD", searchable)
+                                .encode("ascii", "ignore")
+                                .decode("ascii")
+                            )
+                            if filter_terms and not any(term in searchable for term in filter_terms):
+                                continue
+                            document_url = next(
+                                (
+                                    document.get(key)
+                                    for key in ("url", "uri", "location")
+                                    if isinstance(document.get(key), str)
+                                    and document[key].startswith(("http://", "https://"))
+                                ),
+                                None,
+                            )
+                            if document_url:
+                                document_metadata = {
+                                    key: document.get(key)
+                                    for key in (
+                                        "sequencialDocumento",
+                                        "titulo",
+                                        "tipoDocumentoNome",
+                                        "dataPublicacaoPncp",
+                                        "dataVigenciaInicio",
+                                        "dataVigenciaFim",
+                                    )
+                                    if document.get(key) not in (None, "")
+                                }
+                                aliases = {
+                                    "titulo_documento": "titulo",
+                                    "tipo_documento": "tipoDocumentoNome",
+                                    "data_publicacao": "dataPublicacaoPncp",
+                                    "data_vigencia_inicio": "dataVigenciaInicio",
+                                    "data_vigencia_fim": "dataVigenciaFim",
+                                }
+                                document_metadata.update(
+                                    {
+                                        alias: document_metadata[source_key]
+                                        for alias, source_key in aliases.items()
+                                        if document_metadata.get(source_key) not in (None, "")
+                                    }
+                                )
+                                document_metadata_by_url[str(document_url)] = document_metadata
+                        for file_index, file_url in _file_urls({"status": "disponivel", "json": listing_payload}):
+                            if filter_terms and file_url not in document_metadata_by_url:
+                                continue
+                            if file_url in seen_download_urls:
+                                continue
+                            seen_download_urls.add(file_url)
+                            seen_artifact_urls.add(file_url)
+                            file_id = f"{artifact.artifact_id}:arquivo:{file_index}"
+                            destination_base = document_base or base
+                            file_record = _collect_http_item(
+                                context,
+                                destination_base,
+                                file_url,
+                                f"{destination_base['base_id']}:{_safe_component(file_id)}",
+                                f"{_safe_component(resource_kind)}_{index:04d}_{file_index:04d}",
+                            )
+                            file_record["source_ref"] = source_ref.to_dict()
+                            file_record["artifact_id"] = file_id
+                            file_record["provider"] = provider_name
+                            file_record["resource_kind"] = "documento_anexo"
+                            file_record["document_metadata"] = document_metadata_by_url.get(file_url, {})
+                            file_record["unidades_logicas"] = 1 if document_base else 0
+                            context.items[file_record["logical_id"]] = file_record
+                            _checkpoint_write(context)
+                            output.append(file_record)
+                related_factories = {
+                    "itens": getattr(provider, "related_result_artifacts", None),
+                    "atas_compra": getattr(provider, "related_ata_artifacts", None),
+                }
+                related_factory = related_factories.get(resource_kind)
+                if callable(related_factory):
+                    for item_record in records:
+                        item_path = _path_from_record(item_record)
+                        if item_path is None or not item_path.exists():
+                            continue
+                        try:
+                            item_payload = json.loads(item_path.read_text(encoding="utf-8"))
+                            related_artifacts = related_factory(source_ref, item_payload)
+                        except Exception as exc:
+                            output.append(
+                                _failed_record(
+                                    context,
+                                    base,
+                                    f"{base['base_id']}:{artifact.artifact_id}:relacionados",
+                                    artifact.url,
+                                    f"{type(exc).__name__}: {exc}",
+                                    "json",
+                                )
+                            )
+                            continue
+                        for related in related_artifacts:
+                            if related.artifact_id in seen_related_artifact_ids:
+                                continue
+                            seen_related_artifact_ids.add(related.artifact_id)
+                            related_base = {
+                                **artifact_base,
+                                "selecao": {},
+                                "acesso": {
+                                    **access,
+                                    "endpoint": related.url,
+                                    "params": related.metadata.get("params") or {},
+                                    "paginacao": related.metadata.get("paginacao") or {},
+                                },
+                            }
+                            fallback_factory = fallback_factory_for(related.metadata)
+                            fallback_options = (
+                                {"fallback_factory": fallback_factory, "fallback_state": fallback_state}
+                                if fallback_factory
+                                else {}
+                            )
+                            if related.artifact_type.casefold() in {"pdf", "html", "csv", "binary"}:
+                                related_records = [
+                                    _collect_http_item(
+                                        context,
+                                        related_base,
+                                        _clean_url(related.url),
+                                        f"{base['base_id']}:{_safe_component(related.artifact_id)}",
+                                        _safe_component(related.filename or related.artifact_id),
+                                        expected_type=related.artifact_type,
+                                    )
+                                ]
+                            else:
+                                related_records = _collect_rest_endpoint(
+                                    context,
+                                    related_base,
+                                    _safe_component(related.artifact_id),
+                                    related.url,
+                                    **fallback_options,
+                                )
+                            for related_record in related_records:
+                                related_source_ref = related.source_ref or source_ref
+                                related_record["source_ref"] = related_source_ref.to_dict()
+                                related_record["artifact_id"] = related.artifact_id
+                                related_record["provider"] = provider_name
+                                related_record["unidades_logicas"] = int(
+                                    bool(related.metadata.get("logical_unit"))
+                                )
+                                related_record["resource_kind"] = related.metadata.get("resource_kind")
+                                if related.metadata.get("titulo") or related.metadata.get("tipo_documento"):
+                                    related_record["document_metadata"] = {
+                                        "titulo": related.metadata.get("titulo"),
+                                        "tipo_documento": related.metadata.get("tipo_documento"),
+                                    }
+                                if related.metadata.get("acquisition_backend"):
+                                    related_record["acquisition_backend"] = related.metadata[
+                                        "acquisition_backend"
+                                    ]
+                                context.items[related_record["logical_id"]] = related_record
+                                _checkpoint_write(context)
+                                output.append(related_record)
         except Exception as exc:
             output.append(
                 _failed_record(
@@ -2020,7 +2858,7 @@ def _collect_provider_base(context: _VersionContext, base: dict[str, Any]) -> li
                     f"{type(exc).__name__}: {exc}",
                 )
             )
-    if discovered and len(sources) < target:
+    if discovered and not censo_mode and len(sources) < target:
         output.append(
             _failed_record(
                 context,
@@ -2049,7 +2887,41 @@ def _collect_base(context: _VersionContext, base: dict[str, Any]) -> list[dict[s
         ]
     if kind in {"http_pdf", "http_misto", "http_csv"}:
         urls = access.get("urls") or ([access["url"]] if access.get("url") else [])
-        return [_collect_http_item(context, base, _clean_url(url), f"{base['base_id']}:url:{index}", f"{base['base_id']}_{index:03d}") for index, url in enumerate(urls, start=1)]
+        metadata_by_url = access.get("metadados_por_url") or {}
+        records = [
+            _collect_http_item(
+                context,
+                base,
+                _clean_url(url),
+                f"{base['base_id']}:url:{index}",
+                f"{base['base_id']}_{index:03d}",
+            )
+            for index, url in enumerate(urls, start=1)
+        ]
+        for url, record in zip(urls, records):
+            metadata = metadata_by_url.get(str(url)) or metadata_by_url.get(_clean_url(str(url)))
+            if isinstance(metadata, dict) and metadata:
+                record["document_metadata"] = metadata
+        linked_sources = access.get("linked_sources") or []
+        if linked_sources:
+            provider_access = {
+                **access,
+                "tipo": "provider",
+                "provider": "pncp",
+                "sources": linked_sources,
+                "resource_kinds": ["documentos_edital"],
+            }
+            records.extend(
+                _collect_provider_base(
+                    context,
+                    {
+                        **base,
+                        "volume_alvo": len(linked_sources),
+                        "acesso": provider_access,
+                    },
+                )
+            )
+        return records
     if kind in {"rest_api", "rest_api_mais_arquivo"}:
         endpoints = access.get("endpoints") or {"principal": access.get("endpoint")}
         if kind == "rest_api_mais_arquivo" and any("{" in str(endpoint) for endpoint in endpoints.values() if endpoint):
@@ -2088,13 +2960,7 @@ def _build_inventory(
         successful_base = [record for record in base_records if record.get("status") == "ok" and record.get("path")]
         base_failures = [record for record in base_records if record.get("status") != "ok"]
         observed_records = sum(
-            int(
-                record.get(
-                    "unidades_logicas",
-                    record.get("registros", 0),
-                )
-                or 0
-            )
+            int(record.get("unidades_logicas", record.get("registros", 0)) or 0)
             for record in successful_base
         )
         has_record_counts = any(
@@ -2103,9 +2969,22 @@ def _build_inventory(
         )
         observed = observed_records if has_record_counts else len(successful_base)
         formatos: dict[str, int] = {}
+        por_recurso: dict[str, dict[str, int]] = {}
         for record in successful_base:
             tipo = str(record.get("tipo") or "bin")
             formatos[tipo] = formatos.get(tipo, 0) + 1
+            resource_kind = str(
+                record.get("resource_kind")
+                or (record.get("source_ref") or {}).get("resource_type")
+                or "desconhecido"
+            )
+            counts = por_recurso.setdefault(
+                resource_kind,
+                {"artefatos": 0, "registros": 0, "unidades_logicas": 0},
+            )
+            counts["artefatos"] += 1
+            counts["registros"] += int(record.get("registros", 0) or 0)
+            counts["unidades_logicas"] += int(record.get("unidades_logicas", 0) or 0)
         target = base.get("volume_alvo")
         target_value = int(target) if target is not None else None
         if any(record.get("status") == "not_configured" for record in base_records):
@@ -2126,6 +3005,7 @@ def _build_inventory(
             "arquivos": len(successful_base),
             "itens": observed,
             "formatos": formatos,
+            "por_recurso": por_recurso,
             "bytes": sum(int(record.get("bytes", 0) or 0) for record in successful_base),
             "volume_alvo": target,
             "volume_obtido": observed,
@@ -2155,7 +3035,14 @@ def _build_inventory(
         },
         "por_base": by_base,
         "arquivos": records,
-        "falhas": [{"origem": record.get("origem"), "erro": record.get("erro", "falha sem detalhe"), "logical_id": record.get("logical_id")} for record in failures],
+        "falhas": [
+            {
+                "origem": record.get("origem"),
+                "erro": record.get("erro", "falha sem detalhe"),
+                "logical_id": record.get("logical_id"),
+            }
+            for record in failures
+        ],
     }
 
 
@@ -2282,6 +3169,9 @@ def _find_complete_matching_manifest(manifest_hash: str) -> dict[str, Any] | Non
 def _find_resumable_version(
     manifest_hash: str,
     manifest: dict[str, Any] | None = None,
+    *,
+    allow_discovery_manifest_drift: bool = False,
+    expected_external_inputs: dict[str, str] | None = None,
 ) -> int | None:
     checkpoint_root = INVENTORY_ROOT / "checkpoints"
     if not checkpoint_root.exists():
@@ -2300,10 +3190,19 @@ def _find_resumable_version(
         except (OSError, json.JSONDecodeError):
             continue
         staging_path = RAW_ROOT / ".staging" / f"v{version}"
+        manifest_matches = checkpoint.get("manifest_hash") == manifest_hash
+        external_inputs_match = checkpoint.get("external_inputs", {}) == (
+            expected_external_inputs or {}
+        )
+        discovery_matches = (
+            allow_discovery_manifest_drift
+            and _discovery_checkpoint_matches_manifest(checkpoint, manifest)
+        )
         if (
-            checkpoint.get("manifest_hash") == manifest_hash
+            (manifest_matches or discovery_matches)
+            and external_inputs_match
             and checkpoint.get("state") in {"staging", "incomplete"}
-            and staging_path.exists()
+            and (staging_path.exists() or discovery_matches)
         ):
             if manifest is None:
                 return version
@@ -2313,6 +3212,8 @@ def _find_resumable_version(
                 manifest_hash,
                 version,
                 staging_path,
+                allow_discovery_manifest_drift=allow_discovery_manifest_drift,
+                expected_external_inputs=expected_external_inputs,
             )
             if validation.ok:
                 return version
@@ -2325,13 +3226,39 @@ def _run_manifest_command(
     *,
     official: bool,
     base_ids: list[str] | None = None,
+    source_inventory_path: Path | None = None,
+    adopt_attempt_inventory_path: Path | None = None,
+    max_pages: int | None = None,
+    use_discovered_contracts: bool = False,
 ) -> int:
     logger = _RunLogger(command)
     logger.event("manifest_load", "started", manifest=str(manifest_path))
     manifest = load_manifest(manifest_path)
     manifest_hash = _manifest_hash(manifest_path)
+    external_inputs: dict[str, str] = {}
+    adopt_attempt_inventory: dict[str, Any] | None = None
     if official and not base_ids:
         manifest = _manifest_for_scope(manifest, official=True)
+    if use_discovered_contracts:
+        manifest = {
+            **manifest,
+            "bases": [
+                {
+                    **base,
+                    "acesso": {
+                        **(base.get("acesso") or {}),
+                        **(
+                            {"resource_kinds": ["contrato"]}
+                            if base.get("base_id") == "contratos_estruturado"
+                            else {}
+                        ),
+                    },
+                }
+                for base in manifest.get("bases", [])
+            ],
+        }
+    if use_discovered_contracts and (command != "update" or not official or base_ids):
+        raise ValueError("--use-discovered-contracts requer update --official sem --base-id")
     if base_ids:
         if official:
             raise ValueError("--base-id só pode ser usado em uma execução experimental")
@@ -2340,6 +3267,182 @@ def _run_manifest_command(
         if unknown:
             raise ValueError(f"base(s) não declarada(s) no manifesto: {', '.join(unknown)}")
         manifest = {**manifest, "bases": [available[base_id] for base_id in base_ids]}
+    if source_inventory_path is not None:
+        isolated_source_bases = {"editais_normativo", "pca_agregado", "atas_conversacional"}
+        if (
+            command != "fetch"
+            or official
+            or base_ids is None
+            or len(base_ids) != 1
+            or base_ids[0] not in isolated_source_bases
+        ):
+            raise ValueError(
+                "--source-inventory requer fetch experimental limitado a --base-id editais_normativo, pca_agregado ou atas_conversacional"
+            )
+        inventory_bytes = source_inventory_path.read_bytes()
+        inventory_payload = json.loads(inventory_bytes.decode("utf-8"))
+        if not isinstance(inventory_payload, dict) or not isinstance(
+            inventory_payload.get("arquivos"), list
+        ):
+            raise ValueError("--source-inventory precisa apontar para um inventário com lista 'arquivos'")
+        external_inputs = {
+            "source_inventory_sha256": hashlib.sha256(inventory_bytes).hexdigest()
+        }
+        isolated_base = manifest["bases"][0]
+        isolated_access = isolated_base.get("acesso") or {}
+        if base_ids[0] == "editais_normativo":
+            source_base_id = str(
+                isolated_access.get("linked_source_inventory_base") or "contratos_estruturado"
+            )
+            linked_sources: dict[str, dict[str, Any]] = {}
+            for record in inventory_payload.get("arquivos", []):
+                if not isinstance(record, dict) or record.get("base_id") != source_base_id:
+                    continue
+                source_value = record.get("source_ref")
+                if not isinstance(source_value, dict):
+                    continue
+                source_ref = SourceRef.from_dict(source_value)
+                if source_ref.resource_type.casefold() not in {
+                    "contratacao",
+                    "contratação",
+                    "contrato_assinado",
+                    "contrato_pncp",
+                }:
+                    continue
+                linked_sources[source_ref.stable_id] = source_ref.to_dict()
+            if not linked_sources:
+                raise ValueError(
+                    f"inventário não contém SourceRef PNCP elegíveis em {source_base_id}: {source_inventory_path}"
+                )
+            updated_access = {**isolated_access, "linked_sources": list(linked_sources.values())}
+        elif base_ids[0] == "pca_agregado":
+            source_types_by_base = {
+                "contratos_estruturado": {
+                    "contratacao",
+                    "contratação",
+                    "contrato_assinado",
+                    "contrato_pncp",
+                },
+                "pca_agregado": {"pca", "pca_agregado"},
+            }
+            selected_sources: dict[str, dict[str, Any]] = {}
+            sources_by_base = {source_base: set() for source_base in source_types_by_base}
+            for record in inventory_payload.get("arquivos", []):
+                if not isinstance(record, dict):
+                    continue
+                source_base_id = str(record.get("base_id") or "")
+                source_value = record.get("source_ref")
+                if source_base_id not in source_types_by_base or not isinstance(source_value, dict):
+                    continue
+                source_ref = SourceRef.from_dict(source_value)
+                if source_ref.resource_type.casefold() not in source_types_by_base[source_base_id]:
+                    continue
+                selected_sources[source_ref.stable_id] = source_ref.to_dict()
+                sources_by_base[source_base_id].add(source_ref.stable_id)
+            if not sources_by_base["contratos_estruturado"]:
+                raise ValueError(
+                    "inventário não contém SourceRef de contratações/contratos em contratos_estruturado"
+                )
+            pca_target = int(isolated_base.get("volume_alvo") or 1)
+            if len(sources_by_base["pca_agregado"]) < pca_target:
+                raise ValueError(
+                    f"inventário contém {len(sources_by_base['pca_agregado'])} SourceRefs PCA; "
+                    f"são necessários ao menos {pca_target} para atender o alvo de pca_agregado"
+                )
+            if not selected_sources:
+                raise ValueError(f"inventário não contém SourceRef PNCP elegíveis: {source_inventory_path}")
+            updated_access = {
+                **isolated_access,
+                "sources": [selected_sources[key] for key in sorted(selected_sources)],
+                "preserve_explicit_sources": True,
+                "resource_kinds": [
+                    "pca_planejado",
+                    "pca_exportacao",
+                    "contrato",
+                    "contratacao_detalhe",
+                    "contratacao_vinculada",
+                    "itens",
+                ],
+                # A execução recebe fontes explícitas; não executa o censo PCA nem
+                # exige o cadastro completo de CNPJs configurado para o percurso oficial.
+                "censo": False,
+                "exigir_cadastro_completo": False,
+                "populations": [],
+            }
+        else:
+            source_base_id = str(
+                isolated_access.get("linked_source_inventory_base") or "contratos_estruturado"
+            )
+            contract_types = {
+                "contratacao",
+                "contratação",
+                "contrato_assinado",
+                "contrato_pncp",
+            }
+            linked_sources: dict[str, dict[str, Any]] = {}
+            for record in inventory_payload.get("arquivos", []):
+                if not isinstance(record, dict) or record.get("base_id") != source_base_id:
+                    continue
+                source_value = record.get("source_ref")
+                if not isinstance(source_value, dict):
+                    continue
+                source_ref = SourceRef.from_dict(source_value)
+                if source_ref.provider.casefold() != "pncp" or source_ref.resource_type.casefold() not in contract_types:
+                    continue
+                linked_sources[source_ref.stable_id] = source_ref.to_dict()
+            if not linked_sources:
+                raise ValueError(
+                    f"inventário não contém SourceRef PNCP elegíveis em {source_base_id}: {source_inventory_path}"
+                )
+            updated_access = {
+                **isolated_access,
+                "sources": [linked_sources[key] for key in sorted(linked_sources)],
+                "preserve_explicit_sources": True,
+                "resource_kinds": [
+                    "atas_compra",
+                    "ata",
+                    "documentos_ata",
+                    "contratos_vinculados_ata",
+                ],
+                # Este percurso segue somente as compras explícitas do inventário,
+                # sem iniciar uma busca global de atas nem depender do censo PNCP.
+                "censo": False,
+                "exigir_cadastro_completo": False,
+                "populations": [],
+            }
+        manifest = {
+            **manifest,
+            "bases": [{**isolated_base, "acesso": updated_access}],
+        }
+    if adopt_attempt_inventory_path is not None:
+        if command != "update" or not official or base_ids or use_discovered_contracts:
+            raise ValueError(
+                "--adopt-attempt requer update --official sem --base-id e sem --use-discovered-contracts"
+            )
+        attempt_bytes = adopt_attempt_inventory_path.read_bytes()
+        attempt_payload = json.loads(attempt_bytes.decode("utf-8"))
+        if (
+            not isinstance(attempt_payload, dict)
+            or not isinstance(attempt_payload.get("arquivos"), list)
+            or attempt_payload.get("official") is not False
+        ):
+            raise ValueError("--adopt-attempt requer o inventário de uma tentativa experimental concluída")
+        attempt_records = [
+            record
+            for record in attempt_payload["arquivos"]
+            if isinstance(record, dict) and record.get("base_id") == "pca_agregado"
+        ]
+        if not attempt_records or any(
+            record.get("base_id") != "pca_agregado"
+            for record in attempt_payload["arquivos"]
+            if isinstance(record, dict)
+        ):
+            raise ValueError("a tentativa precisa conter somente registros da base pca_agregado")
+        if not any(record.get("status") == "ok" for record in attempt_records):
+            raise ValueError("a tentativa não tem artefatos Agregados bem-sucedidos para promover")
+        _validate_adopt_attempt_coverage(adopt_attempt_inventory_path, attempt_payload)
+        adopt_attempt_inventory = attempt_payload
+        external_inputs["adopt_attempt_inventory_sha256"] = hashlib.sha256(attempt_bytes).hexdigest()
     logger.event(
         "manifest_load",
         "completed",
@@ -2358,7 +3461,13 @@ def _run_manifest_command(
                 )
             )
             return 0
-    resumable_version = _find_resumable_version(manifest_hash, manifest)
+    allow_discovery_manifest_drift = command == "discover"
+    resumable_version = _find_resumable_version(
+        manifest_hash,
+        manifest,
+        allow_discovery_manifest_drift=allow_discovery_manifest_drift,
+        expected_external_inputs=external_inputs,
+    )
     previous = None
     if command == "update":
         latest = _latest_version()
@@ -2384,13 +3493,185 @@ def _run_manifest_command(
             version,
             previous_items=previous_items,
             previous_version=previous_version,
+            allow_discovery_manifest_drift=allow_discovery_manifest_drift,
+            external_inputs=external_inputs,
         )
+        if use_discovered_contracts:
+            selected_count = _seed_discovered_contract_selection(context, manifest)
+            carried_bases = {}
+            for base in manifest.get("bases", []):
+                base_id = str(base.get("base_id") or "")
+                if base_id and base_id != "contratos_estruturado":
+                    carried_bases[base_id] = _carry_forward_base_records(
+                        context,
+                        base_id,
+                        previous_items,
+                    )
+            _checkpoint_write(context)
+        if adopt_attempt_inventory is not None:
+            carried_bases = {
+                str(base.get("base_id")): _carry_forward_base_records(
+                    context,
+                    str(base.get("base_id")),
+                    previous_items,
+                )
+                for base in manifest.get("bases", [])
+                if base.get("base_id")
+            }
+            adopted_count = _adopt_attempt_records(
+                context,
+                adopt_attempt_inventory,
+                source_inventory_path=adopt_attempt_inventory_path,
+            )
+            context.selection = _selection_from_items(context.items)
+            _checkpoint_write(context)
+            logger.event(
+                "attempt_adoption",
+                "completed",
+                base_id="pca_agregado",
+                adopted_records=adopted_count,
+                carried_forward_bases=carried_bases,
+                attempt_inventory=_relative_path(adopt_attempt_inventory_path),
+            )
+            logger.event(
+                "discovery_selection",
+                "completed",
+                base_id="contratos_estruturado",
+                population="contrato_assinado_rj_unidades",
+                selected_contracts=selected_count,
+                scan_complete=bool(
+                    context.discovery.get("contratos_estruturado", {})
+                    .get("contrato_assinado_rj_unidades", {})
+                    .get("scan_completo")
+                ),
+                carried_forward_bases=carried_bases,
+            )
         logger.event(
             "version_resolution",
             "resumed" if resumable_version is not None else "started",
             version=f"v{version}",
         )
+        if command == "discover":
+            contract_base = next(
+                (base for base in manifest["bases"] if base.get("base_id") == "contratos_estruturado"),
+                None,
+            )
+            if contract_base is None:
+                raise RuntimeError("manifesto não declara a base contratos_estruturado")
+            access = contract_base.get("acesso") or {}
+            publication_population = next(
+                (
+                    item
+                    for item in access.get("populations", [])
+                    if str(item.get("resource_type") or "").casefold() in {"contratacao", "contratação"}
+                ),
+                None,
+            )
+            contract_population = next(
+                (
+                    item
+                    for item in access.get("populations", [])
+                    if str(item.get("resource_type") or "").casefold() == "contrato_assinado"
+                ),
+                None,
+            )
+            if publication_population is None or contract_population is None:
+                raise RuntimeError("manifesto precisa declarar contratações publicadas e contratos assinados")
+
+            # A população de publicações encontra órgãos e unidades antes da consulta contratual.
+            # O intervalo começa na adoção do PNCP e termina no corte já usado pelo levantamento.
+            publication_params = {
+                **(access.get("params") or {}),
+                **(publication_population.get("params") or {}),
+                "dataInicial": "2021-01-01",
+                "dataFinal": "2026-09-25",
+                "uf": "RJ",
+            }
+            publication_discovery = {
+                **publication_population,
+                "params": publication_params,
+                "censo": True,
+                "rate_limit_seg": max(float(access.get("rate_limit_seg") or 0), 3.0),
+                "discovery_checkpoint": True,
+                "discovery_key": "contratacao_publicacao_rj",
+                "verify_discovered_units": True,
+            }
+            publication_base = {
+                **contract_base,
+                "acesso": {**access, "populations": [publication_discovery]},
+            }
+            started = time.perf_counter()
+            _collect_provider_base(
+                context,
+                publication_base,
+                discovery_only=True,
+                max_pages=max_pages,
+            )
+            base_discovery = context.discovery.get("contratos_estruturado", {})
+            publication_state = base_discovery.get("contratacao_publicacao_rj", {})
+            unit_state = base_discovery.get("unidades_orgaos_rj", {})
+
+            contract_state: dict[str, Any] = {}
+            if publication_state.get("scan_completo") and unit_state.get("verificacao_completa"):
+                scoped_contract_population = {
+                    **contract_population,
+                    "discovery_key": "contrato_assinado_rj_unidades",
+                }
+                contract_base_for_discovery = {
+                    **contract_base,
+                    "acesso": {**access, "populations": [scoped_contract_population]},
+                }
+                _collect_provider_base(
+                    context,
+                    contract_base_for_discovery,
+                    discovery_only=True,
+                    max_pages=max_pages,
+                )
+                contract_state = context.discovery.get("contratos_estruturado", {}).get(
+                    "contrato_assinado_rj_unidades", {}
+                )
+            _checkpoint_write(context)
+            logger.event(
+                "rj_discovery",
+                "completed" if contract_state.get("scan_completo") else "paused",
+                duration_ms=round((time.perf_counter() - started) * 1000, 2),
+                publication_pages_this_run=publication_state.get("pages_this_run", 0),
+                publication_completed_pages=len(publication_state.get("completed_pages") or []),
+                publication_scan_complete=bool(publication_state.get("scan_completo")),
+                organizations=len(publication_state.get("cnpjs_derivados") or []),
+                organizations_verified=unit_state.get("organizacoes_verificadas", 0),
+                verified_rj_units=len(unit_state.get("verified_unit_scopes") or []),
+                contract_pages_this_run=contract_state.get("pages_this_run", 0),
+                eligible_contracts=len(contract_state.get("eligible_sources") or {}),
+                contract_scan_complete=bool(contract_state.get("scan_completo")),
+            )
+            summary = {
+                "version": f"v{version}",
+                "discovery_only": True,
+                "publication_period": ["2021-01-01", "2026-09-25"],
+                "publication_pages_this_run": publication_state.get("pages_this_run", 0),
+                "publication_completed_pages": len(publication_state.get("completed_pages") or []),
+                "publication_scan_complete": bool(publication_state.get("scan_completo")),
+                "organizations_discovered": len(publication_state.get("cnpjs_derivados") or []),
+                "organizations_verified": unit_state.get("organizacoes_verificadas", 0),
+                "verified_rj_units": len(unit_state.get("verified_unit_scopes") or []),
+                "unit_verification_complete": bool(unit_state.get("verificacao_completa")),
+                "contract_pages_this_run": contract_state.get("pages_this_run", 0),
+                "eligible_contracts": len(contract_state.get("eligible_sources") or {}),
+                "scan_complete": bool(contract_state.get("scan_completo")),
+                "pca_registry_complete": False,
+                "max_pages": max_pages,
+                "promoted": False,
+                "run_id": logger.run_id,
+                "checkpoint": _relative_path(context.checkpoint_path),
+            }
+            print(json.dumps(summary, ensure_ascii=False))
+            return 0
         for base in manifest["bases"]:
+            if adopt_attempt_inventory is not None:
+                continue
+            if use_discovered_contracts and base.get("base_id") != "contratos_estruturado":
+                continue
             started = time.perf_counter()
             logger.event("base_collection", "started", base_id=base["base_id"])
             try:
@@ -2482,6 +3763,199 @@ def _run_manifest_command(
     return 0 if inventory["completo"] else 2
 
 
+def _discovery_report(
+    checkpoint_version: str,
+    base_id: str,
+    population: str,
+    query: str | None,
+    limit: int,
+    offset: int,
+) -> int:
+    version = _version_number(checkpoint_version)
+    if version is None:
+        raise ValueError("--checkpoint-version deve usar o formato vN")
+    checkpoint_path = INVENTORY_ROOT / "checkpoints" / f"v{version}.json"
+    if not checkpoint_path.is_file():
+        raise FileNotFoundError(f"checkpoint de descoberta não encontrado: {checkpoint_path}")
+
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    discovery = checkpoint.get("discovery") or {}
+    base_discovery = discovery.get(base_id)
+    if not isinstance(base_discovery, dict):
+        raise ValueError(f"base sem descoberta no checkpoint: {base_id}")
+    state = base_discovery.get(population)
+    if not isinstance(state, dict):
+        raise ValueError(f"população sem descoberta no checkpoint: {base_id}/{population}")
+
+    sources = state.get("eligible_sources") or state.get("publication_sources") or {}
+    if isinstance(sources, dict):
+        entries = [(str(source_id), source_ref) for source_id, source_ref in sources.items()]
+    elif isinstance(sources, list):
+        entries = [(str(index), source_ref) for index, source_ref in enumerate(sources)]
+    else:
+        entries = []
+
+    normalized_query = query.casefold().strip() if query else ""
+    matches = []
+    for source_id, source_ref in sorted(entries, key=lambda item: item[0]):
+        searchable = json.dumps(
+            {"id": source_id, "source_ref": source_ref},
+            ensure_ascii=False,
+            sort_keys=True,
+        ).casefold()
+        if not normalized_query or normalized_query in searchable:
+            matches.append({"id": source_id, "source_ref": source_ref})
+
+    report = {
+        "checkpoint_version": f"v{version}",
+        "checkpoint": _relative_path(checkpoint_path),
+        "base_id": base_id,
+        "population": population,
+        "scan_completo": bool(state.get("scan_completo")),
+        "paginas_concluidas": len(state.get("completed_pages") or []),
+        "janelas_concluidas": len(state.get("completed_windows") or []),
+        "referencias_registradas": len(entries),
+        "contratos_elegiveis": state.get("total_contratos_elegiveis", len(entries)),
+        "consulta": query,
+        "resultados_encontrados": len(matches),
+        "offset": offset,
+        "limit": limit,
+        "results": matches[offset : offset + limit],
+    }
+
+
+def _carry_forward_base_records(
+    context: _VersionContext,
+    base_id: str,
+    previous_records: dict[str, dict[str, Any]],
+) -> int:
+    """Copy a complete prior base into staging without recollecting its sources."""
+    for logical_id, record in list(context.items.items()):
+        if record.get("base_id") == base_id and record.get("status") != "ok":
+            context.items.pop(logical_id, None)
+    copied = 0
+    for logical_id, previous in previous_records.items():
+        if previous.get("base_id") != base_id or previous.get("status") != "ok":
+            continue
+        current = context.items.get(logical_id)
+        if current and current.get("status") == "ok" and _path_from_record(current):
+            continue
+        previous_path = _path_from_record(previous)
+        if previous_path is None:
+            raise RuntimeError(f"registro anterior sem caminho reutilizável: {logical_id}")
+        digest = str(previous.get("sha256") or _file_sha256(previous_path))
+        materialized = _materialize_previous_record(
+            context,
+            base_id,
+            f"reuso_{digest[:16]}",
+            previous,
+            previous_path.suffix or ".bin",
+        )
+        if materialized is None:
+            raise RuntimeError(f"arquivo anterior ausente para reutilização: {logical_id}")
+        record = {**previous, **materialized}
+        record["logical_id"] = logical_id
+        record["base_id"] = base_id
+        record["manifest_hash"] = context.manifest_hash
+        record["source_file"] = materialized["path"]
+        record["size_bytes"] = materialized["bytes"]
+        context.items[logical_id] = record
+        copied += 1
+    return copied
+
+
+def _adopt_attempt_records(
+    context: _VersionContext,
+    inventory: dict[str, Any],
+    *,
+    source_inventory_path: Path,
+) -> int:
+    """Copy a completed isolated Agregada attempt into an official version."""
+    adopted = 0
+    for candidate in inventory.get("arquivos", []):
+        if not isinstance(candidate, dict):
+            continue
+        logical_id = str(candidate.get("logical_id") or "")
+        if not logical_id:
+            raise ValueError("registro da tentativa sem logical_id")
+        current = context.items.get(logical_id)
+        if current and current.get("status") == "ok":
+            current_path = _path_from_record(current)
+            if current_path is not None and current_path.is_file():
+                continue
+        record = dict(candidate)
+        record["manifest_hash"] = context.manifest_hash
+        record["adotado_de_tentativa"] = _relative_path(source_inventory_path)
+        if record.get("status") == "ok":
+            source_path = _path_from_record(candidate)
+            if source_path is None:
+                raise RuntimeError(f"registro da tentativa sem arquivo: {logical_id}")
+            materialized = _materialize_previous_record(
+                context,
+                "pca_agregado",
+                f"adotado_{hashlib.sha256(logical_id.encode('utf-8')).hexdigest()[:16]}",
+                candidate,
+                source_path.suffix or ".bin",
+            )
+            if materialized is None:
+                raise RuntimeError(f"arquivo da tentativa ausente: {logical_id}")
+            record.update(materialized)
+            record.pop("reutilizado_de", None)
+            record["manifest_hash"] = context.manifest_hash
+            record["adotado_de_tentativa"] = _relative_path(source_inventory_path)
+        context.items[logical_id] = record
+        adopted += 1
+    return adopted
+
+
+def _validate_adopt_attempt_coverage(
+    inventory_path: Path,
+    inventory: dict[str, Any],
+) -> None:
+    version = _version_number(str(inventory.get("version") or ""))
+    if version is None:
+        raise ValueError("inventário da tentativa sem versão vN válida")
+    checkpoint_path = inventory_path.parent / "checkpoints" / f"v{version}.json"
+    if not checkpoint_path.is_file():
+        raise ValueError(f"checkpoint da tentativa não encontrado: {checkpoint_path}")
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    if checkpoint.get("state") != "promoted":
+        raise ValueError("a tentativa ainda não terminou e não pode ser adotada")
+    selected = (checkpoint.get("selection") or {}).get("pca_agregado", [])
+    expected_contracts: set[str] = set()
+    for entry in selected:
+        source_value = entry.get("source_ref") if isinstance(entry, dict) else None
+        if not isinstance(source_value, dict):
+            continue
+        source_ref = SourceRef.from_dict(source_value)
+        if source_ref.resource_type.casefold() == "contrato_assinado":
+            expected_contracts.add(source_ref.stable_id)
+    if not expected_contracts:
+        raise ValueError("checkpoint da tentativa não lista contratos selecionados na base pca_agregado")
+
+    for resource_kind in ("contrato", "itens", "resultado_item"):
+        available: set[str] = set()
+        for record in inventory.get("arquivos", []):
+            if (
+                not isinstance(record, dict)
+                or record.get("base_id") != "pca_agregado"
+                or record.get("resource_kind") != resource_kind
+                or record.get("status") != "ok"
+            ):
+                continue
+            source_value = record.get("source_ref")
+            if isinstance(source_value, dict):
+                available.add(SourceRef.from_dict(source_value).stable_id)
+        missing = expected_contracts - available
+        if missing:
+            raise ValueError(
+                f"tentativa incompleta: {len(missing)} de {len(expected_contracts)} contratos "
+                f"não têm recurso {resource_kind} bem-sucedido"
+            )
+    print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
 def _manifest_main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Materializa o corpus declarado pelo manifesto.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -2497,13 +3971,61 @@ def _manifest_main(argv: list[str]) -> int:
             metavar="ID",
             help="limita a execução a uma base declarada; pode ser repetido em modo experimental",
         )
+        if command == "fetch":
+            command_parser.add_argument(
+                "--source-inventory",
+                type=Path,
+                help="inventário anterior com SourceRef PNCP; usado com --base-id editais_normativo, pca_agregado ou atas_conversacional",
+            )
         if command == "update":
             command_parser.add_argument("--dry-run", action="store_true", help="mostra o plano sem modificar arquivos")
+            command_parser.add_argument(
+                "--adopt-attempt",
+                type=Path,
+                help="promove uma tentativa experimental isolada da pca_agregado, carregando as demais bases da versão anterior",
+            )
+            command_parser.add_argument(
+                "--use-discovered-contracts",
+                action="store_true",
+                help="usa até o alvo de contratos elegíveis já registrado no checkpoint v3",
+            )
+    discovery_parser = subparsers.add_parser(
+        "discover",
+        help="retoma a descoberta nacional de contratos sem baixar recursos nem promover versão",
+        description="Descobre e conta contratos assinados no RJ, registrando o progresso no checkpoint existente sem materializar recursos ou promover uma versão.",
+    )
+    discovery_parser.add_argument("--manifest", type=Path, default=MANIFEST_DEFAULT)
+    discovery_parser.add_argument("--data-root", type=Path, default=None)
+    discovery_parser.add_argument("--official", action="store_true", help="usa a árvore oficial data/")
+    discovery_parser.add_argument(
+        "--max-pages",
+        type=int,
+        default=None,
+        help="limita as páginas consultadas nesta execução; sem limite, conclui toda a descoberta",
+    )
+    report_parser = subparsers.add_parser(
+        "discovery",
+        help="consulta referências já registradas no checkpoint, sem acessar a API",
+    )
+    report_parser.add_argument("--checkpoint-version", default="v3", help="checkpoint a consultar, como v3")
+    report_parser.add_argument("--data-root", type=Path, default=None)
+    report_parser.add_argument("--official", action="store_true", help="usa a árvore oficial data/")
+    report_parser.add_argument("--base-id", default="contratos_estruturado")
+    report_parser.add_argument("--population", default="contrato_assinado_rj_unidades")
+    report_parser.add_argument("--query", help="busca parcial sem distinção de maiúsculas em IDs e campos da referência")
+    report_parser.add_argument("--limit", type=int, default=50, help="máximo de referências retornadas (1–500)")
+    report_parser.add_argument("--offset", type=int, default=0, help="número de resultados a pular")
     inventory_parser = subparsers.add_parser("inventory")
     inventory_parser.add_argument("--corpus-version", required=True, type=str, help="versão do corpus a inspecionar, como v1")
     inventory_parser.add_argument("--data-root", type=Path, default=None)
     inventory_parser.add_argument("--official", action="store_true", help="usa a árvore oficial data/")
     args = parser.parse_args(argv)
+    if args.command == "discover" and args.max_pages is not None and args.max_pages < 1:
+        parser.error("--max-pages deve ser maior que zero")
+    if args.command == "discovery" and not 1 <= args.limit <= 500:
+        parser.error("--limit deve estar entre 1 e 500")
+    if args.command == "discovery" and args.offset < 0:
+        parser.error("--offset não pode ser negativo")
     official_root = (PROJECT_ROOT / "data").resolve()
     if args.official:
         if args.data_root is not None and args.data_root.resolve() != official_root:
@@ -2514,6 +4036,15 @@ def _manifest_main(argv: list[str]) -> int:
             parser.error("coletas não oficiais exigem --data-root; use --official para o corpus oficial")
         data_root = args.data_root.resolve()
     _configure_data_root(data_root)
+    if args.command == "discovery":
+        return _discovery_report(
+            args.checkpoint_version,
+            args.base_id,
+            args.population,
+            args.query,
+            args.limit,
+            args.offset,
+        )
     if args.command == "inventory":
         version = _version_number(args.corpus_version)
         if version is None:
@@ -2524,10 +4055,22 @@ def _manifest_main(argv: list[str]) -> int:
     if args.command == "update" and args.dry_run:
         if args.base_ids:
             parser.error("--base-id não é compatível com update --dry-run")
+        if args.use_discovered_contracts:
+            parser.error("--use-discovered-contracts não é compatível com update --dry-run")
+        if args.adopt_attempt:
+            parser.error("--adopt-attempt não é compatível com update --dry-run")
         return _dry_run_update(args.manifest.resolve(), official=args.official)
     run_kwargs = {"official": args.official}
-    if args.base_ids:
+    if getattr(args, "base_ids", None):
         run_kwargs["base_ids"] = args.base_ids
+    if getattr(args, "source_inventory", None):
+        run_kwargs["source_inventory_path"] = args.source_inventory.resolve()
+    if args.command == "discover":
+        run_kwargs["max_pages"] = args.max_pages
+    if args.command == "update" and args.use_discovered_contracts:
+        run_kwargs["use_discovered_contracts"] = True
+    if args.command == "update" and args.adopt_attempt:
+        run_kwargs["adopt_attempt_inventory_path"] = args.adopt_attempt.resolve()
     return _run_manifest_command(args.command, args.manifest.resolve(), **run_kwargs)
 
 

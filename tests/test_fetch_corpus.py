@@ -9,6 +9,7 @@ import pytest
 
 import src.fetch_corpus as fetch_corpus
 from src import fetch_corpus as fc
+from src.corpus_validator import validate_inventory_contract, validate_manifest_contract
 
 # Merge da branch joao-reis (2026-09-23): remover os skips quando o código entrar no main.
 def _item(logical_id: str, base_id: str, sha256: str, tipo: str = "pdf", **extra) -> dict:
@@ -43,13 +44,24 @@ def test_manifest_declares_real_bases_and_official_pdf_target():
     assert bases["documentos_pncp"]["volume_alvo"] >= 100
     assert bases["documentos_pncp"]["formato"] == "pdf"
     assert bases["contratos_estruturado"]["acesso"]["tipo"] == "provider"
-    assert bases["contratos_estruturado"]["acesso"]["resource_type"] == "contratacao"
-    assert bases["contratos_estruturado"]["volume_alvo"] == 160
-    assert bases["contratos_estruturado"]["selecao"]["limite"] == 160
+    structured = bases["contratos_estruturado"]
+    assert [population["resource_type"] for population in structured["acesso"]["populations"]] == [
+        "contrato_assinado",
+        "contratacao",
+    ]
+    assert structured["volume_alvo"] == 1200
+    assert structured["volume_regra"] == "minimo"
+    assert structured["selecao"]["limite"] == 1200
+    assert structured["acesso"]["populations"][0]["censo"] is True
+    assert structured["acesso"]["populations"][0]["censo_nacional"] is True
+    assert "exigir_cadastro_completo" not in structured["acesso"]["populations"][0]
+    assert structured["acesso"]["populations"][1]["params"]["tamanhoPagina"] == 50
     assert bases["pca_agregado"]["acesso"]["tipo"] == "provider"
     assert bases["pca_agregado"]["acesso"]["provider"] == "pncp"
     assert bases["pca_agregado"]["volume_alvo"] == 16
     assert bases["pca_agregado"]["acesso"]["params"]["anos"] == [2024, 2025]
+    assert bases["pca_agregado"]["acesso"]["exigir_cadastro_completo"] is True
+    assert bases["pca_agregado"]["acesso"]["censo"] is True
     assert bases["atas_conversacional"]["acesso"]["tipo"] == "provider"
     assert bases["atas_conversacional"]["volume_alvo"] == 20
     assert bases["editais_normativo"]["acesso"]["urls"]
@@ -74,6 +86,25 @@ def test_manifest_covers_four_official_base_types():
     assert bases["editais_normativo"]["acesso"]["tipo"] == "http_misto"
     assert bases["atas_conversacional"]["acesso"]["tipo"] == "provider"
     assert bases["pca_agregado"]["acesso"]["tipo"] == "provider"
+
+
+def test_manifest_and_inventory_contract_accept_contract_census_above_minimum():
+    manifest = fetch_corpus.load_manifest(Path("corpus_manifest.yaml"))
+    assert validate_manifest_contract(manifest).ok
+    inventory = {
+        "completo": True,
+        "falhas": [],
+        "por_base": [
+            {
+                "base_id": base["base_id"],
+                "status": "complete",
+                "volume_obtido": 1201 if base["base_id"] == "contratos_estruturado" else base["volume_alvo"],
+            }
+            for base in manifest["bases"]
+            if base.get("escopo") == "oficial"
+        ],
+    }
+    assert validate_inventory_contract(manifest, inventory).ok
 
 
 def test_fixture_contract_has_at_least_twenty_offline_documents():
@@ -333,11 +364,21 @@ def test_checkpoint_persists_and_validates_frozen_selection(monkeypatch, tmp_pat
         last_request_at={},
     )
     monkeypatch.setattr(fetch_corpus, "PROJECT_ROOT", project_root)
+    context.discovery = {
+        "base": {
+            "contrato_assinado": {
+                "completed_pages": ["janela:pagina=1"],
+                "completed_windows": [],
+                "eligible_sources": {},
+            }
+        }
+    }
 
     fetch_corpus._checkpoint_write(context)
     payload = json.loads(context.checkpoint_path.read_text(encoding="utf-8"))
 
     assert payload["selection"]["base"][0]["stable_id"] == "pncp:contratacao:id=1"
+    assert payload["discovery"]["base"]["contrato_assinado"]["completed_pages"] == ["janela:pagina=1"]
     assert fetch_corpus._validate_checkpoint(
         payload, manifest, "sha256:manifest", 1, staging
     ).ok
@@ -348,6 +389,93 @@ def test_checkpoint_persists_and_validates_frozen_selection(monkeypatch, tmp_pat
     )
     assert not validation.ok
     assert any("duplicada" in error for error in validation.errors)
+
+
+def test_checkpoint_records_national_discovery_page(monkeypatch):
+    from types import SimpleNamespace
+    from src.providers.base import SourceRef
+
+    saved = []
+    monkeypatch.setattr(fc, "_checkpoint_write", lambda context: saved.append(context))
+    context = SimpleNamespace(discovery={})
+    source_ref = SourceRef(
+        provider="pncp",
+        resource_type="contrato_assinado",
+        key={
+            "numeroControlePNCP": "11111111000100-2-000001/2025",
+            "cnpj": "11111111000100",
+            "ano": "2025",
+            "sequencial": "000001",
+        },
+    )
+    candidate = SimpleNamespace(source_ref=source_ref)
+    linked_ref = SourceRef(
+        provider="pncp",
+        resource_type="contrato_assinado",
+        key={
+            **source_ref.key,
+            "numeroControlePNCPCompra": "11111111000100-1-000001/2025",
+        },
+    )
+    linked_candidate = SimpleNamespace(source_ref=linked_ref)
+
+    fc._record_pncp_discovery_page(
+        context,
+        "contratos_estruturado",
+        "contrato_assinado",
+        {
+            "window": "20250101:20251231:nacional",
+            "page": 1,
+            "page_key": "20250101:20251231:nacional:pagina=1",
+            "total_paginas": 4047,
+            "total_registros": 2023149,
+            "window_done": False,
+            "candidates": [candidate, candidate, linked_candidate],
+        },
+    )
+
+    state = context.discovery["contratos_estruturado"]["contrato_assinado"]
+    assert state["completed_pages"] == ["20250101:20251231:nacional:pagina=1"]
+    assert state["total_paginas_por_janela"] == {"20250101:20251231:nacional": 4047}
+    assert state["total_registros_nacionais_por_janela"] == {"20250101:20251231:nacional": 2023149}
+    assert list(state["eligible_sources"]) == [source_ref.key["numeroControlePNCP"]]
+    assert state["eligible_sources"][source_ref.key["numeroControlePNCP"]]["key"]["numeroControlePNCPCompra"] == "11111111000100-1-000001/2025"
+    assert state["cnpjs_derivados"] == ["11111111000100"]
+    assert saved == [context]
+
+
+def test_checkpoint_allows_more_contracts_than_minimum_target():
+    from src.providers.base import SourceRef
+
+    refs = [
+        SourceRef(
+            provider="pncp",
+            resource_type="contrato_assinado",
+            key={"numeroControlePNCP": f"11111111000100-2-{index:06d}/2025", "cnpj": "11111111000100", "ano": "2025", "sequencial": str(index)},
+        )
+        for index in (1, 2)
+    ]
+    checkpoint = {
+        "manifest_hash": "sha256:manifest",
+        "version": "v1",
+        "state": "staging",
+        "items": {},
+        "selection": {
+            "contratos_estruturado": [
+                {"stable_id": source_ref.stable_id, "source_ref": source_ref.to_dict()}
+                for source_ref in refs
+            ]
+        },
+        "discovery": {},
+    }
+    manifest = {
+        "bases": [{"base_id": "contratos_estruturado", "volume_alvo": 1, "volume_regra": "minimo"}]
+    }
+
+    validation = fc._validate_checkpoint(
+        checkpoint, manifest, "sha256:manifest", 1, Path("data/raw/.staging/v1")
+    )
+    assert validation.ok
 
 
 def test_data_root_isolates_raw_inventory_logs_and_report(monkeypatch, tmp_path):
@@ -396,7 +524,7 @@ def test_cli_routes_manifest_commands_and_keeps_corpus_version_option(monkeypatc
     monkeypatch.setattr(
         fetch_corpus,
         "_run_manifest_command",
-        lambda command, manifest_path, *, official: manifest_calls.append((command, manifest_path, official)) or 0,
+        lambda command, manifest_path, **kwargs: manifest_calls.append((command, manifest_path, kwargs)) or 0,
     )
     monkeypatch.setattr(
         fetch_corpus,
@@ -406,12 +534,93 @@ def test_cli_routes_manifest_commands_and_keeps_corpus_version_option(monkeypatc
 
     assert fetch_corpus._manifest_main(["fetch", "--manifest", "manifest.yaml", "--official"]) == 0
     assert fetch_corpus._manifest_main(["update", "--manifest", "manifest.yaml", "--data-root", str(tmp_path)]) == 0
+    assert fetch_corpus._manifest_main(["discover", "--manifest", "manifest.yaml", "--data-root", str(tmp_path), "--max-pages", "2"]) == 0
     assert fetch_corpus._manifest_main(["inventory", "--corpus-version", "v2", "--data-root", str(tmp_path)]) == 0
 
-    assert [call[0] for call in manifest_calls] == ["fetch", "update"]
-    assert all(call[2] is False for call in manifest_calls[1:])
+    assert [call[0] for call in manifest_calls] == ["fetch", "update", "discover"]
+    assert manifest_calls[0][2]["official"] is True
+    assert manifest_calls[1][2]["official"] is False
+    assert manifest_calls[2][2] == {"official": False, "max_pages": 2}
     assert inventory_calls == [2]
     assert configured_roots
+
+
+def test_discover_command_stops_after_national_contract_population(monkeypatch, tmp_path, capsys):
+    population = {"resource_type": "contrato_assinado", "censo": True, "censo_nacional": True}
+    manifest = {
+        "scenario_id": "fixture",
+        "bases": [
+            {
+                "base_id": "contratos_estruturado",
+                "acesso": {
+                    "provider": "pncp",
+                    "populations": [population, {"resource_type": "contratacao"}],
+                },
+            }
+        ],
+    }
+    context = type("Context", (), {"discovery": {}, "checkpoint_path": tmp_path / "v3.json"})()
+    calls = []
+    events = []
+
+    class Logger:
+        run_id = "test-run"
+
+        def __init__(self, command):
+            assert command == "discover"
+
+        def event(self, *args, **kwargs):
+            events.append((args, kwargs))
+
+    class Lock:
+        def __init__(self, version):
+            assert version == 3
+
+        def acquire(self):
+            calls.append("lock")
+
+        def release(self):
+            calls.append("release")
+
+    def collect(_context, base, *, discovery_only, max_pages):
+        calls.append((base, discovery_only, max_pages))
+        context.discovery = {
+            "contratos_estruturado": {
+                "contrato_assinado": {
+                    "pages_this_run": 2,
+                    "completed_pages": ["p1", "p2"],
+                    "eligible_sources": {"pncp-contract-id": {}},
+                    "cnpjs_derivados": ["11111111000100"],
+                    "scan_completo": False,
+                }
+            }
+        }
+        return []
+
+    monkeypatch.setattr(fetch_corpus, "_RunLogger", Logger)
+    monkeypatch.setattr(fetch_corpus, "load_manifest", lambda path: manifest)
+    monkeypatch.setattr(fetch_corpus, "_manifest_hash", lambda path: "sha256:manifest")
+    monkeypatch.setattr(fetch_corpus, "_manifest_for_scope", lambda loaded, *, official: loaded)
+    monkeypatch.setattr(fetch_corpus, "_find_resumable_version", lambda *args: 3)
+    monkeypatch.setattr(fetch_corpus, "_VersionLock", Lock)
+    monkeypatch.setattr(fetch_corpus, "_load_version_context", lambda *args, **kwargs: context)
+    monkeypatch.setattr(fetch_corpus, "_collect_provider_base", collect)
+    monkeypatch.setattr(fetch_corpus, "_checkpoint_write", lambda context: None)
+    monkeypatch.setattr(fetch_corpus, "_relative_path", str)
+    monkeypatch.setattr(fetch_corpus, "_build_inventory", lambda *args, **kwargs: pytest.fail("no inventory expected"))
+    monkeypatch.setattr(fetch_corpus, "_promote_version", lambda *args, **kwargs: pytest.fail("no promotion expected"))
+
+    assert fetch_corpus._run_manifest_command(
+        "discover", tmp_path / "manifest.yaml", official=True, max_pages=2
+    ) == 0
+    output = json.loads(capsys.readouterr().out)
+    discovery_call = calls[1]
+    assert discovery_call[0]["acesso"]["populations"] == [population]
+    assert discovery_call[1:] == (True, 2)
+    assert output["eligible_contracts"] == 1
+    assert output["scan_complete"] is False
+    assert output["promoted"] is False
+    assert calls[-1] == "release"
 
 
 def test_api_request_normalizes_manifest_iso_dates():

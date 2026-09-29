@@ -46,3 +46,12 @@
 - Organizei o fluxo de interação do usuário, considerando a realização de perguntas, a apresentação das respostas geradas pelo sistema e a exibição das fontes consultadas.
 - Validei a estrutura planejada de acordo com os requisitos do projeto e com as funcionalidades já disponíveis no backend.
 - Registrei as definições realizadas para orientar a etapa de implementação e garantir a integração do frontend com o pipeline de Adaptive RAG.
+
+## Encontro 6 - 2026-09-25
+
+### Relato individual - Eduarda
+
+- Desenvolvi o frontend e a interface do projeto.
+- Realizei uma prévia da conexão local entre o frontend e o backend.
+- A integração completa com o pipeline de Adaptive RAG ainda está pendente.
+- Disponibilizei uma versão do frontend em: [https://etuarda.github.io/frontendRAG/](https://etuarda.github.io/frontendRAG/).

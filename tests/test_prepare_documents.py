@@ -107,7 +107,7 @@ def test_prepare_documents_extracts_manifest_declared_structured_metadata(tmp_pa
     record = json.loads(output.read_text(encoding="utf-8").splitlines()[0])
     assert record["natureza"] == "estruturada"
     assert record["doc_type"] == "json"
-    assert record["origem"] == "PNCP - API de consulta de contratações/publicação"
+    assert record["origem"] == "PNCP - contratos assinados e contratações publicadas"
     assert record["data_vigencia"] == "2025-12-31"
     assert record["extras"]["orgao"] == "Secretaria X"
     assert record["extras"]["valor"] == 500000
