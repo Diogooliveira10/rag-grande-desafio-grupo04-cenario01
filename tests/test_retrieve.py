@@ -8,6 +8,7 @@ import src.retrieve as retrieve_module
 from src.retrieve import (
     RetrievalResult,
     _parse_number,
+    _result,
     bm25_retrieve,
     dense_retrieve,
     reciprocal_rank_fusion,
@@ -81,6 +82,46 @@ def test_dense_retrieve_ranks_by_cosine_and_preserves_metadata():
     assert results[0].content == "contrato de ambulancia"
     assert results[0].score == pytest.approx(1.0)
     assert results[1].score == pytest.approx(0.0)
+
+
+def test_result_preserves_nested_metadata():
+    metadata = {
+        "source_file": "arquivo.json",
+        "chunk_id": "chunk-001",
+        "base_id": "estruturada",
+        "doc_type": "contrato",
+    }
+
+    result = _result(
+        {"chunk_id": "chunk-001", "metadata": metadata},
+        score=0.75,
+        content="conteúdo do contrato",
+    )
+
+    assert result.metadata == metadata
+    assert result.chunk_id == "chunk-001"
+    assert result.content == "conteúdo do contrato"
+    assert result.score == pytest.approx(0.75)
+
+
+def test_result_reads_metadata_from_top_level_fields():
+    metadata = {
+        "source_file": "arquivo.json",
+        "chunk_id": "chunk-001",
+        "base_id": "estruturada",
+        "doc_type": "contrato",
+    }
+
+    result = _result(
+        {"chunk_id": "chunk-001", **metadata},
+        score=0.75,
+        content="conteúdo do contrato",
+    )
+
+    assert result.metadata == metadata
+    assert result.chunk_id == "chunk-001"
+    assert result.content == "conteúdo do contrato"
+    assert result.score == pytest.approx(0.75)
 
 
 def test_dense_retrieve_returns_empty_for_empty_index_without_embedding():
@@ -164,6 +205,30 @@ def test_bm25_retrieve_ranks_relevant_terms_and_deduplicates_chunk_ids():
     assert all(item.metadata["municipio"] == "rio" for item in results)
     assert results[0].score > results[1].score
     assert results[0].content.startswith("ambulancia")
+
+
+def test_bm25_retrieve_preserves_flat_metadata_through_rrf():
+    records = [
+        {
+            "chunk_id": "chunk-001",
+            "text": "contrato de tecnologia",
+            "source_file": "arquivo.json",
+            "base_id": "estruturada",
+            "doc_type": "contrato",
+        }
+    ]
+
+    results = bm25_retrieve("tecnologia", records=records)
+    fused = reciprocal_rank_fusion([[], results])
+
+    assert len(results) == 1
+    assert results[0].metadata["source_file"] == "arquivo.json"
+    assert results[0].metadata["chunk_id"] == "chunk-001"
+    assert results[0].metadata["base_id"] == "estruturada"
+    assert results[0].metadata["doc_type"] == "contrato"
+    assert results[0].content == "contrato de tecnologia"
+    assert len(fused) == 1
+    assert fused[0].metadata == results[0].metadata
 
 
 def test_bm25_retrieve_is_independent_of_vector_index_and_missing_documents_file(tmp_path):

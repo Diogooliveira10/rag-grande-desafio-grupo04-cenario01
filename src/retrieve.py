@@ -371,8 +371,7 @@ def _filtrar_por_base(
 
 
 def _result(record: Mapping[str, Any], score: float, content: str = "") -> RetrievalResult:
-    raw_metadata = record.get("metadata")
-    metadata = dict(raw_metadata) if isinstance(raw_metadata, Mapping) else {}
+    metadata = dict(_metadata_of(record))
     return RetrievalResult(
         chunk_id=str(record.get("chunk_id") or metadata.get("chunk_id", "")),
         content=content or str(record.get("text", "")),
