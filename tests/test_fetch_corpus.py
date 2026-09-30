@@ -601,7 +601,7 @@ def test_discover_command_stops_after_national_contract_population(monkeypatch, 
     monkeypatch.setattr(fetch_corpus, "load_manifest", lambda path: manifest)
     monkeypatch.setattr(fetch_corpus, "_manifest_hash", lambda path: "sha256:manifest")
     monkeypatch.setattr(fetch_corpus, "_manifest_for_scope", lambda loaded, *, official: loaded)
-    monkeypatch.setattr(fetch_corpus, "_find_resumable_version", lambda *args: 3)
+    monkeypatch.setattr(fetch_corpus, "_find_resumable_version", lambda *args, **kwargs: 3)
     monkeypatch.setattr(fetch_corpus, "_VersionLock", Lock)
     monkeypatch.setattr(fetch_corpus, "_load_version_context", lambda *args, **kwargs: context)
     monkeypatch.setattr(fetch_corpus, "_collect_provider_base", collect)

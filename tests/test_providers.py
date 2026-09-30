@@ -24,10 +24,12 @@ def test_pncp_provider_resolves_stable_resource_references():
     assert purchase.artifacts[0].url.endswith(
         "/api/consulta/v1/orgaos/00394544000185/compras/2025/1220"
     )
-    assert len(purchase.artifacts) == 3
+    assert len(purchase.artifacts) == 4
     assert purchase.artifacts[0].url.endswith("/compras/2025/1220")
     assert purchase.artifacts[1].metadata["resource_kind"] == "itens"
     assert purchase.artifacts[2].metadata["resource_kind"] == "documentos_edital"
+    assert purchase.artifacts[3].metadata["resource_kind"] == "atas_compra"
+    assert purchase.artifacts[3].url.endswith("/compras/2025/1220/atas")
 
     ata = provider.resolve(
         SourceRef(

@@ -60,7 +60,7 @@ def test_manifesto_oficial_aponta_base_faltando_e_volume_divergente():
     erros = validate_manifest_contract(manifesto).errors
 
     assert any("bases oficiais divergentes" in erro for erro in erros)
-    assert any("contratos_estruturado: volume_alvo esperado=160 obtido=5" in erro for erro in erros)
+    assert any("contratos_estruturado: volume_alvo esperado=1200 obtido=5" in erro for erro in erros)
 
 
 def test_manifesto_exige_selecao_deterministica_natureza_e_volume_valido():
@@ -93,7 +93,7 @@ def test_inventario_incompleto_com_falha_base_ausente_e_volume_errado():
     assert "inventário contém 1 falha(s)" in erros
     assert "inventário sem base(s): pca_agregado" in erros
     assert "contratos_estruturado: status='partial'" in erros
-    assert "contratos_estruturado: volume esperado=160 obtido=150" in erros
+    assert "contratos_estruturado: volume esperado=1200 obtido=150" in erros
 
 
 def test_inventario_aceita_itens_quando_nao_ha_volume_obtido():
@@ -105,9 +105,9 @@ def test_inventario_aceita_itens_quando_nao_ha_volume_obtido():
     assert validate_inventory_contract(manifesto, copy.deepcopy(inventario)).ok
 
 
-def test_manifesto_e_inventario_v2_do_repositorio_continuam_validos():
+def test_manifesto_e_inventario_v3_do_repositorio_continuam_validos():
     manifesto = load_manifest(ROOT / "corpus_manifest.yaml")
-    inventario = json.loads((ROOT / "data" / "inventory" / "v2.json").read_text(encoding="utf-8"))
+    inventario = json.loads((ROOT / "data" / "inventory" / "v3.json").read_text(encoding="utf-8"))
 
     assert validate_manifest_contract(manifesto).ok
     assert validate_inventory_contract(manifesto, inventario).ok
