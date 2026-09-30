@@ -131,7 +131,7 @@ def _fingerprint(payload: dict[str, Any]) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def _extraction_fingerprint(base: dict[str, Any]) -> str:
+def _extraction_fingerprint(base: dict[str, Any], *, ocr_motor: str | None = None) -> str:
     return _fingerprint(
         {
             "schema": EXTRACTION_SCHEMA_VERSION,
@@ -141,8 +141,9 @@ def _extraction_fingerprint(base: dict[str, Any]) -> str:
             "campo_vigencia": base.get("campo_vigencia"),
             "metadados_extras": base.get("metadados_extras"),
             "chunking_sugerido": base.get("chunking_sugerido"),
+            **({"json_resultado_records": True} if base.get("natureza") == "agregada" else {}),
             # Instalar ou trocar o OCR muda o texto extraído das páginas escaneadas.
-            "ocr": ocr.motor(),
+            "ocr": ocr.motor() if ocr_motor is None else ocr_motor,
         }
     )
 
@@ -172,9 +173,11 @@ def _visible_html(text: str) -> str:
     return parser.text()
 
 
-def _json_records(payload: Any) -> list[tuple[int | None, Any]]:
+def _json_records(payload: Any, *, unwrap_resultado: bool = False) -> list[tuple[int | None, Any]]:
     if isinstance(payload, dict) and isinstance(payload.get("data"), list):
         return list(enumerate(payload["data"], start=1))
+    if unwrap_resultado and isinstance(payload, dict) and isinstance(payload.get("resultado"), list):
+        return list(enumerate(payload["resultado"], start=1))
     if isinstance(payload, list):
         return list(enumerate(payload, start=1))
     return [(None, payload)]
@@ -292,11 +295,73 @@ def _record_logical_id(
 
 
 def _extras_for_unit(unit: SourceUnit) -> dict[str, Any]:
-    return {
+    extras = {
         key: value
         for key, value in unit.extras.items()
-        if key not in _CANONICAL_UNIT_FIELDS
+        if key not in _CANONICAL_UNIT_FIELDS and key != "arquivo_bruto"
     }
+    # ``origem`` e ``source_file`` já são campos canônicos do chunk.
+    relations = []
+    for relation in extras.get("relacoes_pncp", []):
+        relation = dict(relation)
+        document_metadata = relation.get("document_metadata") or {}
+        for key in ("orgao_cnpj", "orgao", "esfera", "municipio", "uf", "modalidade",
+                    "numero_controle_pncp", "numero_controle_compra", "titulo_documento"):
+            if document_metadata.get(key) not in (None, ""):
+                extras.setdefault(key, document_metadata[key])
+        remaining = {key: value for key, value in document_metadata.items()
+                     if key not in extras or extras[key] != value}
+        if remaining:
+            relation["document_metadata"] = remaining
+        else:
+            relation.pop("document_metadata", None)
+        relations.append(relation)
+    if "relacoes_pncp" in extras:
+        extras["relacoes_pncp"] = relations
+    # Unidades já extraídas também recebem os campos analíticos na retomada.
+    # O texto e os valores/unidades originais permanecem intactos.
+    if unit.formato == "json":
+        try:
+            record = json.loads(unit.text)
+        except (TypeError, ValueError):
+            record = None
+        if isinstance(record, dict):
+            orgao = record.get("orgaoEntidade") or {}
+            unidade = record.get("unidadeOrgao") or {}
+            orgao = orgao if isinstance(orgao, dict) else {}
+            unidade = unidade if isinstance(unidade, dict) else {}
+            fields = {
+                "orgao_cnpj": orgao.get("cnpj") or record.get("cnpjOrgao") or record.get("cnpj"),
+                "orgao": orgao.get("razaoSocial") or record.get("nomeOrgao") or record.get("razaoSocial"),
+                "municipio": unidade.get("municipioNome") or record.get("municipio"),
+                "uf": unidade.get("ufSigla") or record.get("uf"),
+                "esfera": {"E": "estadual", "M": "municipal", "F": "federal", "D": "distrital"}.get(orgao.get("esferaId") or record.get("esfera")),
+                "modalidade": record.get("modalidadeNome"),
+                "fornecedor": record.get("nomeRazaoSocialFornecedor"),
+                "objeto": record.get("objetoContrato") or record.get("objetoCompra") or record.get("objetoContratacao") or record.get("objeto"),
+                "numero_controle_pncp": record.get("numeroControlePNCP") or record.get("numeroControlePNCPAta"),
+                "ano_pca": record.get("anoPca"),
+                "data_assinatura": record.get("dataAssinatura"),
+                "data_resultado": record.get("dataResultado"),
+                "data_publicacao": record.get("dataPublicacaoPncp"),
+            }
+            for source in ("valorGlobal", "valorTotal", "valorTotalEstimado"):
+                if record.get(source) is not None:
+                    fields["valor"] = record[source]
+                    extras.setdefault("campo_valor_original", source)
+                    break
+            for key, value in fields.items():
+                if value not in (None, ""):
+                    extras[key] = value
+    # Campos lidos do corpo JSON também podem ter aparecido nas relações.
+    for relation in extras.get("relacoes_pncp", []):
+        remaining = {key: value for key, value in (relation.get("document_metadata") or {}).items()
+                     if key not in extras or extras[key] != value}
+        if remaining:
+            relation["document_metadata"] = remaining
+        else:
+            relation.pop("document_metadata", None)
+    return extras
 
 
 def _base_for(manifest: dict[str, Any], input_dir: Path, base_id: str | None) -> dict[str, Any]:
@@ -872,7 +937,7 @@ def _file_units(
         except json.JSONDecodeError:
             payload = raw
             status = "json_invalido"
-        for record_number, record in _json_records(payload):
+        for record_number, record in _json_records(payload, unwrap_resultado=base.get("natureza") == "agregada"):
             text = json.dumps(record, ensure_ascii=False, sort_keys=True, indent=2)
             suffix_id = f":registro-{record_number}" if record_number else ""
             source_file = _relative_path(path)
@@ -1168,6 +1233,20 @@ def prepare_documents(
         extraction_fingerprint = _extraction_fingerprint(base)
         cache_key = (source_file, digest, extraction_fingerprint)
         try:
+            # Instalar OCR não invalida texto existente. Só páginas antes sem
+            # texto precisam de uma nova extração; os demais parâmetros devem coincidir.
+            previous_key = (source_file, digest, _extraction_fingerprint(base, ocr_motor="sem-ocr"))
+            if cache_key not in units_cache and ocr.disponivel() and previous_key in units_cache:
+                refreshed = []
+                for cached_unit in units_cache[previous_key]:
+                    unit = replace(cached_unit, extraction_fingerprint=extraction_fingerprint)
+                    if unit.formato == "pdf" and unit.status == "sem_texto":
+                        text = ocr.texto_da_pagina(path, int(unit.extras["pagina"]) - 1).strip()
+                        if text:
+                            unit = replace(unit, text=text, status="ok_ocr",
+                                           extras={**unit.extras, "extracao": ocr.motor()})
+                    refreshed.append(unit)
+                units_cache[cache_key] = refreshed
             if cache_key in units_cache:
                 units = list(units_cache[cache_key])
                 if any(unit.manifest_hash != summary_manifest_hash for unit in units):
@@ -1262,6 +1341,16 @@ def prepare_documents(
                 for key, value in indicador.items()
                 if key != "texto"
             }
+            # O indicador é calculado localmente; a origem aponta para uma
+            # fonte pública do cálculo, nunca para o caminho do inventário.
+            sources = indicador.get("observacoes") or inventory_payload.get("arquivos") or []
+            indicator_origin = next(
+                (str(source["origem"]) for source in sources
+                 if isinstance(source, dict) and
+                 str(source.get("origem") or "").startswith(("https://", "http://"))),
+                "PNCP: resultados de itens homologados",
+            )
+            extras["tipo_origem"] = "calculo_local_sobre_fontes_publicas"
             unit = SourceUnit(
                 source_file=source_file,
                 logical_id=logical_id,
@@ -1270,7 +1359,7 @@ def prepare_documents(
                 natureza=str(base["natureza"]),
                 doc_type="indicador_pncp",
                 sensitivity=str(base.get("sensitivity_default") or "publico"),
-                origem="PNCP: resultados de itens homologados",
+                origem=indicator_origin,
                 manifest_hash=summary_manifest_hash,
                 bytes=len(text.encode("utf-8")),
                 data_vigencia=None,
@@ -1285,7 +1374,7 @@ def prepare_documents(
                     "nome_arquivo": indicator_id,
                     "manifest_fonte": base.get("fonte"),
                     "manifest_hash": summary_manifest_hash,
-                    "origem": "PNCP: resultados de itens homologados",
+                    "origem": indicator_origin,
                     "acesso_tipo": (base.get("acesso") or {}).get("tipo"),
                     "logical_id": logical_id,
                     "coletado_em": fallback_collected_at,
@@ -1351,6 +1440,14 @@ def prepare_documents(
         "incremental_state_invalid": units_cache_invalid or chunks_cache_invalid,
     }
     if not dry_run:
+        if inventory_path is not None:
+            inventory_payload = json.loads(inventory_path.read_text(encoding="utf-8"))
+            provenance = {
+                "inventory_version": inventory_payload.get("version"),
+                "inventory_hash": sha256_file(inventory_path),
+            }
+            for record in records + documents:
+                record.update(provenance)
         _atomic_write_jsonl(output_path, records)
         _atomic_write_jsonl(units_state_path, [_unit_to_record(unit) for unit in state_units])
         _atomic_write_json(

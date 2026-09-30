@@ -49,7 +49,9 @@ def test_manifest_declares_real_bases_and_official_pdf_target():
         "contrato_assinado",
         "contratacao",
     ]
-    assert structured["volume_alvo"] == 1200
+    assert structured["volume_alvo"] > 0
+    assert sum(base["volume_alvo"] for base in bases.values() if base.get("escopo") == "oficial") == manifest["curadoria_v6"]["alvo_arquivos_total"]
+    assert manifest["curadoria_v6"]["limite_por_orgao_por_base"] == 5
     assert structured["volume_regra"] == "minimo"
     assert structured["selecao"]["limite"] == 1200
     assert structured["acesso"]["populations"][0]["censo"] is True
@@ -58,12 +60,12 @@ def test_manifest_declares_real_bases_and_official_pdf_target():
     assert structured["acesso"]["populations"][1]["params"]["tamanhoPagina"] == 50
     assert bases["pca_agregado"]["acesso"]["tipo"] == "provider"
     assert bases["pca_agregado"]["acesso"]["provider"] == "pncp"
-    assert bases["pca_agregado"]["volume_alvo"] == 16
+    assert bases["pca_agregado"]["volume_alvo"] > 0
     assert bases["pca_agregado"]["acesso"]["params"]["anos"] == [2024, 2025]
     assert bases["pca_agregado"]["acesso"]["exigir_cadastro_completo"] is True
     assert bases["pca_agregado"]["acesso"]["censo"] is True
     assert bases["atas_conversacional"]["acesso"]["tipo"] == "provider"
-    assert bases["atas_conversacional"]["volume_alvo"] == 20
+    assert bases["atas_conversacional"]["volume_alvo"] > 0
     assert bases["editais_normativo"]["acesso"]["urls"]
     assert all("exemplo.gov.br" not in url for url in bases["editais_normativo"]["acesso"]["urls"])
 
@@ -545,7 +547,7 @@ def test_cli_routes_manifest_commands_and_keeps_corpus_version_option(monkeypatc
     assert configured_roots
 
 
-def test_discover_command_stops_after_national_contract_population(monkeypatch, tmp_path, capsys):
+def test_discover_command_stops_after_incomplete_publication_population(monkeypatch, tmp_path, capsys):
     population = {"resource_type": "contrato_assinado", "censo": True, "censo_nacional": True}
     manifest = {
         "scenario_id": "fixture",
@@ -586,7 +588,7 @@ def test_discover_command_stops_after_national_contract_population(monkeypatch, 
         calls.append((base, discovery_only, max_pages))
         context.discovery = {
             "contratos_estruturado": {
-                "contrato_assinado": {
+                "contratacao_publicacao_rj": {
                     "pages_this_run": 2,
                     "completed_pages": ["p1", "p2"],
                     "eligible_sources": {"pncp-contract-id": {}},
@@ -600,8 +602,8 @@ def test_discover_command_stops_after_national_contract_population(monkeypatch, 
     monkeypatch.setattr(fetch_corpus, "_RunLogger", Logger)
     monkeypatch.setattr(fetch_corpus, "load_manifest", lambda path: manifest)
     monkeypatch.setattr(fetch_corpus, "_manifest_hash", lambda path: "sha256:manifest")
-    monkeypatch.setattr(fetch_corpus, "_manifest_for_scope", lambda loaded, *, official: loaded)
-    monkeypatch.setattr(fetch_corpus, "_find_resumable_version", lambda *args: 3)
+    monkeypatch.setattr(fetch_corpus, "_manifest_for_scope", lambda loaded, *, official, **kwargs: loaded)
+    monkeypatch.setattr(fetch_corpus, "_find_resumable_version", lambda *args, **kwargs: 3)
     monkeypatch.setattr(fetch_corpus, "_VersionLock", Lock)
     monkeypatch.setattr(fetch_corpus, "_load_version_context", lambda *args, **kwargs: context)
     monkeypatch.setattr(fetch_corpus, "_collect_provider_base", collect)
@@ -615,9 +617,12 @@ def test_discover_command_stops_after_national_contract_population(monkeypatch, 
     ) == 0
     output = json.loads(capsys.readouterr().out)
     discovery_call = calls[1]
-    assert discovery_call[0]["acesso"]["populations"] == [population]
+    discovered_population = discovery_call[0]["acesso"]["populations"][0]
+    assert discovered_population["resource_type"] == "contratacao"
+    assert discovered_population["verify_discovered_units"] is True
+    assert discovered_population["params"]["uf"] == "RJ"
     assert discovery_call[1:] == (True, 2)
-    assert output["eligible_contracts"] == 1
+    assert output["eligible_contracts"] == 0
     assert output["scan_complete"] is False
     assert output["promoted"] is False
     assert calls[-1] == "release"

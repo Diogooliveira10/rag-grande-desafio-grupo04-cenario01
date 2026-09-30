@@ -15,6 +15,79 @@ PDF_ROOT = ROOT / "tests" / "fixtures" / "pdf"
 CSV_FIXTURE = ROOT / "tests" / "fixtures" / "formats" / "licitacoes_siga_real.csv"
 
 
+def test_pca_indicators_do_not_decode_pdf_from_other_base(tmp_path):
+    from src.pncp_result_indicators import _read_payload, indicadores_resultados_homologados
+    pdf = tmp_path / "ata.pdf"
+    pdf.write_bytes(b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n")
+    record = {"status": "ok", "base_id": "atas_conversacional", "path": "ata.pdf",
+              "source_ref": {"key": {"cnpj": "123", "ano": "2025", "sequencial": "1"}}}
+    indicadores_resultados_homologados({"version": "v5", "arquivos": [record]}, tmp_path)
+    assert _read_payload({**record, "resource_kind": "contratacao_detalhe"}, tmp_path) is None
+
+
+def test_pca_resultado_page_is_prepared_as_individual_facts(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    facts = [{"anoPca": 2025, "descricao": "Arroz", "valorTotal": 100},
+             {"anoPca": 2025, "descricao": "Feijão", "valorTotal": 200}]
+    (source / "page.json").write_text(json.dumps({"resultado": facts, "totalRegistros": 2}), encoding="utf-8")
+    output, report = tmp_path / "documents.jsonl", tmp_path / "report.json"
+    summary = prepare_documents(source, output, report, MANIFEST, base_id="pca_agregado")
+    chunks = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
+    assert summary["chunks"] == 2
+    assert [json.loads(chunk["text"]) for chunk in chunks] == facts
+    assert len({chunk["document_id"] for chunk in chunks}) == 2
+    assert all(chunk["extras"]["ano_pca"] == 2025 for chunk in chunks)
+
+
+def test_pncp_metadata_is_available_without_changing_source_text(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    record = {"orgaoEntidade": {"razaoSocial": "Órgão público", "esferaId": "E"},
+              "unidadeOrgao": {"municipioNome": "Rio de Janeiro", "ufSigla": "RJ"},
+              "dataAssinatura": "2025-01-20", "dataVigenciaFim": "2026-01-20",
+              "valorGlobal": 500123.45, "objetoContrato": "Licenças", "anoPca": 2025}
+    (source / "record.json").write_text(json.dumps(record), encoding="utf-8")
+    output, report = tmp_path / "documents.jsonl", tmp_path / "report.json"
+    prepare_documents(source, output, report, MANIFEST, base_id="contratos_estruturado")
+    chunk = json.loads(output.read_text(encoding="utf-8").splitlines()[0])
+    assert json.loads(chunk["text"]) == record
+    assert chunk["extras"]["orgao"] == "Órgão público"
+    assert chunk["extras"]["esfera"] == "estadual"
+    assert chunk["extras"]["valor"] == 500123.45
+    assert chunk["extras"]["campo_valor_original"] == "valorGlobal"
+    assert chunk["extras"]["data_assinatura"] == "2025-01-20"
+    assert chunk["data_vigencia"] == "2026-01-20"
+
+
+def test_ocr_installation_reuses_text_and_retries_only_blank_pages(tmp_path, monkeypatch):
+    from src import prepare_documents as prep
+    source = tmp_path / "source"
+    source.mkdir()
+    shutil.copy2(next(PDF_ROOT.glob("*.pdf")), source / "document.pdf")
+    output, report = tmp_path / "documents.jsonl", tmp_path / "report.json"
+    monkeypatch.setattr(prep.ocr, "motor", lambda: "sem-ocr")
+    monkeypatch.setattr(prep.ocr, "disponivel", lambda: False)
+    prep.prepare_documents(source, output, report, MANIFEST, base_id="exemplos_teste")
+    state_path = prep._extraction_state_path(output)
+    units = [json.loads(line) for line in state_path.read_text(encoding="utf-8").splitlines()]
+    units[0].update(text="", status="sem_texto")
+    state_path.write_text("".join(json.dumps(unit) + "\n" for unit in units), encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(prep.ocr, "motor", lambda: "tesseract:por:300")
+    monkeypatch.setattr(prep.ocr, "disponivel", lambda: True)
+    monkeypatch.setattr(prep.ocr, "texto_da_pagina", lambda path, page: calls.append(page) or "Texto recuperado por OCR")
+    monkeypatch.setattr(prep, "_file_units", lambda *args: pytest.fail("cached PDF must not be fully re-extracted"))
+    summary = prep.prepare_documents(source, output, report, MANIFEST, base_id="exemplos_teste")
+    assert summary["falhas"] == 0
+    assert summary["extraction_cache_hits"] == 1
+    assert calls == [int(units[0]["extras"]["pagina"]) - 1]
+    refreshed = [json.loads(line) for line in state_path.read_text(encoding="utf-8").splitlines()]
+    assert refreshed[0]["status"] == "ok_ocr"
+    assert refreshed[0]["text"] == "Texto recuperado por OCR"
+    assert [unit["text"] for unit in refreshed[1:]] == [unit["text"] for unit in units[1:]]
+
+
 def test_prepare_documents_extracts_pdf_text_and_required_metadata(tmp_path):
     output = tmp_path / "documents.jsonl"
     report = tmp_path / "extraction_report.json"
@@ -508,3 +581,52 @@ def test_pdf_da_ata_herda_vigencia_e_titulo_dos_artefatos_da_mesma_ata(tmp_path)
     assert pdf_chunks
     assert {record["data_vigencia"] for record in pdf_chunks} == {"2026-10-22"}
     assert {record["extras"]["titulo_documento"] for record in pdf_chunks} == {"Ata de Registro de Preços nº 00178"}
+
+
+@pytest.mark.parametrize("formato", ["pdf", "json", "html", "csv"])
+def test_content_link_and_organization_metadata_survive_all_formats(formato):
+    from src.prepare_documents import SourceUnit, _chunk_records
+    unit = SourceUnit(
+        source_file=f"data/raw/v6/base/source.{formato}", logical_id="source",
+        document_id="document", base_id="atas_conversacional", natureza="conversacional",
+        doc_type=formato, sensitivity="publico", origem="https://pncp.gov.br/api/pncp/v1/source",
+        manifest_hash="manifest", bytes=100, data_vigencia=None, chunking_sugerido="generico",
+        formato=formato, sha256="a" * 64, text="Texto de uma fonte pública.", status="ok",
+        extras={"pagina": 3, "arquivo_bruto": f"data/raw/v6/base/source.{formato}", "relacoes_pncp": [{"document_metadata": {
+            "orgao_cnpj": "12345678000100", "orgao": "Órgão de origem", "esfera": "municipal",
+            "uf": "RJ", "numero_controle_compra": "compra-2025"}}]},
+    )
+    chunk = _chunk_records(unit, 1200, 150)[0]
+    metadata = ChunkMetadata(**chunk)
+    assert metadata.origem == unit.origem
+    assert "url_conteudo" not in metadata.extras
+    assert "arquivo_bruto" not in metadata.extras
+    assert metadata.source_file == unit.source_file
+    assert metadata.extras["orgao_cnpj"] == "12345678000100"
+    assert metadata.extras["esfera"] == "municipal"
+    assert metadata.extras["pagina"] == 3
+    assert "document_metadata" not in metadata.extras["relacoes_pncp"][0]
+
+
+def test_flat_pca_fields_override_inherited_purchase_metadata():
+    from src.prepare_documents import SourceUnit, _chunk_records
+    payload = {"cnpj": "12345678000100", "razaoSocial": "Órgão do plano",
+               "municipio": "Cordeiro", "uf": "RJ", "esfera": "E", "anoPca": 2025,
+               "valorTotal": 494060.39, "numeroControlePNCP": "12345678000100-0-000001/2025"}
+    text = json.dumps(payload, ensure_ascii=False)
+    unit = SourceUnit(
+        source_file="data/raw/v6/pca_agregado/pca.json", logical_id="pca", document_id="pca",
+        base_id="pca_agregado", natureza="agregada", doc_type="json", sensitivity="publico",
+        origem="https://pncp.gov.br/api/pncp/v1/orgaos/12345678000100/pca/2025/1/consolidado",
+        manifest_hash="manifest", bytes=len(text.encode()), data_vigencia=None,
+        chunking_sugerido="generico", formato="json", sha256="a" * 64, text=text, status="ok",
+        extras={"relacoes_pncp": [{"document_metadata": {"municipio": "Rio de Janeiro", "orgao": "Compra anterior", "ano_pca": 2025}}]},
+    )
+    metadata = ChunkMetadata(**_chunk_records(unit, 1200, 150)[0])
+    assert metadata.origem == unit.origem
+    assert metadata.extras["municipio"] == "Cordeiro"
+    assert metadata.extras["orgao"] == "Órgão do plano"
+    assert metadata.extras["orgao_cnpj"] == payload["cnpj"]
+    assert metadata.extras["ano_pca"] == 2025
+    assert metadata.extras["valor"] == payload["valorTotal"]
+    assert "document_metadata" not in metadata.extras["relacoes_pncp"][0]

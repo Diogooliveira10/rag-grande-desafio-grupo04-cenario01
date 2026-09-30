@@ -77,7 +77,7 @@ def _source_group(source_ref: Any) -> tuple[str, str, str] | None:
 
 def _read_payload(record: dict[str, Any], project_root: Path) -> Any:
     path = project_root / str(record.get("path") or record.get("source_file") or "")
-    if not path.is_file():
+    if path.suffix.lower() != ".json" or not path.is_file():
         return None
     try:
         return json.loads(path.read_text(encoding="utf-8-sig"))
@@ -261,6 +261,8 @@ def indicadores_resultados_homologados(
 
     for record in arquivos:
         kind = str(record.get("resource_kind") or "")
+        if kind not in {"contratacao_detalhe", "contratacao_vinculada", "contratacao_publicada", "contrato", "itens", "resultado_item"}:
+            continue
         source_group = _source_group(record.get("source_ref"))
         if source_group is None:
             continue

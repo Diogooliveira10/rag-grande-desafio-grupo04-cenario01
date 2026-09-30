@@ -1,11 +1,13 @@
 openai>=3.14.1
 python-dotenv>=1.2.3
-pydantic>=2.13.4
+pydantic>=2.11.2,<2.13
 fastapi>=0.116.0
 uvicorn[standard]>=0.35.0
 httpx>=0.28.0
 pytest>=9.1.1
 pypdf>=5.0.0
+# Suporte AES para PDFs criptografados do corpus PNCP.
+cryptography>=3.1
 # Bundle de certificados somado ao do sistema nos downloads HTTPS
 # (src/ssl_context.py).
 certifi>=2024.2.2
@@ -18,3 +20,4 @@ pytesseract>=0.3.13
 typer>=0.16.0
 rich>=13.9.0
 InquirerPy>=0.3.4
+faiss-cpu>=1.8.0
