@@ -226,10 +226,18 @@ def test_cliente_padrao_usa_sdk_do_llm_ecoa(monkeypatch):
         chamadas.update(kwargs)
         return _resposta_sdk()
 
-    monkeypatch.setattr(llm_ecoa, "client", SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))))
+    sdk = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+
+    def with_options(**opcoes):
+        chamadas["opcoes"] = opcoes
+        return sdk
+
+    monkeypatch.setattr(llm_ecoa, "client", SimpleNamespace(with_options=with_options))
 
     texto, tokens = gen._texto_e_tokens(gen._cliente_padrao()([{"role": "user", "content": "oi"}]))
 
+    # Sem timeout próprio, uma chamada travada no servidor esperava até 30 min.
+    assert chamadas["opcoes"] == {"timeout": gen.config.GENERATION_TIMEOUT, "max_retries": gen.config.GENERATION_MAX_RETRIES}
     assert chamadas["model"] == gen.GENERATION_MODEL
     assert chamadas["messages"] == [{"role": "user", "content": "oi"}]
     assert chamadas["response_format"] == {"type": "json_object"}

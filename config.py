@@ -29,6 +29,10 @@ EMBEDDING_MODEL = _env("EMBEDDING_MODEL", "xagi/qwen3-embedding:0.6b-q4_k_m")
 # de 1.500 tokens, com folga para a resposta.
 GENERATION_CONTEXT_CHARS = int(_env("GENERATION_CONTEXT_CHARS", "3500"))
 GENERATION_CHUNK_CHARS = int(_env("GENERATION_CHUNK_CHARS", "900"))
+# Tempo máximo (s) de cada chamada de geração e quantas vezes tentar de novo.
+# A geração normal leva de 20 a 90 s no servidor da turma.
+GENERATION_TIMEOUT = float(_env("GENERATION_TIMEOUT", "180"))
+GENERATION_MAX_RETRIES = int(_env("GENERATION_MAX_RETRIES", "1"))
 # Rerank por cross-encoder local (src/rerank.py). O modelo da turma ainda não
 # tem endpoint; RERANK_MODEL aceita qualquer CrossEncoder do sentence-transformers.
 RERANK_ENABLED = _env("RERANK_ENABLED", "true").lower() in {"1", "true", "sim", "yes"}

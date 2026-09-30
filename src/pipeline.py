@@ -14,6 +14,7 @@ from typing import Any, Optional, Sequence
 from src.obs import new_query_id, new_run_id
 from src.generate import ClienteLLM, gerar_resposta
 from src.query_analysis import analisar_query, filtros_para_retrieve
+from src.rerank import reranker_padrao
 from src.retrieve import DEFAULT_TOP_K, RerankFn, RetrievalResult, retrieve
 from src.router import inferir_motivo_recusa, rotear_pergunta
 from src.schema import Chunk, ChunkMetadata
@@ -49,6 +50,9 @@ def responder(
     da justificativa do roteador (``router.inferir_motivo_recusa``) e repassado
     para ``gerar_resposta``, que senão cairia sempre em SEM_EVIDENCIA.
 
+    A recuperação funde busca densa e BM25 (RRF) e reordena os primeiros
+    candidatos com o cross-encoder de ``src/rerank.py``, quando ligado.
+
     ``query_analysis`` roda antes do roteamento e não influencia a decisão de
     quais bases consultar — só extrai filtros (ano, valor, órgão) que o
     ``retrieve`` aplica sobre os metadados dos chunks candidatos. Chunk sem o
@@ -77,6 +81,9 @@ def responder(
     refusal_reason_hint = None
     if decisao.bases_selecionadas:
         filtros = filtros_para_retrieve(analise.filtros)
+        # Sem reranker explícito, usa o cross-encoder padrão (src/rerank.py;
+        # desligável com RERANK_ENABLED=false). Ablação em docs/ABLACAO_RERANK.md.
+        reranker = reranker if reranker is not None else reranker_padrao()
         resultados = retrieve(
             query,
             decisao,

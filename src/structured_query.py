@@ -573,8 +573,14 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
         ordem = f"CASE WHEN {coluna} IS NULL THEN 1 ELSE 0 END, " + (
             f"COALESCE(SUM({coluna_valor}), 0) {consulta.ordem}, n DESC"
             if consulta.metrica == "soma" else f"n DESC, COALESCE(SUM({coluna_valor}), 0) DESC")
-        if coluna == "fornecedor":  # registro sem fornecedor não é um fornecedor
-            where = where + (" AND " if where else " WHERE ") + "fornecedor IS NOT NULL"
+        # Registro sem fornecedor não é um fornecedor, e sem modalidade não é uma
+        # modalidade (os contratos assinados do PNCP não trazem modalidade): ficam
+        # fora dos grupos e são contados à parte, para "a mais usada" não ser "nenhuma".
+        sem_campo = 0
+        if coluna in ("fornecedor", "modalidade"):
+            where_nulo = where + (" AND " if where else " WHERE ") + f"{coluna} IS NULL"
+            sem_campo = banco.consultar(f"SELECT COUNT(*) AS n FROM {consulta.tabela}{where_nulo}", parametros)[0]["n"]
+            where = where + (" AND " if where else " WHERE ") + f"{coluna} IS NOT NULL"
         sql = (
             f"SELECT {coluna} AS grupo, COUNT(*) AS n, SUM({coluna_valor}) AS total "
             f"FROM {consulta.tabela}{where} GROUP BY {coluna}"
@@ -590,6 +596,8 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
         ]
         if not grupos and consulta.minimo_por_grupo is not None:
             grupos = [f"Nenhum {coluna} tem {consulta.minimo_por_grupo} ou mais registros com esses filtros."]
+        if sem_campo:
+            grupos.append(f"({sem_campo} registros sem informação de {coluna} ficaram fora dos grupos.)")
         return sql, grupos
 
     if consulta.tipo == "evolucao":

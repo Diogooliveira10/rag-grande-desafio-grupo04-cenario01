@@ -523,3 +523,24 @@ def test_minimo_de_contratos_por_fornecedor(base):
 
     [chunk] = _consultar("Quais fornecedores têm três ou mais contratações de ambulância?", base)
     assert "Nenhum fornecedor tem 3 ou mais registros" in chunk.content
+
+
+def test_agrupamento_por_modalidade_deixa_sem_modalidade_fora_dos_grupos(tmp_path):
+    documents = escrever_documents(
+        tmp_path / "documents.jsonl",
+        contratacoes=[
+            _contratacao("A-1", modalidade="Pregão - Eletrônico"),
+            _contratacao("A-2", modalidade=None),
+            _contratacao("A-3", modalidade=None),
+        ],
+    )
+    banco = Banco(sqlite_path=tmp_path / "base.sqlite")
+    structured_db.construir_banco(documents, banco)
+
+    [chunk] = sq.consultar_estruturado(
+        "Quais modalidades são as mais usadas?", QueryFilters(), ESTRUTURADA, banco=banco, documents_file=documents
+    )
+
+    assert "Pregão - Eletrônico: 1 registros" in chunk.content
+    assert "não informado" not in chunk.content
+    assert "(2 registros sem informação de modalidade ficaram fora dos grupos.)" in chunk.content

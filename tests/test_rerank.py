@@ -159,3 +159,41 @@ def test_reranker_pontua_o_texto_compacto_do_json():
     CrossEncoderReranker(score_fn=score_fn)("pergunta", [_resultado("a", conteudo, 1.0)])
 
     assert vistos == ["objetoCompra: ambulancia tipo D; anoCompra: 2025"]
+
+
+def test_pipeline_usa_o_reranker_padrao_quando_nenhum_e_passado(monkeypatch):
+    from src import pipeline
+    from src.schema import ConfidenceLevel, RAGResponse
+
+    usados = []
+
+    def fake_retrieve(query, route, **kwargs):
+        usados.append(kwargs["reranker"])
+        return []
+
+    sentinela = CrossEncoderReranker(score_fn=lambda pares: [])
+    monkeypatch.setattr(pipeline, "retrieve", fake_retrieve)
+    monkeypatch.setattr(pipeline, "reranker_padrao", lambda: sentinela)
+    monkeypatch.setattr(pipeline, "consultar_estruturado", lambda *a, **k: [])
+    monkeypatch.setattr(pipeline, "gerar_resposta", lambda *a, **k: RAGResponse(
+        query="q", answer="sem evidência", bases_consultadas=[], confidence_level=ConfidenceLevel.BAIXA))
+
+    pipeline.responder("Quais contratos de ambulancias foram publicados?")
+
+    assert usados and all(item is sentinela for item in usados)
+
+
+def test_pipeline_sem_rerank_quando_desligado(monkeypatch):
+    from src import pipeline
+    from src.schema import ConfidenceLevel, RAGResponse
+
+    usados = []
+    monkeypatch.setattr(config, "RERANK_ENABLED", False)
+    monkeypatch.setattr(pipeline, "retrieve", lambda q, r, **kw: usados.append(kw["reranker"]) or [])
+    monkeypatch.setattr(pipeline, "consultar_estruturado", lambda *a, **k: [])
+    monkeypatch.setattr(pipeline, "gerar_resposta", lambda *a, **k: RAGResponse(
+        query="q", answer="x", bases_consultadas=[], confidence_level=ConfidenceLevel.BAIXA))
+
+    pipeline.responder("Quais contratos de ambulancias foram publicados?")
+
+    assert usados == [None]

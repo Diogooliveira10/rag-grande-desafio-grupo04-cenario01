@@ -42,8 +42,13 @@ def _cliente_padrao() -> ClienteLLM:
 
     def _chamar(mensagens: list[dict]) -> Any:
         # json_object faz o Ollama restringir a saída a JSON válido; só o
-        # prompt não bastava para o qwen3-8b.
-        return llm_ecoa.client.chat.completions.create(
+        # prompt não bastava para o qwen3-8b. Sem timeout próprio, o SDK espera
+        # 600 s e tenta de novo duas vezes: uma chamada travada no servidor
+        # compartilhado segurava a pergunta por até 30 minutos.
+        cliente = llm_ecoa.client.with_options(
+            timeout=config.GENERATION_TIMEOUT, max_retries=config.GENERATION_MAX_RETRIES
+        )
+        return cliente.chat.completions.create(
             model=GENERATION_MODEL,
             messages=mensagens,
             temperature=0.2,
@@ -397,6 +402,7 @@ def _logar_validacao(
     citacoes_descartadas: list[str],
     chaves_alias: list[str],
     mascaramentos_resposta: dict[str, int],
+    recusa_convertida: Optional[str] = None,
 ) -> None:
     """Registra o stage ``validacao``: o que foi checado/corrigido na saída do LLM.
 
@@ -417,6 +423,7 @@ def _logar_validacao(
             "citacoes_descartadas": citacoes_descartadas,
             "chaves_fora_do_contrato": chaves_alias,
             "mascaramentos_resposta": mascaramentos_resposta,
+            "recusa_convertida": recusa_convertida,
             "confidence_level": resposta.confidence_level.value,
             "is_refusal": resposta.is_refusal,
         },
@@ -491,6 +498,9 @@ def gerar_resposta(
         sensibilidade["erro_parsing"] = erro_parsing
     if chaves_alias:
         sensibilidade["chaves_fora_do_contrato"] = chaves_alias
+    resposta, recusa_convertida = _converter_recusa_indevida(resposta, bases_consultadas, erro_parsing)
+    if recusa_convertida:
+        sensibilidade["recusa_convertida"] = recusa_convertida
     # Defesa em profundidade: o dado pode ter vindo da própria pergunta.
     answer_mascarada, mascaramentos_resposta = mascarar(resposta.answer)
     if mascaramentos_resposta:
@@ -506,5 +516,36 @@ def gerar_resposta(
         citacoes_descartadas=citacoes_descartadas,
         chaves_alias=chaves_alias,
         mascaramentos_resposta=mascaramentos_resposta,
+        recusa_convertida=recusa_convertida,
     )
     return resposta
+
+
+# Recusas que o LLM pode marcar por engano; as de guardrail (dados bancários,
+# credenciais, juízo de legalidade) são decididas antes do LLM e nunca mudam.
+_RECUSAS_CONVERTIVEIS = (RefusalReason.FORA_DE_ESCOPO, RefusalReason.SEM_EVIDENCIA)
+
+
+def _converter_recusa_indevida(
+    resposta: RAGResponse, bases_consultadas: list[Natureza], erro_parsing: Optional[str]
+) -> tuple[RAGResponse, Optional[str]]:
+    """Recusa com texto, numa pergunta que o roteador pôs no escopo, vira resposta.
+
+    O qwen3-8b escreve uma resposta útil ("o contexto só traz dados municipais,
+    com mediana de R$ 519.500") e ainda marca ``is_refusal`` como fora de escopo
+    ou sem evidência. Se o roteador escolheu bases, a pergunta está no escopo, e
+    dizer o que os dados mostram e o que falta é a resposta esperada; ela sai com
+    confiança baixa, e o log registra a conversão em ``recusa_convertida``.
+    """
+    if (
+        erro_parsing
+        or not resposta.is_refusal
+        or not bases_consultadas
+        or resposta.refusal_reason not in _RECUSAS_CONVERTIVEIS
+        or not resposta.answer.strip()
+    ):
+        return resposta, None
+    motivo = resposta.refusal_reason.value
+    return resposta.model_copy(update={
+        "is_refusal": False, "refusal_reason": None, "confidence_level": ConfidenceLevel.BAIXA,
+    }), motivo

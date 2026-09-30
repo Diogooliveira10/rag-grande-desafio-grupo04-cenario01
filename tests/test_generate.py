@@ -345,3 +345,60 @@ def test_removed_added_guardrails_preserve_llm_response(query, answer, content):
     assert not response.is_refusal
     assert response.answer == answer
     assert [source.chunk_id for source in response.sources_used] == ["c1"]
+
+
+# --------------------------------------------------------------------------
+# Recusa indevida do LLM numa pergunta no escopo (golden set de 30/09)
+# --------------------------------------------------------------------------
+
+
+def _llm_devolve(**saida):
+    return lambda mensagens: json.dumps({"sources_used": [], **saida}, ensure_ascii=False)
+
+
+@pytest.mark.parametrize("motivo", ["fora_de_escopo", "sem_evidencia"])
+def test_recusa_com_texto_em_pergunta_no_escopo_vira_resposta_de_confianca_baixa(motivo):
+    cliente = _llm_devolve(
+        answer="O contexto só traz dados municipais, com mediana de R$ 519.500; falta a esfera estadual.",
+        is_refusal=True, refusal_reason=motivo, confidence_level="recusado",
+    )
+
+    resposta = gen.gerar_resposta("pergunta", [_chunk()], [Natureza.ESTRUTURADA], cliente=cliente)
+
+    assert resposta.is_refusal is False
+    assert resposta.refusal_reason is None
+    assert resposta.confidence_level == ConfidenceLevel.BAIXA
+    assert "mediana de R$ 519.500" in resposta.answer
+
+
+def test_recusa_sem_texto_continua_recusa():
+    cliente = _llm_devolve(answer="", is_refusal=True, refusal_reason="sem_evidencia", confidence_level="recusado")
+
+    resposta = gen.gerar_resposta("pergunta", [_chunk()], [Natureza.ESTRUTURADA], cliente=cliente)
+
+    assert resposta.is_refusal is True
+    assert resposta.refusal_reason == RefusalReason.SEM_EVIDENCIA
+
+
+def test_recusa_de_guardrail_do_llm_nunca_e_convertida():
+    cliente = _llm_devolve(
+        answer="Não posso afirmar se houve fraude.", is_refusal=True,
+        refusal_reason="juizo_legalidade_contrato", confidence_level="recusado",
+    )
+
+    resposta = gen.gerar_resposta("pergunta", [_chunk()], [Natureza.ESTRUTURADA], cliente=cliente)
+
+    assert resposta.is_refusal is True
+    assert resposta.refusal_reason == RefusalReason.JUIZO_LEGALIDADE
+
+
+def test_conversao_de_recusa_fica_registrada_na_validacao():
+    cliente = _llm_devolve(answer="Os dados mostram só parte do pedido.", is_refusal=True,
+                           refusal_reason="fora_de_escopo", confidence_level="recusado")
+
+    gen.gerar_resposta("pergunta", [_chunk()], [Natureza.ESTRUTURADA], cliente=cliente, run_id="r-conv")
+
+    arquivo = next(obs.default_logger.logs_dir.glob("pipeline-*.jsonl"))
+    validacao = [json.loads(l) for l in arquivo.read_text(encoding="utf-8").splitlines()
+                 if json.loads(l)["stage"] == "validacao"][-1]
+    assert validacao["extra"]["recusa_convertida"] == "fora_de_escopo"
