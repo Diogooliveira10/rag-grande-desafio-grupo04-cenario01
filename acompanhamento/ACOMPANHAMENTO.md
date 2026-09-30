@@ -285,3 +285,43 @@ O grupo também avançou na compreensão dos entregáveis iniciais, principalmen
 - Foram utilizados assistentes de IA como apoio à análise do código, investigação de problemas no pipeline, desenvolvimento e revisão de testes, ajustes no query_analysis, recuperação, geração de respostas e documentação.
 
 - As alterações foram revisadas e validadas por meio da execução dos testes automatizados, análise dos resultados do pipeline e verificação dos comportamentos esperados antes da integração.
+
+## Encontro 8 - 2026-09-30
+
+## **Entregamos hoje:**
+
+- Foi executado o Golden Set com o pipeline real. Após instalar no ambiente virtual a dependência `faiss-cpu`, que já constava em `requirements.txt`, a execução `20260930T192922Z` processou os **22 casos atuais** sem erros: **14/22 acertos**. No conjunto original de 19 casos, foram **11 acertos e 8 falhas**. A análise indicou divergências de roteamento e consultas SQL, limitações de cobertura e aspectos que os logs não permitem determinar com segurança.
+
+- Foi registrado que o avaliador mede principalmente a correspondência entre as bases roteadas e a recusa esperada; ele não verifica se as respostas estão factualmente corretas nem se as evidências são suficientes. Também foi observada uma diferença entre a contagem de chunks esperada anteriormente e a base disponível: os artefatos verificados totalizam **5.621 chunks**, não 3.130.
+
+- Foram concluídas melhorias na análise de consultas e nos filtros usados pela busca e pelas consultas SQL. As alterações tratam, entre outros casos, valores confundidos com anos, períodos, contagens e filtros monetários. A abordagem adotada evita aplicar um filtro quando a interpretação não é clara. A validação da branch da Pâmela incluiu mais de 130 testes de regressão, 3.840 combinações de valores e períodos sem erros e 1.656 acertos em 1.663 perguntas adversariais.
+
+- Foram adicionadas à API funcionalidades de feedback e histórico: `POST /api/v1/feedback`, `GET /api/v1/history` e um `query_id` na resposta de `/api/v1/query` para relacionar cada feedback à consulta correspondente. O histórico é salvo em SQLite local; a validação reportada pelo Marco teve **556 testes aprovados**.
+
+- Houve avanços na recuperação e na avaliação: foram realizados testes de compatibilidade de consultas e ampliadas as consultas estruturadas, incluindo SQL parametrizado para PostgreSQL e correção do agrupamento de valores por fornecedor. Uma avaliação de 22 perguntas mediu 59,09% no critério de rota/recusa, sem representar uma avaliação factual completa da resposta.
+
+- Foi realizada uma ablação do reranking com 47 perguntas. O conjunto RRF com reranking obteve o trecho relevante entre os três primeiros em 83% dos casos, ante 64% sem reranking. Também foram revisados os artefatos da versão 6 do corpus; foram apontadas limitações na base agregada e problemas de legibilidade por OCR em parte dos chunks de atas.
+
+- Foram integradas alterações de API, filtros, recuperação e corpus, além de ajustes na avaliação do Golden Set e na documentação. Também houve continuidade da implementação e dos testes do front-end.
+
+## **Ficou pendente:**
+
+- Investigar e tratar as oito falhas do conjunto original do Golden Set, priorizando as divergências de roteamento e consultas estruturadas identificadas. As respostas e a suficiência das evidências precisam de avaliação própria, pois não são verificadas pelo critério atual do avaliador.
+
+- Revisar a cobertura e os campos disponíveis nas bases, especialmente modalidades, especificações técnicas e informações necessárias para comparações entre contratações.
+
+- Continuar a validação da cobertura do corpus v6 e avaliar a qualidade do OCR nos documentos de atas.
+
+- Prosseguir com a implementação e validação do front-end.
+
+## **Bloqueios em aberto:**
+
+- A base de **e-mails sintéticos** continua pendente, aguardando disponibilização ou construção junto ao tutor.
+
+- A análise do Golden Set não determinou com segurança a causa de todas as falhas; os logs atuais não comprovam suficiência de evidência em todos os casos.
+
+## **Uso de assistentes de IA:**
+
+- Foram utilizados assistentes de IA como apoio ao diagnóstico e às correções de filtros e consultas, à elaboração de testes, à revisão das alterações, à análise do reranking e à avaliação do Golden Set.
+
+- Os resultados foram conferidos com testes, relatórios, logs e artefatos locais. A execução diagnóstica do Golden Set não levou a alterações no código, nos testes ou nos dados.

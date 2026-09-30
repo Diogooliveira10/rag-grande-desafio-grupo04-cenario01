@@ -100,3 +100,28 @@ Validar as pré-condições para execução do Golden Set completo com o pipelin
 
 **Resultado:**
 A validação mostrou que o pacote do índice está internamente consistente, mas o ambiente local ainda precisa ser ajustado antes da execução oficial do Golden Set. O próximo passo é instalar as dependências no `.venv`, posicionar corretamente `documents.jsonl` e `index/`, validar o checksum e executar novamente a suíte de testes. Após essas verificações, será possível executar os **19 casos do Golden Set pelo pipeline real**.
+
+## Encontro 8 — 30/09/2026
+
+### Relato individual - Diogo Oliveira
+
+**Tarefa do dia:**
+Executar o Golden Set completo pelo pipeline real e analisar os resultados por caso, sem alterar a implementação, os testes, o Golden Set ou os dados.
+
+**O que fiz:**
+
+- Executei o comando oficial `eval/run_eval.py run --pipeline src.pipeline:responder`. A primeira tentativa foi interrompida em 17 casos por ausência do módulo `faiss` no ambiente virtual; confirmei que `faiss-cpu` já estava declarado em `requirements.txt`, instalei a dependência no `.venv` e repeti a execução.
+- Analisei a execução completa `20260930T192922Z`: foram processados os 22 casos presentes no Golden Set atual, sem erros de execução, com 14 acertos no critério do avaliador. O arquivo contém os 19 casos principais e mais três casos G1–G3, que também passaram.
+- Nos 19 casos principais, identifiquei 11 acertos e 8 falhas: P1.1, P2.2, P2.3, P3.1, P4.2, P4.3, P5.1 e F1.
+- Cruzei resultados com o relatório e os logs de observabilidade, identificando divergências de roteamento, comportamento das consultas SQL, recusas da geração, filtros relaxados por falta de metadados e casos em que o conteúdo disponível não comprova a resposta esperada.
+- Verifiquei que a métrica `acertou` do avaliador compara roteamento e recusa; ela não valida a correção factual da resposta nem a suficiência das evidências. Registrei essa limitação ao interpretar os acertos e as falhas.
+- Confirmei que os artefatos disponíveis totalizam **5.621 chunks**, e não os 3.130 inicialmente esperados, e que essa diferença precisa ser considerada ao comparar a base atual com registros anteriores.
+- Não alterei código, testes, Golden Set ou dados. `git diff --check` não apontou problemas; `git status --short` continuou mostrando somente `indice_rag.zip` como arquivo não rastreado. Não repeti a suíte completa, previamente informada como **444 testes aprovados**.
+
+**Resultado:**
+A execução integral do pipeline real foi concluída, com 14/22 acertos no Golden Set atual e 11/19 no conjunto principal. A análise demonstrou problemas de roteamento e de consulta estruturada, além de limitações de cobertura dos dados e do critério de avaliação. Nem todas as falhas podem ser explicadas conclusivamente apenas pelos logs, e nenhuma correção foi implementada nesta atividade.
+
+### Uso de assistentes de IA:
+
+- Utilizei assistentes de IA como apoio na execução controlada do Golden Set, na correlação entre relatórios, logs e código do pipeline e na organização do diagnóstico por caso.
+- As conclusões foram conferidas com os artefatos locais da execução e com o comportamento observado no código. Não implementei correções durante esta atividade.
