@@ -1,7 +1,7 @@
 import pytest
 
-from src.router import rotear_pergunta
-from src.schema import Natureza
+from src.router import inferir_motivo_recusa, rotear_pergunta
+from src.schema import Natureza, RefusalReason
 
 
 def test_rota_estruturada():
@@ -66,3 +66,21 @@ def test_pergunta_vazia():
 )
 def test_perguntas_sobre_o_pca_vao_para_a_base_agregada(pergunta):
     assert Natureza.AGREGADA in rotear_pergunta(pergunta).bases_selecionadas
+
+
+@pytest.mark.parametrize(
+    ("pergunta", "motivo"),
+    [
+        ("Quais sao os dados bancarios da empresa contratada?", RefusalReason.DADOS_BANCARIOS),
+        ("Qual a conta bancaria do fornecedor do contrato de ambulancias?", RefusalReason.DADOS_BANCARIOS),
+        ("Algum e-mail traz a senha do sistema de compras?", RefusalReason.CREDENCIAIS_VAZADAS),
+        ("Quais credenciais de acesso aparecem nos e-mails?", RefusalReason.CREDENCIAIS_VAZADAS),
+        ("Esse contrato foi fraude?", RefusalReason.JUIZO_LEGALIDADE),
+        ("O orgao agiu com ilegalidade nesse pregao?", RefusalReason.JUIZO_LEGALIDADE),
+    ],
+)
+def test_recusa_carrega_o_motivo_certo_na_justificativa(pergunta, motivo):
+    decisao = rotear_pergunta(pergunta)
+
+    assert decisao.bases_selecionadas == []
+    assert inferir_motivo_recusa(decisao.justificativa) == motivo

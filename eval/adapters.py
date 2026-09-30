@@ -5,18 +5,24 @@ determinístico, offline e não chama o LLM — o suficiente para medir se o
 roteador escolhe as bases certas e recusa nos casos de recusa/fora de escopo
 do golden set, sem o custo (tempo, tokens) de rodar a geração.
 
-Agora que ``src/retrieve.py`` existe, o pipeline completo (roteamento +
-recuperação híbrida + geração) roda direto via ``src/pipeline.py:responder``
-— já compatível com o contrato de ``eval/run_eval.py`` sem precisar de
-adaptador:
+O pipeline completo (roteamento + recuperação híbrida + geração) roda direto
+via ``src/pipeline.py:responder``, já compatível com o contrato de
+``eval/run_eval.py``. ``pipeline_completo`` faz a mesma chamada com um
+``run_id`` próprio e depois lê o log do pipeline para anexar à resposta
+(chave ``_metricas``) os tokens e a latência de cada etapa:
 
-    py .\\eval\\run_eval.py run --pipeline src.pipeline:responder
+    py .\\eval\\run_eval.py run --pipeline eval.adapters:pipeline_completo
 """
 
 from __future__ import annotations
 
-from typing import Any
+import json
+from collections import defaultdict
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Iterable
 
+from src.obs import default_logger, new_run_id
 from src.router import inferir_motivo_recusa, rotear_pergunta
 
 
@@ -33,4 +39,41 @@ def rota_apenas(pergunta: str) -> dict[str, Any]:
     }
 
 
-__all__ = ["rota_apenas"]
+def metricas_do_log(run_id: str, log_paths: Iterable[Path]) -> dict[str, Any]:
+    """Soma tokens e latência por etapa dos registros do log com esse ``run_id``."""
+    etapas: dict[str, dict[str, int]] = defaultdict(lambda: {"tokens": 0, "latencia_ms": 0})
+    for path in log_paths:
+        if not path.exists():
+            continue
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if record.get("run_id") != run_id:
+                    continue
+                etapa = etapas[str(record.get("stage"))]
+                etapa["tokens"] += int((record.get("tokens") or {}).get("total", 0))
+                etapa["latencia_ms"] += int(record.get("latencia_ms") or 0)
+    return {
+        "run_id": run_id,
+        "tokens_total": sum(etapa["tokens"] for etapa in etapas.values()),
+        "etapas": dict(etapas),
+    }
+
+
+def pipeline_completo(pergunta: str) -> dict[str, Any]:
+    """Roda ``src.pipeline.responder`` e anexa ``_metricas`` lidas do log do pipeline."""
+    from src.pipeline import responder
+
+    run_id = new_run_id()
+    inicio = datetime.now().astimezone()
+    resposta = responder(pergunta, run_id=run_id)
+    # Uma pergunta que atravessa a meia-noite grava em dois arquivos diários.
+    paths = {default_logger.log_path(inicio), default_logger.log_path()}
+    resposta["_metricas"] = metricas_do_log(run_id, sorted(paths))
+    return resposta
+
+
+__all__ = ["rota_apenas", "pipeline_completo", "metricas_do_log"]

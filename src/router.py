@@ -10,12 +10,34 @@ from src.obs import Stage, default_logger
 from src.schema import Natureza, RefusalReason, RouteDecision
 
 
-_REFUSAL_PATTERNS = (
-    r"\bfraud\w*\b",
-    r"\billegalidade\b",
-    r"\bilicit[oa]s?\b",
-    r"\bdados bancarios?\b",
-    r"\bcredenciais?\b",
+# Cada grupo de recusa tem justificativa própria, com a pista que
+# ``inferir_motivo_recusa`` usa para devolver o RefusalReason certo.
+_REFUSAL_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        (
+            r"\bdados? bancarios?\b",
+            r"\bconta(s)? (bancaria|corrente)s?\b",
+            r"\bagencia e conta\b",
+            r"\bchave pix\b",
+        ),
+        "A pergunta pede dados bancarios de fornecedor; nenhuma base deve ser consultada.",
+    ),
+    (
+        (
+            r"\bcredenciais?\b",
+            r"\bsenhas?\b",
+        ),
+        "A pergunta pede credenciais de acesso; nenhuma base deve ser consultada.",
+    ),
+    (
+        (
+            r"\bfraud\w*\b",
+            r"\bilegalidade\b",
+            r"\bilegal(mente)?\b",
+            r"\bilicit[oa]s?\b",
+        ),
+        "A pergunta pede juizo de legalidade; nenhuma base deve ser consultada para concluir isso.",
+    ),
 )
 
 _OUT_OF_SCOPE_PATTERNS = (
@@ -157,15 +179,13 @@ def _rotear(query: str) -> RouteDecision:
 
     text = _normalize(query)
 
-    if _contains_pattern(text, _REFUSAL_PATTERNS):
-        return RouteDecision(
-            bases_selecionadas=[],
-            justificativa=(
-                "A pergunta pede juizo de legalidade ou acesso a dado sensivel; "
-                "nenhuma base deve ser consultada para concluir isso."
-            ),
-            confidence=0.98,
-        )
+    for patterns, justificativa in _REFUSAL_RULES:
+        if _contains_pattern(text, patterns):
+            return RouteDecision(
+                bases_selecionadas=[],
+                justificativa=justificativa,
+                confidence=0.98,
+            )
 
     if _contains_pattern(text, _OUT_OF_SCOPE_PATTERNS):
         return RouteDecision(

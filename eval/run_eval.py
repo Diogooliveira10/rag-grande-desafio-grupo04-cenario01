@@ -4,6 +4,8 @@ Uso:
     py .\eval\run_eval.py check
     py .\eval\run_eval.py run --pipeline eval.adapters:rota_apenas
     py .\eval\run_eval.py run --pipeline src.pipeline:responder
+    py .\eval\run_eval.py run --pipeline eval.adapters:pipeline_completo
+    py .\eval\run_eval.py run --pipeline eval.adapters:pipeline_completo --ids P1.1 G1
 
 ``check`` só valida o golden set (contagem por tipo), sem chamar nenhum
 pipeline. ``run`` importa a função apontada por ``--pipeline`` (formato
@@ -11,10 +13,18 @@ pipeline. ``run`` importa a função apontada por ``--pipeline`` (formato
 grava o relatório (JSON + Markdown) em ``eval/runs/<run_id>/``.
 ``eval.adapters:rota_apenas`` avalia só o roteamento (``src/router.py``) —
 rápido e offline. ``src.pipeline:responder`` roda o pipeline completo
-(roteamento + recuperação híbrida + geração), chamando o LLM de verdade.
+(roteamento + recuperação híbrida + geração), chamando o LLM de verdade;
+``eval.adapters:pipeline_completo`` faz o mesmo e ainda junta, a partir dos
+logs, os tokens e a latência de cada etapa. ``--ids`` roda só alguns casos.
+
+Além de rota e recusa (que definem ``acertou``), o relatório mede citação
+(resposta não recusada com ao menos uma fonte; recusa sem fonte), confiança,
+latência de ponta a ponta e tokens.
 
 O golden set (``eval/golden_set.jsonl``) é derivado das 18 perguntas de
-referência + a pergunta de falha esperada do ``PERSONAS.md``. Cada caso
+referência + a pergunta de falha esperada do ``PERSONAS.md``, mais os casos
+``G*`` de guardrail do cenário (dados bancários de fornecedor, credenciais em
+e-mail, juízo sobre contrato específico). Cada caso
 declara a rota esperada (bases) e, quando aplicável, se a resposta correta é
 uma recusa — é o gabarito citado em 2.3 do documento do desafio: rodar esse
 benchmark antes e depois de atualizar a base mostra se a recuperação piorou.
@@ -25,7 +35,9 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import statistics
 import sys
+import time
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -102,6 +114,14 @@ def evaluate_case(case: EvalCase, response: dict[str, Any]) -> dict[str, Any]:
     # Quando a resposta correta é recusar, não cobramos rota: o sistema não deveria escolher base nenhuma.
     rota_ok = True if case.is_refusal_esperado else bases_obtidas == sorted(case.bases_esperadas)
 
+    # Resposta sem campo sources_used (ex.: rota_apenas) não é avaliada em citação.
+    fontes = response.get("sources_used")
+    n_fontes = len(fontes) if isinstance(fontes, list) else None
+    if n_fontes is None:
+        citacao_ok = None
+    else:
+        citacao_ok = n_fontes == 0 if is_refusal_obtido else n_fontes > 0
+
     return {
         "id": case.id,
         "tipo": case.tipo,
@@ -114,12 +134,74 @@ def evaluate_case(case: EvalCase, response: dict[str, Any]) -> dict[str, Any]:
         "rota_ok": rota_ok,
         "refusal_ok": refusal_ok,
         "acertou": rota_ok and refusal_ok,
+        "n_fontes": n_fontes,
+        "citacao_ok": citacao_ok,
+        "confidence_level": response.get("confidence_level"),
+        "answer": response.get("answer"),
+        "metricas": response.get("_metricas"),
+    }
+
+
+def _executar_caso(case: EvalCase, pipeline_fn: PipelineFn) -> dict[str, Any]:
+    """Roda um caso medindo a latência; exceção vira caso errado, não derruba a rodada."""
+    inicio = time.perf_counter()
+    try:
+        resposta = pipeline_fn(case.pergunta)
+        erro = None
+    except Exception as exc:  # noqa: BLE001 - o relatório precisa registrar qualquer falha
+        resposta = {}
+        erro = f"{type(exc).__name__}: {exc}"
+    latencia_ms = int((time.perf_counter() - inicio) * 1000)
+
+    resultado = evaluate_case(case, resposta)
+    resultado["latencia_ms"] = latencia_ms
+    resultado["erro"] = erro
+    if erro:
+        resultado.update(rota_ok=False, refusal_ok=False, acertou=False, citacao_ok=False)
+    return resultado
+
+
+def _resumo_metricas(resultados: list[dict[str, Any]]) -> dict[str, Any]:
+    latencias = [r["latencia_ms"] for r in resultados if r.get("latencia_ms") is not None]
+    citacoes = [r["citacao_ok"] for r in resultados if r.get("citacao_ok") is not None]
+    confianca: dict[str, int] = defaultdict(int)
+    tokens_total = 0
+    tokens_por_etapa: dict[str, int] = defaultdict(int)
+    for resultado in resultados:
+        if resultado.get("confidence_level"):
+            confianca[str(resultado["confidence_level"])] += 1
+        metricas = resultado.get("metricas") or {}
+        tokens_total += int(metricas.get("tokens_total", 0))
+        for etapa, dados in (metricas.get("etapas") or {}).items():
+            tokens_por_etapa[etapa] += int(dados.get("tokens", 0))
+    return {
+        "erros": sum(1 for r in resultados if r.get("erro")),
+        "citacao_avaliada": len(citacoes),
+        "citacao_ok": sum(citacoes),
+        "confianca": dict(sorted(confianca.items())),
+        "latencia_ms": {
+            "media": int(statistics.mean(latencias)) if latencias else 0,
+            "mediana": int(statistics.median(latencias)) if latencias else 0,
+            "max": max(latencias) if latencias else 0,
+            "total": sum(latencias),
+        },
+        "tokens_total": tokens_total,
+        "tokens_por_etapa": dict(sorted(tokens_por_etapa.items())),
     }
 
 
 def run_eval(cases: list[EvalCase], pipeline_fn: PipelineFn) -> dict[str, Any]:
     """Roda cada caso do golden set contra o pipeline e agrega os resultados."""
-    resultados = [evaluate_case(case, pipeline_fn(case.pergunta)) for case in cases]
+    resultados = []
+    for indice, case in enumerate(cases, start=1):
+        resultado = _executar_caso(case, pipeline_fn)
+        resultados.append(resultado)
+        status = "ERRO" if resultado["erro"] else ("OK" if resultado["acertou"] else "FALHOU")
+        print(
+            f"[{indice}/{len(cases)}] {case.id} {status} ({resultado['latencia_ms']} ms)",
+            file=sys.stderr,
+            flush=True,
+        )
 
     por_tipo: dict[str, dict[str, int]] = defaultdict(lambda: {"total": 0, "acertos": 0})
     for case, resultado in zip(cases, resultados):
@@ -133,6 +215,7 @@ def run_eval(cases: list[EvalCase], pipeline_fn: PipelineFn) -> dict[str, Any]:
         "acertos": acertos,
         "taxa_acerto": round(acertos / total, 4) if total else 0.0,
         "por_tipo": dict(sorted(por_tipo.items())),
+        "metricas": _resumo_metricas(resultados),
         "resultados": resultados,
     }
 
@@ -154,23 +237,62 @@ def render_report_markdown(report: dict[str, Any], run_id: str, built_at: str) -
     for tipo, stats in report["por_tipo"].items():
         lines.append(f"| {tipo} | {stats['acertos']} | {stats['total']} |")
 
+    metricas = report.get("metricas") or {}
+    latencia = metricas.get("latencia_ms") or {}
+    if metricas:
+        lines.extend(["", "## Métricas", ""])
+        if metricas.get("citacao_avaliada"):
+            lines.append(f"- Citação correta: **{metricas['citacao_ok']}/{metricas['citacao_avaliada']}**")
+        if metricas.get("confianca"):
+            confianca = ", ".join(f"{nivel}={qtd}" for nivel, qtd in metricas["confianca"].items())
+            lines.append(f"- Confiança: {confianca}")
+        lines.append(
+            f"- Latência (ms): média {latencia.get('media', 0)}, mediana {latencia.get('mediana', 0)}, "
+            f"máx {latencia.get('max', 0)}, total {latencia.get('total', 0)}"
+        )
+        if metricas.get("tokens_total"):
+            lines.append(f"- Tokens: **{metricas['tokens_total']}** no total")
+            for etapa, tokens in metricas.get("tokens_por_etapa", {}).items():
+                lines.append(f"  - {etapa}: {tokens}")
+        lines.append(f"- Erros de execução: {metricas.get('erros', 0)}")
+
     lines.extend(
         [
             "",
             "## Casos",
             "",
-            "| ID | Tipo | Rota esperada | Rota obtida | Recusa esperada | Recusa obtida | Resultado |",
-            "|---|---|---|---|---|---|---|",
+            "| ID | Tipo | Rota esperada | Rota obtida | Recusa esperada | Recusa obtida "
+            "| Fontes | Latência (ms) | Resultado |",
+            "|---|---|---|---|---|---|---:|---:|---|",
         ]
     )
     for resultado in report["resultados"]:
-        status = "OK" if resultado["acertou"] else "FALHOU"
+        if resultado.get("erro"):
+            status = "ERRO"
+        else:
+            status = "OK" if resultado["acertou"] else "FALHOU"
+        n_fontes = resultado.get("n_fontes")
         lines.append(
             f"| {resultado['id']} | {resultado['tipo']} "
             f"| {', '.join(resultado['bases_esperadas']) or '—'} "
             f"| {', '.join(resultado['bases_obtidas']) or '—'} "
-            f"| {resultado['is_refusal_esperado']} | {resultado['is_refusal_obtido']} | {status} |"
+            f"| {resultado['is_refusal_esperado']} | {resultado['is_refusal_obtido']} "
+            f"| {'—' if n_fontes is None else n_fontes} | {resultado.get('latencia_ms', '—')} | {status} |"
         )
+
+    com_texto = [r for r in report["resultados"] if r.get("answer") or r.get("erro")]
+    if com_texto:
+        lines.extend(["", "## Respostas", ""])
+        for resultado in com_texto:
+            lines.extend([f"### {resultado['id']}", ""])
+            if resultado.get("erro"):
+                lines.append(f"Erro: `{resultado['erro']}`")
+            else:
+                confianca = resultado.get("confidence_level") or "—"
+                lines.extend([f"Confiança: {confianca} · fontes: {resultado.get('n_fontes')}", ""])
+                texto = " ".join(str(resultado["answer"]).split())
+                lines.append(f"> {texto[:1200]}{'…' if len(texto) > 1200 else ''}")
+            lines.append("")
     return "\n".join(lines) + "\n"
 
 
@@ -218,6 +340,7 @@ def main() -> int:
     )
     run_parser.add_argument("--output", type=Path, default=DEFAULT_RUNS_DIR)
     run_parser.add_argument("--run-id", default=None)
+    run_parser.add_argument("--ids", nargs="+", default=None, help="roda só os casos com esses IDs")
 
     args = parser.parse_args()
 
@@ -241,6 +364,12 @@ def main() -> int:
             "use eval.adapters:rota_apenas (só roteamento) ou src.pipeline:responder "
             "(pipeline completo)."
         )
+
+    if args.ids:
+        desconhecidos = sorted(set(args.ids) - {case.id for case in cases})
+        if desconhecidos:
+            parser.error(f"IDs fora do golden set: {', '.join(desconhecidos)}")
+        cases = [case for case in cases if case.id in set(args.ids)]
 
     run_id = args.run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     built_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
