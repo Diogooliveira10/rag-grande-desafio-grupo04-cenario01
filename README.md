@@ -45,15 +45,17 @@ Contexto completo do desafio, dos outros dois cenários e dos padrões de engenh
 | Base | Natureza | Conteúdo | Fonte | Acesso |
 | --- | --- | --- | --- | --- |
 | `editais_normativo` | Normativa | Lei 14.133/2021, decretos estaduais, editais de licitação | Senado Federal, REDELOG-RJ, CGE-RJ, MPPI | PDF/HTML por URL |
-| `contratos_estruturado` | Estruturada | 160 contratações publicadas em 2025, UF=RJ | PNCP — API de consulta | REST paginado |
-| `atas_conversacional` | Conversacional | 20 atas de registro de preços do Estado do RJ: metadados, lista de arquivos e os PDFs das atas; e-mails de compras (base sintética, a ser criada com o tutor) | PNCP + base sintética | REST (JSON) + PDF |
-| `pca_agregado` | Agregada | Plano de Contratações Anual 2024–2025 do Estado do RJ, transformado em indicadores | PNCP | REST (CSV + JSON) |
+| `contratos_estruturado` | Estruturada | 625 contratos de órgãos do RJ, quase todos de 2025 (434 municipais, 159 federais, 32 estaduais) | PNCP — API de consulta | REST paginado |
+| `atas_conversacional` | Conversacional | 376 arquivos de atas de registro de preços: 336 JSON de metadados e 40 PDFs; e-mails de compras (base sintética, a ser criada com o tutor) | PNCP + base sintética | REST (JSON) + PDF |
+| `pca_agregado` | Agregada | 386 registros relacionados ao planejamento e ao resultado das compras: itens homologados, contratações vinculadas e um PCA confirmado (Secretaria de Saúde estadual) | PNCP | REST (JSON) |
+
+Números da v6 (limite de cinco arquivos por órgão e por base); detalhes em [CORPUS_INVENTORY.md](CORPUS_INVENTORY.md) e em [docs/registro_execucao_v6.md](docs/registro_execucao_v6.md).
 
 A definição declarativa de cada base — fonte, tipo de acesso, volume-alvo, campo de vigência, licença — vive em [corpus_manifest.yaml](corpus_manifest.yaml), que é a fonte única de verdade sobre o que entra no corpus. `data/raw/` nunca é versionado; qualquer pessoa reconstrói o corpus rodando o coletor contra o manifesto.
 
 Só as bases com `escopo: oficial` no manifesto (uma por natureza) respondem perguntas; as marcadas como `experimental` ficam fora da busca (`ESCOPOS_CONSULTADOS` em [src/pipeline.py](src/pipeline.py)).
 
-**Base agregada.** O CSV do PCA traz um item planejado por linha (~39,5 mil no Estado do RJ em 2025). Em vez de um chunk por linha, a preparação calcula indicadores com [src/pca_indicators.py](src/pca_indicators.py): visão geral, e totais, participação e ranking por categoria, unidade responsável, classe de catálogo e mês, além de rankings das 30 maiores unidades e classes. Cada indicador vira **um chunk** com os números já calculados (cerca de 1.000 no total). Assim o LLM cita valores prontos, em vez de tentar somar linhas.
+**Base agregada.** Quando a base traz o CSV do PCA (um item planejado por linha), a preparação calcula indicadores com [src/pca_indicators.py](src/pca_indicators.py): visão geral, e totais, participação e ranking por categoria, unidade responsável, classe de catálogo e mês. Cada indicador vira **um chunk** com os números já calculados, e assim o LLM cita valores prontos, em vez de tentar somar linhas. Na v6, com o limite por órgão, a base ficou com um único PCA confirmado; os 911 chunks são quase todos registros JSON (itens homologados e contratações vinculadas), com só 2 indicadores. Contas sobre esses registros (soma por fornecedor, ranking, mediana) passam pela etapa `consulta_sql`.
 
 **Base conversacional.** A API de atas do PNCP ignora o filtro `uf`; o recorte do RJ é feito pelo CNPJ do órgão (`cnpjs` no manifesto, o mesmo do PCA). Para cada ata, o coletor baixa o JSON de metadados, a listagem `/arquivos` e cada PDF anunciado nela. Parte desses PDFs é escaneada, sem texto; com o Tesseract instalado, a preparação aplica OCR nessas páginas ([src/ocr.py](src/ocr.py)). Os chunks do PDF herdam da mesma ata a vigência (`dataVigenciaFim`) e o título do documento, que também aparecem para o LLM no cabeçalho de cada trecho — assim ele distingue a ata de uma publicação no Diário Oficial anexada a ela.
 
@@ -131,12 +133,12 @@ Uma pergunta via `responder` gera, no log, uma linha por stage — `query_analys
 ├── CORPUS_INVENTORY.md           ← inventário legível do corpus coletado
 ├── data/
 │   ├── raw/vN/                  ← versão imutável de cada coleta (staging em raw/.staging/ até promoção)
-│   ├── normalized/              ← chunks normalizados (JSONL), saída de src/prepare_documents.py (ignorado pelo Git)
+│   ├── normalized/              ← chunks normalizados (JSONL), saída de src/prepare_documents.py (o snapshot da v6 está versionado; novas saídas continuam ignoradas)
 │   ├── embeddings/               ← embeddings versionados (cache + partes), gerados por src/create_embeddings.py
 │   ├── inventory/                ← inventário por versão (JSON), checkpoints e diffs entre versões
 │   ├── runs/                    ← relatórios de execução de cada coleta
 │   └── attempts/                ← coletas e preparações experimentais (--data-root), fora do Git
-├── index/                       ← índice vetorial por base (index/<base_id>/vectors.jsonl), fora do Git
+├── index/                       ← índice vetorial por base (vectors.jsonl + vectors.faiss); o índice da v6 está versionado
 ├── logs/                        ← log estruturado do pipeline (pipeline-AAAA-MM-DD.jsonl), fora do Git
 ├── eval/                        ← golden set das personas e harness de avaliação (run_eval.py)
 ├── tests/fixtures/               ← amostras locais para testes offline

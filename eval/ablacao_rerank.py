@@ -15,7 +15,8 @@ quando presente, restringe ao arquivo de origem.
 Cada pergunta é buscada só nas bases de ``bases`` (o roteamento não entra na
 conta) e só no escopo oficial, como no pipeline. Denso e BM25 devolvem
 ``DEFAULT_FETCH_K`` candidatos cada, como no ``retrieve``; o RRF funde e cada
-configuração de rerank reordena os N primeiros da fusão. Métricas: hit@k
+configuração ``rrf+rerank@N`` reordena os N primeiros da fusão, e
+``denso+rerank@N`` os N primeiros só da busca densa. Métricas: hit@k
 (algum relevante entre os k primeiros) e MRR@10. hit@3 é a que mais pesa: com
 ``GENERATION_CONTEXT_CHARS``/``GENERATION_CHUNK_CHARS`` padrão só ~3–4 chunks
 cabem no prompt da geração.
@@ -133,9 +134,10 @@ def rodar_ablacao(
     index_dir: Path = config.INDEX_DIR,
     documents_file: Path = config.NORMALIZED_DATA_DIR / "documents.jsonl",
 ) -> dict[str, Any]:
-    configuracoes = ["denso", "bm25", "hibrido_rrf"] + [f"rrf+rerank@{n}" for n in candidatos]
+    com_rerank = [f"{origem}+rerank@{n}" for origem in ("rrf", "denso") for n in candidatos]
+    configuracoes = ["denso", "bm25", "hibrido_rrf"] + com_rerank
     posicoes: dict[str, list[Optional[int]]] = {nome: [] for nome in configuracoes}
-    latencias_rerank: dict[str, list[int]] = {f"rrf+rerank@{n}": [] for n in candidatos}
+    latencias_rerank: dict[str, list[int]] = {nome: [] for nome in com_rerank}
     por_caso = []
     for indice, caso in enumerate(casos, start=1):
         comum = dict(index_dir=index_dir, documents_file=documents_file, bases=caso.bases, escopos=ESCOPOS)
@@ -143,10 +145,12 @@ def rodar_ablacao(
         bm25 = bm25_retrieve(caso.pergunta, top_k=DEFAULT_FETCH_K, **comum)
         fusao = reciprocal_rank_fusion([denso, bm25])
         rankings = {"denso": denso, "bm25": bm25, "hibrido_rrf": fusao}
-        for n in candidatos:
-            inicio = time.perf_counter()
-            rankings[f"rrf+rerank@{n}"] = reranker(caso.pergunta, fusao[:n])
-            latencias_rerank[f"rrf+rerank@{n}"].append(int((time.perf_counter() - inicio) * 1000))
+        for origem, lista in (("rrf", fusao), ("denso", denso)):
+            for n in candidatos:
+                nome = f"{origem}+rerank@{n}"
+                inicio = time.perf_counter()
+                rankings[nome] = reranker(caso.pergunta, lista[:n])
+                latencias_rerank[nome].append(int((time.perf_counter() - inicio) * 1000))
         linha = {"id": caso.id, "pergunta": caso.pergunta}
         for nome in configuracoes:
             posicao = posicao_do_primeiro_relevante(caso, rankings[nome])

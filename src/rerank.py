@@ -28,7 +28,7 @@ ScoreFn = Callable[[list[tuple[str, str]]], Sequence[float]]
 _PAR_JSON_RE = re.compile(r'"(\w+)":\s*(?:"((?:[^"\\]|\\.)*)"|(-?\d+(?:\.\d+)?))')
 # Campos que dizem do que o registro trata vêm primeiro; o resto segue na ordem original.
 _CAMPOS_PRIORITARIOS = (
-    "objeto", "titulo", "descricao", "razaosocial", "nomeunidade", "nomerazaosocial",
+    "objeto", "titulo", "descricao", "razaosocial", "nomefornecedor", "nomeunidade", "nomerazaosocial",
     "modalidadenome", "valor", "municipio", "ufsigla", "situacao", "tipodocumentonome",
 )
 
