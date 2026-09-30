@@ -38,6 +38,50 @@ def _consultar(pergunta, base, bases=ESTRUTURADA, **filtros):
 
 
 # --------------------------------------------------------------------------
+# Filtros vindos do query_analysis
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("pergunta", [
+    "Qual o valor total dos contratos acima de 500 mil em 2025?",
+    "Qual a média dos contratos com valor superior a 2000 em 2025?",
+    "Quais os maiores contratos no máximo de 50 mil reais?",
+    "Quantos contratos acima de 1 milhão houve por modalidade?",
+])
+def test_expressao_de_filtro_nao_vira_termo_do_objeto(pergunta):
+    from src.query_analysis import _analisar
+
+    consulta = sq.detectar_consulta(pergunta, _analisar(pergunta), ESTRUTURADA)
+    assert consulta.termos_objeto == ()
+
+
+def test_maior_que_como_filtro_nao_vira_ranking():
+    from src.query_analysis import _analisar
+
+    pergunta = "Qual a média dos contratos com valor maior que 2000?"
+    assert sq.detectar_consulta(pergunta, _analisar(pergunta), ESTRUTURADA).tipo == "estatistica"
+
+
+@pytest.mark.parametrize("filtros, where, parametros", [
+    ({"ano": 2025}, "ano_publicacao = ?", [2025]),
+    ({"ano": 2024, "ano_final": 2025}, "ano_publicacao >= ? AND ano_publicacao <= ?", [2024, 2025]),
+    ({"ano_desde": 2024}, "ano_publicacao >= ?", [2024]),
+    ({"ano_ate": 2024}, "ano_publicacao <= ?", [2024]),
+])
+def test_periodo_vira_where_do_sql(filtros, where, parametros):
+    consulta = sq.detectar_consulta("Qual a mediana dos contratos?", QueryFilters(**filtros), ESTRUTURADA)
+    sql, valores = sq._where(consulta, ())
+    assert sql == f" WHERE {where}"
+    assert valores == parametros
+
+
+def test_periodo_filtra_as_linhas_do_sql(base):
+    [chunk] = _consultar("Qual a mediana das contratações?", base, ano=2024, ano_final=2025)
+    assert "ano de 2024 a 2025" in chunk.content
+    assert "Geral: 4 registros" in chunk.content
+
+
+# --------------------------------------------------------------------------
 # Detecção
 # --------------------------------------------------------------------------
 

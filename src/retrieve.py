@@ -219,6 +219,13 @@ def _condicoes(expected: Any) -> list[tuple[str, Any]]:
     return [("==", expected)]
 
 
+def _sem_caixa_e_acento(texto: str) -> str:
+    sem_acento = "".join(
+        char for char in unicodedata.normalize("NFKD", texto.casefold()) if not unicodedata.combining(char)
+    )
+    return " ".join(sem_acento.split())
+
+
 def _condicao_satisfeita(actual: Any, operator: str, value: Any) -> bool:
     try:
         if operator in {"==", "="}:
@@ -253,7 +260,9 @@ def _condicao_satisfeita(actual: Any, operator: str, value: Any) -> bool:
             return any(_values_equal(actual, candidate) for candidate in candidates)
         if operator == "contains":
             if isinstance(actual, str):
-                return str(value) in actual
+                # Sem caixa nem acento: "Secretaria de Saúde" (pergunta) casa
+                # com "SECRETARIA DE ESTADO DE SAUDE" (razaoSocial do PNCP).
+                return _sem_caixa_e_acento(str(value)) in _sem_caixa_e_acento(actual)
             return value in actual
         return False
     except (TypeError, ValueError, KeyError):
@@ -269,12 +278,26 @@ def _filtro_opcional(expected: Any) -> bool:
     return False
 
 
+_COMPARACOES = frozenset({">", ">=", "<", "<="})
+
+
+def _sem_valor_comparavel(actual: Any, expected: Any) -> bool:
+    """Campo presente, mas vazio ou ilegível para uma comparação (``""``,
+    ``"Sigiloso"``, ``{}``): num filtro opcional, conta como campo ausente."""
+    if actual in ("", [], {}) or (isinstance(actual, str) and not actual.strip()):
+        return True
+    operadores = {operator for operator, _ in _condicoes(expected)}
+    if operadores and operadores <= _COMPARACOES:
+        return _parse_date(actual) is None and _parse_number(actual) is None
+    return False
+
+
 def _matches_filters(metadata: Mapping[str, Any], filters: Mapping[str, Any] | None) -> bool:
     if not filters:
         return True
     for key, expected in filters.items():
         actual = _metadata_value(metadata, key)
-        if actual is None:
+        if actual is None or (_filtro_opcional(expected) and _sem_valor_comparavel(actual, expected)):
             if _filtro_opcional(expected):
                 continue
             return False
@@ -335,9 +358,14 @@ def _filtrar_por_base(
     """Aplica os filtros base a base, sem deixar um filtro zerar a busca.
 
     Numa base, um filtro só vale se ao menos um chunk dela tem o campo (ex.:
-    ``valor`` não existe na base normativa). Se os filtros aplicáveis excluem
-    todos os chunks da base, ela entra sem filtro. Devolve os registros e,
-    por ``base_id``, as chaves ignoradas (``sem_campo`` / ``zerou_resultados``).
+    ``valor`` não existe na base normativa) e se ao menos um desses chunks
+    passa nele: um filtro que reprova todos os chunks que têm o campo está
+    lendo errado aquela base (ex.: órgão "Secretaria de Saúde" contra os
+    indicadores do PCA, cujo órgão é "Estado do Rio de Janeiro"), e deixaria
+    só os chunks sem o campo. Se os filtros que sobram, juntos, excluem todos
+    os chunks da base, ela entra sem filtro. Devolve os registros e, por
+    ``base_id``, as chaves ignoradas (``sem_campo`` / ``nenhum_chunk_passou``
+    / ``zerou_resultados``).
     """
     por_base: dict[str, list[dict[str, Any]]] = {}
     for record in records:
@@ -347,15 +375,18 @@ def _filtrar_por_base(
     ignorados: dict[str, dict[str, list[str]]] = {}
     for base_id, registros in por_base.items():
         metadados = [_metadata_of(record) for record in registros]
-        aplicaveis = {
-            key: value
-            for key, value in filters.items()
-            if any(_metadata_value(metadata, key) is not None for metadata in metadados)
-        }
         motivo: dict[str, list[str]] = {}
-        sem_campo = sorted(set(filters) - set(aplicaveis))
-        if sem_campo:
-            motivo["sem_campo"] = sem_campo
+        aplicaveis: dict[str, Any] = {}
+        for key, value in filters.items():
+            com_campo = [m for m in metadados if _metadata_value(m, key) is not None]
+            if not com_campo:
+                motivo.setdefault("sem_campo", []).append(key)
+            elif not any(_matches_filters(m, {key: value}) for m in com_campo):
+                motivo.setdefault("nenhum_chunk_passou", []).append(key)
+            else:
+                aplicaveis[key] = value
+        for chave in motivo:
+            motivo[chave].sort()
         passam = [
             record
             for record, metadata in zip(registros, metadados)

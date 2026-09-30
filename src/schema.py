@@ -72,17 +72,31 @@ class RouteDecision(BaseModel):
 class QueryFilters(BaseModel):
     """Filtros estruturados extraídos da pergunta pela etapa query_analysis."""
 
+    # Ano da pergunta ("em 2025") ou primeiro ano de um período fechado.
     ano: Optional[int] = None
-    # Último ano de um período ("entre 2024 e 2025"); None = só ``ano``.
+    # Último ano de um período fechado ("entre 2024 e 2025"); None = só ``ano``.
     ano_final: Optional[int] = None
+    # Períodos abertos, usados só quando ``ano`` é None: "a partir de 2024" /
+    # "depois de 2023" -> ano_desde; "até 2025" / "antes de 2026" -> ano_ate.
+    ano_desde: Optional[int] = None
+    ano_ate: Optional[int] = None
     valor_min: Optional[float] = None
     valor_max: Optional[float] = None
     orgao: Optional[str] = None
 
+    def intervalo_de_anos(self) -> tuple[Optional[int], Optional[int]]:
+        """(primeiro ano, último ano), inclusivos; None = sem limite daquele lado."""
+        if self.ano is not None:
+            return self.ano, self.ano_final or self.ano
+        return self.ano_desde, self.ano_ate
+
     def esta_vazio(self) -> bool:
         return all(
             valor is None
-            for valor in (self.ano, self.ano_final, self.valor_min, self.valor_max, self.orgao)
+            for valor in (
+                self.ano, self.ano_final, self.ano_desde, self.ano_ate,
+                self.valor_min, self.valor_max, self.orgao,
+            )
         )
 
 

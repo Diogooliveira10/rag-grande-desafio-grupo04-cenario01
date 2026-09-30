@@ -218,6 +218,55 @@ def test_maior_que_com_numero_continua_sendo_valor():
 
 
 # --------------------------------------------------------------------------
+# Comparação de grandeza ("acima de", "superior a"...): o número é valor mesmo
+# com cara de ano; só "a partir de" e "até" tratam 2024/2025 como ano.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("pergunta", [
+    "Contratos acima de 2000 em 2025",
+    "Contratos acima de 3000 em 2025",
+])
+def test_numero_depois_de_acima_de_e_valor_mesmo_com_cara_de_ano(pergunta):
+    filtros = qa.analisar_query(pergunta).filtros
+    assert filtros.ano == 2025
+    assert filtros.valor_min is not None and filtros.valor_min >= 2000
+
+
+@pytest.mark.parametrize("pergunta, campo, esperado", [
+    ("valor superior a 2000", "valor_min", 2000.0),
+    ("valor superior ou igual a 500 mil", "valor_min", 500_000.0),
+    ("valor inferior a 2000", "valor_max", 2000.0),
+    ("valor inferior ou igual a R$ 1 milhão", "valor_max", 1_000_000.0),
+    ("contratos maior que 2000", "valor_min", 2000.0),
+    ("contratos menor que 2000", "valor_max", 2000.0),
+    ("contratos com menos de 1500 reais", "valor_max", 1500.0),
+])
+def test_comparacoes_de_valor_reconhecidas(pergunta, campo, esperado):
+    filtros = qa.analisar_query(pergunta).filtros
+    assert getattr(filtros, campo) == pytest.approx(esperado)
+    assert filtros.ano is None
+
+
+def test_menos_de_com_substantivo_e_contagem():
+    filtros = qa.analisar_query("municípios com menos de 50 mil habitantes").filtros
+    assert filtros.valor_min is None and filtros.valor_max is None
+
+
+def test_faixa_com_numero_com_cara_de_ano_e_faixa_de_valor():
+    filtros = qa.analisar_query("contratos entre 1000 e 2000").filtros
+    assert (filtros.valor_min, filtros.valor_max) == (pytest.approx(1000.0), pytest.approx(2000.0))
+    assert filtros.ano is None
+
+
+def test_faixa_so_usa_o_numero_logo_depois_do_e():
+    """Faixa incompleta é ambígua: nenhum filtro de valor, e o 2025 continua ano."""
+    filtros = qa.analisar_query("contratos entre 1000 e os contratos de 2025").filtros
+    assert filtros.valor_max is None
+    assert filtros.ano == 2025
+
+
+# --------------------------------------------------------------------------
 # Contagem não vira valor: número seguido de substantivo ("3 contratos").
 # --------------------------------------------------------------------------
 
@@ -326,6 +375,92 @@ def test_ano_de_norma_nao_esconde_o_ano_da_pergunta():
     assert filtros.ano == 2025
 
 
+@pytest.mark.parametrize("pergunta", [
+    "O que diz a Lei nº 14.133, de 1º de abril de 2021, sobre pregão?",
+    "Lei 14.133 de 2021 sobre dispensa",
+    "Decreto 42.063/2009",
+])
+def test_ano_de_citacao_de_norma_nao_vira_ano(pergunta):
+    assert qa.analisar_query(pergunta).filtros.intervalo_de_anos() == (None, None)
+
+
+# --------------------------------------------------------------------------
+# Períodos abertos e outras formas de citar anos
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("pergunta, intervalo", [
+    ("contratos a partir de 2024", (2024, None)),
+    ("contratos desde 2023", (2023, None)),
+    ("contratos depois de 2023", (2024, None)),
+    ("contratos após 2023", (2024, None)),
+    ("contratos publicados até 2025", (None, 2025)),
+    ("contratos até o ano de 2025", (None, 2025)),
+    ("contratos antes de 2024", (None, 2023)),
+    ("contratos a partir de 2024 até 2025", (2024, 2025)),
+    ("contratos desde 2023 até 2025", (2023, 2025)),
+])
+def test_periodo_aberto(pergunta, intervalo):
+    assert qa.analisar_query(pergunta).filtros.intervalo_de_anos() == intervalo
+
+
+def test_periodo_aberto_vira_so_um_limite_de_data_vigencia():
+    convertido = qa.filtros_para_retrieve(QueryFilters(ano_ate=2023))
+    assert convertido["data_vigencia"] == [{"operator": "<", "value": date(2024, 1, 1), "optional": True}]
+
+
+@pytest.mark.parametrize("pergunta", [
+    "compare os contratos em 2024 e 2025",
+    "contratos de 2024 ou 2025",
+    "contratos de 2024, 2025",
+    "contratos de setembro de 2024 a março de 2025",
+])
+def test_dois_anos_citados_juntos_viram_periodo(pergunta):
+    assert qa.analisar_query(pergunta).filtros.intervalo_de_anos() == (2024, 2025)
+
+
+def test_data_completa_da_o_ano():
+    assert qa.analisar_query("contratos assinados em 30/09/2025").filtros.ano == 2025
+
+
+# --------------------------------------------------------------------------
+# Valor seguido de verbo, faixa impossível e plurais
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("pergunta, valor", [
+    ("Quantos contratos acima de 1 milhão houve por modalidade?", 1_000_000.0),
+    ("contratos acima de 5000 foram assinados em 2025?", 5000.0),
+    ("contratos acima de 500 mil contratados em 2025", 500_000.0),
+    ("valores maiores que 100 mil", 100_000.0),
+    ("contratos superiores a 2 milhões", 2_000_000.0),
+    ("contratos com valor maior do que 50 mil", 50_000.0),
+])
+def test_valor_seguido_de_verbo_ou_com_gatilho_no_plural(pergunta, valor):
+    assert qa.analisar_query(pergunta).filtros.valor_min == pytest.approx(valor)
+
+
+def test_minimo_maior_que_maximo_e_um_ou_e_nao_vira_filtro():
+    filtros = qa.analisar_query("contratos acima de 1 milhão ou abaixo de 10 mil").filtros
+    assert filtros.valor_min is None and filtros.valor_max is None
+
+
+# --------------------------------------------------------------------------
+# texto_sem_filtros: o que sobra da pergunta para o structured_query
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("pergunta, esperado", [
+    ("Qual a média dos contratos com valor maior que 2000?", "qual a media dos contratos com valor ?"),
+    ("Total de ambulâncias acima de R$ 300 mil em 2025", "total de ambulancias em"),
+    ("Quantos contratos acima de 1 milhão de reais houve?", "quantos contratos houve?"),
+    ("Mediana entre 2024 e 2025", "mediana"),
+    ("Contratos a partir de 2024", "contratos"),
+])
+def test_texto_sem_filtros_tira_so_as_expressoes_que_viraram_filtro(pergunta, esperado):
+    assert qa.texto_sem_filtros(pergunta) == esperado
+
+
 # --------------------------------------------------------------------------
 # Logging (stage query_analysis em logs/pipeline-AAAA-MM-DD.jsonl)
 # --------------------------------------------------------------------------
@@ -344,3 +479,184 @@ def test_analisar_query_loga_stage_query_analysis(tmp_path, monkeypatch):
     assert len(linhas) == 1
     assert '"stage": "query_analysis"' in linhas[0]
     assert '"run_id": "r1"' in linhas[0]
+
+# --------------------------------------------------------------------------
+# Regressões achadas em revisão adversarial (30/09). Cada linha é um caso que
+# já saiu errado: (pergunta, (primeiro ano, último ano), valor_min, valor_max).
+# --------------------------------------------------------------------------
+
+_SEM = (None, None)
+
+
+@pytest.mark.parametrize("pergunta, anos, vmin, vmax", [
+    # multiplicadores abreviados e colados
+    ("Quais contratos da Secretaria de Saúde acima de 500k em 2025?", (2025, 2025), 500_000, None),
+    ("contratos acima de 1,2mi em 2025", (2025, 2025), 1_200_000, None),
+    ("contratos acima de R$ 1 mi", _SEM, 1_000_000, None),
+    ("contratos acima de R$ 2 bi", _SEM, 2_000_000_000, None),
+    ("contratos acima de 1.500 mil", _SEM, 1_500_000, None),
+    ("compras de 100kg em 2025", (2025, 2025), None, None),
+    # número seguido de vírgula, percentual, data, parêntese
+    ("Liste os contratos acima de 2000, ordenados por valor", _SEM, 2000, None),
+    ("contratos com aditivos acima de 25%", _SEM, None, None),
+    ("reajuste de até 10% em 2025", (2025, 2025), None, None),
+    ("contratos acima de 25 por cento", _SEM, None, None),
+    ("contratos até 31/12/2025", (None, 2025), None, None),
+    ("contratos a partir de 01/01/2024", (2024, None), None, None),
+    ("prazo de até 90 (noventa) dias", _SEM, None, None),
+    ("contratos vigentes até 30 de junho de 2025", (None, 2025), None, None),
+    # contagem
+    ("municípios com mais de 1 milhão de habitantes", _SEM, None, None),
+    ("fornecedores que ganharam mais de 3 dos pregões", _SEM, None, None),
+    ("mais de 3 por modalidade", _SEM, None, None),
+    ("no máximo 2 por empresa", _SEM, None, None),
+    ("prefeituras que compraram entre 2 e 5 ambulâncias em 2025", (2025, 2025), None, None),
+    ("entre 100 e 200 mil habitantes", _SEM, None, None),
+    ("Em 2025, 2000 cestas básicas foram compradas pela Secretaria?", (2025, 2025), None, None),
+    ("compra de 2000 cestas básicas em 2025", (2025, 2025), None, None),
+    ("contratos com mais de 2000 itens em 2025", (2025, 2025), None, None),
+    ("contratos no valor de 2000 em 2025", (2025, 2025), None, None),
+    # faixas
+    ("contratos entre 500 e 800 mil reais", _SEM, 500_000, 800_000),
+    ("contratos entre 1 milhão e 500 mil", _SEM, 500_000, 1_000_000),
+    ("contratos de 2000 a 5000 reais em 2025", (2025, 2025), 2000, 5000),
+    ("contratos de R$ 100 mil até R$ 500 mil", _SEM, 100_000, 500_000),
+    ("Entre 2024 e 2025, quais contratos ficaram entre 100 mil e 500 mil?", (2024, 2025), 100_000, 500_000),
+    ("contratos a partir de 2024 até R$ 80 mil", (2024, None), None, 80_000),
+    ("contratos de março de 2023 a maio de 2024 até R$ 80 mil", (2023, 2024), None, 80_000),
+    ("contratos a partir de 100 mil reais até 2023", (None, 2023), 100_000, None),
+    # gatilho repetido: o primeiro não tem valor válido
+    ("a partir de 2024, contratos acima de 1 milhão", (2024, None), 1_000_000, None),
+    ("fornecedores com mais de 3 contratos acima de R$ 500 mil em 2025", (2025, 2025), 500_000, None),
+    # períodos abertos com contração, data, mês e semestre
+    ("contrato posterior a 2023", (2024, None), None, None),
+    ("período anterior à 2024", (None, 2023), None, None),
+    ("depois do ano de 2023", (2024, None), None, None),
+    ("anteriores ao ano de 2024", (None, 2023), None, None),
+    ("a partir do 2º semestre de 2024", (2024, None), None, None),
+    ("antes de 01/01/2024", (None, 2023), None, None),
+    ("após 01/06/2024", (2024, None), None, None),
+    ("até o dia 30/06/2025", (None, 2025), None, None),
+    ("até 1º de janeiro de 2025", (None, 2025), None, None),
+    ("antes de março de 2024", (None, 2024), None, None),
+    ("após junho de 2024", (2024, None), None, None),
+    ("contratos de 2024 em diante", (2024, None), None, None),
+    ("desde o início de 2024", (2024, None), None, None),
+    ("até o fim de 2025", (None, 2025), None, None),
+    ("Quais os maiores contratos antes de 2024 ou depois de 2025?", _SEM, None, None),
+    # vários anos
+    ("contratos de 2023, 2024 e 2025", (2023, 2025), None, None),
+    ("exercício 2024/2025", (2024, 2025), None, None),
+    ("contratos 2024 x 2025", (2024, 2025), None, None),
+    ("compare 2024 com 2025", (2024, 2025), None, None),
+    ("de 2024 para 2025", (2024, 2025), None, None),
+    ("contratos de 2023 até 2025 com valor até 100 mil", (2023, 2025), None, 100_000),
+    ("contratos de 2025-03-01", (2025, 2025), None, None),
+    ("contratos assinados em 03/2025", (2025, 2025), None, None),
+    ("Em 2025 milhões de reais foram gastos com ambulâncias?", (2025, 2025), None, None),
+    # citações de norma
+    ("O que diz a Lei n° 14.133, de 1° de abril de 2021?", _SEM, None, None),
+    ("IN SEGES/ME nº 65, de 7 de julho de 2021, sobre pesquisa de preços", _SEM, None, None),
+    ("o que diz a nova lei de licitações de 2021 sobre pregão?", _SEM, None, None),
+    ("Lei 14.133 (2021) e contratos de 2025", (2025, 2025), None, None),
+    ("contratos firmados sob a Lei 14.133/2021 de 2023 a 2025", (2023, 2025), None, None),
+])
+def test_regressoes_da_revisao_adversarial(pergunta, anos, vmin, vmax):
+    filtros = qa.analisar_query(pergunta).filtros
+    assert filtros.intervalo_de_anos() == anos
+    assert filtros.valor_min == (pytest.approx(vmin) if vmin is not None else None)
+    assert filtros.valor_max == (pytest.approx(vmax) if vmax is not None else None)
+
+
+def test_pergunta_toda_em_maiusculas_nao_estende_o_orgao():
+    assert qa.analisar_query("QUAIS CONTRATOS DA SECRETARIA DE SAUDE ACIMA DE 1 MILHAO EM 2025").filtros.orgao is None
+
+
+def test_texto_sem_filtros_tira_expressoes_de_valor_mesmo_quando_o_ou_descarta_o_filtro():
+    assert qa.texto_sem_filtros("contratos acima de 1 milhão ou abaixo de 10 mil") == "contratos ou"
+
+# Terceira rodada adversarial (30/09): (pergunta, (primeiro ano, último ano), valor_min, valor_max).
+@pytest.mark.parametrize("pergunta, anos, vmin, vmax", [
+    ("dispensas de 2025 ate R$ 50 mil", (2025, 2025), None, 50_000),
+    ("compras de 2024 ate 100 mil reais", (2024, 2024), None, 100_000),
+    ("quantos contratos pela Lei 8.666 de 2021 a 2023?", (2021, 2023), None, None),
+    ("contratos de 2025 sob a nova lei de licitacoes (2021)", (2025, 2025), None, None),
+    ("contratos de 2025 conforme a Resolução SEPLAG nº 5 de 2024", (2025, 2025), None, None),
+    ("contratos de 2025 conforme Portaria SEFAZ nº 123, de 15 de março de 2024", (2025, 2025), None, None),
+    ("empresas enquadradas na LC 123 de 2006 com contratos em 2025", (2025, 2025), None, None),
+    ("contratos em 2025 segundo o Decreto Rio nº 51.078 de 2022", (2025, 2025), None, None),
+    ("Lei de Acesso à Informação (2011) e contratos de 2025", (2025, 2025), None, None),
+    ("contratos de 2025 e a lei do pregao de 2002", (2025, 2025), None, None),
+    ("Lei 14.133 (de 2021) e contratos de 2025", (2025, 2025), None, None),
+    ("lei 14.133 art 75 de 2021", (None, None), None, None),
+    ("a lei geral de licitacoes 8.666 de 1993 e os contratos de 2025", (2025, 2025), None, None),
+    ("contratos de 2024 oriundos do pregao eletronico 05/2023", (2024, 2024), None, None),
+    ("ata de registro de precos nº 12/2024", (None, None), None, None),
+    ("IN SEGES 65/2021 e pesquisa de precos em 2025", (2025, 2025), None, None),
+    ("contratos assinados em 2024 com vigencia apos 2025", (2024, 2024), None, None),
+    ("contratos de 2025 com vigencia ate 2027", (2025, 2025), None, None),
+    ("contratos de 2024 que vencem depois de 2025", (2024, 2024), None, None),
+    ("contratos assinados antes do fim de 2024", (None, 2024), None, None),
+    ("contratos assinados depois do inicio de 2024", (2024, None), None, None),
+    ("contratos antes de 2025-03-01", (None, 2025), None, None),
+    ("contratos entre 500 e 1 milhão", (None, None), 500_000, 1_000_000),
+    ("contratos entre 800 e 1,2 milhão em 2025", (2025, 2025), 800_000, 1_200_000),
+    ("contratos com ano maior que 2023", (2024, None), None, None),
+    ("contratos com ano menor ou igual a 2025", (None, 2025), None, None),
+    ("contratos com data de publicacao superior a 2023", (2024, None), None, None),
+    ("itens do pca com quantidade superior a 1500", (None, None), None, None),
+    ("municipios com populacao acima de 100 mil", (None, None), None, None),
+    ("quantidade de contratos acima de 1 milhão", (None, None), 1_000_000, None),
+    ("escolas com ate 2000 alunos", (None, None), None, None),
+    ("kits para ate 2000 pessoas em 2025", (2025, 2025), None, None),
+    ("dispensas com valor ate 2000", (None, None), None, 2000),
+    ("ate 2000 milhoes destinados a saude", (None, None), None, 2_000_000_000),
+    ("contratos acima de 1 milhao e meio", (None, None), 1_500_000, None),
+    ("contratos acima de R$ 1 milhão e 500 mil", (None, None), 1_500_000, None),
+    ("contratos acima de 2 mil e 500 reais", (None, None), 2500, None),
+    ("contratos abaixo de 1 milhão e 200 mil em 2025", (2025, 2025), None, 1_200_000),
+    ("compare o valor total de 2024 com o de 2025", (2024, 2025), None, None),
+    ("qual o valor total de 2025?", (2025, 2025), None, None),
+    ("qual o contrato de maior valor de 2025?", (2025, 2025), None, None),
+    ("compra de 2000 a 3000 cestas basicas em 2025", (2025, 2025), None, None),
+    ("kits para 2000 ou 3000 pessoas", (None, None), None, None),
+    ("2000 ou mais unidades em 2025", (2025, 2025), None, None),
+    ("pregoes com mais de 2000 e menos de 5000 itens", (None, None), None, None),
+    ("compra de 2000 vacinas em 2021", (2021, 2021), None, None),
+    ("entregues em 2000 unidades de saude", (None, None), None, None),
+    ("uns 2000 contratos", (None, None), None, None),
+    ("contratos com a empresa Rio 2000 Engenharia", (None, None), None, None),
+    ("contratos de 2024 pra frente", (2024, None), None, None),
+    ("contratos a contar de 2024", (2024, None), None, None),
+    ("contratos anteriores ao exercicio de 2024", (None, 2023), None, None),
+    ("contratos desde meados de 2023", (2023, None), None, None),
+    ("contratos de 2023 ate a presente data", (2023, None), None, None),
+    ("contratos de 2023 ou anteriores", (None, 2023), None, None),
+    ("contratos de 01/03/2024 ate 28/02/2025", (2024, 2025), None, None),
+    ("Qual a média dos contratos com valor igual ou superior a 100 mil?", (None, None), 100_000, None),
+    ("acima de 1 milhão da Secretaria de Saúde", (None, None), 1_000_000, None),
+    ("acima de R$ 100.000,00 (cem mil reais)", (None, None), 100_000, None),
+    ("contratos entre R$ 100 mil a R$ 500 mil em 2025", (2025, 2025), 100_000, 500_000),
+    ("os maiores 2025", (2025, 2025), None, None),
+    ("contratos do MP 2024", (2024, 2024), None, None),
+    ("pca 2025 itens de ti", (2025, 2025), None, None),
+    ("contratos dos ultimos 3 anos acima de 1 milhao", (None, None), 1_000_000, None),
+    ("contratos que ultrapassam R$ 1 milhão", (None, None), 1_000_000, None),
+    ("contratos acima dos 100 mil reais", (None, None), 100_000, None),
+    ("contratos em 15.03.2025", (2025, 2025), None, None),
+])
+def test_regressoes_da_terceira_rodada(pergunta, anos, vmin, vmax):
+    filtros = qa.analisar_query(pergunta).filtros
+    assert filtros.intervalo_de_anos() == anos
+    assert filtros.valor_min == (pytest.approx(vmin) if vmin is not None else None)
+    assert filtros.valor_max == (pytest.approx(vmax) if vmax is not None else None)
+
+
+@pytest.mark.parametrize("pergunta, esperado", [
+    ("Qual o total de contratos no exercício de 2025?", "qual o total de contratos ?"),
+    ("Quantos contratos no 1º semestre de 2025?", "quantos contratos ?"),
+    ("Qual a média dos contratos com valor igual ou superior a 100 mil?", "qual a media dos contratos com valor ?"),
+    ("total de contratos em outubro/2025", "total de contratos em"),
+])
+def test_texto_sem_filtros_tira_expressoes_de_tempo(pergunta, esperado):
+    assert qa.texto_sem_filtros(pergunta) == esperado

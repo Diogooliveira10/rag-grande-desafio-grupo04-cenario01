@@ -285,6 +285,27 @@ def test_filters_support_base_id_and_combined_metadata_conditions():
     assert [item.chunk_id for item in results] == ["c1"]
 
 
+@pytest.mark.parametrize("valor_ilegivel", ["", "Sigiloso", "   ", {}])
+def test_filtro_opcional_trata_valor_ilegivel_como_campo_ausente(valor_ilegivel):
+    filtro = {"valor": {"operator": ">=", "value": 500_000, "optional": True}}
+    assert retrieve_module._matches_filters({"extras": {"valor": valor_ilegivel}}, filtro)
+    # Sem "optional", o comportamento estrito continua: valor ilegível não passa.
+    assert not retrieve_module._matches_filters({"extras": {"valor": "Sigiloso"}}, {"valor": (">=", 500_000)})
+
+
+def test_contains_ignora_caixa_e_acento():
+    records = [
+        _record("estado", text="ambulancia", metadata_extra={"orgao": "SECRETARIA DE ESTADO DE SAUDE"}),
+        _record("outro", text="ambulancia", metadata_extra={"orgao": "SECRETARIA DE EDUCACAO"}),
+    ]
+
+    results = bm25_retrieve(
+        "ambulancia", records=records, filters={"orgao": {"operator": "contains", "value": "Estado de Saúde"}}
+    )
+
+    assert [item.chunk_id for item in results] == ["estado"]
+
+
 @pytest.mark.parametrize(
     ("expected", "matching_ids"),
     [
@@ -942,7 +963,47 @@ def test_retrieve_ignora_filtro_que_zeraria_a_base(tmp_path, monkeypatch):
 
     assert {item.chunk_id for item in results} == {"c1", "c2"}
     [log] = _logs_de_retrieval()
-    assert log["extra"]["filtros_ignorados"] == {"contratos_estruturado": {"zerou_resultados": ["valor"]}}
+    assert log["extra"]["filtros_ignorados"] == {"contratos_estruturado": {"nenhum_chunk_passou": ["valor"]}}
+
+
+def test_retrieve_ignora_filtro_que_reprova_todos_os_chunks_com_o_campo(tmp_path, monkeypatch):
+    """Caso real do PCA: indicadores têm órgão "Estado do Rio de Janeiro", os
+    planos JSON não têm órgão; o filtro "Secretaria de Saúde" não pode deixar
+    só os JSON."""
+    monkeypatch.setattr(default_logger, "logs_dir", tmp_path / "logs")
+    registros = [
+        _record("indicador", text="pca classe", base_id="pca_agregado", embedding=[1.0, 0.0],
+                metadata_extra={"extras": {"orgao": "Estado do Rio de Janeiro"}}),
+        _record("plano", text="pca classe", base_id="pca_agregado", embedding=[0.9, 0.1]),
+    ]
+    comum = _grava_indice(tmp_path, registros)
+    filtros = {"orgao": {"operator": "contains", "value": "Secretaria de Saúde", "optional": True}}
+
+    results = retrieve("pca classe", None, filters=filtros, **comum)
+
+    assert {item.chunk_id for item in results} == {"indicador", "plano"}
+    [log] = _logs_de_retrieval()
+    assert log["extra"]["filtros_ignorados"] == {"pca_agregado": {"nenhum_chunk_passou": ["orgao"]}}
+
+
+def test_retrieve_filtro_opcional_continua_valendo_quando_algum_chunk_com_o_campo_passa(tmp_path, monkeypatch):
+    monkeypatch.setattr(default_logger, "logs_dir", tmp_path / "logs")
+    registros = [
+        _record("pca2025", text="pca total", base_id="pca_agregado", embedding=[1.0, 0.0],
+                metadata_extra={"data_vigencia": "2025-12-31"}),
+        _record("pca2024", text="pca total", base_id="pca_agregado", embedding=[0.9, 0.1],
+                metadata_extra={"data_vigencia": "2024-12-31"}),
+        _record("indicador", text="pca total", base_id="pca_agregado", embedding=[0.8, 0.2]),
+    ]
+    comum = _grava_indice(tmp_path, registros)
+    filtros = {"data_vigencia": [
+        {"operator": ">=", "value": "2025-01-01", "optional": True},
+        {"operator": "<", "value": "2026-01-01", "optional": True},
+    ]}
+
+    results = retrieve("pca total", None, filters=filtros, **comum)
+
+    assert {item.chunk_id for item in results} == {"pca2025", "indicador"}
 
 
 def test_retrieve_mantem_filtro_onde_ele_existe_e_ignora_nas_outras_bases(tmp_path, monkeypatch):

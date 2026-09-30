@@ -25,6 +25,7 @@ from typing import Any, Iterable, Optional
 import config
 from src import structured_db
 from src.obs import Stage, default_logger
+from src.query_analysis import texto_sem_filtros
 from src.schema import Chunk, ChunkMetadata, Natureza, QueryFilters
 from src.structured_db import Banco
 
@@ -75,7 +76,10 @@ class Consulta:
     ordem: str = "DESC"
     limite: int = LIMITE_RANKING
     agrupar_por: str = "modalidade"
+    # Período em anos, inclusivo; None = sem limite daquele lado. Um ano só:
+    # ano == ano_final.
     ano: Optional[int] = None
+    ano_final: Optional[int] = None
     valor_min: Optional[float] = None
     valor_max: Optional[float] = None
     esfera: Optional[str] = None
@@ -109,7 +113,10 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
     nem agregada: aí a busca normal responde sozinha.
     """
     bases = set(bases)
-    texto = structured_db.normalizar(query)
+    # Sem as expressões que já viraram filtro: em "média dos contratos com valor
+    # maior que 2000", o "maior" não pede ranking, e "acima"/"milhão" não
+    # descrevem o objeto contratado.
+    texto = structured_db.normalizar(texto_sem_filtros(query))
     if Natureza.AGREGADA in bases and (_RE_PCA.search(texto) or Natureza.ESTRUTURADA not in bases):
         tabela = "pca_planos"
     elif Natureza.ESTRUTURADA in bases:
@@ -150,13 +157,15 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
             esfera = "estadual" if estadual else "municipal"
 
     so_menor = re.search(r"\bmenor(?:es)?\b", texto) and not re.search(r"\bmaior(?:es)?\b", texto)
+    primeiro_ano, ultimo_ano = filtros.intervalo_de_anos()
     return Consulta(
         tabela=tabela,
         tipo=tipo,
         ordem="ASC" if so_menor else "DESC",
         limite=max(1, min(limite, 50)),
         agrupar_por=agrupar_por,
-        ano=filtros.ano,
+        ano=primeiro_ano,
+        ano_final=ultimo_ano,
         valor_min=filtros.valor_min,
         valor_max=filtros.valor_max,
         esfera=esfera,
@@ -177,9 +186,16 @@ def _where(consulta: Consulta, termos: Iterable[str], juncao: str = "AND") -> tu
     condicoes: list[str] = []
     parametros: list[Any] = []
     coluna_ano = "ano_pca" if consulta.tabela == "pca_planos" else "ano_publicacao"
-    if consulta.ano is not None:
+    if consulta.ano is not None and consulta.ano == consulta.ano_final:
         condicoes.append(f"{coluna_ano} = ?")
         parametros.append(consulta.ano)
+    else:
+        if consulta.ano is not None:
+            condicoes.append(f"{coluna_ano} >= ?")
+            parametros.append(consulta.ano)
+        if consulta.ano_final is not None:
+            condicoes.append(f"{coluna_ano} <= ?")
+            parametros.append(consulta.ano_final)
     if consulta.valor_min is not None:
         condicoes.append(f"{_coluna_valor(consulta)} >= ?")
         parametros.append(consulta.valor_min)
@@ -288,8 +304,14 @@ def _cabecalho(consulta: Consulta, total_tabela: int, termos: tuple[str, ...], j
             "valor = homologado quando existe, senão estimado. A tabela não tem dados de fornecedor."
         )
     filtros = []
-    if consulta.ano is not None:
+    if consulta.ano is not None and consulta.ano == consulta.ano_final:
         filtros.append(f"ano={consulta.ano}")
+    elif consulta.ano is not None and consulta.ano_final is not None:
+        filtros.append(f"ano de {consulta.ano} a {consulta.ano_final}")
+    elif consulta.ano is not None:
+        filtros.append(f"ano>={consulta.ano}")
+    elif consulta.ano_final is not None:
+        filtros.append(f"ano<={consulta.ano_final}")
     if consulta.valor_min is not None:
         filtros.append(f"valor>={_brl(consulta.valor_min)}")
     if consulta.valor_max is not None:
