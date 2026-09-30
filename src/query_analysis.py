@@ -28,8 +28,9 @@ def _normalize(texto: str) -> str:
 # --------------------------------------------------------------------------
 
 # Ano depois de "/" é parte de um número de norma ou processo ("Lei
-# 14.133/2021", "edital 90005/2025"), não o ano de que a pergunta trata.
-_ANO_RE = re.compile(r"(?<![/\d.])\b(19|20)\d{2}\b")
+# 14.133/2021", "edital 90005/2025"), não o ano de que a pergunta trata; com
+# casas decimais depois ("2000,00", "2025.50") é valor, não ano.
+_ANO_RE = re.compile(r"(?<![/\d.])\b(19|20)\d{2}\b(?![.,]\d)")
 _PERIODO_RE = re.compile(
     r"\b(?:entre|de)\s+(?P<inicio>(?:19|20)\d{2})\s+(?:e|a|ate)\s+(?P<fim>(?:19|20)\d{2})\b"
 )

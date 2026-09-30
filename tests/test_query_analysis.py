@@ -286,6 +286,27 @@ def test_valor_monetario_nao_vira_ano(pergunta):
     assert filtros.valor_min is not None or filtros.valor_max is not None
 
 
+@pytest.mark.parametrize("pergunta, valor", [
+    ("contratos acima de 2000,00 reais", 2000.0),
+    ("contratos acima de 2000.00 reais", 2000.0),
+    ("contratos acima de 2000,50", 2000.5),
+])
+def test_valor_com_centavos_nao_vira_ano(pergunta, valor):
+    filtros = qa.analisar_query(pergunta).filtros
+    assert filtros.ano is None
+    assert filtros.valor_min == pytest.approx(valor)
+
+
+def test_valor_com_centavos_nao_esconde_o_ano_da_pergunta():
+    filtros = qa.analisar_query("contratos acima de 2025,00 em 2024").filtros
+    assert filtros.ano == 2024
+    assert filtros.valor_min == pytest.approx(2025.0)
+
+
+def test_ano_no_fim_da_frase_continua_sendo_ano():
+    assert qa.analisar_query("Quais contratos foram assinados em 2025.").filtros.ano == 2025
+
+
 def test_ano_da_pergunta_nao_e_confundido_com_valor_monetario():
     filtros = qa.analisar_query("contratos acima de 2000 reais em 2025").filtros
     assert filtros.ano == 2025
