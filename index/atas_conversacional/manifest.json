@@ -1,0 +1,30 @@
+{
+  "base_id": "atas_conversacional",
+  "embedding_model": "Qwen3-Embedding-0.6B.Q8_0",
+  "encoding_config": {
+    "backend": "llama.cpp",
+    "checkpoint": "D:\\LLM\\Qwen3-Embedding-0.6B.Q8_0.gguf",
+    "checkpoint_sha256": "e40d4a708d0b324fc133bae547bd64dec79edb885410ef262c1e5c2efb2050b3",
+    "context_size": 4096,
+    "document_instruction": null,
+    "flash_attention": "auto",
+    "gpu_layers": "all",
+    "parallel": 1,
+    "pooling": "last",
+    "server_context_size": 4096,
+    "threads": 2,
+    "ubatch_size": 2048
+  },
+  "inventory_versions": [
+    "v6"
+  ],
+  "inventory_hashes": [
+    "887e3d061880396e0717d6c578f0e2d90fd08e64cb79e836e1a2384d224035ff"
+  ],
+  "dimension": 1024,
+  "faiss_index": "vectors.faiss",
+  "total_chunks": 2524,
+  "source_file": "data/normalized/v6/atas_conversacional/documents.jsonl",
+  "source_sha256": "f1c0bbd5a1dd6f8081f23bc523957b8ba4ce9ed681a0f06a63debf11e282d87b",
+  "built_at": "2026-09-30T17:23:38+00:00"
+}

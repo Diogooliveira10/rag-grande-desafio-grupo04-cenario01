@@ -1,0 +1,9 @@
+{
+  "chunks": 625,
+  "tokens": 564907,
+  "max_tokens": 1334,
+  "limit_exclusive": 2048,
+  "tokenizer": "llama.cpp/tokenize",
+  "add_special": true,
+  "tokenizer_calls": 625
+}

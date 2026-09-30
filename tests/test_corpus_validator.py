@@ -42,6 +42,14 @@ def _inventario_completo(manifesto: dict) -> dict:
     }
 
 
+def test_curadoria_rejeita_soma_diferente_do_orcamento_de_arquivos():
+    manifesto = _manifesto_oficial()
+    manifesto["curadoria_v6"] = {"alvo_arquivos_total": 1400, "limite_por_orgao_por_base": 5}
+    result = validate_manifest_contract(manifesto)
+    assert not result.ok
+    assert any("soma dos volumes" in error for error in result.errors)
+
+
 def test_manifesto_oficial_valido_passa_e_ignora_bases_experimentais():
     assert validate_manifest_contract(_manifesto_oficial()).ok
 
@@ -60,7 +68,7 @@ def test_manifesto_oficial_aponta_base_faltando_e_volume_divergente():
     erros = validate_manifest_contract(manifesto).errors
 
     assert any("bases oficiais divergentes" in erro for erro in erros)
-    assert any("contratos_estruturado: volume_alvo esperado=160 obtido=5" in erro for erro in erros)
+    assert any(f"contratos_estruturado: volume_alvo esperado={OFFICIAL_BASE_TARGETS['contratos_estruturado']} obtido=5" in erro for erro in erros)
 
 
 def test_manifesto_exige_selecao_deterministica_natureza_e_volume_valido():
@@ -93,7 +101,7 @@ def test_inventario_incompleto_com_falha_base_ausente_e_volume_errado():
     assert "inventário contém 1 falha(s)" in erros
     assert "inventário sem base(s): pca_agregado" in erros
     assert "contratos_estruturado: status='partial'" in erros
-    assert "contratos_estruturado: volume esperado=160 obtido=150" in erros
+    assert f"contratos_estruturado: volume esperado={OFFICIAL_BASE_TARGETS['contratos_estruturado']} obtido=150" in erros
 
 
 def test_inventario_aceita_itens_quando_nao_ha_volume_obtido():
@@ -105,9 +113,14 @@ def test_inventario_aceita_itens_quando_nao_ha_volume_obtido():
     assert validate_inventory_contract(manifesto, copy.deepcopy(inventario)).ok
 
 
-def test_manifesto_e_inventario_v2_do_repositorio_continuam_validos():
+def test_manifesto_e_inventario_v5_do_repositorio_continuam_validos():
     manifesto = load_manifest(ROOT / "corpus_manifest.yaml")
-    inventario = json.loads((ROOT / "data" / "inventory" / "v2.json").read_text(encoding="utf-8"))
+    # A v5 conserva seu contrato de volumes; o manifesto ativo descreve a v6.
+    manifesto.pop("curadoria_v6", None)
+    for base in manifesto["bases"]:
+        if base["base_id"] in OFFICIAL_BASE_TARGETS:
+            base["volume_alvo"] = OFFICIAL_BASE_TARGETS[base["base_id"]]
+    inventario = json.loads((ROOT / "data" / "inventory" / "v5.json").read_text(encoding="utf-8"))
 
     assert validate_manifest_contract(manifesto).ok
     assert validate_inventory_contract(manifesto, inventario).ok

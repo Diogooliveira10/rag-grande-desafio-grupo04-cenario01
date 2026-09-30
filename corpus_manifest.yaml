@@ -64,7 +64,7 @@ bases:
       limite: 1200
       chave: "numeroControlePNCP"
       max_paginas: 100000
-    volume_alvo: 1200
+    volume_alvo: 625
     volume_regra: minimo
     formato: json
     licenca: "Dados abertos gov.br - atribuição"
@@ -131,7 +131,7 @@ bases:
       artefatos_relacionados:
         documentos_edital: "editais_normativo"
     selecao_deterministica: true
-    volume_alvo: 4
+    volume_alvo: 13
     formatos: [html, htm, pdf]
     licenca: "Domínio público"
     sensitivity_default: publico
@@ -173,7 +173,7 @@ bases:
       deterministica: true
       limite: 20
       chave: "numeroControlePNCPAta"
-    volume_alvo: 20
+    volume_alvo: 376
     volume_regra: minimo
     # O provider PNCP coleta, por ata, o JSON de metadados, a listagem
     # /arquivos (JSON) e cada PDF anunciado nela.
@@ -206,7 +206,7 @@ bases:
       deterministica: true
       limite: 16
       chave: "numeroControlePNCP"
-    volume_alvo: 16
+    volume_alvo: 386
     volume_regra: minimo
     formatos: [json, csv]
     licenca: "Dados abertos gov.br - atribuição"
@@ -355,3 +355,9 @@ bases:
       - "Processos"
       - "Regime"
       - "Data_extracao"
+
+curadoria_v6:
+  limite_por_orgao_por_base: 5
+  identificador_orgao: cnpj
+  alvo_arquivos_total: 1400
+  selecao: amostra_intencional_personas_nao_censo
