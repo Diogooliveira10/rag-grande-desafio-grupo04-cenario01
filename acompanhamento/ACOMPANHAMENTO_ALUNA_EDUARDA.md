@@ -66,8 +66,7 @@
 
 ### Relato individual - Eduarda
 
+
 - Concluí a integração do frontend com a API do projeto, incluindo os fluxos de consulta, exibição das respostas, fontes consultadas e histórico.
-- Organizei e versionei o código do frontend exclusivamente na branch `developerEduarda`, mantendo a branch `main` sem essa implementação.
-- Validei a aplicação executando o build de produção do frontend com sucesso.
-- Sincronizei o ambiente local com a versão mais recente da `main` para trabalhar sobre a base atualizada do projeto.
+- Organizei e versionei o código do frontend exclusivamente na branch `developerEduarda`, mantendo a branch `main` sem essa implementação. 
 - Como próxima atividade, vou revisar e atualizar o arquivo `ARQUITETURA.md` para documentar a integração do frontend, o estado atual da solução e as próximas etapas do projeto.
