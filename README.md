@@ -4,8 +4,8 @@
 
 ## API HTTP
 
-O backend FastAPI expõe `GET /health` e `POST /api/v1/query`. Para executar
-localmente:
+O backend FastAPI expõe `GET /health`, `POST /api/v1/query`, `POST /api/v1/feedback`
+e `GET /api/v1/history`. Para executar localmente:
 
 ```bash
 uvicorn app.api:app --reload --host 127.0.0.1 --port 8000
@@ -100,7 +100,9 @@ Estágios (mesmos nomes usados no campo `stage` do log estruturado): `query_anal
 
 [src/pipeline.py](src/pipeline.py) une as etapas numa única função (`responder`).
 
-**Ainda não implementado:** `feedback`. O modelo de rerank da turma ainda não tem endpoint; quando tiver, basta um reranker com a mesma assinatura em [src/rerank.py](src/rerank.py).
+`feedback` ([src/history_store.py](src/history_store.py)): toda chamada a `POST /api/v1/query` recebe um `query_id` e é salva (pergunta + resposta completa) num SQLite local (`data/app_state/historico.sqlite`, fora do Git — diferente da base derivada de `structured_db.py`, este é estado da aplicação e não é remontado). `POST /api/v1/feedback` associa uma avaliação (`positivo`/`negativo` + comentário opcional) a um `query_id` já registrado (404 se não existir) e grava o evento no log estruturado com `stage="feedback"`. `GET /api/v1/history?limit=N` devolve as consultas mais recentes com o feedback recebido. Testes em [tests/test_history_store.py](tests/test_history_store.py) e [tests/test_app_api.py](tests/test_app_api.py).
+
+O modelo de rerank da turma ainda não tem endpoint; quando tiver, basta um reranker com a mesma assinatura em [src/rerank.py](src/rerank.py).
 
 O parsing da geração aceita as variações de chave que o modelo da turma produz na prática (`sources` em vez de `sources_used`, `confidence` numérico em vez de `confidence_level`) e registra no log, em `extra.chaves_fora_do_contrato`, quando isso acontece. Toda etapa registra log estruturado via [src/obs.py](src/obs.py) (JSONL em `logs/pipeline-AAAA-MM-DD.jsonl`, com `run_id`, `stage`, latência e tokens).
 
@@ -126,7 +128,7 @@ Uma pergunta via `responder` gera, no log, uma linha por stage — `query_analys
 ├── tests/                       ← testes de contrato (pytest), offline
 ├── app/
 │   ├── cli.py                   ← interface de linha de comando: rota e resposta completa do pipeline
-│   └── api.py                   ← API HTTP (FastAPI): GET /health e POST /api/v1/query
+│   └── api.py                   ← API HTTP (FastAPI): /health, /api/v1/query, /api/v1/feedback, /api/v1/history
 ├── src/
 │   ├── fetch_corpus.py          ← coleta determinística e versionada do corpus
 │   ├── providers/               ← provedores declarativos de fontes (pncp.py: contratações, atas + PDFs, PCA)
@@ -154,6 +156,7 @@ Uma pergunta via `responder` gera, no log, uma linha por stage — `query_analys
 │   ├── generate.py              ← geração com guardrails, prompt na janela do modelo e validação da saída do LLM
 │   ├── sensitivity.py           ← política de sensibilidade: mascaramento de CPF/telefone/e-mail e filtro de restritos
 │   ├── pipeline.py              ← une query_analysis + roteamento + recuperação + geração numa função (responder)
+│   ├── history_store.py         ← histórico de consultas e feedback do usuário (SQLite local, data/app_state/)
 │   ├── obs.py                   ← logging estruturado (JSONL) e contagem de tokens
 │   └── schema.py                ← modelos Pydantic (chunk, roteamento, resposta, recusa)
 ├── llm_ecoa.py                  ← exemplo mínimo de geração e embedding via endpoint compartilhado

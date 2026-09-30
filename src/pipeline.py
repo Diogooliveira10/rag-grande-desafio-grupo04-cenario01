@@ -36,6 +36,7 @@ def responder(
     reranker: Optional[RerankFn] = None,
     cliente: Optional[ClienteLLM] = None,
     run_id: Optional[str] = None,
+    query_id: Optional[str] = None,
     escopos: Optional[Sequence[str]] = ESCOPOS_CONSULTADOS,
 ) -> dict[str, Any]:
     """Roda query_analysis + roteamento + recuperação híbrida + geração para uma pergunta.
@@ -61,9 +62,12 @@ def responder(
 
     ``run_id`` e ``query_id`` são repassados a todas as etapas, amarrando no
     log (``logs/pipeline-AAAA-MM-DD.jsonl``) os stages de uma mesma pergunta.
+    Passe ``query_id`` quando o chamador (ex.: ``app/api.py``, para o
+    histórico em ``src/history_store.py``) precisa saber o id *antes* da
+    resposta pronta; por padrão um novo id é gerado aqui.
     """
     run_id = run_id or new_run_id()
-    query_id = new_query_id()
+    query_id = query_id or new_query_id()
 
     analise = analisar_query(query, run_id=run_id, query_id=query_id)
     decisao = rotear_pergunta(query, run_id=run_id, query_id=query_id)
