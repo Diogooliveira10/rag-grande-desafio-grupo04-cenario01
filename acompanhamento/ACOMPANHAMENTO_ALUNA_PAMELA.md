@@ -123,3 +123,58 @@ Mais um fix em query_analyzer:
 ### Uso de assistentes de IA:
 
 Usei para ajudar a achar a melhor solução nos erros que estavam aparecendo
+
+
+## Encontro 8 - 2026-09-30
+
+### Relato individual - Pâmela de Freitas
+
+Hoje trabalhei nos filtros do query_analysis e em como eles são usados na busca e no SQL.
+
+#### Correções pontuais (casos que o Renato reportou)
+
+- Valor com centavos virava ano: "acima de 2000,00 reais" gerava ano=2000, e "acima de 2025,00 em 2024" perdia o 2024.
+- "Contratos acima de 2000 em 2025" virava ano=2000 e sem valor. Agora, depois de "acima de", "superior a", "maior que" etc., o número é sempre valor; só "a partir de" e "até" tratam 2024/2025 como ano.
+- Passaram a ser reconhecidos "superior a", "inferior a", "maior/menor que" com número com cara de ano, e "entre 1000 e 2000" (antes virava ano=2000).
+
+#### Revisão completa dos filtros
+
+- Revisei o query_analysis e todo o código que usa os filtros (retrieve, structured_query, pipeline). No SQL do Renato, os filtros viram WHERE estrito, então filtro errado dá resposta errada.
+- Achei e corrigi problemas no SQL causados pelos filtros:
+    - "acima de 500 mil" buscava contratos com "acima" no objeto;
+    - "maior que 2000" virava pedido de ranking;
+    - "entre 2024 e 2025" filtrava só 2024.
+- Como cada correção abria um caso novo, reescrevi a extração com uma regra só: **o filtro só é criado quando a leitura não deixa dúvida**. Na dúvida, nenhum filtro.
+- Casos que passaram a funcionar:
+    - "antes de 2024" (até 2023), "depois de 2023", "a partir de", "até";
+    - datas completas e com mês/semestre, e "2024 x 2025" como período;
+    - leis e processos com ano no número ("Lei 14.133/2021", "pregão 05/2023"), que não viram ano;
+    - contagens ("mais de 3 contratos", "2000 cestas"), que não viram valor nem ano;
+    - "1 milhão e meio", "500k" e "1,2 mi".
+- No retrieve: o filtro de órgão ignora maiúsculas e acentos; um filtro que reprova todos os chunks com o campo é ignorado naquela base; valor ilegível conta como campo ausente.
+
+#### Testes
+
+- Fiz três rodadas de revisão adversarial com agentes de IA tentando quebrar o código, com cerca de 20 mil perguntas no total.
+- Resultado final:
+    - 0 erros nas 3.840 combinações de valor × período;
+    - 1.656 de 1.663 perguntas adversariais certas (o que sobra é escolha de propósito).
+- Os casos encontrados viraram mais de 130 testes de regressão em `tests/test_query_analysis.py`.
+
+#### Merge com a main
+
+- Juntei a main nova (v6, rerank e o SQL do João) com as minhas mudanças e resolvi os conflitos em query_analysis, structured_query e nos testes:
+    - mantive as detecções novas do João, calculadas sobre o texto sem as expressões de filtro;
+    - separei os dois `ano_final` (o dele e o meu tinham sentidos diferentes), criando `ano_desde`/`ano_ate`;
+    - desfiz uma linha dele no retrieve que trazia de volta o erro do PCA.
+- Suíte completa: **753 testes passando**. Branch `pamela-filtros-conservadores` enviada para o GitHub.
+
+#### Pendências e avisos
+
+- Mandei ao Renato uma lista de problemas no SQL dele: palavras comuns virando objeto, modalidade, esfera federal, mês ignorado, contagem sem os valores nulos.
+- O `index/` e o `data/normalized/` da v6 foram commitados no Git e substituíram o meu índice local v1. O zip antigo continua guardado.
+
+### Uso de assistentes de IA:
+
+- Usei o Claude Code para diagnosticar os erros, escrever as correções e os testes, rodar as revisões adversariais (agentes tentando quebrar o código) e resolver os conflitos do merge.
+- Eu direcionei o que corrigir a partir dos casos do Renato, pedi a revisão completa do código que usa os filtros e decidi manter as funcionalidades do João no merge. Conferi os resultados rodando os testes e os comandos de verificação.
