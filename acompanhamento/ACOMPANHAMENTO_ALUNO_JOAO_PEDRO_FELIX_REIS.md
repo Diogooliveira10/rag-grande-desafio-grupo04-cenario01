@@ -294,3 +294,75 @@ Utilizei o Codex como apoio para conferir o estado das branches, identificar os 
 - merge da `main` em `joao-reis`: `36cb53b` — branch local/remota sincronizada;
 - branch `main`: sem commit ou push feito nesta sessão;
 
+## Atualização — 30/09/2026
+
+### Atividades realizadas desde o último registro
+
+Dei continuidade à preparação do corpus após o registro de 28/09, passando pelas versões intermediárias v4 e v5 até consolidar a **v6 oficial**. A v5 chegou a 8.636 arquivos, mas sua distribuição e seu tamanho motivaram uma seleção menor, orientada às perguntas de `PERSONAS.md`, com dados municipais, estaduais e federais do Rio de Janeiro.
+
+Reutilizei os módulos de coleta e preparação do repositório e os scripts de descoberta e avaliação de escopo. A curadoria passou a limitar a seleção a **cinco arquivos por órgão/CNPJ em cada base**, inclusive na esfera federal, evitando concentrar o corpus em muitas unidades do mesmo órgão. As consultas às fontes tiveram tentativas e pausas limitadas; arquivos indisponíveis ou respostas que não eram PDFs foram registrados e pulados, sem interromper toda a seleção nem preencher lacunas com conteúdo inventado.
+
+### Corpus, preparação e proveniência
+
+O inventário v6 está completo e vinculado ao manifesto, com **1.400 arquivos**:
+
+| Base oficial | Arquivos |
+|---|---:|
+| `contratos_estruturado` | 625 |
+| `editais_normativo` | 13 |
+| `atas_conversacional` | 376 |
+| `pca_agregado` | 386 |
+
+A distribuição ficou em **804 arquivos municipais, 513 federais e 83 estaduais**, abrangendo 166 CNPJs e quatro identificadores de publicadores normativos. O limite por órgão/base foi verificado. A cobertura estadual permaneceu menor; a seleção é uma amostra intencional, não um censo nem uma distribuição perfeitamente equilibrada. Os formatos são 1.347 JSON, 49 PDF e quatro HTML.
+
+Corrigi a preparação para preservar versão, hashes, origem e relações entre documentos até a recuperação. Os metadados passaram a usar links públicos do conteúdo em `origem`, mantendo `source_file` apenas como caminho relativo interno de rastreabilidade. Removi aliases redundantes e repetições de campos, e fiz os dados reais dos JSONs prevalecerem sobre informações herdadas do contexto da coleta. Mantive descrições, unidades e valores originais.
+
+Os PDFs foram processados pelo fluxo existente de extração textual, com reutilização do cache de páginas e suporte ao OCR quando necessário. As quatro bases oficiais foram normalizadas separadamente; as bases experimentais e o fixture de e-mails permaneceram separados. Os indicadores continuaram calculados pelo código existente, sem depender do LLM para produzir estatísticas.
+
+### Embeddings locais e recuperação
+
+Implementei o fluxo com o executável `llama.exe` e o checkpoint local **Qwen3-Embedding-0.6B Q8**, incluindo validação de tokens antes da geração e retomada por cache. Organizei os embeddings da v6 em `data/embeddings/2026-09-30_12-08-51/`, com uma subpasta por base. A auditoria confirmou **5.621 vetores de dimensão 1.024**, finitos e não nulos, com proveniência da v6.
+
+Comparei configurações de geração local. No pequeno benchmark, o melhor perfil medido utilizou Vulkan na GPU, duas threads e lote 16, atingindo aproximadamente **5,29 documentos por segundo**. Esse resultado é específico da máquina e da amostra testadas. O reprocessamento dos metadados reutilizou os vetores existentes, sem recalcular todos os embeddings.
+
+Mantive o modelo de queries exigido no ECOA, **Qwen3-Embedding-0.6B Q4**, distinguindo-o do artefato Q8 local. O teste de compatibilidade com quatro perguntas e 20 documentos obteve menor cosseno de aproximadamente **0,967** e sobreposição média de **100% no top-5**. Esses resultados atenderam aos critérios definidos para o projeto, sem demonstrar identidade entre os checkpoints ou compatibilidade universal.
+
+Corrigi a leitura de `chunk_content_sha256` na indexação, preservando compatibilidade com `content_sha256`, e construí os índices FAISS a partir dos vetores armazenados. Ajustei a recuperação para carregar os índices persistidos, preservar os metadados e informar filtros relaxados na busca ampliada. O ECOA foi usado para embeddings das perguntas e geração das respostas, com cache de queries, sem novas chamadas para embedar os documentos.
+
+### Consultas analíticas e avaliação
+
+Ampliei os modelos de análise da pergunta com métrica, agrupamentos, filtros analíticos e referência temporal. Estendi o módulo `structured_query` com compilação PostgreSQL pura, parametrizada e limitada a datasets, campos e operações permitidos. Registrei cinco exemplos relevantes das personas, distinguindo datas de publicação, assinatura, resultado e PCA. **Não conectei nem executei esse novo caminho em PostgreSQL e não apliquei DDL**; o cálculo já existente nas consultas continuou usando SQLite.
+
+Na revisão de respostas, encontrei um erro na pergunta sobre fornecedores com maior valor total: a consulta retornava maiores contratos por órgão. Corrigi para somar os valores contratados por fornecedor e ordenar pela soma. Um teste de regressão distinguiu vários contratos pequenos de um contrato maior, e a repetição do caso pela CLI com ECOA confirmou a correção.
+
+Executei pela CLI existente **22 perguntas**: as 18 de `PERSONAS.md`, a falha esperada e os três exemplos do Cenário 1. As chamadas foram sequenciais, com pausas e reutilização de cache. Registrei rotas, evidências, fontes, filtros, confiança, recusas, latências e tokens. O avaliador de **rota/recusa** marcou **13 acertos em 22 casos, ou 59,09%**; esse resultado não mede correção factual das respostas.
+
+Conferi as evidências citadas e registrei as falhas por caso. Permaneceram problemas como interpretar a categoria “Compras” como modalidade licitatória, ignorar uma norma explícita, devolver uma recusa sem texto e concluir aumento ao longo do ano apenas com picos de valores. Comparações de preços unitários e de equivalência técnica ficaram limitadas pela cobertura disponível. Preservei os mecanismos originais de recusa e mascaramento; os guardrails adicionais introduzidos durante a sessão foram retirados conforme solicitado.
+
+### Entregas, versionamento e validação
+
+Gerei e validei dois arquivos: [ZIP com os PDFs das atas v6](../atas-zip/atas_conversacional-v6.zip), com 40 PDFs, e [ZIP com os Markdown correspondentes](../atas-zip/atas_conversacional-v6-md.zip), com 40 arquivos e texto extraído de 542 páginas. Preservei caminhos relativos, conferi integridade e hashes e incluí links públicos das fontes nos Markdown. Os ZIPs da v6 foram incluídos no repositório e enviados ao GitHub após autorização; não enviei e-mail de entrega.
+
+Organizei as alterações em cinco commits, todos de autoria registrada como João Pedro Félix Reis e enviados somente para `origin/joao-reis`:
+
+- `ce522f1` — `feat(corpus): amplia coleta PNCP e preserva proveniência dos documentos`;
+- `5c04774` — `feat(embeddings): gera vetores locais e reutiliza índices persistidos nas consultas`;
+- `7e090b7` — `feat(sql): compila consultas PostgreSQL e soma contratos por fornecedor`;
+- `bb5aa49` — `feat(corpus): publica snapshot consultável da v6 e ZIPs das atas`;
+- `bafd418` — `docs(v6): alinha guias e registra curadoria, avaliação e entregas`.
+
+Versionei os vetores da v6, FAISS, documentos normalizados, SQLite, inventários, scripts e relatórios selecionados. Os embeddings e o ZIP da v5 ficaram preservados apenas no disco, sem Git LFS. Ajustei `.gitignore` para manter credenciais, cache e artefatos locais fora dos commits, e `.gitattributes` para preservar os bytes dos snapshots, evitando que a conversão CRLF/LF invalide seus hashes.
+
+Antes desta atualização, conferi o histórico e a única worktree: a branch `joao-reis` estava limpa e sincronizada com o remoto em `bafd418`. A `main` não recebeu alterações ou push nessa entrega. A suíte offline passou com **511 testes**, a auditoria v6 confirmou arquivos, vetores, URLs públicas e limites por órgão/base, e `git diff --check` não apontou problemas. Os detalhes estão no [registro da execução v6](../docs/registro_execucao_v6.md) e nos relatórios selecionados em `eval/runs/`.
+
+### Pendências
+
+- Corrigir as falhas de recuperação e geração identificadas nos 22 casos e repetir os casos afetados.
+- Ampliar a cobertura estadual, de PCA e de preços unitários comparáveis, respeitando os limites de seleção; a vigência normativa histórica ainda não foi comprovada integralmente.
+- Completar cross-encoder com ablação, persistência de feedback e histórico, execução PostgreSQL e a trilha de e-mails prevista no desafio. O fixture sintético não foi promovido para substituí-la.
+- O snapshot principalmente de 2025 não comprova que uma licitação continue aberta em setembro de 2026; a cobertura temporal precisa ser considerada nas respostas.
+
+### Uso de IA (inteligência artificial)
+
+Utilizei o Codex como apoio à investigação das fontes, implementação de correções modulares, configuração e comparação de embeddings locais, execução dos testes, revisão das respostas contra evidências, preparação dos ZIPs e organização dos commits. O ECOA foi usado explicitamente na avaliação de queries e respostas. As entregas foram verificadas por testes automatizados, auditorias de arquivos e vetores, conferência dos hashes e inspeção do histórico Git; as limitações observadas foram registradas, sem tratar acerto de rota como prova de correção factual.
+
