@@ -187,3 +187,21 @@ def test_sem_permissao_e_sem_base_nenhuma_o_erro_sobe(documents, tmp_path, monke
 
     with pytest.raises(PermissionError):
         structured_db.garantir_banco(documents, banco)
+
+
+def test_signed_contract_preserves_contract_value_and_distinct_signature_date():
+    from src.structured_db import _linha_contratacao
+    row = _linha_contratacao({"chunk_id": "c1", "extras": {"modalidade": "Pregão eletrônico"}}, {
+        "numeroControlePNCP": "12345678000100-2-000001/2025",
+        "dataAssinatura": "2025-12-20", "dataPublicacaoPncp": "2026-01-02",
+        "objetoContrato": "Manutenção de computadores", "valorGlobal": 700000,
+        "valorTotalEstimado": 900000, "nomeRazaoSocialFornecedor": "Fornecedor público",
+    })
+    assert row["valor"] == row["valor_contratado"] == 700000
+    assert row["valor_estimado"] == 900000
+    assert row["ano_assinatura"] == 2025 and row["ano_publicacao"] == 2026
+    assert row["mes_assinatura"] == "2025-12" and row["mes_publicacao"] == "2026-01"
+    assert row["objeto"] == "Manutenção de computadores"
+    assert row["fornecedor"] == "Fornecedor público"
+    assert row["modalidade"] == "Pregão eletrônico"
+    assert row["tipo_registro"] == "contrato_assinado"

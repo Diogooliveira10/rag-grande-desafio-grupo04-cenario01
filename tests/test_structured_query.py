@@ -15,6 +15,45 @@ ESTRUTURADA = [Natureza.ESTRUTURADA]
 AGREGADA = [Natureza.ESTRUTURADA, Natureza.AGREGADA]
 
 
+def test_compilador_postgres_parametriza_filtros_e_mediana():
+    consulta = sq.Consulta(
+        tabela="pca_fatos", tipo="estatistica", dataset="pca_agregado", versao="v5",
+        metrica="mediana", campo="valor_total", agrupamentos=("unidade_nome",),
+        referencia_temporal="pca", ano=2025,
+        filtros_analiticos=(("unidade_nome", "Saúde'; DROP TABLE pca_fatos; --"),),
+    )
+    sql, parametros = sq.compilar_consulta_postgres(consulta)
+    assert "percentile_cont(0.5)" in sql
+    assert "ano_pca BETWEEN %s AND %s" in sql
+    assert "GROUP BY unidade_nome" in sql
+    assert "DROP" not in sql
+    assert parametros == ("v5", 2025, 2025, consulta.filtros_analiticos[0][1], 10)
+
+
+@pytest.mark.parametrize("opcoes", [
+    {"dataset": "emails_sinteticos"}, {"dataset": "pca_agregado"},
+    {"campo": "valor; DROP TABLE x"}, {"metrica": "exec"},
+    {"agrupamentos": ("senha",)}, {"ano": 2025},
+    {"referencia_temporal": "pca"}, {"ordem": "DESC; DROP TABLE x"},
+])
+def test_compilador_postgres_rejeita_contratos_invalidos(opcoes):
+    with pytest.raises(ValueError):
+        sq.compilar_consulta_postgres(sq.Consulta(
+            tabela="contratos_fatos", tipo="estatistica",
+            **({"dataset": "contratos_estruturado"} | opcoes),
+        ))
+
+
+@pytest.mark.parametrize("referencia", ["assinatura", "resultado", "publicacao"])
+def test_compilador_preserva_semantica_da_data(referencia):
+    sql, parametros = sq.compilar_consulta_postgres(sq.Consulta(
+        tabela="contratos_fatos", tipo="estatistica", dataset="contratos_estruturado",
+        ano=2024, ano_final=2025, referencia_temporal=referencia,
+    ))
+    assert f"EXTRACT(YEAR FROM data_{referencia})" in sql
+    assert parametros == (2024, 2025, 10)
+
+
 @pytest.fixture
 def base(tmp_path):
     documents = escrever_documents(
@@ -220,3 +259,63 @@ def test_pipeline_poe_resultado_sql_antes_dos_chunks_da_busca(base, monkeypatch)
 
     assert vistos["ids"][0].startswith("sql:contratacoes:ranking:")
     assert vistos["ids"][-1] == "busca-1"
+
+
+def test_postgres_compiles_recurring_supplier_count_and_exclusive_amount():
+    from src.structured_query import Consulta, compilar_consulta_postgres
+    consulta = Consulta(tabela="contratacoes", tipo="agrupamento", dataset="contratos_estruturado",
+                        versao="v6", metrica="contagem", agrupamentos=("fornecedor",),
+                        referencia_temporal="assinatura", ano=2025, esfera="estadual",
+                        valor_min=500000, valor_min_exclusivo=True, minimo_por_grupo=3, limite=5)
+    sql, params = compilar_consulta_postgres(consulta)
+    assert "valor > %s" in sql
+    assert "GROUP BY fornecedor HAVING COUNT(*) >= %s" in sql
+    assert params == ("v6", 2025, 2025, 500000, "estadual", 3, 5)
+
+
+def test_postgres_groups_months_by_signature_date_and_contracts_by_control_id():
+    from src.structured_query import Consulta, compilar_consulta_postgres
+    query = Consulta(tabela="contratacoes", tipo="evolucao", dataset="contratos_estruturado",
+                     versao="v6", metrica="media", agrupamentos=("mes_assinatura",),
+                     referencia_temporal="assinatura", ano=2025)
+    sql, params = compilar_consulta_postgres(query)
+    assert "EXTRACT(MONTH FROM data_assinatura) AS mes_assinatura" in sql
+    assert "GROUP BY EXTRACT(MONTH FROM data_assinatura)" in sql
+    assert params[:3] == ("v6", 2025, 2025)
+    ranking = Consulta(tabela="contratacoes", tipo="ranking", dataset="contratos_estruturado",
+                       metrica="maximo", agrupamentos=("numero_controle_pncp",), limite=10)
+    sql, params = compilar_consulta_postgres(ranking)
+    assert "GROUP BY numero_controle_pncp" in sql
+    assert params == (10,)
+
+
+def test_legacy_sql_signature_scope_does_not_use_publication_year_or_estimates():
+    from src.structured_query import Consulta, _where, _coluna_valor
+    consulta = Consulta(tabela="contratacoes", tipo="estatistica", ano=2025,
+                        referencia_temporal="assinatura", valor_min=500000, valor_min_exclusivo=True)
+    sql, parameters = _where(consulta, ())
+    assert "tipo_registro = ?" in sql
+    assert "ano_assinatura = ?" in sql and "ano_publicacao" not in sql
+    assert "valor_contratado > ?" in sql
+    assert parameters == ["contrato_assinado", 2025, 500000]
+    assert _coluna_valor(consulta) == "valor_contratado"
+
+def test_fornecedores_ordenados_pela_soma_dos_contratos_assinados(tmp_path):
+    registros = []
+    for numero, fornecedor, valor in [(1, 'Fornecedor A', 100), (2, 'Fornecedor A', 100), (3, 'Fornecedor B', 900)]:
+        registro = _contratacao(f'111-2-{numero:06d}/2025')
+        registro.update(dataAssinatura='2025-03-01', valorGlobal=valor, nomeRazaoSocialFornecedor=fornecedor)
+        registros.append(registro)
+    documents = escrever_documents(tmp_path / 'documents.jsonl', contratacoes=registros)
+    banco = Banco(sqlite_path=tmp_path / 'base.sqlite')
+    structured_db.construir_banco(documents, banco)
+    pergunta = 'Quais fornecedores receberam o maior valor total em contratos de 2025?'
+    consulta = sq.detectar_consulta(pergunta, QueryFilters(ano=2025), ESTRUTURADA)
+    assert consulta.tipo == 'agrupamento'
+    assert consulta.agrupar_por == 'fornecedor'
+    assert consulta.metrica == 'soma'
+    resultado = _consultar(pergunta, {'banco': banco, 'documents_file': documents}, ano=2025)
+    assert resultado is not None
+    texto = str(resultado)
+    assert texto.index('Fornecedor B') < texto.index('Fornecedor A')
+    assert '900' in texto and '200' in texto
