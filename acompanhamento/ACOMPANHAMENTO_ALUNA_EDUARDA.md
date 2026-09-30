@@ -55,3 +55,19 @@
 - Realizei uma prévia da conexão local entre o frontend e o backend.
 - A integração completa com o pipeline de Adaptive RAG ainda está pendente.
 - Disponibilizei uma versão do frontend em: [https://etuarda.github.io/frontendRAG/](https://etuarda.github.io/frontendRAG/).
+
+## Encontro 7 - 2026-09-28
+
+### Relato individual - Eduarda
+
+- Atualizei o arquivo `ARQUITETURA.md`.
+
+## Encontro 8 - 2026-09-30
+
+### Relato individual - Eduarda
+
+- Concluí a integração do frontend com a API do projeto, incluindo os fluxos de consulta, exibição das respostas, fontes consultadas e histórico.
+- Organizei e versionei o código do frontend exclusivamente na branch `developerEduarda`, mantendo a branch `main` sem essa implementação.
+- Validei a aplicação executando o build de produção do frontend com sucesso.
+- Sincronizei o ambiente local com a versão mais recente da `main` para trabalhar sobre a base atualizada do projeto.
+- Como próxima atividade, vou revisar e atualizar o arquivo `ARQUITETURA.md` para documentar a integração do frontend, o estado atual da solução e as próximas etapas do projeto.
