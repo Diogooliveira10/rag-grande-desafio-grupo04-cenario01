@@ -1,0 +1,2 @@
+-- Compilação offline, sem execução. Parâmetros: ["v6", 2025, 2025, 500000, "estadual", "%tecnolog%", 3, 10]
+SELECT fornecedor, COUNT(*) AS resultado FROM contratos_fatos WHERE inventory_version = %s AND EXTRACT(YEAR FROM data_assinatura) BETWEEN %s AND %s AND valor > %s AND esfera = %s AND objeto_normalizado LIKE %s GROUP BY fornecedor HAVING COUNT(*) >= %s ORDER BY resultado DESC, fornecedor LIMIT %s;

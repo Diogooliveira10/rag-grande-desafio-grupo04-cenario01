@@ -1,0 +1,99 @@
+{
+  "version": "v6",
+  "files": 1400,
+  "unique_file_hashes": 1216,
+  "max_files_per_organization_per_base": 5,
+  "distribution": [
+    {
+      "base": "atas_conversacional",
+      "sphere": "estadual",
+      "files": 21
+    },
+    {
+      "base": "atas_conversacional",
+      "sphere": "federal",
+      "files": 190
+    },
+    {
+      "base": "atas_conversacional",
+      "sphere": "municipal",
+      "files": 165
+    },
+    {
+      "base": "contratos_estruturado",
+      "sphere": "estadual",
+      "files": 32
+    },
+    {
+      "base": "contratos_estruturado",
+      "sphere": "federal",
+      "files": 159
+    },
+    {
+      "base": "contratos_estruturado",
+      "sphere": "municipal",
+      "files": 434
+    },
+    {
+      "base": "editais_normativo",
+      "sphere": "estadual",
+      "files": 6
+    },
+    {
+      "base": "editais_normativo",
+      "sphere": "federal",
+      "files": 5
+    },
+    {
+      "base": "editais_normativo",
+      "sphere": "municipal",
+      "files": 2
+    },
+    {
+      "base": "pca_agregado",
+      "sphere": "estadual",
+      "files": 24
+    },
+    {
+      "base": "pca_agregado",
+      "sphere": "federal",
+      "files": 159
+    },
+    {
+      "base": "pca_agregado",
+      "sphere": "municipal",
+      "files": 203
+    }
+  ],
+  "bases": {
+    "contratos_estruturado": {
+      "files": 625,
+      "chunks": 625,
+      "vectors": 625,
+      "encoding_configurations": 1
+    },
+    "editais_normativo": {
+      "files": 13,
+      "chunks": 1561,
+      "vectors": 1561,
+      "encoding_configurations": 1
+    },
+    "atas_conversacional": {
+      "files": 376,
+      "chunks": 2524,
+      "vectors": 2524,
+      "encoding_configurations": 1
+    },
+    "pca_agregado": {
+      "files": 386,
+      "chunks": 911,
+      "vectors": 911,
+      "encoding_configurations": 1
+    }
+  },
+  "embedding_folder": "data/embeddings/2026-09-30_12-08-51",
+  "public_origin_urls": true,
+  "source_paths_relative_internal": true,
+  "duplicate_source_aliases": false,
+  "checks_passed": true
+}

@@ -1,0 +1,663 @@
+{
+  "organizations": [
+    {
+      "cnpj": "42498600000171",
+      "razaoSocial": "ESTADO DO RIO DE JANEIRO",
+      "poderId": "N",
+      "esferaId": "E"
+    },
+    {
+      "cnpj": "28305936000140",
+      "razaoSocial": "MINISTERIO PUBLICO DO ESTADO DO RIO DE JANEIRO",
+      "poderId": "E",
+      "esferaId": "E"
+    },
+    {
+      "cnpj": "28538734000148",
+      "razaoSocial": "TRIBUNAL DE JUSTICA DO ESTADO DO RIO DE JANEIRO",
+      "poderId": "J",
+      "esferaId": "E"
+    },
+    {
+      "cnpj": "31443526000170",
+      "razaoSocial": "DEFENSORIA PUBLICA DO ESTADO DO RIO DE JANEIRO-DPE",
+      "poderId": "E",
+      "esferaId": "E"
+    },
+    {
+      "cnpj": "42433698000189",
+      "razaoSocial": "INSTITUTO DE PESOS E MEDIDAS DO ESTADO DO RIO DE JANEIR",
+      "poderId": "E",
+      "esferaId": "E"
+    },
+    {
+      "cnpj": "30051023000196",
+      "razaoSocial": "TRIBUNAL DE CONTAS DO ESTADO DO RIO DE JANEIRO",
+      "poderId": "L",
+      "esferaId": "E"
+    },
+    {
+      "cnpj": "32855236000104",
+      "razaoSocial": "SECRETARIA DE ESTADO DE POLICIA CIVIL",
+      "poderId": "E",
+      "esferaId": "E"
+    },
+    {
+      "cnpj": "35949858000181",
+      "razaoSocial": "ESCOLA DA MAGISTRATURA DO ESTADO DO RIO DE JANEIRO",
+      "poderId": "J",
+      "esferaId": "E"
+    },
+    {
+      "cnpj": "42498733000148",
+      "razaoSocial": "MUNICIPIO DE RIO DE JANEIRO",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "11800731000138",
+      "razaoSocial": "FUNDO MUNICIPAL DE SAUDE/SUS DO MUNICIPIO DE RESENDE",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "02098399000110",
+      "esferaId": "M",
+      "razaoSocial": "CAMARA MUNICIPAL DE SAO FIDELIS",
+      "poderId": "L"
+    },
+    {
+      "cnpj": "01612355000102",
+      "razaoSocial": "MUNICIPIO DE PORTO REAL",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "02385669000174",
+      "esferaId": "M",
+      "razaoSocial": "FIOTEC - FUNDACAO PARA O DESENVOLVIMENTO CIENTIFICO E TECNOLOGICO EM SAUDE",
+      "poderId": "E"
+    },
+    {
+      "cnpj": "08772020000192",
+      "razaoSocial": "FUNDO MUNICIPAL DE SAUDE",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "11216262000104",
+      "razaoSocial": "FUNDO MUNICIPAL DE SAUDE",
+      "esferaId": "M",
+      "poderId": "E"
+    },
+    {
+      "cnpj": "11308894000106",
+      "razaoSocial": "FUNDO MUNICIPAL DE SAUDE",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "14102885000144",
+      "razaoSocial": "FUNDO MUNICIPAL DE ASSISTENCIA SOCIAL DE SAO JOSE DO VALE DO RIO PRETO",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "14999490000196",
+      "razaoSocial": "FUNDO MUNICIPAL DE SAUDE",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "28916716000152",
+      "razaoSocial": "MUNICIPIO DE ITAPERUNA",
+      "esferaId": "M",
+      "poderId": "N"
+    },
+    {
+      "cnpj": "29138328000150",
+      "razaoSocial": "MUNICIPIO DE DUQUE DE CAXIAS",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "29893617000165",
+      "razaoSocial": "CAMARA MUNICIPAL DE MACAE",
+      "poderId": "L",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "30419220000115",
+      "razaoSocial": "SERVICO AUTONOMO DE AGUA E ESGOTO-SAAE",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "32001836000105",
+      "razaoSocial": "MUNICIPIO DE SAO JOSE DO VALE DO RIO PRETO",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "32147670000121",
+      "razaoSocial": "MUNICIPIO DE SAQUAREMA",
+      "esferaId": "M",
+      "poderId": "N"
+    },
+    {
+      "cnpj": "32512501000143",
+      "razaoSocial": "MUNICIPIO DE VOLTA REDONDA",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "39217831000155",
+      "razaoSocial": "MUNICIPIO DE VARRE-SAI",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "39485438000142",
+      "razaoSocial": "MUNICIPIO DE BELFORD ROXO",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "43327293000129",
+      "razaoSocial": "FUNDO MUNICIPAL DE EDUCACAO DE MENDES",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "00495116000149",
+      "razaoSocial": "CAMARA MUNICIPAL DE BOM JARDIM",
+      "poderId": "L",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "01197548000136",
+      "razaoSocial": "FUNDO MUNICIPAL DE ASSISTENCIA SOCIAL",
+      "esferaId": "M",
+      "poderId": "E"
+    },
+    {
+      "cnpj": "01604139000107",
+      "razaoSocial": "MUNICIPIO DE SEROPEDICA",
+      "esferaId": "M",
+      "poderId": "N"
+    },
+    {
+      "cnpj": "01612089000100",
+      "razaoSocial": "MUNICIPIO DE TANGUA",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "03405084000131",
+      "razaoSocial": "INSTITUTO DE PREVIDENCIA DOS SERVIDORES DO MUNICIPIO DE CASIMIRO DE ABREU",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "03450083000109",
+      "razaoSocial": "INSTITUTO DE PREV. DOS SERVIDORES MUNICIPAIS DE NOVA IGUACU",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "04239111000106",
+      "razaoSocial": "CAMARA MUNICIPAL DE TRES RIOS - RJ",
+      "poderId": "L",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "04428657000105",
+      "razaoSocial": "Confederação Brasileira de Wrestling/RJ ",
+      "esferaId": "M",
+      "poderId": "L"
+    },
+    {
+      "cnpj": "07754024000185",
+      "razaoSocial": "AUTARQUIA MUNICIPAL DE AGUA E ESGOTO DE CACHOEIRAS DE MACACU",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "08881803000104",
+      "esferaId": "M",
+      "razaoSocial": "INSTITUTO DE PREVIDENCIA DOS SERVIDORES MUNICIPAIS DE SEROPEDICA - SEROPREVI",
+      "poderId": "E"
+    },
+    {
+      "cnpj": "10268003000164",
+      "esferaId": "M",
+      "razaoSocial": "FUNDO MUNICIPAL DE ASSISTENCIA SOCIAL",
+      "poderId": "E"
+    },
+    {
+      "cnpj": "10476365000140",
+      "razaoSocial": "FUNDO MUNICIPAL DE SAUDE DE ITATIAIA",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "10497795000149",
+      "razaoSocial": "FUNDO MUNICIPAL DE SAUDE",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "11867889000125",
+      "razaoSocial": "FUNDO MUNICIPAL DE SAUDE DE BOM JARDIM",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "11892333000199",
+      "razaoSocial": "FUNDO MUNICIPAL DE SAUDE DO MUNICIPIO DE QUISSAMA",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "12640342000155",
+      "razaoSocial": "FUNDO MUNICIPAL DE SAUDE",
+      "esferaId": "M",
+      "poderId": "E"
+    },
+    {
+      "cnpj": "13233438000161",
+      "razaoSocial": "FUNDO MUNICIPAL DE APOSENTADORIAS E PENSOES DOS SERVIDORES PUBLICOS DO MUNICIPIO DE PATY DO ALFERES",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "13712697000175",
+      "razaoSocial": "FUNDO MUNICIPAL DE ASSISTENCIA SOCIAL",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "14779841000153",
+      "razaoSocial": "FUNDO MUNICIPAL DE ASSISTENCIA SOCIAL",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "14787731000133",
+      "razaoSocial": "FUNDO MUNICIPAL DE ASSISTENCIA SOCIAL",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "19556698000154",
+      "esferaId": "M",
+      "razaoSocial": "COMENDADOR LEVY GASPARIAN PREV",
+      "poderId": "E"
+    },
+    {
+      "cnpj": "21337238000187",
+      "razaoSocial": "EMPRESA PUBLICA DE TRANSPORTES EPT",
+      "esferaId": "M",
+      "poderId": "E"
+    },
+    {
+      "cnpj": "27759380000107",
+      "razaoSocial": "SAO PEDRO DA ALDEIA CAMARA MUNICIPAL",
+      "poderId": "L",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "27772078000180",
+      "razaoSocial": "MARICA CAMARA MUNICIPAL",
+      "poderId": "L",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "27792373000107",
+      "razaoSocial": "MUNICIPIO DE ARRAIAL DO CABO",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "28521748000159",
+      "razaoSocial": "MUNICIPIO DE NITEROI",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "28531762000133",
+      "razaoSocial": "MUNICIPIO DE ARARUAMA",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "28549483000105",
+      "razaoSocial": "MUNICIPIO DE CABO FRIO",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "28550176000136",
+      "razaoSocial": "FUNDACAO DE ARTE DE NITEROI - FAN",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "28561041000176",
+      "razaoSocial": "MUNICIPIO DE BOM JARDIM",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "28580694000100",
+      "razaoSocial": "MUNICIPIO DE MENDES",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "28606630000123",
+      "razaoSocial": "MUNICIPIO DE NOVA FRIBURGO",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "28615557000156",
+      "razaoSocial": "MUNICIPIO DE ITAOCARA",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "28636579000100",
+      "esferaId": "M",
+      "razaoSocial": "MUNICIPIO DE SAO GONCALO",
+      "poderId": "N"
+    },
+    {
+      "cnpj": "28645786000113",
+      "esferaId": "M",
+      "razaoSocial": "MUNICIPIO DE SAO SEBASTIAO DO ALTO",
+      "poderId": "N"
+    },
+    {
+      "cnpj": "28695658000184",
+      "razaoSocial": "MUNICIPIO DE BARRA MANSA",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "28741072000109",
+      "razaoSocial": "MUNICIPIO DE RIO BONITO",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "28741080000155",
+      "razaoSocial": "MUNICIPIO DE ITABORAI",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "28741098000157",
+      "razaoSocial": "MUNICIPIO DE SILVA JARDIM",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "28909604000174",
+      "razaoSocial": "MUNICIPIO DE SAO PEDRO DA ALDEIA",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "29063294000182",
+      "esferaId": "M",
+      "razaoSocial": "SERVICO AUTONOMO HOSPITALAR",
+      "poderId": "E"
+    },
+    {
+      "cnpj": "29114139000148",
+      "razaoSocial": "MUNICIPIO DE SANTO ANTONIO DE PADUA",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "29115474000160",
+      "razaoSocial": "MUNICIPIO DE MACAE",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "29116894000161",
+      "esferaId": "M",
+      "razaoSocial": "MUNICIPIO DE CAMPOS DOS GOYTACAZES",
+      "poderId": "N"
+    },
+    {
+      "cnpj": "29116902000170",
+      "esferaId": "M",
+      "razaoSocial": "MUNICIPIO DE SAO JOAO DA BARRA",
+      "poderId": "N"
+    },
+    {
+      "cnpj": "29128741000134",
+      "razaoSocial": "MUNICIPIO DE CARMO",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "29131075000193",
+      "razaoSocial": "MUNICIPIO DE MARICA",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "29138294000102",
+      "razaoSocial": "MUNICIPIO DE PARACAMBI",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "29138302000102",
+      "razaoSocial": "MUNICIPIO DE ITAGUAI",
+      "esferaId": "M",
+      "poderId": "N"
+    },
+    {
+      "cnpj": "29138344000143",
+      "razaoSocial": "MUNICIPIO DE PETROPOLIS",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "29138351000145",
+      "razaoSocial": "MUNICIPIO DE MAGE",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "29138369000147",
+      "razaoSocial": "MUNICIPIO DE TERESOPOLIS",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "29138377000193",
+      "razaoSocial": "MUNICIPIO DE TRES RIOS",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "29141322000132",
+      "razaoSocial": "MUNICIPIO DE PIRAI",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "29172475000147",
+      "razaoSocial": "MUNICIPIO DE PARATI",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "29178233000160",
+      "razaoSocial": "MUNICIPIO DE RESENDE",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "29737103000110",
+      "razaoSocial": "Serviço de Apoio às Micro e Pequenas Empresas do Estado do Rio de Janeiro",
+      "poderId": "L",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "29844172000123",
+      "razaoSocial": "NOVA FRIBURGO CAMARA MUNICIPAL",
+      "esferaId": "M",
+      "poderId": "L"
+    },
+    {
+      "cnpj": "29846003000122",
+      "esferaId": "M",
+      "razaoSocial": "SAO GONCALO CAMARA MUNICIPAL",
+      "poderId": "L"
+    },
+    {
+      "cnpj": "30381552000158",
+      "razaoSocial": "DUQUE DE CAXIAS CAMARA MUNICIPAL",
+      "poderId": "L",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "30407977000199",
+      "esferaId": "M",
+      "razaoSocial": "CAMPOS CAMARA MUNICIPAL",
+      "poderId": "L"
+    },
+    {
+      "cnpj": "30646665000138",
+      "razaoSocial": "PARACAMBI CAMARA MUNICIPAL",
+      "poderId": "L",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "31505027000160",
+      "razaoSocial": "MUNICIPIO DE QUISSAMA",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "32002305000129",
+      "esferaId": "M",
+      "razaoSocial": "CAMARA MUNICIPAL DE SAO JOSE DO VALE DO RIO PRETO",
+      "poderId": "L"
+    },
+    {
+      "cnpj": "32012189000129",
+      "razaoSocial": "SAO JOAO DA BARRA CAMARA MUNICIPAL",
+      "poderId": "L",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "32356680000177",
+      "razaoSocial": "SOMAR",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "32504664000184",
+      "razaoSocial": "CAMARA MUNICIPAL DE RESENDE",
+      "esferaId": "M",
+      "poderId": "L"
+    },
+    {
+      "cnpj": "32504706000187",
+      "razaoSocial": "SERVICO AUTONOMO DE AGUA E ESGOTO SAAE",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "32517906000174",
+      "razaoSocial": "MUNICIPIO DE VOLTA REDONDA/CAMARA MUNICIPAL",
+      "poderId": "L",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "32538167000105",
+      "razaoSocial": "INSTITUTO DE PREVIDENCIA E ASSISTENCIA DOS SERVIDORES MUNICIPAIS DE SAO GONCALO",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "33703761000169",
+      "esferaId": "M",
+      "razaoSocial": "INSTITUTO MUNICIPAL DO AMBIENTE DE ANGRA DOS REIS - IMAAR",
+      "poderId": "E"
+    },
+    {
+      "cnpj": "34906284000100",
+      "razaoSocial": "FUNDACAO ESTATAL DE SAUDE DE NITEROI - FESAUDE",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "36507127000149",
+      "razaoSocial": "FUNDO MUNICIPAL DE SAUDE",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "39157029000117",
+      "razaoSocial": "FUNDO MUNICIPAL DE SAUDE DE ANGRA DOS REIS",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "39260120000163",
+      "razaoSocial": "FUNDACAO MUNICIPAL DE SAUDE DE SAO GONCALO",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "39485396000140",
+      "razaoSocial": "MUNICIPIO DE JAPERI",
+      "poderId": "N",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "39563911000162",
+      "razaoSocial": "FUNDO MUNICIPAL DE SAUDE PMVR SMS",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "39691605000101",
+      "razaoSocial": "OSTRASPREV - RIO DAS OSTRAS PREVIDENCIA",
+      "poderId": "E",
+      "esferaId": "M"
+    },
+    {
+      "cnpj": "45268662000185",
+      "esferaId": "M",
+      "razaoSocial": "FME-Barra Mansa",
+      "poderId": "L"
+    }
+  ],
+  "candidate_contracts": 6033,
+  "spheres": {
+    "E": 466,
+    "M": 5567
+  },
+  "tags": {
+    "tecnologia": 286,
+    "material_escritorio": 86,
+    "manutencao_computadores": 24,
+    "ambulancia": 38
+  },
+  "population": "bounded purposive discovery; not a census",
+  "max_items_per_base_per_organization": 5,
+  "organization_key": "orgaoEntidade.cnpj",
+  "request_pause_seconds": 12,
+  "signature_year": 2025,
+  "uf": "RJ"
+}

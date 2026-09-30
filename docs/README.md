@@ -8,8 +8,9 @@ Este diretório reúne guias de uso e referências do projeto.
   exemplo e fluxo para preparar uma base local.
 - [Arquitetura atual e alvo](../ARQUITETURA.md): o que já está implementado e o
   que ainda é parte do desenho do Adaptive RAG.
-- [Inventário do corpus](../CORPUS_INVENTORY.md): contagens da coleta v2 e da
-  extração disponível nesta cópia do repositório.
+- [Inventário do corpus](../CORPUS_INVENTORY.md): contagens da v6 oficial.
+- [Registro da v6](registro_execucao_v6.md): distribuição, embeddings, avaliação
+  e limitações das respostas.
 - [Personas e perguntas de referência](../PERSONAS.md).
 - [Enunciado completo do Grande Desafio](../GRANDE_DESAFIO_CENARIOS.md).
 

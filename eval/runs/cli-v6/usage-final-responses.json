@@ -1,0 +1,10 @@
+{
+  "tokens": {
+    "prompt": 31463,
+    "completion": 13352,
+    "total": 44815
+  },
+  "query_embedding_calls": 0,
+  "query_cache_hits": 20,
+  "generation_calls": 20
+}

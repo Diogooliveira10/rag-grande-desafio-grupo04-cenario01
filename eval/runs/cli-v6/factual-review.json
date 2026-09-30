@@ -1,0 +1,159 @@
+{
+  "method": "Revisão dos textos efetivamente citados e eventos SQL; validação de hashes não equivale à correção factual. Sem grader LLM adicional.",
+  "cases": [
+    {
+      "case_id": "P1.1",
+      "classification": "cobertura",
+      "finding": "Recusa: amostra não comprova fornecedores com três contratos acima do limiar; não inferir inexistência no universo.",
+      "refusal": true,
+      "cited_sources": 0
+    },
+    {
+      "case_id": "P1.2",
+      "classification": "parcial",
+      "finding": "Trechos citados não comprovam atraso; resposta limitada aos documentos recuperados.",
+      "refusal": false,
+      "cited_sources": 2
+    },
+    {
+      "case_id": "P1.3",
+      "classification": "recusa_prevista",
+      "finding": "Recusa de juízo de legalidade pelo comportamento preexistente.",
+      "refusal": true,
+      "cited_sources": 0
+    },
+    {
+      "case_id": "P2.1",
+      "classification": "geracao",
+      "finding": "Órgão, fornecedor e valor constam no JSON; Compras é categoriaProcesso, não modalidade licitatória.",
+      "refusal": false,
+      "cited_sources": 1
+    },
+    {
+      "case_id": "P2.2",
+      "classification": "calculo_indisponivel",
+      "finding": "Sem preços unitários e equivalência técnica suficientes para mediana por ambulância tipo D.",
+      "refusal": true,
+      "cited_sources": 0
+    },
+    {
+      "case_id": "P2.3",
+      "classification": "cobertura",
+      "finding": "Ausência de editais vinculados suficientes para comparação técnica.",
+      "refusal": true,
+      "cited_sources": 0
+    },
+    {
+      "case_id": "P3.1",
+      "classification": "parcial",
+      "finding": "Base legal recuperada; vigência histórica integral em 2025 não verificada.",
+      "refusal": false,
+      "cited_sources": 3
+    },
+    {
+      "case_id": "P3.2",
+      "classification": "geracao",
+      "finding": "Resposta afirma ausência de norma explícita, mas amparoLegal.nome cita Lei 14.133/2021, Art. 28, I.",
+      "refusal": false,
+      "cited_sources": 3
+    },
+    {
+      "case_id": "P3.3",
+      "classification": "recusa_prevista",
+      "finding": "Pergunta fora do escopo; comportamento original preservado.",
+      "refusal": true,
+      "cited_sources": 0
+    },
+    {
+      "case_id": "P4.1",
+      "classification": "parcial",
+      "finding": "Órgão e valor 38.551,16 confirmados no registro; exemplo da amostra, não censo de todos os órgãos.",
+      "refusal": false,
+      "cited_sources": 1
+    },
+    {
+      "case_id": "P4.2",
+      "classification": "metadados",
+      "finding": "Modalidade licitatória ausente em parte dos contratos; categoriaProcesso não supre esse campo.",
+      "refusal": true,
+      "cited_sources": 0
+    },
+    {
+      "case_id": "P4.3",
+      "classification": "geracao",
+      "finding": "Modelo devolveu is_refusal=true com answer vazio; caso registrado como defeito de apresentação ainda pendente.",
+      "refusal": true,
+      "cited_sources": 0
+    },
+    {
+      "case_id": "P5.1",
+      "classification": "parcial",
+      "finding": "Ranking calculado em SQLite por valor contratado na amostra; datas apresentadas são publicação e não devem ser lidas como assinatura.",
+      "refusal": false,
+      "cited_sources": 3
+    },
+    {
+      "case_id": "P5.2",
+      "classification": "corrigido",
+      "finding": "SQL agora agrega SUM(valor_contratado) por fornecedor e ordena pela soma. Teste de regressão e repetição pela CLI confirmados; resposta cita apenas dois dos dez grupos retornados.",
+      "refusal": false,
+      "cited_sources": 3
+    },
+    {
+      "case_id": "P5.3",
+      "classification": "geracao",
+      "finding": "Picos e média anual não demonstram tendência crescente ao longo do ano; conclusão e formatação monetária requerem correção.",
+      "refusal": false,
+      "cited_sources": 3
+    },
+    {
+      "case_id": "P6.1",
+      "classification": "parcial",
+      "finding": "Trecho da LC 123/2006 sustenta participação de microempresa no pregão; análise histórica completa de vigência não realizada.",
+      "refusal": false,
+      "cited_sources": 1
+    },
+    {
+      "case_id": "P6.2",
+      "classification": "geracao",
+      "finding": "Fornecedores e órgãos encontrados, mas Compras novamente interpretada como modalidade em vez de categoria.",
+      "refusal": false,
+      "cited_sources": 2
+    },
+    {
+      "case_id": "P6.3",
+      "classification": "recuperacao_geracao",
+      "finding": "Artigos societários/judiciais recuperados têm pouca utilidade para requisitos de compras de material de escritório; resposta incompleta.",
+      "refusal": false,
+      "cited_sources": 3
+    },
+    {
+      "case_id": "F1",
+      "classification": "recusa_prevista",
+      "finding": "Sem evidências suficientes para comparação controlada entre esferas; recusa evita inventar mediana.",
+      "refusal": true,
+      "cited_sources": 0
+    },
+    {
+      "case_id": "cenario1-marina",
+      "classification": "calculo_indisponivel",
+      "finding": "Sem dados unitários comparáveis de arroz por quilo para calcular média.",
+      "refusal": true,
+      "cited_sources": 0
+    },
+    {
+      "case_id": "cenario1-rodrigo",
+      "classification": "parcial",
+      "finding": "Registro citado confirma fornecedor, órgão e valor de software; exemplo da amostra, sem prova de completude.",
+      "refusal": false,
+      "cited_sources": 1
+    },
+    {
+      "case_id": "cenario1-claudia",
+      "classification": "cobertura_geracao",
+      "finding": "Snapshot 2025 não comprova oportunidades abertas hoje; passagem sobre pregão não basta para sustentar todas as condições de MEI.",
+      "refusal": false,
+      "cited_sources": 1
+    }
+  ]
+}
