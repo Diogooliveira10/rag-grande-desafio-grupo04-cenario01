@@ -62,20 +62,37 @@ Rodei os 20 testes, todos passando, fiz commit e push na branch marco/test-fetch
 Uso de IA: usei o Claude pra montar o esqueleto dos testes e pra revisar o corpus_manifest.yaml contra o código. Quem rodou os testes, confirmou os resultados e decidiu o que citar no PR fui eu.
 
 
-## Encontro — 25/09/2026
+## Encontro 6 — 25/09/2026
 
-**Tarefa do dia:** criar a etapa `query_analysis` (item 6 das pendências do time: o roteador não gerava filtros de ano, valor e órgão para o retrieve).
+Contexto: tarefa designada pra mim hoje foi o query_analysis (item 6 das pendências do time: o roteador não gerava filtros de ano, valor e órgão para o retrieve).
 
-**O que fiz:**
-- Implementei `src/query_analysis.py`: extração determinística por regex (sem LLM), seguindo o mesmo padrão de `router.py`/`generate.py`. Extrai ano, valor (mínimo/máximo/faixa, formatos monetários em BRL — "R$ 500.000,00", "1,5 milhão", "200 mil") e órgão (heurística por palavras-gatilho como "secretaria", "prefeitura", "tribunal").
-- Adicionei `QueryFilters` e `QueryAnalysisResult` em `src/schema.py`.
-- Pluguei a etapa no `src/pipeline.py`: `responder()` agora roda `analisar_query()` antes do roteamento e repassa os filtros extraídos para o `retrieve()`.
-- Estendi `_matches_filters` em `src/retrieve.py` para aceitar múltiplas condições sobre a mesma chave (faixa de valor, e "ano" virando um intervalo em `data_vigencia`), sem alterar o comportamento já existente.
-- Escrevi testes novos: `tests/test_query_analysis.py`, `tests/test_pipeline_query_analysis.py`, e 4 testes de faixa em `tests/test_retrieve.py`.
+O que fiz:
 
-**Imprevisto:** durante o dia, o `main` do time avançou bastante em paralelo (reescrita de `retrieve.py` com escopos/manifesto/fetch_k pelo Diogo, novos campos em `schema.py`, etc.). Precisei reconciliar minha branch (`marco/query-analysis`) com essas mudanças antes de abrir o PR, preservando as features dos colegas.
+Implementei o src/query_analysis.py: extração determinística por regex (sem LLM), seguindo o mesmo padrão do router.py/generate.py. Extrai ano, valor (mínimo/máximo/faixa, formatos monetários em BRL — "R$ 500.000,00", "1,5 milhão", "200 mil") e órgão (heurística por palavras-gatilho como "secretaria", "prefeitura", "tribunal").
+Adicionei QueryFilters e QueryAnalysisResult em src/schema.py.
+Pluguei a etapa no src/pipeline.py: responder() agora roda analisar_query() antes do roteamento e repassa os filtros extraídos pro retrieve().
+Estendi _matches_filters em src/retrieve.py pra aceitar múltiplas condições sobre a mesma chave (faixa de valor, e "ano" virando um intervalo em data_vigencia), sem alterar o comportamento já existente.
+Escrevi testes novos: tests/test_query_analysis.py, tests/test_pipeline_query_analysis.py, e 4 testes de faixa em tests/test_retrieve.py.
+Durante o dia, o main do time avançou bastante em paralelo (reescrita de retrieve.py com escopos/manifesto/fetch_k pelo Diogo, novos campos em schema.py). Precisei reconciliar minha branch (marco/query-analysis) com essas mudanças antes de abrir o PR, preservando as features dos colegas.
+Rodei a suíte completa localmente (322 passed, 1 failed pré-existente e sem relação com meu trabalho — falha de extração de PDF já presente no main antes do meu merge), fiz commit, push e abri o PR.
 
-**Resultado:** branch `marco/query-analysis` mergeada com o `main` atual e com push feito; PR aberto. Suíte completa local: 322 passed, 1 failed pré-existente e sem relação com meu trabalho (`test_prepare_documents_extracts_pdf_text_and_required_metadata`, extração de PDF — falha já presente no `main` antes do meu merge, possivelmente ligada à versão do Python local).
+Uso de IA: usei o Claude pra desenhar a extração por regex do query_analysis, pra estender os filtros de retrieve.py em cima do código novo do Diogo sem quebrar as features dele, e pra investigar o bug de dependência (pypdf faltando no meu ambiente) que apareceu depois. Rodei os testes, decidi o formato de saída dos filtros e confirmei cada mudança antes de commitar fui eu.
 
 
+## Encontro 7 — 30/09/2026
 
+Contexto: tarefa designada pra mim hoje veio da lista de pendências levantada pelo time: feedback do usuário e histórico de consultas persistido, que a especificação exige e a API ainda não tinha (só existiam /health e /api/v1/query).
+
+O que fiz:
+
+Implementei src/history_store.py: histórico de consultas e feedback em SQLite local (data/app_state/, fora do Git). É estado da própria aplicação, diferente da base estruturada derivada do corpus (structured_db.py) — não pode ser apagado/remontado.
+Estendi app/api.py: POST /api/v1/query agora devolve um query_id e salva a pergunta+resposta no histórico; criei POST /api/v1/feedback (avaliação positivo/negativo + comentário opcional, associado ao query_id da consulta original, 404 se ele não existir) e GET /api/v1/history?limit=N (consultas recentes com o feedback recebido).
+Pluguei o feedback no log estruturado: o estágio "feedback" já existia reservado no Stage enum do obs.py mas não estava integrado a nada — agora POST /api/v1/feedback grava o evento amarrado ao mesmo run_id da consulta original.
+Estendi src/pipeline.py com um parâmetro query_id opcional em responder() (mesmo padrão que já existia pra run_id), pra API gerar o id antes de chamar o pipeline e usar o mesmo pra salvar o histórico. Mudança aditiva, não quebra quem chama responder() sem esse argumento.
+Escrevi tests/test_history_store.py (7 testes novos) e atualizei tests/test_app_api.py (precisei ajustar o fake_responder dos testes existentes pra aceitar os novos argumentos run_id/query_id).
+Atualizei README.md e ARQUITETURA.md pra documentar os dois endpoints novos e tirar "feedback" da lista de estágios não implementados, e o .gitignore pra ignorar data/app_state/.
+Rodei a suíte local antes de abrir a PR (462 passed, 2 failed pré-existentes e sem relação — os dois itens do Diogo sobre censo nacional/unidades RJ no fetch_corpus, já sinalizados na lista de pendências), fiz commit, push e abri a PR #11.
+
+Imprevisto: depois de abrir a PR, dei git pull numa hora ruim (estando na minha branch, então só atualizou o tracking dela, não o main local) e o Renato tinha avançado bastante o main em paralelo (recoleta v6 do corpus, rerank). Reconciliei dando merge do main atualizado na minha branch (fast-forward) e confirmei com git log/git branch --contains que meu commit já estava no main — a PR só ficou marcada como "Closed" em vez de "Merged" porque o merge foi feito direto por fora do botão do GitHub. Suíte final depois da reconciliação: 556 passed.
+
+Uso de IA: usei o Claude pra revisar a arquitetura do histórico (decidir por que um SQLite separado fazia mais sentido do que reaproveitar o structured_db.py ou o log JSONL do obs.py), na construção do esqueleto do history_store.py e dos endpoints novos. Rodei os testes, decidi o formato dos endpoints (avaliação positivo/negativo, 404 pra query_id desconhecido) e revisei cada mudança antes de commitar fui eu.
