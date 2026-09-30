@@ -16,6 +16,12 @@ adaptador:
 from __future__ import annotations
 
 from typing import Any
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
 
 from src.router import inferir_motivo_recusa, rotear_pergunta
 
@@ -33,4 +39,35 @@ def rota_apenas(pergunta: str) -> dict[str, Any]:
     }
 
 
-__all__ = ["rota_apenas"]
+def cli_resposta(pergunta: str) -> dict[str, Any]:
+    """Integração explícita ECOA via os comandos existentes, sem mudar a CLI.
+
+    Mantém PostgreSQL offline: a análise numérica legada usa somente SQLite.
+    A resposta inclui rota, latência e logs para revisão contra as fontes.
+    """
+    root = Path(__file__).resolve().parents[1]
+    logs = root / "logs"
+    offsets = {path: path.stat().st_size for path in logs.glob("pipeline-*.jsonl")}
+    env = {**os.environ, "DATABASE_URL": "", "PYTHONIOENCODING": "utf-8"}
+    payloads, latencies = {}, {}
+    for command in ("rota", "perguntar"):
+        started = time.perf_counter()
+        result = subprocess.run(
+            [sys.executable, str(root / "app" / "cli.py"), command, pergunta],
+            cwd=root, env=env, capture_output=True, text=True, encoding="utf-8", check=True,
+        )
+        latencies[command] = (time.perf_counter() - started) * 1000
+        payloads[command] = json.loads(result.stdout[result.stdout.index("\n{") + 1:].strip())
+    events = []
+    for path in logs.glob("pipeline-*.jsonl"):
+        with path.open("rb") as handle:
+            handle.seek(offsets.get(path, 0))
+            events.extend(json.loads(line) for line in handle.read().decode("utf-8").splitlines() if line.strip())
+    response = payloads["perguntar"]
+    response["rota_cli"] = payloads["rota"]
+    response["latencias_cli_ms"] = latencies
+    response["eventos"] = events
+    return response
+
+
+__all__ = ["rota_apenas", "cli_resposta"]

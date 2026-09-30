@@ -205,8 +205,28 @@ def _analisar(query: str) -> QueryFilters:
     ano, ano_final = _extrair_periodo(texto)
     valor_min, valor_max = _extrair_faixa_valor(texto)
     orgao = _extrair_orgao(query)
+    metrica = next((valor for padrao, valor in (
+        (r"\bmediana\b", "mediana"), (r"\b(?:media|medio)\b", "media"),
+        (r"\b(?:soma|total)\b", "soma"), (r"\b(?:quantos|quantas|quantidade)\b", "contagem"),
+        (r"\b(?:maior|maiores|maximo)\b", "maximo"), (r"\b(?:menor|menores|minimo)\b", "minimo"),
+    ) if re.search(padrao, texto)), None)
+    agrupamentos = [campo for termo, campo in (
+        ("modalidade", "modalidade"), ("municipio", "municipio"), ("orgao", "orgao_nome"),
+        ("unidade", "unidade_nome"), ("categoria", "categoria"), ("classe", "classe"),
+        ("esfera", "esfera"), ("fornecedor", "fornecedor"),
+    ) if re.search(r"\bpor " + termo, texto)]
+    referencia = next((nome for termo, nome in (
+        ("assinatura", "assinatura"), ("assinad", "assinatura"),
+        ("resultado", "resultado"), ("homolog", "resultado"),
+        ("pca", "pca"), ("publicac", "publicacao"), ("publicad", "publicacao"),
+    ) if termo in texto), None)
+    analiticos = {}
+    if ("estadua" in texto) != ("municip" in texto):
+        analiticos["esfera"] = "estadual" if "estadua" in texto else "municipal"
     return QueryFilters(
-        ano=ano, ano_final=ano_final, valor_min=valor_min, valor_max=valor_max, orgao=orgao
+        ano=ano, ano_final=ano_final, valor_min=valor_min, valor_max=valor_max, orgao=orgao,
+        metrica=metrica, agrupamentos=agrupamentos, referencia_temporal=referencia,
+        filtros_analiticos=analiticos,
     )
 
 
@@ -252,10 +272,23 @@ def filtros_para_retrieve(filtros: QueryFilters) -> dict[str, Any]:
         resultado["valor"] = {"operator": "<=", "value": filtros.valor_max}
     if filtros.ano is not None:
         ultimo_ano = filtros.ano_final or filtros.ano
-        resultado["data_vigencia"] = [
-            {"operator": ">=", "value": date(filtros.ano, 1, 1)},
-            {"operator": "<", "value": date(ultimo_ano + 1, 1, 1)},
-        ]
+        if filtros.referencia_temporal == "pca":
+            resultado["ano_pca"] = [
+                {"operator": ">=", "value": filtros.ano},
+                {"operator": "<=", "value": ultimo_ano},
+            ]
+        else:
+            campo = {
+                "assinatura": "data_assinatura", "resultado": "data_resultado",
+                "publicacao": "data_publicacao",
+            }.get(filtros.referencia_temporal, "data_vigencia")
+            resultado[campo] = [
+                {"operator": ">=", "value": date(filtros.ano, 1, 1)},
+                {"operator": "<", "value": date(ultimo_ano + 1, 1, 1)},
+            ]
+    for campo in ("esfera", "municipio", "uf", "modalidade", "fornecedor"):
+        if filtros.filtros_analiticos.get(campo) is not None:
+            resultado[campo] = {"operator": "==", "value": filtros.filtros_analiticos[campo]}
     # Filtros vindos da pergunta são opcionais: chunk sem o campo continua na
     # busca (ex.: indicador do PCA sem data_vigencia); só sai quem tem o campo
     # com valor fora do filtro.

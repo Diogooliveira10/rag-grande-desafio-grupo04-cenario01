@@ -26,6 +26,13 @@ _NATUREZAS = frozenset(item.value for item in Natureza)
 
 EmbedFn = Callable[[list[str]], list[list[float]]]
 RerankFn = Callable[[str, list["RetrievalResult"]], Sequence[Any]]
+QUERY_INSTRUCTION = "Given a public procurement question, retrieve relevant passages that answer the query"
+QUERY_CACHE_PATH = config.ROOT_DIR / "data" / "embeddings" / "query_cache.jsonl"
+
+
+def embedding_query_text(query: str) -> str:
+    """Instrução Qwen exclusiva da busca densa; BM25/roteamento recebem o original."""
+    return f"Instruct: {QUERY_INSTRUCTION}\nQuery:{query}"
 
 
 @dataclass
@@ -295,15 +302,20 @@ def _records_for(
     allowed_scopes = set(escopos) if escopos is not None else None
     if records is None:
         paths = sorted(index_dir.glob("*/vectors.jsonl"))
+        declarations = _manifest_bases()
+        paths = [path for path in paths if not declarations.get(path.parent.name) or (
+            (selection is None or path.parent.name in selection[1]
+             or declarations[path.parent.name].get("natureza") in selection[0])
+            and (allowed_scopes is None
+                 or declarations[path.parent.name].get("escopo", "oficial") in allowed_scopes)
+        )]
         raw = [record for path in paths for record in _read_jsonl(path)]
     else:
         raw = [dict(record) for record in records]
     filtered: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
     for record in raw:
-        metadata = record.get("metadata")
-        if not isinstance(metadata, Mapping):
-            metadata = {}
+        metadata = _metadata_of(record)
         chunk_id = str(record.get("chunk_id") or metadata.get("chunk_id") or "")
         if not chunk_id or chunk_id in seen_ids or not _matches_filters(metadata, filters):
             continue
@@ -359,7 +371,8 @@ def _filtrar_por_base(
         passam = [
             record
             for record, metadata in zip(registros, metadados)
-            if _matches_filters(metadata, aplicaveis)
+            if all(_metadata_value(metadata, key) is not None for key in aplicaveis)
+            and _matches_filters(metadata, aplicaveis)
         ]
         if aplicaveis and not passam:
             passam = registros
@@ -371,8 +384,9 @@ def _filtrar_por_base(
 
 
 def _result(record: Mapping[str, Any], score: float, content: str = "") -> RetrievalResult:
-    raw_metadata = record.get("metadata")
-    metadata = dict(raw_metadata) if isinstance(raw_metadata, Mapping) else {}
+    metadata = dict(_metadata_of(record))
+    metadata.pop("text", None)
+    metadata.pop("embedding", None)
     return RetrievalResult(
         chunk_id=str(record.get("chunk_id") or metadata.get("chunk_id", "")),
         content=content or str(record.get("text", "")),
@@ -394,27 +408,104 @@ def _cosine(left: Sequence[float], right: Sequence[float]) -> float:
 
 
 def _default_embed(query: str) -> list[float]:
-    from src.index import _default_embed_fn
-
-    return _default_embed_fn(config.EMBEDDING_MODEL)([query])[0]
+    return _embed_fn_com_uso([])([query])[0]
 
 
-def _embed_fn_com_uso(uso: list[TokenUsage]) -> EmbedFn:
+def _embed_fn_com_uso(uso: list[TokenUsage], estatisticas: dict[str, int] | None = None) -> EmbedFn:
     """Embedding padrão (servidor da turma) que anota o ``usage`` de cada chamada.
 
     Usado por ``retrieve`` para preencher ``tokens`` do stage
     ``retrieval_denso``; quem passa ``embed_fn`` próprio fica sem contagem.
     """
     def embed(texts: list[str]) -> list[list[float]]:
+        encoded = [embedding_query_text(text) for text in texts]
+        chave = {"endpoint": config.OLLAMA_URL, "model": config.EMBEDDING_MODEL, "texts": encoded}
+        for record in _read_jsonl(QUERY_CACHE_PATH):
+            if record.get("key") == chave:
+                vectors = record["vectors"]
+                if len(vectors) == len(texts) and all(
+                    vector and all(math.isfinite(v) for v in vector) and any(vector)
+                    for vector in vectors
+                ):
+                    uso.append(TokenUsage())
+                    if estatisticas is not None:
+                        estatisticas["cache_hits"] += 1
+                    return vectors
         # Cliente criado só na chamada: sem candidatos, dense_retrieve nem embeda.
         from openai import OpenAI
 
         client = OpenAI(base_url=config.OLLAMA_URL, api_key=config.OLLAMA_API_KEY)
-        response = client.embeddings.create(model=config.EMBEDDING_MODEL, input=texts)
+        response = client.embeddings.create(model=config.EMBEDDING_MODEL, input=encoded)
         uso.append(token_usage_from_response(response))
-        return [item.embedding for item in response.data]
+        vectors = [item.embedding for item in sorted(response.data, key=lambda item: getattr(item, "index", 0))]
+        if len(vectors) != len(texts) or not all(
+            vector and all(math.isfinite(v) for v in vector) and any(vector) for vector in vectors
+        ):
+            raise ValueError("ECOA retornou embeddings de query inválidos")
+        QUERY_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with QUERY_CACHE_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({"key": chave, "vectors": vectors}, ensure_ascii=False) + "\n")
+        if estatisticas is not None:
+            estatisticas["calls"] += 1
+        return vectors
 
     return embed
+
+
+def _faiss_scores(
+    query_vector: Sequence[float],
+    candidates: list[dict[str, Any]],
+    indexed_records: list[dict[str, Any]],
+    *,
+    index_path: Path | None,
+    top_k: int,
+) -> dict[str, float]:
+    """Busca candidatos no índice persistido ou monta um índice FAISS em memória."""
+    import faiss
+    import numpy as np
+
+    dimension = len(query_vector)
+    if not dimension:
+        return {str(record.get("chunk_id", "")): 0.0 for record in candidates}
+
+    candidate_ids = {str(record.get("chunk_id", "")) for record in candidates}
+    if index_path is not None and index_path.exists():
+        index = faiss.read_index(str(index_path))
+        if index.ntotal != len(indexed_records):
+            raise RuntimeError(
+                f"índice FAISS desatualizado em {index_path}; regenere com src.index"
+            )
+        if index.d != dimension:
+            return {chunk_id: 0.0 for chunk_id in candidate_ids}
+    else:
+        vectors = np.zeros((len(indexed_records), dimension), dtype=np.float32)
+        for row, record in enumerate(indexed_records):
+            embedding = record.get("embedding", [])
+            if isinstance(embedding, list) and len(embedding) == dimension:
+                vectors[row] = embedding
+        vectors = np.ascontiguousarray(vectors)
+        faiss.normalize_L2(vectors)
+        index = faiss.IndexFlatIP(dimension)
+        index.add(vectors)
+
+    query = np.ascontiguousarray([query_vector], dtype=np.float32)
+    faiss.normalize_L2(query)
+    target = min(top_k, len(candidate_ids))
+    search_k = min(index.ntotal, max(1, target))
+    scores_by_id: dict[str, float] = {}
+    while index.ntotal:
+        scores, positions = index.search(query, search_k)
+        scores_by_id = {}
+        for score, position in zip(scores[0], positions[0]):
+            if position < 0:
+                continue
+            chunk_id = str(indexed_records[int(position)].get("chunk_id", ""))
+            if chunk_id in candidate_ids:
+                scores_by_id[chunk_id] = float(score)
+        if len(scores_by_id) >= target or search_k >= index.ntotal:
+            break
+        search_k = min(index.ntotal, max(search_k + 1, search_k * 2))
+    return scores_by_id
 
 
 def dense_retrieve(
@@ -431,13 +522,32 @@ def dense_retrieve(
     run_id: str = "sem-run-id",
     query_id: str = "sem-query-id",
 ) -> list[RetrievalResult]:
-    """Recupera os vetores mais próximos usando o índice persistido."""
+    """Recupera chunks próximos pelo FAISS e aplica filtros de metadados."""
     if top_k <= 0 or not query.strip():
         return []
     candidates = _records_for(index_dir, bases, filters, records, escopos)
     if not candidates:
         return []
+
     query_vector = (embed_fn or (lambda texts: [_default_embed(texts[0])]))([query])[0]
+    candidates_by_base: dict[str, list[dict[str, Any]]] = {}
+    for record in candidates:
+        metadata = record.get("metadata")
+        base_id = _record_base_id(
+            record, metadata if isinstance(metadata, Mapping) else {}
+        )
+        candidates_by_base.setdefault(base_id, []).append(record)
+
+    indexed_by_base: dict[str, list[dict[str, Any]]] = {}
+    index_paths: dict[str, Path] = {}
+    if records is None:
+        for vectors_path in sorted(index_dir.glob("*/vectors.jsonl")):
+            base_id = vectors_path.parent.name
+            indexed_by_base[base_id] = _read_jsonl(vectors_path)
+            index_paths[base_id] = vectors_path.parent / "vectors.faiss"
+    else:
+        indexed_by_base = {base_id: group for base_id, group in candidates_by_base.items()}
+
     normalized_text = {
         str(item.get("chunk_id")): str(item.get("text", ""))
         for item in _read_jsonl(documents_file)
@@ -445,6 +555,7 @@ def dense_retrieve(
     scored: list[RetrievalResult] = []
     incompatible_embeddings: list[dict[str, Any]] = []
     missing_embeddings: list[dict[str, str]] = []
+    compatible_candidates_by_base: dict[str, list[dict[str, Any]]] = {}
     for record in candidates:
         embedding = record.get("embedding", [])
         metadata = record.get("metadata")
@@ -454,22 +565,38 @@ def dense_retrieve(
         if embedding is None:
             missing_embeddings.append({"chunk_id": chunk_id})
             continue
-        if len(embedding) != len(query_vector):
+        try:
+            embedding_dimension = len(embedding)
+        except TypeError:
+            embedding_dimension = None
+        if embedding_dimension != len(query_vector):
             incompatible_embeddings.append(
                 {
                     "chunk_id": chunk_id,
                     "expected_dimension": len(query_vector),
-                    "actual_dimension": len(embedding),
+                    "actual_dimension": embedding_dimension,
                 }
             )
             continue
-        scored.append(
-            _result(
-                record,
-                _cosine(query_vector, embedding),
-                str(record.get("text", "")) or normalized_text.get(str(record.get("chunk_id")), ""),
-            )
+        compatible_candidates_by_base.setdefault(
+            _record_base_id(record, metadata if isinstance(metadata, Mapping) else {}), []
+        ).append(record)
+    for base_id, group in compatible_candidates_by_base.items():
+        indexed_records = indexed_by_base.get(base_id, group)
+        faiss_path = index_paths.get(base_id)
+        scores = _faiss_scores(
+            query_vector,
+            group,
+            indexed_records,
+            index_path=faiss_path if faiss_path and faiss_path.exists() else None,
+            top_k=top_k,
         )
+        for record in group:
+            chunk_id = str(record.get("chunk_id", ""))
+            if chunk_id not in scores:
+                continue
+            content = str(record.get("text", "")) or normalized_text.get(chunk_id, "")
+            scored.append(_result(record, scores[chunk_id], content))
     if incompatible_embeddings:
         registrar(
             run_id=run_id,
@@ -659,7 +786,8 @@ def retrieve(
         )
 
     uso_embedding: list[TokenUsage] = []
-    embed_da_consulta = embed_fn or _embed_fn_com_uso(uso_embedding)
+    estatisticas_embedding = {"calls": 0, "cache_hits": 0}
+    embed_da_consulta = embed_fn or _embed_fn_com_uso(uso_embedding, estatisticas_embedding)
     with _span(Stage.RETRIEVAL_DENSO) as span:
         dense = dense_retrieve(
             query,
@@ -675,6 +803,7 @@ def retrieve(
             query_id=query_id,
         )
         span.set_result(_resumo(dense))
+        span.extra.update({"query_embedding": estatisticas_embedding})
         if uso_embedding:
             span.modelo = config.EMBEDDING_MODEL
             span.tokens = TokenUsage(
@@ -696,7 +825,18 @@ def retrieve(
         span.set_result(_resumo(sparse))
     with _span(Stage.FUSAO_RRF, rrf_k=DEFAULT_RRF_K) as span:
         fused = reciprocal_rank_fusion([dense, sparse], top_k=top_k)
+        for item in fused:
+            ignored = filtros_ignorados.get(str(item.metadata.get("base_id")), {})
+            if ignored:
+                item.metadata = {**item.metadata, "extras": {
+                    **item.metadata.get("extras", {}), "filtros_relaxados": ignored,
+                }}
         span.set_result(_resumo(fused))
+        span.extra["evidencias"] = [
+            {"chunk_id": item.chunk_id, "base_id": item.metadata.get("base_id"),
+             "source_file": item.metadata.get("source_file"), "score": item.score}
+            for item in fused
+        ]
     if reranker is not None and fused:
         with _span(Stage.RERANK) as span:
             reranked = list(reranker(query, fused))[:top_k]

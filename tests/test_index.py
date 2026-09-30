@@ -10,6 +10,32 @@ FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 SAMPLE_INPUT = FIXTURES_DIR / "documents_sample.jsonl"
 
 
+def test_stored_embed_fn_aceita_hash_atual(tmp_path):
+    path = tmp_path / "embeddings.jsonl"
+    path.write_text(json.dumps({
+        "chunk_content_sha256": hashlib.sha256(b"texto").hexdigest(),
+        "embedding": [1.0, 2.0], "embedding_model": "local-q8",
+    }) + "\n", encoding="utf-8")
+    embed, model = stored_embed_fn(path)
+    assert model == "local-q8"
+    assert embed(["texto"]) == [[1.0, 2.0]]
+
+
+def test_index_preserva_proveniencia_e_relacoes(tmp_path):
+    record = {
+        "chunk_id": "c1", "document_id": "d1", "base_id": "atas_conversacional",
+        "text": "ata", "source_file": "ata.pdf", "doc_type": "pdf",
+        "origem": "pncp", "inventory_version": "v5", "manifest_hash": "manifest",
+        "parent_chunk_id": "pai", "relations": {"anexos": ["anexo.pdf"]},
+        "chunk_content_sha256": hashlib.sha256(b"ata").hexdigest(),
+    }
+    path = tmp_path / "documents.jsonl"
+    path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    chunk = next(read_normalized_chunks(path))
+    for key in ("origem", "inventory_version", "manifest_hash", "parent_chunk_id", "relations", "chunk_content_sha256"):
+        assert chunk.metadata[key] == record[key]
+
+
 def _fake_embed_fn(dimension: int = 4):
     """Embeddings determinísticos e offline, só para testar a montagem do índice."""
 
@@ -29,7 +55,9 @@ def test_build_index_agrupa_por_base_e_grava_manifesto(tmp_path):
 
     for base in manifest["bases"]:
         vectors_path = output_dir / base["base_id"] / "vectors.jsonl"
+        faiss_path = output_dir / base["base_id"] / "vectors.faiss"
         assert vectors_path.exists()
+        assert faiss_path.exists()
         records = [json.loads(line) for line in vectors_path.read_text(encoding="utf-8").splitlines()]
         assert len(records) == base["total_chunks"]
         assert all(len(record["embedding"]) == base["dimension"] for record in records)
@@ -37,8 +65,72 @@ def test_build_index_agrupa_por_base_e_grava_manifesto(tmp_path):
 
         base_manifest = json.loads((output_dir / base["base_id"] / "manifest.json").read_text(encoding="utf-8"))
         assert base_manifest == base
+        assert base_manifest["faiss_index"] == "vectors.faiss"
 
     assert (output_dir / "manifest.json").exists()
+
+
+def test_retrieve_usa_indice_faiss_persistido(tmp_path):
+    import faiss
+
+    from src.retrieve import dense_retrieve
+
+    input_file = tmp_path / "documents.jsonl"
+    records = [
+        {
+            "chunk_id": "base:hospital",
+            "document_id": "base:hospital",
+            "base_id": "base",
+            "text": "compra de equipamento hospitalar",
+            "source_file": "hospital.json",
+            "sha256": "a",
+            "metadata": {
+                "source_file": "hospital.json",
+                "chunk_id": "base:hospital",
+                "base_id": "base",
+                "doc_type": "json",
+                "sensitivity": "publico",
+            },
+        },
+        {
+            "chunk_id": "base:software",
+            "document_id": "base:software",
+            "base_id": "base",
+            "text": "licença de software",
+            "source_file": "software.json",
+            "sha256": "b",
+            "metadata": {
+                "source_file": "software.json",
+                "chunk_id": "base:software",
+                "base_id": "base",
+                "doc_type": "json",
+                "sensitivity": "publico",
+            },
+        },
+    ]
+    input_file.write_text(
+        "\n".join(json.dumps(record, ensure_ascii=False) for record in records) + "\n",
+        encoding="utf-8",
+    )
+
+    def embed(texts: list[str]) -> list[list[float]]:
+        return [[1.0, 0.0] if "hospital" in text else [0.0, 1.0] for text in texts]
+
+    output_dir = tmp_path / "index"
+    build_index(input_file, output_dir, embed, model="fixture-model")
+    persisted = faiss.read_index(str(output_dir / "base" / "vectors.faiss"))
+    assert persisted.ntotal == 2
+
+    results = dense_retrieve(
+        "hospital",
+        index_dir=output_dir,
+        documents_file=input_file,
+        embed_fn=embed,
+        top_k=1,
+    )
+
+    assert [result.chunk_id for result in results] == ["base:hospital"]
+    assert results[0].score == pytest.approx(1.0)
 
 
 def test_build_index_ignora_chunks_sem_texto(tmp_path):

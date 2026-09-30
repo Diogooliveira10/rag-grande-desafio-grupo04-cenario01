@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 import src.retrieve as retrieve_module
+from src.pipeline import _chunk_from_retrieval
 from src.retrieve import (
     RetrievalResult,
     _parse_number,
@@ -15,6 +16,30 @@ from src.retrieve import (
 )
 from src.obs import default_logger
 from src.schema import Natureza
+
+
+def test_bm25_normalized_flat_metadata_survives_pipeline_and_filters(tmp_path):
+    record = {"chunk_id": "ata:1", "base_id": "atas_conversacional", "doc_type": "pdf",
+              "source_file": "ata.pdf", "natureza": "conversacional", "text": "atraso de entrega",
+              "inventory_version": "v5", "extras": {"ano_pca": 2025}}
+    results = bm25_retrieve("atraso de entrega", records=[record],
+                            bases=[Natureza.CONVERSACIONAL], filters={"ano_pca": 2025})
+    assert len(results) == 1
+    chunk = _chunk_from_retrieval(results[0])
+    assert chunk.metadata.source_file == "ata.pdf"
+    assert chunk.metadata.inventory_version == "v5"
+    assert chunk.metadata.extras["ano_pca"] == 2025
+    assert "text" not in results[0].metadata
+    assert bm25_retrieve("atraso", records=[record], filters={"ano_pca": 2024}) == []
+
+
+def test_optional_missing_fields_cannot_hide_empty_scoped_result():
+    records = [{"chunk_id": "contract", "base_id": "contratos_estruturado", "extras": {"valor": 10}},
+               {"chunk_id": "attachment", "base_id": "contratos_estruturado"}]
+    selected, ignored = retrieve_module._filtrar_por_base(
+        records, {"valor": {"operator": ">=", "value": 500000, "optional": True}})
+    assert len(selected) == 2
+    assert ignored == {"contratos_estruturado": {"zerou_resultados": ["valor"]}}
 
 
 def _record(
@@ -104,6 +129,7 @@ def test_retrieve_excludes_and_logs_incompatible_embedding_dimensions(tmp_path, 
 
     results = retrieve(
         "ambulancia",
+        index_dir=tmp_path,
         embed_fn=lambda texts: [[1.0, 0.0] for _ in texts],
         run_id="run-real",
         query_id="query-real",
@@ -148,6 +174,23 @@ def test_dense_retrieve_ignores_and_logs_null_embedding(tmp_path, monkeypatch):
     assert log["query_id"] == "query-null"
     assert "ausente(s)/nulo(s)" in log["output"]
     assert log["extra"]["missing_embeddings"] == [{"chunk_id": "missing"}]
+
+
+def test_dense_retrieve_does_not_rank_unreturned_faiss_candidates_as_zero():
+    records = [
+        _record("c1", text="resultado menos próximo", embedding=[-1.0, 0.0]),
+        _record("c2", text="resultado mais próximo", embedding=[-0.2, 0.9797959]),
+    ]
+
+    results = dense_retrieve(
+        "consulta",
+        records=records,
+        embed_fn=lambda texts: [[1.0, 0.0] for _ in texts],
+        top_k=1,
+    )
+
+    assert [item.chunk_id for item in results] == ["c2"]
+    assert results[0].score == pytest.approx(-0.2, abs=1e-6)
 
 
 def test_bm25_retrieve_ranks_relevant_terms_and_deduplicates_chunk_ids():

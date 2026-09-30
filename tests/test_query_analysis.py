@@ -269,6 +269,36 @@ def test_periodo_vira_intervalo_de_data_vigencia_do_inicio_ao_fim():
     ]
 
 
+@pytest.mark.parametrize("referencia,campo", [
+    ("assinatura", "data_assinatura"), ("resultado", "data_resultado"),
+    ("publicacao", "data_publicacao"),
+])
+def test_explicit_temporal_reference_does_not_filter_validity(referencia, campo):
+    convertido = qa.filtros_para_retrieve(QueryFilters(ano=2025, referencia_temporal=referencia))
+    assert campo in convertido and "data_vigencia" not in convertido
+
+
+def test_pca_year_and_analytical_scope_are_preserved():
+    convertido = qa.filtros_para_retrieve(QueryFilters(
+        ano=2025, referencia_temporal="pca", filtros_analiticos={"esfera": "estadual"},
+    ))
+    assert convertido["ano_pca"][0]["value"] == 2025
+    assert convertido["esfera"]["value"] == "estadual"
+    assert "data_vigencia" not in convertido
+
+
+@pytest.mark.parametrize("question,reference", [
+    ("Contratos assinados em 2025", "assinatura"),
+    ("Contratações publicadas em 2025", "publicacao"),
+    ("Publicações de contratos em 2025", "publicacao"),
+])
+def test_temporal_reference_recognizes_natural_word_forms(question, reference):
+    filtros = qa.analisar_query(question).filtros
+    assert filtros.referencia_temporal == reference
+    assert filtros.ano == 2025
+    assert "data_vigencia" not in qa.filtros_para_retrieve(filtros)
+
+
 def test_ano_isolado_nao_tem_ano_final():
     filtros = qa.analisar_query("contratos de 2025").filtros
     assert (filtros.ano, filtros.ano_final) == (2025, None)
