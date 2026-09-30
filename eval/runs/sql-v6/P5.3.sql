@@ -1,0 +1,2 @@
+-- Compilação offline, sem execução. Parâmetros: ["v6", 2025, 2025, "%tecnolog%", 12]
+SELECT EXTRACT(MONTH FROM data_assinatura) AS mes_assinatura, AVG(valor) AS resultado FROM contratos_fatos WHERE inventory_version = %s AND EXTRACT(YEAR FROM data_assinatura) BETWEEN %s AND %s AND objeto_normalizado LIKE %s GROUP BY EXTRACT(MONTH FROM data_assinatura) ORDER BY resultado ASC, mes_assinatura LIMIT %s;

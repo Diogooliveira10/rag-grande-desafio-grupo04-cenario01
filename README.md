@@ -2,6 +2,21 @@
 
 **Residência TIC em Trilhas · PUC-Rio · Instituto ECOA**
 
+O snapshot oficial atual é a **v6**, com 1.400 arquivos nas quatro bases e limite
+de cinco arquivos por órgão e por base. São 804 arquivos municipais, 513 federais
+e 83 estaduais: uma amostra orientada às personas, sem garantia de censo.
+Consulte o [inventário](CORPUS_INVENTORY.md), o
+[registro da v6](docs/registro_execucao_v6.md) e o
+[fluxo de consulta da v6](docs/CLI.md#snapshot-oficial-v6).
+
+Os vetores em `data/embeddings/2026-09-30_12-08-51/`, os índices em `index/`,
+os documentos normalizados e o SQLite da v6 estão versionados para consulta.
+As credenciais ECOA continuam locais no `.env`. Os arquivos brutos são externos
+ao Git; as fontes públicas constam nos metadados. As entregas das atas estão em
+[PDF](atas-zip/atas_conversacional-v6.zip) e
+[Markdown](atas-zip/atas_conversacional-v6-md.zip), com 40 documentos cada.
+Embeddings e ZIP da v5 permanecem no disco, fora destes commits.
+
 ## API HTTP
 
 O backend FastAPI expõe `GET /health`, `POST /api/v1/query`, `POST /api/v1/feedback`

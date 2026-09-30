@@ -1,0 +1,11 @@
+{
+  "corpus_version": "v6",
+  "folder": "data/embeddings/2026-09-30_12-08-51",
+  "threads": 2,
+  "batch_size": 16,
+  "gpu_layers": "all",
+  "context_size": 4096,
+  "ubatch_size": 2048,
+  "parallel": 1,
+  "pause_seconds": 0
+}

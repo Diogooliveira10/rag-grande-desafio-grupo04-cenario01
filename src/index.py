@@ -6,8 +6,9 @@ Uso:
     py .\src\index.py --dry-run
 
 Lê o JSONL normalizado (saída de ``ingest.py``), agrupa os chunks por
-``base_id`` e grava, para cada base, um índice vetorial plano
-(``index/<base_id>/vectors.jsonl``) mais um manifesto
+``base_id`` e grava, para cada base, um índice FAISS
+(``index/<base_id>/vectors.faiss``), os vetores e metadados em JSONL
+(``index/<base_id>/vectors.jsonl``) e um manifesto
 (``index/<base_id>/manifest.json``) com o modelo usado, a dimensão dos
 vetores e a proveniência da fonte. Chunks sem texto (ex.: PDFs ainda
 pendentes de extração) são pulados e contados à parte.
@@ -42,6 +43,18 @@ DEFAULT_BATCH_SIZE = 64
 REQUIRED_METADATA_FIELDS = {"source_file", "chunk_id", "base_id", "doc_type", "sensitivity"}
 
 
+def _write_faiss_index(path: Path, embeddings: list[list[float]]) -> None:
+    """Persiste busca por produto interno após normalizar os vetores para cosseno."""
+    import faiss
+    import numpy as np
+
+    vectors = np.ascontiguousarray(embeddings, dtype=np.float32)
+    faiss.normalize_L2(vectors)
+    index = faiss.IndexFlatIP(vectors.shape[1])
+    index.add(vectors)
+    faiss.write_index(index, str(path))
+
+
 @dataclass(frozen=True)
 class NormalizedChunk:
     """Um registro do JSONL normalizado, pronto para embedding."""
@@ -65,7 +78,7 @@ def _chunk_metadata(record: dict[str, Any]) -> dict[str, Any]:
     """
     if "metadata" in record:  # compat: formato antigo, já aninhado
         return record["metadata"]
-    return {
+    metadata = {
         "source_file": record.get("source_file", ""),
         "chunk_id": record["chunk_id"],
         "base_id": record["base_id"],
@@ -75,6 +88,14 @@ def _chunk_metadata(record: dict[str, Any]) -> dict[str, Any]:
         "data_vigencia": record.get("data_vigencia"),
         "extras": record.get("extras", {}),
     }
+    for key in (
+        "document_id", "parent_chunk_id", "origem", "coletado_em", "manifest_hash",
+        "sha256", "document_content_sha256", "chunk_content_sha256", "chunking_strategy",
+        "inventory_version", "inventory_hash", "version", "relations",
+    ):
+        if key in record:
+            metadata[key] = record[key]
+    return metadata
 
 
 def read_normalized_chunks(input_file: Path) -> Iterator[NormalizedChunk]:
@@ -137,15 +158,22 @@ def stored_embed_fn(embeddings_file: Path) -> tuple[EmbedFn, str]:
     """
     vectors: dict[str, list[float]] = {}
     models: set[str] = set()
+    configurations: set[str] = set()
     with embeddings_file.open("r", encoding="utf-8") as handle:
         for line in handle:
             if not line.strip():
                 continue
             record = json.loads(line)
-            vectors[record["content_sha256"]] = record["embedding"]
+            digest = record.get("chunk_content_sha256") or record.get("content_sha256")
+            if not digest:
+                raise ValueError("embedding sem hash de conteúdo")
+            vectors[digest] = record["embedding"]
             models.add(str(record.get("embedding_model", "")))
+            configurations.add(json.dumps(record.get("encoding_config"), sort_keys=True))
     if len(models) != 1:
         raise ValueError(f"{embeddings_file} mistura modelos de embedding: {sorted(models)}")
+    if len(configurations) != 1:
+        raise ValueError(f"{embeddings_file} mistura configurações de codificação")
 
     def embed(texts: list[str]) -> list[list[float]]:
         digests = [hashlib.sha256(text.encode("utf-8")).hexdigest() for text in texts]
@@ -154,6 +182,7 @@ def stored_embed_fn(embeddings_file: Path) -> tuple[EmbedFn, str]:
             raise KeyError(f"{len(missing)} chunk(s) sem vetor em {embeddings_file}: {missing[:3]}")
         return [vectors[digest] for digest in digests]
 
+    embed.encoding_config = json.loads(configurations.pop())
     return embed, models.pop()
 
 
@@ -194,6 +223,7 @@ def build_index(
         base_dir.mkdir(parents=True, exist_ok=True)
         vectors_path = base_dir / "vectors.jsonl"
         dimension: int | None = None
+        embedding_rows: list[list[float]] = []
         with vectors_path.open("w", encoding="utf-8", newline="\n") as handle:
             for batch in batched(chunks, batch_size):
                 embeddings = embed_fn([chunk.text for chunk in batch])
@@ -219,11 +249,19 @@ def build_index(
                         "metadata": chunk.metadata,
                     }
                     handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+                    embedding_rows.append(embedding)
+
+        faiss_path = base_dir / "vectors.faiss"
+        _write_faiss_index(faiss_path, embedding_rows)
 
         manifest = {
             "base_id": base_id,
             "embedding_model": model,
+            "encoding_config": getattr(embed_fn, "encoding_config", None),
+            "inventory_versions": sorted({c.metadata["inventory_version"] for c in chunks if c.metadata.get("inventory_version")}),
+            "inventory_hashes": sorted({c.metadata["inventory_hash"] for c in chunks if c.metadata.get("inventory_hash")}),
             "dimension": dimension or 0,
+            "faiss_index": faiss_path.name,
             "total_chunks": len(chunks),
             "source_file": _relative(input_file),
             "source_sha256": source_hash,

@@ -1,0 +1,12 @@
+﻿{
+    "version":  "v6",
+    "archive":  "C:\\Users\\REVY\\Downloads\\atas_conversacional-v6.zip",
+    "pdf_entries":  40,
+    "only_ata_pdfs":  true,
+    "relative_paths_preserved":  true,
+    "inventory_hashes_validated":  true,
+    "zip_integrity_validated":  true,
+    "sha256":  "7029600b6e4d032b3bf533dfdeaf6f07d01344f35cc0dfef582b62d7f3465dec",
+    "bytes":  16590104,
+    "compression":  "Windows native System.IO.Compression"
+}

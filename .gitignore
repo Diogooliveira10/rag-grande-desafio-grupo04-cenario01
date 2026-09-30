@@ -26,6 +26,12 @@ pytest-of-*/
 # Data and logs
 index/
 logs/
+# Snapshots locais: a v6 validada é adicionada explicitamente ao Git.
+data/embeddings/*/
+data/embeddings/query_cache.jsonl
+atas-zip/*
+!atas-zip/atas_conversacional-v6.zip
+!atas-zip/atas_conversacional-v6-md.zip
 data/raw/
 data/runs/
 data/inventory/checkpoints/

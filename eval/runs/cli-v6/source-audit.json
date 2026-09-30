@@ -1,0 +1,3221 @@
+{
+  "scope": "Fontes verificadas contra inventário e chunks; não prova automática de correção factual.",
+  "case_count": 22,
+  "verified_raw_sources": {
+    "data/raw/v6/contratos_estruturado/registro_01b997d82d56d78a_714dea5f0211.json": {
+      "sha256": "714dea5f02114ee947ecb5e96fc9525aec10120c20f053cffd33bac777b3cb55",
+      "inventory_matches": true
+    },
+    "data/raw/v6/contratos_estruturado/registro_0da426d3175b1170_95db6df453e3.json": {
+      "sha256": "95db6df453e39a4a0305b49a899bc85319b5fd7dce2bd320ccd73f770c3ec905",
+      "inventory_matches": true
+    },
+    "data/raw/v6/contratos_estruturado/registro_29f035e744c2d43c_86addeedf3d2.json": {
+      "sha256": "86addeedf3d2cd36b40f68305d089e7ccd54e22d45d49f514d49dc96dfb3ec77",
+      "inventory_matches": true
+    },
+    "data/raw/v6/contratos_estruturado/registro_357e8995b93ca88b_861c3eaf157c.json": {
+      "sha256": "861c3eaf157c73745cb19494ebe243c661f2f4fb1e2811dd2b9cf0468871ae5f",
+      "inventory_matches": true
+    },
+    "data/raw/v6/contratos_estruturado/registro_68c18b14c9392c62_73655626b048.json": {
+      "sha256": "73655626b048f3e1fac04ed52217604044f6f69572b934978214e50b05dcc2c6",
+      "inventory_matches": true
+    },
+    "data/raw/v6/contratos_estruturado/registro_bc1e82f70063d774_31861ced0727.json": {
+      "sha256": "31861ced07277daed37b372aeb9b88f8ad553194a94d8fa98c2654f9272cf1ea",
+      "inventory_matches": true
+    },
+    "data/raw/v6/contratos_estruturado/registro_e06a49ad48693aa5_6810553f6542.json": {
+      "sha256": "6810553f654233b3d5cf7732743a604c8754391daac69af3aed658124bc7fbe5",
+      "inventory_matches": true
+    },
+    "data/raw/v6/contratos_estruturado/registro_ef54c9bb994b8b4c_c95c495bfcb7.json": {
+      "sha256": "c95c495bfcb719ef43ba79c92117229999abee539d41d3f51084aacbf931813c",
+      "inventory_matches": true
+    },
+    "data/raw/v6/contratos_estruturado/registro_f9220958f3964419_c0f49000f9c2.json": {
+      "sha256": "c0f49000f9c2a391fc3f24febbdb9bbad18ff5ab3e650b3f6bf754eba71eab3d",
+      "inventory_matches": true
+    },
+    "data/raw/v6/contratos_estruturado/reuso_006ac14361dc00e1_006ac14361dc.json": {
+      "sha256": "006ac14361dc00e157a266f66e76e1cfcc58f896ea5838df6c9fe3e08d6be42f",
+      "inventory_matches": true
+    },
+    "data/raw/v6/editais_normativo/reuso_1f7354fb65590678_1f7354fb6559.html": {
+      "sha256": "1f7354fb655906788a87397059a766ae8a2dcac36096dc927835c74108f1e2d1",
+      "inventory_matches": true
+    },
+    "data/raw/v6/editais_normativo/reuso_8f720ba21db90bdc_8f720ba21db9.html": {
+      "sha256": "8f720ba21db90bdce089be8f9c14025755f7b2e65b46eb8f9f172184858d31ff",
+      "inventory_matches": true
+    },
+    "data/raw/v6/editais_normativo/reuso_a5b21177bdc78c93_a5b21177bdc7.pdf": {
+      "sha256": "a5b21177bdc78c93fa5c9d4d1430a0c74cd6e70f92406f9f2a649f509ae7d8c5",
+      "inventory_matches": true
+    },
+    "data/raw/v6/atas_conversacional/reuso_c44e5c67c4de4d3d_c44e5c67c4de.pdf": {
+      "sha256": "c44e5c67c4de4d3de2542123ff5822c5e7d9db80627fd37e8c52410a97370156",
+      "inventory_matches": true
+    },
+    "data/raw/v6/atas_conversacional/reuso_e88c7162ee580b8c_e88c7162ee58.pdf": {
+      "sha256": "e88c7162ee580b8c859da3b1f37f93d5d51ce4a400ab074d67c757b580dfae81",
+      "inventory_matches": true
+    }
+  },
+  "cases": [
+    {
+      "case_id": "P1.1",
+      "question": "Quais fornecedores firmaram três ou mais contratos de serviços ou licenciamento de tecnologia com órgãos estaduais do Rio de Janeiro em 2025, considerando apenas contratos acima de R$ 500 mil?",
+      "answer": "Não há evidência suficiente nos dados fornecidos para identificar fornecedores que firmaram três ou mais contratos acima de R$ 500 mil em 2025.",
+      "route": {
+        "bases_selecionadas": [
+          "estruturada"
+        ],
+        "justificativa": "A pergunta requer evidencia das bases: estruturada.",
+        "confidence": 0.8
+      },
+      "confidence": "recusado",
+      "refusal": true,
+      "refusal_reason": "sem_evidencia",
+      "latencies_cli_ms": {
+        "rota": 430.5437000002712,
+        "perguntar": 13915.030500036664
+      },
+      "retrieval": [
+        {
+          "bases": [
+            "estruturada"
+          ],
+          "escopos": [
+            "oficial"
+          ],
+          "filtros": {
+            "valor": {
+              "operator": ">=",
+              "value": 500000.0,
+              "optional": true
+            },
+            "data_vigencia": [
+              {
+                "operator": ">=",
+                "value": "2025-01-01",
+                "optional": true
+              },
+              {
+                "operator": "<",
+                "value": "2026-01-01",
+                "optional": true
+              }
+            ],
+            "esfera": {
+              "operator": "==",
+              "value": "estadual",
+              "optional": true
+            }
+          },
+          "k": 10,
+          "fetch_k": 50,
+          "rrf_k": 60,
+          "evidencias": [
+            {
+              "chunk_id": "contratos_estruturado:1539f807210b2f13:chunk-1-5206f447388a",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_5937b8e55b2bcfd6_1539f807210b.json",
+              "score": 0.03278688524590164
+            }
+          ]
+        }
+      ],
+      "tokens": {
+        "prompt": 770,
+        "completion": 364,
+        "total": 1134
+      },
+      "embedding_calls": 0,
+      "embedding_cache_hits": 1,
+      "generation_calls": 1,
+      "sensitivity_events": [
+        {
+          "confidence_level": "recusado",
+          "is_refusal": true,
+          "bases_consultadas": [
+            "estruturada"
+          ],
+          "num_sources": 0,
+          "restritos_descartados": 0,
+          "mascaramentos": {},
+          "chunks_no_prompt": 1,
+          "chunks_fora_do_orcamento": 0
+        }
+      ],
+      "cited_evidence": []
+    },
+    {
+      "case_id": "P1.2",
+      "question": "Entre os fornecedores encontrados nesses contratos, existem atas ou registros que mencionem atraso de entrega, descumprimento de prazo ou problema de fornecimento?",
+      "answer": "Não há menção explícita a atrasos de entrega, descumprimento de prazo ou problemas de fornecimento nos trechos analisados. As referências encontradas estão relacionadas a prazos de emissão de notas fiscais, condicionamento de pagamento e envio de anexos administrativos, mas não abordam diretamente atrasos na entrega de materiais ou serviços.",
+      "route": {
+        "bases_selecionadas": [
+          "estruturada",
+          "conversacional"
+        ],
+        "justificativa": "A pergunta requer evidencia das bases: estruturada, conversacional.",
+        "confidence": 0.85
+      },
+      "confidence": "alta",
+      "refusal": false,
+      "refusal_reason": null,
+      "latencies_cli_ms": {
+        "rota": 407.80599997378886,
+        "perguntar": 39022.95579994097
+      },
+      "retrieval": [
+        {
+          "bases": [
+            "conversacional",
+            "estruturada"
+          ],
+          "escopos": [
+            "oficial"
+          ],
+          "filtros": {},
+          "k": 10,
+          "fetch_k": 50,
+          "rrf_k": 60,
+          "evidencias": [
+            {
+              "chunk_id": "atas_conversacional:c44e5c67c4de4d3d:pagina-5:chunk-2-4a6b2bcf0659",
+              "base_id": "atas_conversacional",
+              "source_file": "data/raw/v6/atas_conversacional/reuso_c44e5c67c4de4d3d_c44e5c67c4de.pdf",
+              "score": 0.020709430756159726
+            },
+            {
+              "chunk_id": "atas_conversacional:1d602c5b21fa8611:pagina-3:chunk-6-29dbb751d0a8",
+              "base_id": "atas_conversacional",
+              "source_file": "data/raw/v6/atas_conversacional/reuso_1d602c5b21fa8611_1d602c5b21fa.pdf",
+              "score": 0.01639344262295082
+            },
+            {
+              "chunk_id": "atas_conversacional:e88c7162ee580b8c:pagina-7:chunk-3-54656c243682",
+              "base_id": "atas_conversacional",
+              "source_file": "data/raw/v6/atas_conversacional/reuso_e88c7162ee580b8c_e88c7162ee58.pdf",
+              "score": 0.01639344262295082
+            },
+            {
+              "chunk_id": "atas_conversacional:1d602c5b21fa8611:pagina-3:chunk-2-f9dec04e76dd",
+              "base_id": "atas_conversacional",
+              "source_file": "data/raw/v6/atas_conversacional/reuso_1d602c5b21fa8611_1d602c5b21fa.pdf",
+              "score": 0.016129032258064516
+            },
+            {
+              "chunk_id": "atas_conversacional:47a3ab011b426f92:pagina-11:chunk-3-7a24fa94efca",
+              "base_id": "atas_conversacional",
+              "source_file": "data/raw/v6/atas_conversacional/reuso_47a3ab011b426f92_47a3ab011b42.pdf",
+              "score": 0.016129032258064516
+            },
+            {
+              "chunk_id": "atas_conversacional:9ed3278f53fb6ba9:pagina-11:chunk-1-6963d9855ae7",
+              "base_id": "atas_conversacional",
+              "source_file": "data/raw/v6/atas_conversacional/reuso_9ed3278f53fb6ba9_9ed3278f53fb.pdf",
+              "score": 0.015873015873015872
+            },
+            {
+              "chunk_id": "atas_conversacional:c44e5c67c4de4d3d:pagina-8:chunk-1-4e95cd35d45d",
+              "base_id": "atas_conversacional",
+              "source_file": "data/raw/v6/atas_conversacional/reuso_c44e5c67c4de4d3d_c44e5c67c4de.pdf",
+              "score": 0.015873015873015872
+            },
+            {
+              "chunk_id": "atas_conversacional:320eb4e577aac209:pagina-4:chunk-2-5e93ea4cb120",
+              "base_id": "atas_conversacional",
+              "source_file": "data/raw/v6/atas_conversacional/reuso_320eb4e577aac209_320eb4e577aa.pdf",
+              "score": 0.015625
+            },
+            {
+              "chunk_id": "atas_conversacional:47a3ab011b426f92:pagina-12:chunk-1-bcf7fc66be4c",
+              "base_id": "atas_conversacional",
+              "source_file": "data/raw/v6/atas_conversacional/reuso_47a3ab011b426f92_47a3ab011b42.pdf",
+              "score": 0.015625
+            },
+            {
+              "chunk_id": "atas_conversacional:47a3ab011b426f92:pagina-13:chunk-2-5a2585aa9b8f",
+              "base_id": "atas_conversacional",
+              "source_file": "data/raw/v6/atas_conversacional/reuso_47a3ab011b426f92_47a3ab011b42.pdf",
+              "score": 0.015384615384615385
+            }
+          ]
+        }
+      ],
+      "tokens": {
+        "prompt": 1534,
+        "completion": 1215,
+        "total": 2749
+      },
+      "embedding_calls": 0,
+      "embedding_cache_hits": 1,
+      "generation_calls": 1,
+      "sensitivity_events": [
+        {
+          "confidence_level": "alta",
+          "is_refusal": false,
+          "bases_consultadas": [
+            "estruturada",
+            "conversacional"
+          ],
+          "num_sources": 2,
+          "restritos_descartados": 0,
+          "mascaramentos": {},
+          "chunks_no_prompt": 3,
+          "chunks_fora_do_orcamento": 7
+        }
+      ],
+      "cited_evidence": [
+        {
+          "chunk_id": "atas_conversacional:c44e5c67c4de4d3d:pagina-5:chunk-2-4a6b2bcf0659",
+          "base_id": "atas_conversacional",
+          "source_file": "data/raw/v6/atas_conversacional/reuso_c44e5c67c4de4d3d_c44e5c67c4de.pdf",
+          "text_masked": "da licitação, isentando a CONTRATANTE \nde quaisquer ônus adicionais.\na) Os custos diretos e indiretos necessários ao fornecimento dos materiais  \ncorrerão às custas da CONTRATADA.\n7.2 A CONTRATADA deverá emitir a nota fiscal dos materiais fornecidos, conforme preço  \ncontratado na licitação.\n7.2.1 A CONTRATADA deverá  emitir  nota  fiscal  no  valor  total  dos  materiais \nfornecidos, a qual deverá ser apresentada no mínimo 30 (trinta) dias antes do  \nvencimento.\n7.2.2 A liberação para pagamento da fatura ou nota fiscal ficará condicionada ao atesto  \nda unidade gestora da Ata, conforme disposto no artigo 141, da Lei 14.133/2021. \n7.2.3 Caso seja necessária a retificação da nota fiscal por culpa da CONTRATADA, a \nfluência do prazo de 10 (dez) úteis dias será suspensa, reiniciando-se a contagem a \npartir da reapresentação da fatura retificada.\n7.2.4 Qualquer  atraso  ocorrido  na  apresentação  da  fatura  ou  nota  fiscal,  ou  dos  \ndocumentos  exigidos  como  condição  para  pagamento  por  parte  da  \nCONTRATADA, importará em prorrogação automática do prazo de vencimento  \nda obrigação da CONTRATANTE.\n5 de 10\nPROCURADORIA REGIONAL DA REPÚBLICA – 2ª REGIÃO\nRua Almirante Barroso,",
+          "masking": {},
+          "inventory_version": "v6",
+          "chunk_content_sha256": "4a6b2bcf0659d14d8ab4f28e9ad2a26acfff2bf2628a74c60d9b55d01c3d6c19",
+          "raw_file_validation": {
+            "sha256": "c44e5c67c4de4d3de2542123ff5822c5e7d9db80627fd37e8c52410a97370156",
+            "inventory_matches": true
+          }
+        },
+        {
+          "chunk_id": "atas_conversacional:e88c7162ee580b8c:pagina-7:chunk-3-54656c243682",
+          "base_id": "atas_conversacional",
+          "source_file": "data/raw/v6/atas_conversacional/reuso_e88c7162ee580b8c_e88c7162ee58.pdf",
+          "text_masked": "ndo em vista o erro ocorrido no sistema..\nSistema para o\nparticipante\n33.890.430/0001-85\n01/12/2023 14:31:00\nO item G17 teve a convocação para envio de anexos encerrada às 14:31:00 de 01/12/2023. Nenhum\nanexo foi enviado pelo fornecedor D A G G TAVARES PROJETOS ESTRUTURAIS LTDA, CNPJ\n33.890.430/0001-85.\nSistema para o\nparticipante\n30.997.600/0001-37\n14/12/2023 09:25:22\nSr. Fornecedor FCA ENGENHARIA E CONSTRUCAO LTDA, CNPJ 30.997.600/0001-37, você\nfoi convocado para enviar anexos para o item G17. Prazo para encerrar o envio: 11:25:00 do dia\n14/12/2023. Justificativa: Solicito envio de anexos conforme solicitado via chat: Planilha sintética,\nplanilha analítica e composição do BDI.\npelo participante\n30.997.600/0001-37 14/12/2023 10:58:57\nO item G17 teve a convocação para envio de anexos encerrada às 10:58:57 de 14/12/2023. 4 anexos\nforam enviados pelo fornecedor FCA ENGENHARIA E CONSTRUCAO LTDA, CNPJ\n30.997.600/0001-37.\nSistema 18/12/2023 10:09:17 O item G17 está na etapa de julgamento de proposta no período de intenção de recursos, com\nacréscimo de 10 minutos a partir de agora - até 18/12/2023 10:19:17.\nSistema para o\nparticipante\n30.997.600/0001-37\n18/12/2023 10:34:47\nSr. Fornecedor",
+          "masking": {},
+          "inventory_version": "v6",
+          "chunk_content_sha256": "54656c243682d1fd49b23c799dd665fdabfb523371fa1a8f7f78177c985cb94a",
+          "raw_file_validation": {
+            "sha256": "e88c7162ee580b8c859da3b1f37f93d5d51ce4a400ab074d67c757b580dfae81",
+            "inventory_matches": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "P1.3",
+      "question": "Esses contratos e registros comprovam que algum dos fornecedores fraudou licitações ou agiu de forma ilegal?",
+      "answer": "Não posso emitir juízo sobre a legalidade de um contrato específico.",
+      "route": {
+        "bases_selecionadas": [],
+        "justificativa": "A pergunta pede juizo de legalidade ou acesso a dado sensivel; nenhuma base deve ser consultada para concluir isso.",
+        "confidence": 0.98
+      },
+      "confidence": "recusado",
+      "refusal": true,
+      "refusal_reason": "juizo_legalidade_contrato",
+      "latencies_cli_ms": {
+        "rota": 412.4243000987917,
+        "perguntar": 416.319900075905
+      },
+      "retrieval": [],
+      "tokens": {
+        "prompt": 0,
+        "completion": 0,
+        "total": 0
+      },
+      "embedding_calls": 0,
+      "embedding_cache_hits": 0,
+      "generation_calls": 0,
+      "sensitivity_events": [
+        {
+          "confidence_level": "recusado",
+          "is_refusal": true,
+          "bases_consultadas": [],
+          "num_sources": 0,
+          "restritos_descartados": 0,
+          "mascaramentos": {}
+        }
+      ],
+      "cited_evidence": []
+    },
+    {
+      "case_id": "P2.1",
+      "question": "Quais contratações de ambulâncias tipo D foram publicadas por órgãos públicos do Rio de Janeiro em 2025? Informe órgão contratante, fornecedor, modalidade e valor contratado quando esses dados estiverem disponíveis.",
+      "answer": "Contratação de ambulância tipo D foi publicada pelo FUNDO MUNICIPAL DE SAUDE (orgão contratante) para PROTEGER SERVIÇOS LTDA (fornecedor), modalidade Compras, com valor contratado de R$ 1.950.000,00. Dados encontrados no registro com numeroControlePNCP: 36507127000149-2-000001/2025.",
+      "route": {
+        "bases_selecionadas": [
+          "estruturada"
+        ],
+        "justificativa": "A pergunta requer evidencia das bases: estruturada.",
+        "confidence": 0.8
+      },
+      "confidence": "alta",
+      "refusal": false,
+      "refusal_reason": null,
+      "latencies_cli_ms": {
+        "rota": 403.4490999765694,
+        "perguntar": 28943.852300057188
+      },
+      "retrieval": [
+        {
+          "bases": [
+            "estruturada"
+          ],
+          "escopos": [
+            "oficial"
+          ],
+          "filtros": {
+            "data_publicacao": [
+              {
+                "operator": ">=",
+                "value": "2025-01-01",
+                "optional": true
+              },
+              {
+                "operator": "<",
+                "value": "2026-01-01",
+                "optional": true
+              }
+            ]
+          },
+          "k": 10,
+          "fetch_k": 50,
+          "rrf_k": 60,
+          "evidencias": [
+            {
+              "chunk_id": "contratos_estruturado:c95c495bfcb719ef:chunk-1-23cce8371195",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_ef54c9bb994b8b4c_c95c495bfcb7.json",
+              "score": 0.030536130536130537
+            },
+            {
+              "chunk_id": "contratos_estruturado:a8228473eb17cbd2:chunk-1-00677dc1c2fa",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_bb67527e8249c5b0_a8228473eb17.json",
+              "score": 0.029138513513513514
+            },
+            {
+              "chunk_id": "contratos_estruturado:4d1b402b500eba52:chunk-1-44f9651ecc2a",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_1d053a1599894662_4d1b402b500e.json",
+              "score": 0.028404512489927477
+            },
+            {
+              "chunk_id": "contratos_estruturado:ec06f7eebf83b752:chunk-1-a9e4cdda6fba",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_bc78775937a9add1_ec06f7eebf83.json",
+              "score": 0.025206087507926443
+            },
+            {
+              "chunk_id": "contratos_estruturado:8b15827d1d423efc:chunk-1-9f7f5ed7fbca",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_7ccac338a0234088_8b15827d1d42.json",
+              "score": 0.024696969696969696
+            },
+            {
+              "chunk_id": "contratos_estruturado:119147eae85a2614:chunk-1-a11af5574050",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_9a3dce5a72b92f08_119147eae85a.json",
+              "score": 0.024016282225237447
+            },
+            {
+              "chunk_id": "contratos_estruturado:8ffa47c52e5a22e7:chunk-1-f5444f677d77",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_3fb17a170ee9cf12_8ffa47c52e5a.json",
+              "score": 0.0238230289279637
+            },
+            {
+              "chunk_id": "contratos_estruturado:4e81740697b6fd38:chunk-1-f16da0470798",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_9ef6e383c3b20b40_4e81740697b6.json",
+              "score": 0.023769338959212377
+            },
+            {
+              "chunk_id": "contratos_estruturado:4c70f525520c346d:chunk-1-c08b5b5326ab",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_e02865eb21a5f5dd_4c70f525520c.json",
+              "score": 0.022246272246272247
+            },
+            {
+              "chunk_id": "contratos_estruturado:31861ced07277dae:chunk-1-cff1da6463c4",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_bc1e82f70063d774_31861ced0727.json",
+              "score": 0.019743240614666407
+            }
+          ]
+        }
+      ],
+      "tokens": {
+        "prompt": 1867,
+        "completion": 877,
+        "total": 2744
+      },
+      "embedding_calls": 0,
+      "embedding_cache_hits": 1,
+      "generation_calls": 1,
+      "sensitivity_events": [
+        {
+          "confidence_level": "alta",
+          "is_refusal": false,
+          "bases_consultadas": [
+            "estruturada"
+          ],
+          "num_sources": 1,
+          "restritos_descartados": 0,
+          "mascaramentos": {},
+          "chunks_no_prompt": 4,
+          "chunks_fora_do_orcamento": 8
+        }
+      ],
+      "cited_evidence": [
+        {
+          "chunk_id": "contratos_estruturado:c95c495bfcb719ef:chunk-1-23cce8371195",
+          "base_id": "contratos_estruturado",
+          "source_file": "data/raw/v6/contratos_estruturado/registro_ef54c9bb994b8b4c_c95c495bfcb7.json",
+          "text_masked": "{\n  \"anoContrato\": 2025,\n  \"categoriaProcesso\": {\n    \"id\": 2,\n    \"nome\": \"Compras\"\n  },\n  \"codigoPaisFornecedor\": null,\n  \"dataAssinatura\": \"2025-01-13\",\n  \"dataAtualizacao\": \"2025-01-21T11:07:48\",\n  \"dataAtualizacaoGlobal\": \"2025-01-21T11:07:48\",\n  \"dataPublicacaoPncp\": \"2025-01-21T11:05:37\",\n  \"dataVigenciaFim\": \"2027-01-13\",\n  \"dataVigenciaInicio\": \"2025-01-13\",\n  \"emendaParlamentar\": null,\n  \"frutoAdesao\": null,\n  \"identificadorCipi\": null,\n  \"informacaoComplementar\": \"\\tCONTRATAÇÃO DE EMPRESA PARA PRESTAÇÃO DE SERVIÇOS DE REMOÇÃO DE PACIENTES EM AMBULÂNCIA TIPO D - SUPORTE AVANÇADO ADULTO/PEDIÁTRICO/NEONATAL\",\n  \"niFornecedor\": \"29413863000172\",\n  \"niFornecedorSubContratado\": null,\n  \"nomeFornecedorSubContratado\": null,\n  \"nomeRazaoSocialFornecedor\": \"PROTEGER SERVIÇOS LTDA\",\n  \"numeroContratoEmpenho\": \"2\",\n  \"numeroControlePNCP\": \"36507127000149-2-000001/2025\",\n  \"numeroControlePncpAta\": null,\n  \"numeroControlePncpCompra\": \"36507127000149-1-000200/2024\",\n  \"numeroParcelas\": 1,\n  \"numeroRetificacao\": 0,\n  \"objetoContrato\": \"\\tCONTRATAÇÃO DE EMPRESA PARA PRESTAÇÃO DE SERVIÇOS DE REMOÇÃO DE PACIENTES EM AMBULÂNCIA TIPO D - SUPORTE AVANÇADO ADULTO/PEDIÁTRICO/NEONATAL\",\n  \"orgaoEntidade\": {\n    \"cnpj\": \"36507127000149\",\n    \"esferaId\": \"M\",\n    \"poderId\": \"E\",\n    \"razaoSocial\": \"FUNDO MUNICIPAL DE SAUDE\"\n  },\n  \"orgaoSubRogado\": null,\n  \"processo\": \"00002441/2024\",\n  \"receita\": false,\n  \"sequencialContrato\": 1,\n  \"temRemanejamento\": null,\n  \"tipoContrato\": {\n    \"id\": 8,\n    \"nome\": \"Outros\"\n  },\n  \"tipoPessoa\": \"PE\",\n  \"tipoPessoaSubContratada\": null,\n  \"unidadeOrgao\": {\n    \"codigoIbge\": \"3300407\",\n    \"codigoUnidade\": \"6194\",\n    \"municipioNome\": \"Barra Mansa\",\n    \"nomeUnidade\": \"Fundo Municipal de Saúde de Barra Mansa\",\n    \"ufNome\": \"Rio de Janeiro\",\n    \"ufSigla\": \"RJ\"\n  },\n  \"unidadeSubRogada\": null,\n  \"urlCipi\": null,\n  \"usuarioNome\": \"Coplan - Consultoria E Planejamento Eireli\",\n  \"valorAcumulado\": 1950000.0,\n  \"valorGlobal\": 0.0,\n  \"valorInicial\": 1950000.0,\n  \"valorParcela\": 1950000.0\n}",
+          "masking": {},
+          "inventory_version": "v6",
+          "chunk_content_sha256": "23cce83711955f275b8000023f51b82ded042ed54b6be8e0450f943c068c22f3",
+          "raw_file_validation": {
+            "sha256": "c95c495bfcb719ef43ba79c92117229999abee539d41d3f51084aacbf931813c",
+            "inventory_matches": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "P2.2",
+      "question": "Qual foi a mediana do valor por ambulância tipo D nas contratações de municípios do Rio de Janeiro em 2025 e como esse valor se compara ao das contratações feitas por órgãos estaduais?",
+      "answer": "Não há evidência suficiente para calcular a mediana do valor por ambulância tipo D, pois o contexto fornecido contém apenas um registro de contratação de ambulância tipo D (R$ 856.800,00) e não fornece dados suficientes para análise estatística ou comparação com órgãos estaduais.",
+      "route": {
+        "bases_selecionadas": [
+          "estruturada",
+          "agregada"
+        ],
+        "justificativa": "A pergunta requer evidencia das bases: estruturada, agregada.",
+        "confidence": 0.85
+      },
+      "confidence": "recusado",
+      "refusal": true,
+      "refusal_reason": "sem_evidencia",
+      "latencies_cli_ms": {
+        "rota": 402.8333999449387,
+        "perguntar": 22084.69749998767
+      },
+      "retrieval": [
+        {
+          "bases": [
+            "agregada",
+            "estruturada"
+          ],
+          "escopos": [
+            "oficial"
+          ],
+          "filtros": {
+            "data_vigencia": [
+              {
+                "operator": ">=",
+                "value": "2025-01-01",
+                "optional": true
+              },
+              {
+                "operator": "<",
+                "value": "2026-01-01",
+                "optional": true
+              }
+            ]
+          },
+          "k": 10,
+          "fetch_k": 50,
+          "rrf_k": 60,
+          "evidencias": [
+            {
+              "chunk_id": "contratos_estruturado:a86c841c70ab10e2:chunk-1-e80b2a5bfc5e",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_11434845ea1ed78d_a86c841c70ab.json",
+              "score": 0.031024531024531024
+            },
+            {
+              "chunk_id": "contratos_estruturado:1a19a82d8ba50185:chunk-1-3e0d6107f46a",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_ef9bcc3f743854fd_1a19a82d8ba5.json",
+              "score": 0.03047794966520434
+            },
+            {
+              "chunk_id": "contratos_estruturado:263d55f46c467e64:chunk-1-b69f0b23e10e",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_70f590ea7f639fa7_263d55f46c46.json",
+              "score": 0.02862400327131466
+            },
+            {
+              "chunk_id": "contratos_estruturado:b4a005f5f89ad359:chunk-1-927754b8c8af",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_1893e1e71c875244_b4a005f5f89a.json",
+              "score": 0.02804284323271665
+            },
+            {
+              "chunk_id": "contratos_estruturado:9ad342790abf3657:chunk-1-c9c2fb293742",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_0ac231f90650ddae_9ad342790abf.json",
+              "score": 0.027031740495291244
+            },
+            {
+              "chunk_id": "contratos_estruturado:d2fcc59befd4420a:chunk-1-6a085249fe88",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_bef52a99e31a5cbf_d2fcc59befd4.json",
+              "score": 0.02690100430416069
+            },
+            {
+              "chunk_id": "contratos_estruturado:67b2b2bac3ceff99:chunk-1-83b7f9432ede",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_ba875df73a5212e4_67b2b2bac3ce.json",
+              "score": 0.026709401709401708
+            },
+            {
+              "chunk_id": "contratos_estruturado:1cc46243ee3d576e:chunk-1-b6d2bbc0274d",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_5d40f150d0adf722_1cc46243ee3d.json",
+              "score": 0.026655348047538198
+            },
+            {
+              "chunk_id": "contratos_estruturado:286b8bf792ec75e0:chunk-1-ded4864b152d",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_63a84f2cc7520617_286b8bf792ec.json",
+              "score": 0.02661401098901099
+            },
+            {
+              "chunk_id": "contratos_estruturado:2247102922059192:chunk-1-aab74e8297b8",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_6faf9e3ade226d39_224710292205.json",
+              "score": 0.02623004235907462
+            }
+          ]
+        }
+      ],
+      "tokens": {
+        "prompt": 1856,
+        "completion": 543,
+        "total": 2399
+      },
+      "embedding_calls": 0,
+      "embedding_cache_hits": 1,
+      "generation_calls": 1,
+      "sensitivity_events": [
+        {
+          "confidence_level": "recusado",
+          "is_refusal": true,
+          "bases_consultadas": [
+            "estruturada",
+            "agregada"
+          ],
+          "num_sources": 0,
+          "restritos_descartados": 0,
+          "mascaramentos": {},
+          "chunks_no_prompt": 4,
+          "chunks_fora_do_orcamento": 8
+        }
+      ],
+      "cited_evidence": []
+    },
+    {
+      "case_id": "P2.3",
+      "question": "Quais editais estão ligados às contratações de ambulâncias tipo D encontradas e quais especificações técnicas devem ser consideradas para saber se as compras podem ser comparadas?",
+      "answer": "Não há evidência nos dados fornecidos sobre editais específicos de ambulâncias tipo D ou especificações técnicas para comparação de compras.",
+      "route": {
+        "bases_selecionadas": [
+          "estruturada"
+        ],
+        "justificativa": "A pergunta requer evidencia das bases: estruturada.",
+        "confidence": 0.8
+      },
+      "confidence": "recusado",
+      "refusal": true,
+      "refusal_reason": "sem_evidencia",
+      "latencies_cli_ms": {
+        "rota": 421.3728999020532,
+        "perguntar": 17830.09319996927
+      },
+      "retrieval": [
+        {
+          "bases": [
+            "estruturada"
+          ],
+          "escopos": [
+            "oficial"
+          ],
+          "filtros": {},
+          "k": 10,
+          "fetch_k": 50,
+          "rrf_k": 60,
+          "evidencias": [
+            {
+              "chunk_id": "contratos_estruturado:31a7e47d506b2e8b:chunk-1-2fedf11a2728",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_1edf27009de03fb7_31a7e47d506b.json",
+              "score": 0.029386529386529386
+            },
+            {
+              "chunk_id": "contratos_estruturado:0b78c74b51a0df28:chunk-1-7fc50bb3f2a8",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_c94468178cfebb83_0b78c74b51a0.json",
+              "score": 0.02736498731424429
+            },
+            {
+              "chunk_id": "contratos_estruturado:a8228473eb17cbd2:chunk-1-00677dc1c2fa",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_bb67527e8249c5b0_a8228473eb17.json",
+              "score": 0.025232198142414862
+            },
+            {
+              "chunk_id": "contratos_estruturado:2ffef252307d8916:chunk-1-dc1e9fd22647",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_6d975f58334d8f37_2ffef252307d.json",
+              "score": 0.02472929470295581
+            },
+            {
+              "chunk_id": "contratos_estruturado:7d26124985895e19:chunk-1-420e394f6e83",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_712fbadda518a4a5_7d2612498589.json",
+              "score": 0.024325827078120657
+            },
+            {
+              "chunk_id": "contratos_estruturado:119147eae85a2614:chunk-1-a11af5574050",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_9a3dce5a72b92f08_119147eae85a.json",
+              "score": 0.02369989165763814
+            },
+            {
+              "chunk_id": "contratos_estruturado:4c70f525520c346d:chunk-1-c08b5b5326ab",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_e02865eb21a5f5dd_4c70f525520c.json",
+              "score": 0.022214040255277366
+            },
+            {
+              "chunk_id": "contratos_estruturado:396889c580d9e0ca:chunk-1-5f6528930448",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_c95999a498d3045e_396889c580d9.json",
+              "score": 0.02046142603612068
+            },
+            {
+              "chunk_id": "contratos_estruturado:81a7ab46ac42e736:chunk-1-65adf46bb23e",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_f41d464c71022e07_81a7ab46ac42.json",
+              "score": 0.01639344262295082
+            },
+            {
+              "chunk_id": "contratos_estruturado:a45687057777fbc5:chunk-1-3c1439710acf",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_f299ff43aef99d7c_a45687057777.json",
+              "score": 0.01639344262295082
+            }
+          ]
+        }
+      ],
+      "tokens": {
+        "prompt": 1739,
+        "completion": 287,
+        "total": 2026
+      },
+      "embedding_calls": 0,
+      "embedding_cache_hits": 1,
+      "generation_calls": 1,
+      "sensitivity_events": [
+        {
+          "confidence_level": "recusado",
+          "is_refusal": true,
+          "bases_consultadas": [
+            "estruturada"
+          ],
+          "num_sources": 0,
+          "restritos_descartados": 0,
+          "mascaramentos": {},
+          "chunks_no_prompt": 4,
+          "chunks_fora_do_orcamento": 8
+        }
+      ],
+      "cited_evidence": []
+    },
+    {
+      "case_id": "P3.1",
+      "question": "Qual regra estava vigente em 2025 para a pesquisa de preços nas contratações públicas e quais documentos do corpus tratam desse procedimento?",
+      "answer": "A regra vigente em 2025 para pesquisa de preços nas contratações públicas segue os parâmetros definidos na Lei 14.133/2021, que inclui a utilização de dados de pesquisa, tabelas aprovadas, contratações similares no ano anterior e a base nacional de notas fiscais. Os documentos que tratam desse procedimento são os chunks citados.\n\nBusca ampliada; filtros relaxados em normas: ano/período de vigência (metadados ausentes).",
+      "route": {
+        "bases_selecionadas": [
+          "normativa",
+          "estruturada"
+        ],
+        "justificativa": "A pergunta requer evidencia das bases: normativa, estruturada.",
+        "confidence": 0.85
+      },
+      "confidence": "alta",
+      "refusal": false,
+      "refusal_reason": null,
+      "latencies_cli_ms": {
+        "rota": 436.20060000102967,
+        "perguntar": 19331.32069988642
+      },
+      "retrieval": [
+        {
+          "bases": [
+            "estruturada",
+            "normativa"
+          ],
+          "escopos": [
+            "oficial"
+          ],
+          "filtros": {
+            "data_vigencia": [
+              {
+                "operator": ">=",
+                "value": "2025-01-01",
+                "optional": true
+              },
+              {
+                "operator": "<",
+                "value": "2026-01-01",
+                "optional": true
+              }
+            ]
+          },
+          "k": 10,
+          "fetch_k": 50,
+          "filtros_ignorados": {
+            "editais_normativo": {
+              "sem_campo": [
+                "data_vigencia"
+              ]
+            }
+          },
+          "rrf_k": 60,
+          "evidencias": [
+            {
+              "chunk_id": "editais_normativo:a5b21177bdc78c93:pagina-15:chunk-3-a49a567b7894",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_a5b21177bdc78c93_a5b21177bdc7.pdf",
+              "score": 0.03177805800756621
+            },
+            {
+              "chunk_id": "editais_normativo:1f7354fb65590678:chunk-69-71d4bb691eac",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_1f7354fb65590678_1f7354fb6559.html",
+              "score": 0.031024531024531024
+            },
+            {
+              "chunk_id": "editais_normativo:a5b21177bdc78c93:pagina-15:chunk-1-77c81104b3db",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_a5b21177bdc78c93_a5b21177bdc7.pdf",
+              "score": 0.030886196246139225
+            },
+            {
+              "chunk_id": "editais_normativo:51d64c0a174ebcf7:pagina-6:chunk-1-7d9cc7f2d0c2",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_51d64c0a174ebcf7_51d64c0a174e.pdf",
+              "score": 0.02967032967032967
+            },
+            {
+              "chunk_id": "editais_normativo:9699114e71c760d9:pagina-3:chunk-23-727e905f7a1f",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_9699114e71c760d9_9699114e71c7.pdf",
+              "score": 0.02946236559139785
+            },
+            {
+              "chunk_id": "editais_normativo:a5b21177bdc78c93:pagina-41:chunk-2-ec02b7b8a3e7",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_a5b21177bdc78c93_a5b21177bdc7.pdf",
+              "score": 0.026988636363636364
+            },
+            {
+              "chunk_id": "editais_normativo:9699114e71c760d9:pagina-4:chunk-19-116289ec9c71",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_9699114e71c760d9_9699114e71c7.pdf",
+              "score": 0.02574441687344913
+            },
+            {
+              "chunk_id": "editais_normativo:1f7354fb65590678:chunk-67-0b81f6b55572",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_1f7354fb65590678_1f7354fb6559.html",
+              "score": 0.025245441795231416
+            },
+            {
+              "chunk_id": "editais_normativo:9699114e71c760d9:pagina-4:chunk-17-0162a6c15854",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_9699114e71c760d9_9699114e71c7.pdf",
+              "score": 0.02502638323533846
+            },
+            {
+              "chunk_id": "editais_normativo:9699114e71c760d9:pagina-4:chunk-10-f8902f79c194",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_9699114e71c760d9_9699114e71c7.pdf",
+              "score": 0.024288588674906582
+            }
+          ]
+        }
+      ],
+      "tokens": {
+        "prompt": 1251,
+        "completion": 530,
+        "total": 1781
+      },
+      "embedding_calls": 0,
+      "embedding_cache_hits": 1,
+      "generation_calls": 1,
+      "sensitivity_events": [
+        {
+          "confidence_level": "alta",
+          "is_refusal": false,
+          "bases_consultadas": [
+            "normativa",
+            "estruturada"
+          ],
+          "num_sources": 3,
+          "restritos_descartados": 0,
+          "mascaramentos": {},
+          "chunks_no_prompt": 3,
+          "chunks_fora_do_orcamento": 7
+        }
+      ],
+      "cited_evidence": [
+        {
+          "chunk_id": "editais_normativo:a5b21177bdc78c93:pagina-15:chunk-3-a49a567b7894",
+          "base_id": "editais_normativo",
+          "source_file": "data/raw/v6/editais_normativo/reuso_a5b21177bdc78c93_a5b21177bdc7.pdf",
+          "text_masked": "de dados de pesquisa publicada em mídia especializada, de tabela de referência formalmente\naprovada pelo Poder Executivo federal e de sítios eletrônicos especializados ou de domínio amplo, desde que\ncontenham a data e a hora de acesso;\nIII - contratações similares feitas pela Administração Pública, em execução ou concluídas no período de 1 (um)\nano anterior à data da pesquisa de preços, observado o índice de atualização de preços correspondente;\nIV - pesquisa na base nacional de notas fiscais eletrônicas, na forma de regulamento.\n§ 3º Nas contratações realizadas por Municípios, Estados e Distrito Federal, desde que não envolvam recursos\nda União, o valor previamente estimado da contratação, a que se refere o caput deste artigo, poderá ser definido por\nmeio da utilização de outros sistemas de custos adotados pelo respectivo ente federativo.\n§ 4º Nas contratações diretas por inexigibilidade ou por dispensa, quando não for possível estimar o valor do\nobjeto na forma estabelecida nos §§ 1º, 2º e 3º deste artigo, o contratado deverá comprovar previamente que os\npreços estão em conformidade com os praticados em contratações semelhantes de objetos de mesma natureza, por\nmeio da apresentaç",
+          "masking": {},
+          "inventory_version": "v6",
+          "chunk_content_sha256": "a49a567b78941a50242243f5275f975220e3f5083425b056cd2aea7540226d1f",
+          "raw_file_validation": {
+            "sha256": "a5b21177bdc78c93fa5c9d4d1430a0c74cd6e70f92406f9f2a649f509ae7d8c5",
+            "inventory_matches": true
+          }
+        },
+        {
+          "chunk_id": "editais_normativo:1f7354fb65590678:chunk-69-71d4bb691eac",
+          "base_id": "editais_normativo",
+          "source_file": "data/raw/v6/editais_normativo/reuso_1f7354fb65590678_1f7354fb6559.html",
+          "text_masked": "iais de Obras (Sicro), para serviços e obras de infraestrutura de transportes, ou do Sistema Nacional de\nPesquisa de Custos e Índices de Construção Civil (Sinapi), para as demais obras e serviços de engenharia;\nII – utilização de dados de pesquisa publicada em mídia especializada, de tabela de referência formalmente aprovada pelo Poder Executivo federal e de\nsítios eletrônicos especializados ou de domínio amplo, desde que contenham a data e a hora de acesso;\nIII –\ncontratações similares feitas pela Administração Pública, em execução ou concluídas no período de 1 (um) ano anterior à data da pesquisa de preços, observado o índice de atualização de preços correspondente;\nIV – pesquisa na base nacional de notas fiscais\neletrônicas, na forma de regulamento.\n§ 3º Nas contratações realizadas por Municípios, Estados e Distrito Federal, desde que não envolvam recursos da União, o valor previamente estimado da contratação, a que se refere o\ncaput\ndeste artigo, poderá ser defin\nido por meio da utilização de outros sistemas de custos adotados pelo respectivo ente federativo.\n§ 4º Nas contratações diretas por inexigibilidade ou por dispensa, quando não for possível estimar o valor do objeto na",
+          "masking": {},
+          "inventory_version": "v6",
+          "chunk_content_sha256": "71d4bb691eacce0302355f513508a3f0b0dedaaa68a948918be9f19490f55b34",
+          "raw_file_validation": {
+            "sha256": "1f7354fb655906788a87397059a766ae8a2dcac36096dc927835c74108f1e2d1",
+            "inventory_matches": true
+          }
+        },
+        {
+          "chunk_id": "editais_normativo:a5b21177bdc78c93:pagina-15:chunk-1-77c81104b3db",
+          "base_id": "editais_normativo",
+          "source_file": "data/raw/v6/editais_normativo/reuso_a5b21177bdc78c93_a5b21177bdc7.pdf",
+          "text_masked": "20/04/2021 L14133\nwww.planalto.gov.br/ccivil_03/_ato2019-2022/2021/lei/L14133.htm 15/69\n§ 1º No processo licitatório para aquisição de bens e contratação de serviços em geral, conforme regulamento,\no valor estimado será definido com base no melhor preço aferido por meio da utilização dos seguintes parâmetros,\nadotados de forma combinada ou não:\nI - composição de custos unitários menores ou iguais à mediana do item correspondente no painel para\nconsulta de preços ou no banco de preços em saúde disponíveis no Portal Nacional de Contratações Públicas\n(PNCP);\nII - contratações similares feitas pela Administração Pública, em execução ou concluídas no período de 1 (um)\nano anterior à data da pesquisa de preços, inclusive mediante sistema de registro de preços, observado o índice de\natualização de preços correspondente;\nIII - utilização de dados de pesquisa publicada em mídia especializada, de tabela de referência formalmente\naprovada pelo Poder Executivo federal e de sítios eletrônicos especializados ou de domínio amplo, desde que\ncontenham a data e hora de acesso;\nIV - pesquisa direta com no mínimo 3 (três) fornecedores, mediante solicitação formal de cotação, desde que\nseja apresentada",
+          "masking": {},
+          "inventory_version": "v6",
+          "chunk_content_sha256": "77c81104b3db2c8d9a522a16b72c7b7d6e9be59f18ab7f30f9943f9b4e5ea671",
+          "raw_file_validation": {
+            "sha256": "a5b21177bdc78c93fa5c9d4d1430a0c74cd6e70f92406f9f2a649f509ae7d8c5",
+            "inventory_matches": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "P3.2",
+      "question": "Para uma contratação publicada no Rio de Janeiro em 2025, quais normas do corpus se aplicam à modalidade registrada no processo?",
+      "answer": "A modalidade registrada nos processos mencionados no contexto é o 'pregão', conforme descrito nos campos 'amparoLegal' dos contratos. No entanto, os trechos fornecidos não especificam quais normas legais (como leis ou regulamentos) são aplicáveis à modalidade 'pregão' em si, apenas indicam que ela é a modalidade de licitação obrigatória para aquisição de bens e serviços.\n\nBusca ampliada; filtros relaxados em normas: data de publicação (metadados ausentes).",
+      "route": {
+        "bases_selecionadas": [
+          "normativa",
+          "estruturada"
+        ],
+        "justificativa": "A pergunta requer evidencia das bases: normativa, estruturada.",
+        "confidence": 0.85
+      },
+      "confidence": "media",
+      "refusal": false,
+      "refusal_reason": null,
+      "latencies_cli_ms": {
+        "rota": 403.4738999325782,
+        "perguntar": 24833.49589991849
+      },
+      "retrieval": [
+        {
+          "bases": [
+            "estruturada",
+            "normativa"
+          ],
+          "escopos": [
+            "oficial"
+          ],
+          "filtros": {
+            "data_publicacao": [
+              {
+                "operator": ">=",
+                "value": "2025-01-01",
+                "optional": true
+              },
+              {
+                "operator": "<",
+                "value": "2026-01-01",
+                "optional": true
+              }
+            ]
+          },
+          "k": 10,
+          "fetch_k": 50,
+          "filtros_ignorados": {
+            "editais_normativo": {
+              "sem_campo": [
+                "data_publicacao"
+              ]
+            }
+          },
+          "rrf_k": 60,
+          "evidencias": [
+            {
+              "chunk_id": "contratos_estruturado:86addeedf3d2cd36:chunk-1-1691e4880e9a",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_29f035e744c2d43c_86addeedf3d2.json",
+              "score": 0.027242401779095628
+            },
+            {
+              "chunk_id": "contratos_estruturado:31861ced07277dae:chunk-1-cff1da6463c4",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_bc1e82f70063d774_31861ced0727.json",
+              "score": 0.026631393298059962
+            },
+            {
+              "chunk_id": "contratos_estruturado:861c3eaf157c7374:chunk-1-c76bc7c80860",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_357e8995b93ca88b_861c3eaf157c.json",
+              "score": 0.025837770122142185
+            },
+            {
+              "chunk_id": "contratos_estruturado:ecf444669481cca4:chunk-1-9b459b4e503a",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_82cbf2d108382cdd_ecf444669481.json",
+              "score": 0.025794938351719664
+            },
+            {
+              "chunk_id": "editais_normativo:b1eb1bfb44f3b192:pagina-2:chunk-1-67537460141f",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_b1eb1bfb44f3b192_b1eb1bfb44f3.pdf",
+              "score": 0.025306978137166813
+            },
+            {
+              "chunk_id": "contratos_estruturado:68035f7988ca74b6:chunk-1-09ad037bec2d",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_a65d0165f7f5b764_68035f7988ca.json",
+              "score": 0.022592592592592595
+            },
+            {
+              "chunk_id": "contratos_estruturado:9b3756de6413c7c3:chunk-1-3f9ed46cc2dc",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_0d82cc255d323dd2_9b3756de6413.json",
+              "score": 0.021202990737640887
+            },
+            {
+              "chunk_id": "contratos_estruturado:72f6dd4d23cf7df8:chunk-1-1ffab01ad8e9",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_95906d7fced0031a_72f6dd4d23cf.json",
+              "score": 0.01639344262295082
+            },
+            {
+              "chunk_id": "editais_normativo:8f720ba21db90bdc:chunk-168-390842e629f9",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_8f720ba21db90bdc_8f720ba21db9.html",
+              "score": 0.01639344262295082
+            },
+            {
+              "chunk_id": "editais_normativo:8f720ba21db90bdc:chunk-236-ef1b9be9b570",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_8f720ba21db90bdc_8f720ba21db9.html",
+              "score": 0.016129032258064516
+            }
+          ]
+        }
+      ],
+      "tokens": {
+        "prompt": 1478,
+        "completion": 741,
+        "total": 2219
+      },
+      "embedding_calls": 0,
+      "embedding_cache_hits": 1,
+      "generation_calls": 1,
+      "sensitivity_events": [
+        {
+          "confidence_level": "media",
+          "is_refusal": false,
+          "bases_consultadas": [
+            "normativa",
+            "estruturada"
+          ],
+          "num_sources": 3,
+          "restritos_descartados": 0,
+          "mascaramentos": {},
+          "chunks_no_prompt": 3,
+          "chunks_fora_do_orcamento": 7
+        }
+      ],
+      "cited_evidence": [
+        {
+          "chunk_id": "contratos_estruturado:86addeedf3d2cd36:chunk-1-1691e4880e9a",
+          "base_id": "contratos_estruturado",
+          "source_file": "data/raw/v6/contratos_estruturado/registro_29f035e744c2d43c_86addeedf3d2.json",
+          "text_masked": "{\n  \"amparoLegal\": {\n    \"codigo\": 1,\n    \"descricao\": \"pregão: modalidade de licitação obrigatória para aquisição de bens e serviços comuns\",\n    \"nome\": \"Lei 14.133/2021, Art. 28, I\"\n  },\n  \"anoCompra\": 2025,\n  \"dataAberturaProposta\": \"2025-10-01T09:00:00\",\n  \"dataAtualizacao\": \"2025-10-01T07:27:28\",\n  \"dataAtualizacaoGlobal\": \"2025-10-20T17:05:44\",\n  \"dataEncerramentoProposta\": \"2025-10-15T09:00:00\",\n  \"dataInclusao\": \"2025-10-01T07:27:28\",\n  \"dataPublicacaoPncp\": \"2025-10-01T07:27:28\",\n  \"emendaParlamentar\": null,\n  \"fontesOrcamentarias\": [],\n  \"informacaoComplementar\": \"Acessar os sites www.compras.gov.br ou www.inca.gov.br para retirar o edital Para as respostas de esclarecimentos e impugnações deste edital acesse o link: https://cnetmobile.estaleiro.serpro.gov.br/comprasnet-web/public/landing?destino=quadro-informativo&compra=25005205911702025\",\n  \"justificativaPresencial\": null,\n  \"linkProcessoEletronico\": null,\n  \"linkSistemaOrigem\": \"https://cnetmobile.estaleiro.serpro.gov.br/comprasnet-web/public/landing?destino=acompanhamento-compra&compra=25005205911702025\",\n  \"modalidadeId\": 6,\n  \"modalidadeNome\": \"Pregão - Eletrônico\",\n  \"modoDisputaId\": 1,\n  \"modoDisputaNome\": \"Aberto\",\n  \"numeroCompra\": \"91170\",\n  \"numeroControlePNCP\": \"00394544000185-1-002332/2025\",\n  \"objetoCompra\": \"Contratação de empresa para fornecimento de “conjunto integrado\\\" de insumos e serviços que objetivam a satisfação do interesse público em que a contratada assumirá o fornecimento, em conformidade com os padrões preconizados nas normas técnicas vigentes, incluindo, locação de equipamentos/automação, fornecimento de reagentes e insumos, software de interfaceamento, manutenções preventivas, corretivas, calibração, transmissão de dados do processamento\",\n  \"orgaoEntidade\": {\n    \"cnpj\": \"00394544000185\",\n    \"esferaId\": \"F\",\n    \"poderId\": \"E\",\n    \"razaoSocial\": \"MINISTERIO DA SAUDE\"\n  },\n  \"orgaoSubRogado\": null,\n  \"processo\": \"25410009943202482\",\n  \"sequencialCompra\": 2332,\n  \"situacaoCompraId\": 1,\n  \"situacaoCompraNome\": \"Divulgada no PNCP\",\n  \"srp\": false,\n  \"tipoInstrumentoConvocatorioCodigo\": 1,\n  \"tipoInstrumentoConvocatorioNome\": \"Edital\",\n  \"unidadeOrgao\": {\n    \"codigoIbge\": \"3304557\",\n    \"codigoUnidade\": \"250052\",\n    \"municipioNome\": \"Rio de Janeiro\",\n    \"nomeUnidade\": \"INSTITUTO NACIONAL DO CANCER - RJ\",\n    \"ufNome\": \"Rio de Janeiro\",\n    \"ufSigla\": \"RJ\"\n  },\n  \"unidadeSubRogada\": null,\n  \"usuarioNome\": \"Compras.gov.br\",\n  \"valorTotalEstimado\": 6047375.7,\n  \"valorTotalHomologado\": 4986360.24\n}",
+          "masking": {},
+          "inventory_version": "v6",
+          "chunk_content_sha256": "1691e4880e9a3e12681b0937bc270d5b5387bf34992ea95fba4c96bee112e6c4",
+          "raw_file_validation": {
+            "sha256": "86addeedf3d2cd36b40f68305d089e7ccd54e22d45d49f514d49dc96dfb3ec77",
+            "inventory_matches": true
+          }
+        },
+        {
+          "chunk_id": "contratos_estruturado:31861ced07277dae:chunk-1-cff1da6463c4",
+          "base_id": "contratos_estruturado",
+          "source_file": "data/raw/v6/contratos_estruturado/registro_bc1e82f70063d774_31861ced0727.json",
+          "text_masked": "{\n  \"amparoLegal\": {\n    \"codigo\": 1,\n    \"descricao\": \"pregão: modalidade de licitação obrigatória para aquisição de bens e serviços comuns\",\n    \"nome\": \"Lei 14.133/2021, Art. 28, I\"\n  },\n  \"anoCompra\": 2025,\n  \"dataAberturaProposta\": \"2025-01-06T09:00:00\",\n  \"dataAtualizacao\": \"2026-09-16T15:06:05\",\n  \"dataAtualizacaoGlobal\": \"2026-09-16T15:06:05\",\n  \"dataEncerramentoProposta\": \"2025-01-21T10:00:00\",\n  \"dataInclusao\": \"2025-01-06T07:08:42\",\n  \"dataPublicacaoPncp\": \"2025-01-06T07:08:42\",\n  \"emendaParlamentar\": false,\n  \"fontesOrcamentarias\": [],\n  \"informacaoComplementar\": \"O Edital encontra-se disponível nas páginas www.gov.br/compras; www.gestao.ufrj.br e no Portal Nacional de  Contratações Públicas (PNCP).  Para as respostas de esclarecimentos e impugnações deste edital acesse o link: https://cnetmobile.estaleiro.serpro.gov.br/comprasnet-web/public/landing?destino=quadro-informativo&compra=15311505900012025\",\n  \"justificativaPresencial\": null,\n  \"linkProcessoEletronico\": null,\n  \"linkSistemaOrigem\": \"https://cnetmobile.estaleiro.serpro.gov.br/comprasnet-web/public/landing?destino=acompanhamento-compra&compra=15311505900012025\",\n  \"modalidadeId\": 6,\n  \"modalidadeNome\": \"Pregão - Eletrônico\",\n  \"modoDisputaId\": 3,\n  \"modoDisputaNome\": \"Aberto-Fechado\",\n  \"numeroCompra\": \"90001\",\n  \"numeroControlePNCP\": \"33663683000116-1-000004/2025\",\n  \"objetoCompra\": \"Contratação de serviços de limpeza, asseio e conservação para as Unidades da Universidade Federal do Rio de Janeiro, no Município do Rio de Janeiro, no Campus da Praia Vermelha, a serem executados com regime de dedicação exclusiva de mão de obra, conforme condições, quantidades e exigências estabelecidas neste Edital e seus anexos.\",\n  \"orgaoEntidade\": {\n    \"cnpj\": \"33663683000116\",\n    \"esferaId\": \"F\",\n    \"poderId\": \"E\",\n    \"razaoSocial\": \"UNIVERSIDADE FEDERAL DO RIO DE JANEIRO\"\n  },\n  \"orgaoSubRogado\": null,\n  \"processo\": \"23079265529202363\",\n  \"sequencialCompra\": 4,\n  \"situacaoCompraId\": 1,\n  \"situacaoCompraNome\": \"Divulgada no PNCP\",\n  \"srp\": false,\n  \"tipoInstrumentoConvocatorioCodigo\": 1,\n  \"tipoInstrumentoConvocatorioNome\": \"Edital\",\n  \"unidadeOrgao\": {\n    \"codigoIbge\": \"3304557\",\n    \"codigoUnidade\": \"153115\",\n    \"municipioNome\": \"Rio de Janeiro\",\n    \"nomeUnidade\": \"MEC-UFRJ-UNIVERSID.FED.DO RIO DE JANEIRO/RJ\",\n    \"ufNome\": \"Rio de Janeiro\",\n    \"ufSigla\": \"RJ\"\n  },\n  \"unidadeSubRogada\": null,\n  \"usuarioNome\": \"Compras.gov.br\",\n  \"valorTotalEstimado\": 5055128.4,\n  \"valorTotalHomologado\": 4520835.6\n}",
+          "masking": {},
+          "inventory_version": "v6",
+          "chunk_content_sha256": "cff1da6463c4bf8a32702fbed2bbc0a794cec19b8242e495f3088969d2ae0525",
+          "raw_file_validation": {
+            "sha256": "31861ced07277daed37b372aeb9b88f8ad553194a94d8fa98c2654f9272cf1ea",
+            "inventory_matches": true
+          }
+        },
+        {
+          "chunk_id": "contratos_estruturado:861c3eaf157c7374:chunk-1-c76bc7c80860",
+          "base_id": "contratos_estruturado",
+          "source_file": "data/raw/v6/contratos_estruturado/registro_357e8995b93ca88b_861c3eaf157c.json",
+          "text_masked": "{\n  \"amparoLegal\": {\n    \"codigo\": 1,\n    \"descricao\": \"pregão: modalidade de licitação obrigatória para aquisição de bens e serviços comuns\",\n    \"nome\": \"Lei 14.133/2021, Art. 28, I\"\n  },\n  \"anoCompra\": 2025,\n  \"dataAberturaProposta\": \"2025-10-01T08:00:00\",\n  \"dataAtualizacao\": \"2025-10-01T07:25:59\",\n  \"dataAtualizacaoGlobal\": \"2025-10-28T09:37:38\",\n  \"dataEncerramentoProposta\": \"2025-10-14T10:00:00\",\n  \"dataInclusao\": \"2025-10-01T07:25:59\",\n  \"dataPublicacaoPncp\": \"2025-10-01T07:25:59\",\n  \"emendaParlamentar\": null,\n  \"fontesOrcamentarias\": [],\n  \"informacaoComplementar\": \" Para as respostas de esclarecimentos e impugnações deste edital acesse o link: https://cnetmobile.estaleiro.serpro.gov.br/comprasnet-web/public/landing?destino=quadro-informativo&compra=15316605900522025\",\n  \"justificativaPresencial\": null,\n  \"linkProcessoEletronico\": null,\n  \"linkSistemaOrigem\": \"https://cnetmobile.estaleiro.serpro.gov.br/comprasnet-web/public/landing?destino=acompanhamento-compra&compra=15316605900522025\",\n  \"modalidadeId\": 6,\n  \"modalidadeNome\": \"Pregão - Eletrônico\",\n  \"modoDisputaId\": 3,\n  \"modoDisputaNome\": \"Aberto-Fechado\",\n  \"numeroCompra\": \"90052\",\n  \"numeroControlePNCP\": \"29427465000105-1-000048/2025\",\n  \"objetoCompra\": \"Aquisição de materiais permanentes e de consumo para a realização de cursos de qualificação profissional em refrigeração e construção civil para pessoas em situação de vulnerabilidade social, inscritas no cadastro único para programas sociais do governo federal (cadúnico), residentes no município de Nova Iguaçu, estado do Rio de Janeiro.\",\n  \"orgaoEntidade\": {\n    \"cnpj\": \"29427465000105\",\n    \"esferaId\": \"F\",\n    \"poderId\": \"E\",\n    \"razaoSocial\": \"UNIVERSIDADE FEDERAL RURAL DO RIO DE JANEIRO\"\n  },\n  \"orgaoSubRogado\": null,\n  \"processo\": \"23083034668202540\",\n  \"sequencialCompra\": 48,\n  \"situacaoCompraId\": 1,\n  \"situacaoCompraNome\": \"Divulgada no PNCP\",\n  \"srp\": true,\n  \"tipoInstrumentoConvocatorioCodigo\": 1,\n  \"tipoInstrumentoConvocatorioNome\": \"Edital\",\n  \"unidadeOrgao\": {\n    \"codigoIbge\": \"3305554\",\n    \"codigoUnidade\": \"153166\",\n    \"municipioNome\": \"Seropédica\",\n    \"nomeUnidade\": \"MEC-UFRRJ-UNIV.FED.RURAL DO R.DE JANEIRO/RJ\",\n    \"ufNome\": \"Rio de Janeiro\",\n    \"ufSigla\": \"RJ\"\n  },\n  \"unidadeSubRogada\": null,\n  \"usuarioNome\": \"Compras.gov.br\",\n  \"valorTotalEstimado\": 137452.79,\n  \"valorTotalHomologado\": 109909.63\n}",
+          "masking": {},
+          "inventory_version": "v6",
+          "chunk_content_sha256": "c76bc7c80860a745099571a3ed695b74c0612e7c483dfa159544576ff7d7865e",
+          "raw_file_validation": {
+            "sha256": "861c3eaf157c73745cb19494ebe243c661f2f4fb1e2811dd2b9cf0468871ae5f",
+            "inventory_matches": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "P3.3",
+      "question": "Quais licitações de tecnologia estarão abertas no Rio de Janeiro no próximo mês e quais empresas provavelmente vencerão esses processos?",
+      "answer": "Essa pergunta está fora do escopo de contratações públicas do RJ.",
+      "route": {
+        "bases_selecionadas": [],
+        "justificativa": "A pergunta pede previsao ou informacao fora do corpus congelado.",
+        "confidence": 0.95
+      },
+      "confidence": "recusado",
+      "refusal": true,
+      "refusal_reason": "fora_de_escopo",
+      "latencies_cli_ms": {
+        "rota": 416.9032000936568,
+        "perguntar": 417.81689994968474
+      },
+      "retrieval": [],
+      "tokens": {
+        "prompt": 0,
+        "completion": 0,
+        "total": 0
+      },
+      "embedding_calls": 0,
+      "embedding_cache_hits": 0,
+      "generation_calls": 0,
+      "sensitivity_events": [
+        {
+          "confidence_level": "recusado",
+          "is_refusal": true,
+          "bases_consultadas": [],
+          "num_sources": 0,
+          "restritos_descartados": 0,
+          "mascaramentos": {}
+        }
+      ],
+      "cited_evidence": []
+    },
+    {
+      "case_id": "P4.1",
+      "question": "Quais órgãos do Rio de Janeiro contrataram serviços de manutenção de computadores em 2025 e quais foram os valores desses contratos?",
+      "answer": "O órgão que contratou serviços de manutenção de computadores em 2025 foi a Câmara Municipal de Duque de Caxias (orgãoEntidade: DUQUE DE CAXIAS CAMARA MUNICIPAL), com valor global de R$38.551,16. O contrato foi assinado em 07/10/2025.",
+      "route": {
+        "bases_selecionadas": [
+          "estruturada"
+        ],
+        "justificativa": "A pergunta requer evidencia das bases: estruturada.",
+        "confidence": 0.8
+      },
+      "confidence": "alta",
+      "refusal": false,
+      "refusal_reason": null,
+      "latencies_cli_ms": {
+        "rota": 438.3557999972254,
+        "perguntar": 23946.652799961157
+      },
+      "retrieval": [
+        {
+          "bases": [
+            "estruturada"
+          ],
+          "escopos": [
+            "oficial"
+          ],
+          "filtros": {
+            "data_vigencia": [
+              {
+                "operator": ">=",
+                "value": "2025-01-01",
+                "optional": true
+              },
+              {
+                "operator": "<",
+                "value": "2026-01-01",
+                "optional": true
+              }
+            ]
+          },
+          "k": 10,
+          "fetch_k": 50,
+          "rrf_k": 60,
+          "evidencias": [
+            {
+              "chunk_id": "contratos_estruturado:714dea5f02114ee9:chunk-1-1a24f399cecc",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_01b997d82d56d78a_714dea5f0211.json",
+              "score": 0.030309988518943745
+            },
+            {
+              "chunk_id": "contratos_estruturado:8a5c5b6570d2be45:chunk-1-5d252548e2ed",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_8551ca46af9346b8_8a5c5b6570d2.json",
+              "score": 0.029513888888888888
+            },
+            {
+              "chunk_id": "contratos_estruturado:1ecee118b59dd26f:chunk-1-774bc9056d69",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_6f5d0c0b51dabfc9_1ecee118b59d.json",
+              "score": 0.02928692699490662
+            },
+            {
+              "chunk_id": "contratos_estruturado:6b5e3a2035d57b2c:chunk-1-33e2edb21025",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_235d794a19a78f2a_6b5e3a2035d5.json",
+              "score": 0.02900988017658188
+            },
+            {
+              "chunk_id": "contratos_estruturado:668b80375d87fc5f:chunk-1-6d03f4d65c72",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_02ca9ff62bf45c3a_668b80375d87.json",
+              "score": 0.027799227799227798
+            },
+            {
+              "chunk_id": "contratos_estruturado:00126d56baaaad6c:chunk-1-00126d56baaa",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/reuso_00126d56baaaad6c_00126d56baaa.json",
+              "score": 0.026838432635534086
+            },
+            {
+              "chunk_id": "contratos_estruturado:1539f807210b2f13:chunk-1-5206f447388a",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_5937b8e55b2bcfd6_1539f807210b.json",
+              "score": 0.02681010928961749
+            },
+            {
+              "chunk_id": "contratos_estruturado:6ec9899a4f21a663:chunk-1-b67bdf460a3f",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_eaabfa910c83040b_6ec9899a4f21.json",
+              "score": 0.02565359477124183
+            },
+            {
+              "chunk_id": "contratos_estruturado:e7a8a1ff518deec0:chunk-1-377dc5c0d829",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_bdb144ffafbdf40b_e7a8a1ff518d.json",
+              "score": 0.02542892156862745
+            },
+            {
+              "chunk_id": "contratos_estruturado:263d55f46c467e64:chunk-1-b69f0b23e10e",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_70f590ea7f639fa7_263d55f46c46.json",
+              "score": 0.025388291517323774
+            }
+          ]
+        }
+      ],
+      "tokens": {
+        "prompt": 1668,
+        "completion": 714,
+        "total": 2382
+      },
+      "embedding_calls": 0,
+      "embedding_cache_hits": 1,
+      "generation_calls": 1,
+      "sensitivity_events": [
+        {
+          "confidence_level": "alta",
+          "is_refusal": false,
+          "bases_consultadas": [
+            "estruturada"
+          ],
+          "num_sources": 1,
+          "restritos_descartados": 0,
+          "mascaramentos": {},
+          "chunks_no_prompt": 3,
+          "chunks_fora_do_orcamento": 7
+        }
+      ],
+      "cited_evidence": [
+        {
+          "chunk_id": "contratos_estruturado:714dea5f02114ee9:chunk-1-1a24f399cecc",
+          "base_id": "contratos_estruturado",
+          "source_file": "data/raw/v6/contratos_estruturado/registro_01b997d82d56d78a_714dea5f0211.json",
+          "text_masked": "{\n  \"anoContrato\": 2025,\n  \"categoriaProcesso\": {\n    \"id\": 8,\n    \"nome\": \"Serviços\"\n  },\n  \"codigoPaisFornecedor\": null,\n  \"dataAssinatura\": \"2025-10-07\",\n  \"dataAtualizacao\": \"2025-10-24T11:46:52\",\n  \"dataAtualizacaoGlobal\": \"2025-10-24T11:46:52\",\n  \"dataPublicacaoPncp\": \"2025-10-24T11:46:51\",\n  \"dataVigenciaFim\": \"2025-12-07\",\n  \"dataVigenciaInicio\": \"2025-10-08\",\n  \"emendaParlamentar\": null,\n  \"frutoAdesao\": null,\n  \"identificadorCipi\": null,\n  \"informacaoComplementar\": null,\n  \"niFornecedor\": \"15064270000133\",\n  \"niFornecedorSubContratado\": null,\n  \"nomeFornecedorSubContratado\": null,\n  \"nomeRazaoSocialFornecedor\": \"MODERNIZACAO PUBLICA E INFORMATICA LTDA\",\n  \"numeroContratoEmpenho\": \"14\",\n  \"numeroControlePNCP\": \"30381552000158-2-000016/2025\",\n  \"numeroControlePncpAta\": null,\n  \"numeroControlePncpCompra\": \"30381552000158-1-000022/2025\",\n  \"numeroParcelas\": 1,\n  \"numeroRetificacao\": 0,\n  \"objetoContrato\": \"O objeto do presente instrumento é a prestação dos serviços especializados de licenciamento de programas de informática, concernentes a software, almoxarifado, patrimônio, recursos humanos e folha de pagamento e portal da transparência, com fornecimento de todos os materiais e mão de obra necessária a instalação, treinamento, manutenção e atualização dos sistemas, bem como a locação de data Center.\",\n  \"orgaoEntidade\": {\n    \"cnpj\": \"30381552000158\",\n    \"esferaId\": \"M\",\n    \"poderId\": \"L\",\n    \"razaoSocial\": \"DUQUE DE CAXIAS CAMARA MUNICIPAL\"\n  },\n  \"orgaoSubRogado\": null,\n  \"processo\": \"1583/2025\",\n  \"receita\": false,\n  \"sequencialContrato\": 16,\n  \"temRemanejamento\": null,\n  \"tipoContrato\": {\n    \"id\": 1,\n    \"nome\": \"Contrato (termo inicial)\"\n  },\n  \"tipoPessoa\": \"PJ\",\n  \"tipoPessoaSubContratada\": null,\n  \"unidadeOrgao\": {\n    \"codigoIbge\": \"3301702\",\n    \"codigoUnidade\": \"928088\",\n    \"municipioNome\": \"Duque de Caxias\",\n    \"nomeUnidade\": \"CAMARA MUNICIPAL DE DUQUE DE CAXIAS - RJ\",\n    \"ufNome\": \"Rio de Janeiro\",\n    \"ufSigla\": \"RJ\"\n  },\n  \"unidadeSubRogada\": null,\n  \"urlCipi\": null,\n  \"usuarioNome\": \"Compras.gov.br\",\n  \"valorAcumulado\": null,\n  \"valorGlobal\": 38551.16,\n  \"valorInicial\": 38551.16,\n  \"valorParcela\": 38551.16\n}",
+          "masking": {},
+          "inventory_version": "v6",
+          "chunk_content_sha256": "1a24f399cecc7834d67f5c26d4660d0d658cd54bf65274e298dd763c87333ba5",
+          "raw_file_validation": {
+            "sha256": "714dea5f02114ee947ecb5e96fc9525aec10120c20f053cffd33bac777b3cb55",
+            "inventory_matches": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "P4.2",
+      "question": "Quais modalidades apareceram com mais frequência nas contratações de manutenção de computadores encontradas em 2025?",
+      "answer": "Não há evidência suficiente para responder sobre as modalidades de contratações de manutenção de computadores em 2025.",
+      "route": {
+        "bases_selecionadas": [
+          "estruturada",
+          "agregada"
+        ],
+        "justificativa": "A pergunta requer evidencia das bases: estruturada, agregada.",
+        "confidence": 0.85
+      },
+      "confidence": "recusado",
+      "refusal": true,
+      "refusal_reason": "sem_evidencia",
+      "latencies_cli_ms": {
+        "rota": 411.7670999839902,
+        "perguntar": 16600.6175999064
+      },
+      "retrieval": [
+        {
+          "bases": [
+            "agregada",
+            "estruturada"
+          ],
+          "escopos": [
+            "oficial"
+          ],
+          "filtros": {
+            "data_vigencia": [
+              {
+                "operator": ">=",
+                "value": "2025-01-01",
+                "optional": true
+              },
+              {
+                "operator": "<",
+                "value": "2026-01-01",
+                "optional": true
+              }
+            ]
+          },
+          "k": 10,
+          "fetch_k": 50,
+          "rrf_k": 60,
+          "evidencias": [
+            {
+              "chunk_id": "contratos_estruturado:6b5e3a2035d57b2c:chunk-1-33e2edb21025",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_235d794a19a78f2a_6b5e3a2035d5.json",
+              "score": 0.02928692699490662
+            },
+            {
+              "chunk_id": "contratos_estruturado:1ecee118b59dd26f:chunk-1-774bc9056d69",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_6f5d0c0b51dabfc9_1ecee118b59d.json",
+              "score": 0.02921395544346364
+            },
+            {
+              "chunk_id": "contratos_estruturado:668b80375d87fc5f:chunk-1-6d03f4d65c72",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_02ca9ff62bf45c3a_668b80375d87.json",
+              "score": 0.029206349206349208
+            },
+            {
+              "chunk_id": "contratos_estruturado:714dea5f02114ee9:chunk-1-1a24f399cecc",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_01b997d82d56d78a_714dea5f0211.json",
+              "score": 0.029083245521601686
+            },
+            {
+              "chunk_id": "contratos_estruturado:9fff4ec5ac52c55c:chunk-1-5d26003c2551",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_d9365a42022c2e52_9fff4ec5ac52.json",
+              "score": 0.028438886647841874
+            },
+            {
+              "chunk_id": "contratos_estruturado:308e10dc4e69408f:chunk-1-fcb816326d07",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_8f9659d4304e4ee5_308e10dc4e69.json",
+              "score": 0.028404512489927477
+            },
+            {
+              "chunk_id": "contratos_estruturado:8a5c5b6570d2be45:chunk-1-5d252548e2ed",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_8551ca46af9346b8_8a5c5b6570d2.json",
+              "score": 0.02813852813852814
+            },
+            {
+              "chunk_id": "contratos_estruturado:263d55f46c467e64:chunk-1-b69f0b23e10e",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_70f590ea7f639fa7_263d55f46c46.json",
+              "score": 0.027119252873563218
+            },
+            {
+              "chunk_id": "contratos_estruturado:67b2b2bac3ceff99:chunk-1-83b7f9432ede",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_ba875df73a5212e4_67b2b2bac3ce.json",
+              "score": 0.027118043247075507
+            },
+            {
+              "chunk_id": "contratos_estruturado:a86c841c70ab10e2:chunk-1-e80b2a5bfc5e",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_11434845ea1ed78d_a86c841c70ab.json",
+              "score": 0.026334026334026334
+            }
+          ]
+        }
+      ],
+      "tokens": {
+        "prompt": 1437,
+        "completion": 410,
+        "total": 1847
+      },
+      "embedding_calls": 0,
+      "embedding_cache_hits": 1,
+      "generation_calls": 1,
+      "sensitivity_events": [
+        {
+          "confidence_level": "recusado",
+          "is_refusal": true,
+          "bases_consultadas": [
+            "estruturada",
+            "agregada"
+          ],
+          "num_sources": 0,
+          "restritos_descartados": 0,
+          "mascaramentos": {},
+          "chunks_no_prompt": 3,
+          "chunks_fora_do_orcamento": 8
+        }
+      ],
+      "cited_evidence": []
+    },
+    {
+      "case_id": "P4.3",
+      "question": "Quais regras do corpus tratam da modalidade mais usada nessas contratações?",
+      "answer": "",
+      "route": {
+        "bases_selecionadas": [
+          "normativa",
+          "estruturada"
+        ],
+        "justificativa": "A pergunta requer evidencia das bases: normativa, estruturada.",
+        "confidence": 0.85
+      },
+      "confidence": "recusado",
+      "refusal": true,
+      "refusal_reason": "sem_evidencia",
+      "latencies_cli_ms": {
+        "rota": 400.17869998700917,
+        "perguntar": 18353.446000022814
+      },
+      "retrieval": [
+        {
+          "bases": [
+            "estruturada",
+            "normativa"
+          ],
+          "escopos": [
+            "oficial"
+          ],
+          "filtros": {},
+          "k": 10,
+          "fetch_k": 50,
+          "rrf_k": 60,
+          "evidencias": [
+            {
+              "chunk_id": "editais_normativo:1f7354fb65590678:chunk-170-29478c2f1291",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_1f7354fb65590678_1f7354fb6559.html",
+              "score": 0.03252247488101534
+            },
+            {
+              "chunk_id": "editais_normativo:a5b21177bdc78c93:pagina-36:chunk-2-2e60797e5a74",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_a5b21177bdc78c93_a5b21177bdc7.pdf",
+              "score": 0.03252247488101534
+            },
+            {
+              "chunk_id": "editais_normativo:1f7354fb65590678:chunk-85-b385efd2c744",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_1f7354fb65590678_1f7354fb6559.html",
+              "score": 0.029631255487269532
+            },
+            {
+              "chunk_id": "editais_normativo:a5b21177bdc78c93:pagina-18:chunk-4-9a7fbc7514c0",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_a5b21177bdc78c93_a5b21177bdc7.pdf",
+              "score": 0.027425373134328357
+            },
+            {
+              "chunk_id": "editais_normativo:51d64c0a174ebcf7:pagina-10:chunk-1-044a557f4c24",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_51d64c0a174ebcf7_51d64c0a174e.pdf",
+              "score": 0.024955436720142603
+            },
+            {
+              "chunk_id": "editais_normativo:9699114e71c760d9:pagina-5:chunk-3-6dccdddc26e6",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_9699114e71c760d9_9699114e71c7.pdf",
+              "score": 0.02183253977470677
+            },
+            {
+              "chunk_id": "editais_normativo:1f7354fb65590678:chunk-81-2c8bacafaf8f",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_1f7354fb65590678_1f7354fb6559.html",
+              "score": 0.015873015873015872
+            },
+            {
+              "chunk_id": "editais_normativo:403eb376a02e4684:pagina-12:chunk-3-7b211ffed024",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_403eb376a02e4684_403eb376a02e.pdf",
+              "score": 0.015873015873015872
+            },
+            {
+              "chunk_id": "editais_normativo:8f720ba21db90bdc:chunk-184-3b835828b3b7",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_8f720ba21db90bdc_8f720ba21db9.html",
+              "score": 0.015625
+            },
+            {
+              "chunk_id": "editais_normativo:a5b21177bdc78c93:pagina-17:chunk-5-0e5756903b22",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_a5b21177bdc78c93_a5b21177bdc7.pdf",
+              "score": 0.015625
+            }
+          ]
+        }
+      ],
+      "tokens": {
+        "prompt": 1398,
+        "completion": 377,
+        "total": 1775
+      },
+      "embedding_calls": 0,
+      "embedding_cache_hits": 1,
+      "generation_calls": 1,
+      "sensitivity_events": [
+        {
+          "confidence_level": "recusado",
+          "is_refusal": true,
+          "bases_consultadas": [
+            "normativa",
+            "estruturada"
+          ],
+          "num_sources": 0,
+          "restritos_descartados": 0,
+          "mascaramentos": {},
+          "chunks_no_prompt": 4,
+          "chunks_fora_do_orcamento": 7
+        }
+      ],
+      "cited_evidence": []
+    },
+    {
+      "case_id": "P5.1",
+      "question": "Quais foram as dez maiores contratações registradas no Rio de Janeiro em 2025 por valor contratado?",
+      "answer": "1. R$ 1.196.949.440,06 - COMANDO DA AERONAUTICA (2025-04-25)\n2. R$ 672.969.074,40 - BANCO CENTRAL DO BRASIL (2025-06-27)\n3. R$ 61.552.617,60 - MUNICIPIO DE RIO DE JANEIRO (2025-02-04)\n4. R$ 54.451.933,00 - MUNICIPIO DE MAGE (2025-02-07)\n5. R$ 54.169.397,10 - MUNICIPIO DE SAO PEDRO DA ALDEIA (2025-01-10)\n6. R$ 49.800.221,88 - ESTADO DO RIO DE JANEIRO (2025-02-03)\n7. R$ 45.415.036,80 - FUNDO MUNICIPAL DE SAUDE (2025-01-28)\n8. R$ 36.930.756,00 - DEFENSORIA PUBLICA DO ESTADO DO RIO DE JANEIRO-DPE (2025-01-21)\n9. R$ 26.463.260,00 - MUNICIPIO DE CABO FRIO (2025-09-26)\n10. R$ 19.299.999,60 - MUNICIPIO DE DUQUE DE CAXIAS (2025-05-22)",
+      "route": {
+        "bases_selecionadas": [
+          "estruturada",
+          "agregada"
+        ],
+        "justificativa": "A pergunta requer evidencia das bases: estruturada, agregada.",
+        "confidence": 0.85
+      },
+      "confidence": "alta",
+      "refusal": false,
+      "refusal_reason": null,
+      "latencies_cli_ms": {
+        "rota": 413.89960004016757,
+        "perguntar": 29066.283399937674
+      },
+      "retrieval": [
+        {
+          "bases": [
+            "agregada",
+            "estruturada"
+          ],
+          "escopos": [
+            "oficial"
+          ],
+          "filtros": {
+            "data_vigencia": [
+              {
+                "operator": ">=",
+                "value": "2025-01-01",
+                "optional": true
+              },
+              {
+                "operator": "<",
+                "value": "2026-01-01",
+                "optional": true
+              }
+            ]
+          },
+          "k": 10,
+          "fetch_k": 50,
+          "rrf_k": 60,
+          "evidencias": [
+            {
+              "chunk_id": "contratos_estruturado:2247102922059192:chunk-1-aab74e8297b8",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_6faf9e3ade226d39_224710292205.json",
+              "score": 0.029418126757516764
+            },
+            {
+              "chunk_id": "contratos_estruturado:9ad342790abf3657:chunk-1-c9c2fb293742",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_0ac231f90650ddae_9ad342790abf.json",
+              "score": 0.0287391216352965
+            },
+            {
+              "chunk_id": "contratos_estruturado:00126d56baaaad6c:chunk-1-00126d56baaa",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/reuso_00126d56baaaad6c_00126d56baaa.json",
+              "score": 0.027046783625730993
+            },
+            {
+              "chunk_id": "contratos_estruturado:04237a07e0df9983:chunk-1-308c197ada8f",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_fcdd40bf3b7b32b3_04237a07e0df.json",
+              "score": 0.02651914295749912
+            },
+            {
+              "chunk_id": "contratos_estruturado:a1f64de4bde32486:chunk-1-2a57efcb26f3",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_d727ca3a8e2a3fe1_a1f64de4bde3.json",
+              "score": 0.0265113137453563
+            },
+            {
+              "chunk_id": "contratos_estruturado:1ecee118b59dd26f:chunk-1-774bc9056d69",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_6f5d0c0b51dabfc9_1ecee118b59d.json",
+              "score": 0.025098039215686277
+            },
+            {
+              "chunk_id": "contratos_estruturado:c0aa8cf880bbd1ea:chunk-1-e4b64e582082",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_42d43e62836063ca_c0aa8cf880bb.json",
+              "score": 0.023513513513513516
+            },
+            {
+              "chunk_id": "contratos_estruturado:006ac14361dc00e1:chunk-1-006ac14361dc",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/reuso_006ac14361dc00e1_006ac14361dc.json",
+              "score": 0.023414503612523417
+            },
+            {
+              "chunk_id": "contratos_estruturado:a86c841c70ab10e2:chunk-1-e80b2a5bfc5e",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_11434845ea1ed78d_a86c841c70ab.json",
+              "score": 0.02319109461966605
+            },
+            {
+              "chunk_id": "contratos_estruturado:6ec9899a4f21a663:chunk-1-b67bdf460a3f",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_eaabfa910c83040b_6ec9899a4f21.json",
+              "score": 0.02317541613316261
+            }
+          ]
+        }
+      ],
+      "tokens": {
+        "prompt": 1726,
+        "completion": 937,
+        "total": 2663
+      },
+      "embedding_calls": 0,
+      "embedding_cache_hits": 1,
+      "generation_calls": 1,
+      "sensitivity_events": [
+        {
+          "confidence_level": "alta",
+          "is_refusal": false,
+          "bases_consultadas": [
+            "estruturada",
+            "agregada"
+          ],
+          "num_sources": 3,
+          "restritos_descartados": 0,
+          "mascaramentos": {},
+          "chunks_no_prompt": 4,
+          "chunks_fora_do_orcamento": 9
+        }
+      ],
+      "cited_evidence": [
+        {
+          "chunk_id": "sql:contratacoes:ranking:fb574f6c2184:1",
+          "base_id": "contratos_estruturado",
+          "source_file": "data/structured/base_estruturada.sqlite",
+          "derived_sql": [
+            {
+              "ts": "2026-09-30T12:29:48.725-05:00",
+              "run_id": "f0d6a836",
+              "query_id": "q_b1c905fc",
+              "stage": "consulta_sql",
+              "status": "ok",
+              "latencia_ms": 21,
+              "input": "Quais foram as dez maiores contratações registradas no Rio de Janeiro em 2025 por valor contratado?",
+              "output": "10 linha(s) em 3 chunk(s)",
+              "tokens": {
+                "prompt": 0,
+                "completion": 0,
+                "total": 0
+              },
+              "modelo": null,
+              "extra": {
+                "tabela": "contratacoes",
+                "tipo": "ranking",
+                "banco": "data/structured/base_estruturada.sqlite",
+                "sql": "SELECT data_publicacao, orgao_nome, esfera, municipio, modalidade, objeto, valor FROM contratacoes WHERE tipo_registro = ? AND ano_assinatura = ? AND valor_contratado IS NOT NULL ORDER BY valor_contratado DESC LIMIT 10",
+                "linhas": 10,
+                "chunks": 3
+              }
+            }
+          ],
+          "exists": true
+        },
+        {
+          "chunk_id": "sql:contratacoes:ranking:fb574f6c2184:2",
+          "base_id": "contratos_estruturado",
+          "source_file": "data/structured/base_estruturada.sqlite",
+          "derived_sql": [
+            {
+              "ts": "2026-09-30T12:29:48.725-05:00",
+              "run_id": "f0d6a836",
+              "query_id": "q_b1c905fc",
+              "stage": "consulta_sql",
+              "status": "ok",
+              "latencia_ms": 21,
+              "input": "Quais foram as dez maiores contratações registradas no Rio de Janeiro em 2025 por valor contratado?",
+              "output": "10 linha(s) em 3 chunk(s)",
+              "tokens": {
+                "prompt": 0,
+                "completion": 0,
+                "total": 0
+              },
+              "modelo": null,
+              "extra": {
+                "tabela": "contratacoes",
+                "tipo": "ranking",
+                "banco": "data/structured/base_estruturada.sqlite",
+                "sql": "SELECT data_publicacao, orgao_nome, esfera, municipio, modalidade, objeto, valor FROM contratacoes WHERE tipo_registro = ? AND ano_assinatura = ? AND valor_contratado IS NOT NULL ORDER BY valor_contratado DESC LIMIT 10",
+                "linhas": 10,
+                "chunks": 3
+              }
+            }
+          ],
+          "exists": true
+        },
+        {
+          "chunk_id": "sql:contratacoes:ranking:fb574f6c2184:3",
+          "base_id": "contratos_estruturado",
+          "source_file": "data/structured/base_estruturada.sqlite",
+          "derived_sql": [
+            {
+              "ts": "2026-09-30T12:29:48.725-05:00",
+              "run_id": "f0d6a836",
+              "query_id": "q_b1c905fc",
+              "stage": "consulta_sql",
+              "status": "ok",
+              "latencia_ms": 21,
+              "input": "Quais foram as dez maiores contratações registradas no Rio de Janeiro em 2025 por valor contratado?",
+              "output": "10 linha(s) em 3 chunk(s)",
+              "tokens": {
+                "prompt": 0,
+                "completion": 0,
+                "total": 0
+              },
+              "modelo": null,
+              "extra": {
+                "tabela": "contratacoes",
+                "tipo": "ranking",
+                "banco": "data/structured/base_estruturada.sqlite",
+                "sql": "SELECT data_publicacao, orgao_nome, esfera, municipio, modalidade, objeto, valor FROM contratacoes WHERE tipo_registro = ? AND ano_assinatura = ? AND valor_contratado IS NOT NULL ORDER BY valor_contratado DESC LIMIT 10",
+                "linhas": 10,
+                "chunks": 3
+              }
+            }
+          ],
+          "exists": true
+        }
+      ]
+    },
+    {
+      "case_id": "P5.2",
+      "question": "Quais fornecedores receberam o maior valor total em contratos no conjunto de dados de 2025?",
+      "answer": "Os fornecedores que receberam o maior valor total em contratos no conjunto de dados de 2025 foram: 1) CRISTALIA PRODUTOS QUIMICOS FARMACEUTICOS LTDA (R$ 1.196.949.440,06) e 2) CASA DA MOEDA DO BRASIL CMB (R$ 672.969.074,40).",
+      "route": {
+        "bases_selecionadas": [
+          "estruturada",
+          "agregada"
+        ],
+        "justificativa": "A pergunta requer evidencia das bases: estruturada, agregada.",
+        "confidence": 0.85
+      },
+      "confidence": "alta",
+      "refusal": false,
+      "refusal_reason": null,
+      "latencies_cli_ms": {
+        "rota": 424.7698000399396,
+        "perguntar": 37061.19699997362
+      },
+      "retrieval": [
+        {
+          "bases": [
+            "agregada",
+            "estruturada"
+          ],
+          "escopos": [
+            "oficial"
+          ],
+          "filtros": {
+            "data_vigencia": [
+              {
+                "operator": ">=",
+                "value": "2025-01-01",
+                "optional": true
+              },
+              {
+                "operator": "<",
+                "value": "2026-01-01",
+                "optional": true
+              }
+            ]
+          },
+          "k": 10,
+          "fetch_k": 50,
+          "rrf_k": 60,
+          "evidencias": [
+            {
+              "chunk_id": "contratos_estruturado:2247102922059192:chunk-1-aab74e8297b8",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_6faf9e3ade226d39_224710292205.json",
+              "score": 0.026988636363636364
+            },
+            {
+              "chunk_id": "contratos_estruturado:006ac14361dc00e1:chunk-1-006ac14361dc",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/reuso_006ac14361dc00e1_006ac14361dc.json",
+              "score": 0.0266900790166813
+            },
+            {
+              "chunk_id": "contratos_estruturado:263d55f46c467e64:chunk-1-b69f0b23e10e",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_70f590ea7f639fa7_263d55f46c46.json",
+              "score": 0.0260840108401084
+            },
+            {
+              "chunk_id": "contratos_estruturado:04237a07e0df9983:chunk-1-308c197ada8f",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_fcdd40bf3b7b32b3_04237a07e0df.json",
+              "score": 0.025849212924606464
+            },
+            {
+              "chunk_id": "contratos_estruturado:6ec9899a4f21a663:chunk-1-b67bdf460a3f",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_eaabfa910c83040b_6ec9899a4f21.json",
+              "score": 0.025396825396825397
+            },
+            {
+              "chunk_id": "contratos_estruturado:308e10dc4e69408f:chunk-1-fcb816326d07",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_8f9659d4304e4ee5_308e10dc4e69.json",
+              "score": 0.02513105149552883
+            },
+            {
+              "chunk_id": "contratos_estruturado:3e9b99fa02f6318b:chunk-1-d52a58f8ba19",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_e7a69e224a7ed7d8_3e9b99fa02f6.json",
+              "score": 0.024501173708920188
+            },
+            {
+              "chunk_id": "contratos_estruturado:67b2b2bac3ceff99:chunk-1-83b7f9432ede",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_ba875df73a5212e4_67b2b2bac3ce.json",
+              "score": 0.024386724386724387
+            },
+            {
+              "chunk_id": "contratos_estruturado:dce556273c13e09f:chunk-1-30293e18da23",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_8301ff839eae664f_dce556273c13.json",
+              "score": 0.023414503612523417
+            },
+            {
+              "chunk_id": "contratos_estruturado:9fff4ec5ac52c55c:chunk-1-5d26003c2551",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_d9365a42022c2e52_9fff4ec5ac52.json",
+              "score": 0.023026315789473686
+            }
+          ]
+        }
+      ],
+      "tokens": {
+        "prompt": 1818,
+        "completion": 639,
+        "total": 2457
+      },
+      "embedding_calls": 0,
+      "embedding_cache_hits": 1,
+      "generation_calls": 1,
+      "sensitivity_events": [
+        {
+          "confidence_level": "alta",
+          "is_refusal": false,
+          "bases_consultadas": [
+            "estruturada",
+            "agregada"
+          ],
+          "num_sources": 3,
+          "restritos_descartados": 0,
+          "mascaramentos": {},
+          "chunks_no_prompt": 4,
+          "chunks_fora_do_orcamento": 8
+        }
+      ],
+      "cited_evidence": [
+        {
+          "chunk_id": "sql:contratacoes:agrupamento:0ed639d3d72d:1",
+          "base_id": "contratos_estruturado",
+          "source_file": "data/structured/base_estruturada.sqlite",
+          "derived_sql": [
+            {
+              "ts": "2026-09-30T12:44:18.140-05:00",
+              "run_id": "e27192d9",
+              "query_id": "q_0793447f",
+              "stage": "consulta_sql",
+              "status": "ok",
+              "latencia_ms": 24,
+              "input": "Quais fornecedores receberam o maior valor total em contratos no conjunto de dados de 2025?",
+              "output": "10 linha(s) em 2 chunk(s)",
+              "tokens": {
+                "prompt": 0,
+                "completion": 0,
+                "total": 0
+              },
+              "modelo": null,
+              "extra": {
+                "tabela": "contratacoes",
+                "tipo": "agrupamento",
+                "banco": "data/structured/base_estruturada.sqlite",
+                "sql": "SELECT fornecedor AS grupo, COUNT(*) AS n, SUM(valor_contratado) AS total FROM contratacoes WHERE tipo_registro = ? AND ano_assinatura = ? GROUP BY fornecedor ORDER BY COALESCE(SUM(valor_contratado), 0) DESC, n DESC LIMIT 10",
+                "linhas": 10,
+                "chunks": 2
+              }
+            }
+          ],
+          "exists": true
+        },
+        {
+          "chunk_id": "sql:contratacoes:agrupamento:0ed639d3d72d:2",
+          "base_id": "contratos_estruturado",
+          "source_file": "data/structured/base_estruturada.sqlite",
+          "derived_sql": [
+            {
+              "ts": "2026-09-30T12:44:18.140-05:00",
+              "run_id": "e27192d9",
+              "query_id": "q_0793447f",
+              "stage": "consulta_sql",
+              "status": "ok",
+              "latencia_ms": 24,
+              "input": "Quais fornecedores receberam o maior valor total em contratos no conjunto de dados de 2025?",
+              "output": "10 linha(s) em 2 chunk(s)",
+              "tokens": {
+                "prompt": 0,
+                "completion": 0,
+                "total": 0
+              },
+              "modelo": null,
+              "extra": {
+                "tabela": "contratacoes",
+                "tipo": "agrupamento",
+                "banco": "data/structured/base_estruturada.sqlite",
+                "sql": "SELECT fornecedor AS grupo, COUNT(*) AS n, SUM(valor_contratado) AS total FROM contratacoes WHERE tipo_registro = ? AND ano_assinatura = ? GROUP BY fornecedor ORDER BY COALESCE(SUM(valor_contratado), 0) DESC, n DESC LIMIT 10",
+                "linhas": 10,
+                "chunks": 2
+              }
+            }
+          ],
+          "exists": true
+        },
+        {
+          "chunk_id": "contratos_estruturado:006ac14361dc00e1:chunk-1-006ac14361dc",
+          "base_id": "contratos_estruturado",
+          "source_file": "data/raw/v6/contratos_estruturado/reuso_006ac14361dc00e1_006ac14361dc.json",
+          "text_masked": "{\n  \"anoContrato\": 2025,\n  \"categoriaProcesso\": {\n    \"id\": 2,\n    \"nome\": \"Compras\"\n  },\n  \"codigoPaisFornecedor\": null,\n  \"dataAssinatura\": \"2025-06-17\",\n  \"dataAtualizacao\": \"2025-06-30T14:44:48\",\n  \"dataAtualizacaoGlobal\": \"2026-05-18T07:22:26\",\n  \"dataPublicacaoPncp\": \"2025-06-27T13:38:24\",\n  \"dataVigenciaFim\": \"2025-12-31\",\n  \"dataVigenciaInicio\": \"2025-06-17\",\n  \"emendaParlamentar\": null,\n  \"frutoAdesao\": null,\n  \"identificadorCipi\": null,\n  \"informacaoComplementar\": \"\",\n  \"niFornecedor\": \"34164319000506\",\n  \"niFornecedorSubContratado\": null,\n  \"nomeFornecedorSubContratado\": null,\n  \"nomeRazaoSocialFornecedor\": \"CASA DA MOEDA DO BRASIL CMB\",\n  \"numeroContratoEmpenho\": \"90656\",\n  \"numeroControlePNCP\": \"00038166000105-2-000105/2025\",\n  \"numeroControlePncpAta\": null,\n  \"numeroControlePncpCompra\": \"00038166000105-1-000259/2025\",\n  \"numeroParcelas\": 1,\n  \"numeroRetificacao\": 2,\n  \"objetoContrato\": \"AQUISIÇÃO DE CÉDULAS DE CIRCULAÇÃO COMUM DO PADRÃO REAL\",\n  \"orgaoEntidade\": {\n    \"cnpj\": \"00038166000105\",\n    \"esferaId\": \"F\",\n    \"poderId\": \"E\",\n    \"razaoSocial\": \"BANCO CENTRAL DO BRASIL\"\n  },\n  \"orgaoParteEnvolvida\": null,\n  \"orgaoSubRogado\": null,\n  \"processo\": \"285994\",\n  \"receita\": false,\n  \"sequencialContrato\": 105,\n  \"temRemanejamento\": null,\n  \"tipoContrato\": {\n    \"descricao\": \"Instrumento formal que estabelece o vínculo jurídico inicial entre a Administração Pública e o contratado, definindo direitos, obrigações, prazos e condições de execução.\",\n    \"id\": 1,\n    \"nome\": \"Contrato (termo inicial)\",\n    \"statusAtivo\": true\n  },\n  \"tipoParteEnvolvida\": null,\n  \"tipoPessoa\": \"PJ\",\n  \"tipoPessoaSubContratada\": null,\n  \"unidadeOrgao\": {\n    \"codigoIbge\": \"3304557\",\n    \"codigoUnidade\": \"925136\",\n    \"municipioNome\": \"Rio de Janeiro\",\n    \"nomeUnidade\": \"BANCO CENTRAL DO BRASIL - RIO DE JANEIRO\",\n    \"ufNome\": \"Rio de Janeiro\",\n    \"ufSigla\": \"RJ\"\n  },\n  \"unidadeOrgaoParteEnvolvida\": null,\n  \"unidadeSubRogada\": null,\n  \"urlCipi\": null,\n  \"usuarioNome\": \"Contratos.gov.br\",\n  \"valorAcumulado\": null,\n  \"valorGlobal\": 672969074.4,\n  \"valorInicial\": 672969074.4,\n  \"valorParcela\": 672969074.4\n}",
+          "masking": {},
+          "inventory_version": "v6",
+          "chunk_content_sha256": "006ac14361dc00e157a266f66e76e1cfcc58f896ea5838df6c9fe3e08d6be42f",
+          "raw_file_validation": {
+            "sha256": "006ac14361dc00e157a266f66e76e1cfcc58f896ea5838df6c9fe3e08d6be42f",
+            "inventory_matches": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "P5.3",
+      "question": "Houve aumento no valor médio das contratações de tecnologia ao longo de 2025?",
+      "answer": "Sim, houve aumento no valor médio das contratações de tecnologia ao longo de 2025. A média mensal variou significativamente, com picos em abril (R$ 202,158.598,04) e junho (R$ 4,638,812,43), além de um valor anual médio de R$ 20,864 milhões, superior ao mês de janeiro (R$ 2,609,721,92).",
+      "route": {
+        "bases_selecionadas": [
+          "estruturada",
+          "agregada"
+        ],
+        "justificativa": "A pergunta requer evidencia das bases: estruturada, agregada.",
+        "confidence": 0.85
+      },
+      "confidence": "alta",
+      "refusal": false,
+      "refusal_reason": null,
+      "latencies_cli_ms": {
+        "rota": 408.92519999761134,
+        "perguntar": 41319.40229993779
+      },
+      "retrieval": [
+        {
+          "bases": [
+            "agregada",
+            "estruturada"
+          ],
+          "escopos": [
+            "oficial"
+          ],
+          "filtros": {
+            "data_vigencia": [
+              {
+                "operator": ">=",
+                "value": "2025-01-01",
+                "optional": true
+              },
+              {
+                "operator": "<",
+                "value": "2026-01-01",
+                "optional": true
+              }
+            ]
+          },
+          "k": 10,
+          "fetch_k": 50,
+          "rrf_k": 60,
+          "evidencias": [
+            {
+              "chunk_id": "contratos_estruturado:23ef4e3bff11a73e:chunk-1-e1b38d6756ce",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_5e215be3dfbf4895_23ef4e3bff11.json",
+              "score": 0.027598020555767037
+            },
+            {
+              "chunk_id": "contratos_estruturado:6ec9899a4f21a663:chunk-1-b67bdf460a3f",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_eaabfa910c83040b_6ec9899a4f21.json",
+              "score": 0.027346637102734665
+            },
+            {
+              "chunk_id": "contratos_estruturado:37da60e0d62b709a:chunk-1-211b107087c6",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_806ceb1f2b0ebf94_37da60e0d62b.json",
+              "score": 0.026860955056179775
+            },
+            {
+              "chunk_id": "contratos_estruturado:a2fc614ea5cde6e7:chunk-1-f40b8a4f05cb",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_9693da556a76ad28_a2fc614ea5cd.json",
+              "score": 0.02662057044079516
+            },
+            {
+              "chunk_id": "contratos_estruturado:308e10dc4e69408f:chunk-1-fcb816326d07",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_8f9659d4304e4ee5_308e10dc4e69.json",
+              "score": 0.02661064425770308
+            },
+            {
+              "chunk_id": "contratos_estruturado:6b5e3a2035d57b2c:chunk-1-33e2edb21025",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_235d794a19a78f2a_6b5e3a2035d5.json",
+              "score": 0.026438310608579978
+            },
+            {
+              "chunk_id": "contratos_estruturado:84b2020185715f79:chunk-1-6ee1450a748e",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_7af3093866a1759f_84b202018571.json",
+              "score": 0.025937081659973226
+            },
+            {
+              "chunk_id": "contratos_estruturado:31ffaff7b0135de2:chunk-1-2cce904f3228",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_608371db07c94bb0_31ffaff7b013.json",
+              "score": 0.025914384123339348
+            },
+            {
+              "chunk_id": "contratos_estruturado:ad89eeea03f241a8:chunk-1-c976921f51f5",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_59aa5f9bd7a866a1_ad89eeea03f2.json",
+              "score": 0.025396825396825397
+            },
+            {
+              "chunk_id": "contratos_estruturado:2247102922059192:chunk-1-aab74e8297b8",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_6faf9e3ade226d39_224710292205.json",
+              "score": 0.024448419797257006
+            }
+          ]
+        }
+      ],
+      "tokens": {
+        "prompt": 2121,
+        "completion": 1343,
+        "total": 3464
+      },
+      "embedding_calls": 0,
+      "embedding_cache_hits": 1,
+      "generation_calls": 1,
+      "sensitivity_events": [
+        {
+          "confidence_level": "alta",
+          "is_refusal": false,
+          "bases_consultadas": [
+            "estruturada",
+            "agregada"
+          ],
+          "num_sources": 3,
+          "restritos_descartados": 0,
+          "mascaramentos": {},
+          "chunks_no_prompt": 4,
+          "chunks_fora_do_orcamento": 9
+        }
+      ],
+      "cited_evidence": [
+        {
+          "chunk_id": "sql:contratacoes:evolucao:fc7be1e8aaae:1",
+          "base_id": "contratos_estruturado",
+          "source_file": "data/structured/base_estruturada.sqlite",
+          "derived_sql": [
+            {
+              "ts": "2026-09-30T12:30:52.132-05:00",
+              "run_id": "3cfd3384",
+              "query_id": "q_61567889",
+              "stage": "consulta_sql",
+              "status": "ok",
+              "latencia_ms": 22,
+              "input": "Houve aumento no valor médio das contratações de tecnologia ao longo de 2025?",
+              "output": "12 linha(s) em 3 chunk(s)",
+              "tokens": {
+                "prompt": 0,
+                "completion": 0,
+                "total": 0
+              },
+              "modelo": null,
+              "extra": {
+                "tabela": "contratacoes",
+                "tipo": "evolucao",
+                "banco": "data/structured/base_estruturada.sqlite",
+                "sql": "SELECT mes_publicacao AS periodo, valor AS valor FROM contratacoes WHERE ano_publicacao = ? AND (objeto_normalizado LIKE ?)",
+                "linhas": 12,
+                "chunks": 3
+              }
+            }
+          ],
+          "exists": true
+        },
+        {
+          "chunk_id": "sql:contratacoes:evolucao:fc7be1e8aaae:2",
+          "base_id": "contratos_estruturado",
+          "source_file": "data/structured/base_estruturada.sqlite",
+          "derived_sql": [
+            {
+              "ts": "2026-09-30T12:30:52.132-05:00",
+              "run_id": "3cfd3384",
+              "query_id": "q_61567889",
+              "stage": "consulta_sql",
+              "status": "ok",
+              "latencia_ms": 22,
+              "input": "Houve aumento no valor médio das contratações de tecnologia ao longo de 2025?",
+              "output": "12 linha(s) em 3 chunk(s)",
+              "tokens": {
+                "prompt": 0,
+                "completion": 0,
+                "total": 0
+              },
+              "modelo": null,
+              "extra": {
+                "tabela": "contratacoes",
+                "tipo": "evolucao",
+                "banco": "data/structured/base_estruturada.sqlite",
+                "sql": "SELECT mes_publicacao AS periodo, valor AS valor FROM contratacoes WHERE ano_publicacao = ? AND (objeto_normalizado LIKE ?)",
+                "linhas": 12,
+                "chunks": 3
+              }
+            }
+          ],
+          "exists": true
+        },
+        {
+          "chunk_id": "sql:contratacoes:evolucao:fc7be1e8aaae:3",
+          "base_id": "contratos_estruturado",
+          "source_file": "data/structured/base_estruturada.sqlite",
+          "derived_sql": [
+            {
+              "ts": "2026-09-30T12:30:52.132-05:00",
+              "run_id": "3cfd3384",
+              "query_id": "q_61567889",
+              "stage": "consulta_sql",
+              "status": "ok",
+              "latencia_ms": 22,
+              "input": "Houve aumento no valor médio das contratações de tecnologia ao longo de 2025?",
+              "output": "12 linha(s) em 3 chunk(s)",
+              "tokens": {
+                "prompt": 0,
+                "completion": 0,
+                "total": 0
+              },
+              "modelo": null,
+              "extra": {
+                "tabela": "contratacoes",
+                "tipo": "evolucao",
+                "banco": "data/structured/base_estruturada.sqlite",
+                "sql": "SELECT mes_publicacao AS periodo, valor AS valor FROM contratacoes WHERE ano_publicacao = ? AND (objeto_normalizado LIKE ?)",
+                "linhas": 12,
+                "chunks": 3
+              }
+            }
+          ],
+          "exists": true
+        }
+      ]
+    },
+    {
+      "case_id": "P6.1",
+      "question": "Uma microempresa pode participar de pregão eletrônico segundo as regras presentes no corpus?",
+      "answer": "Sim, uma microempresa pode participar de pregão eletrônico segundo as regras presentes no corpus. De acordo com o §3º do artigo da Lei Complementar 123/2006 (chunk-192), em caso de pregão, a microempresa ou empresa de pequeno porte mais bem classificada é convocada para apresentar nova proposta no prazo máximo de 5 minutos após o encerramento dos lances.",
+      "route": {
+        "bases_selecionadas": [
+          "normativa"
+        ],
+        "justificativa": "A pergunta requer evidencia das bases: normativa.",
+        "confidence": 0.8
+      },
+      "confidence": "alta",
+      "refusal": false,
+      "refusal_reason": null,
+      "latencies_cli_ms": {
+        "rota": 399.28710006643087,
+        "perguntar": 45174.80339994654
+      },
+      "retrieval": [
+        {
+          "bases": [
+            "normativa"
+          ],
+          "escopos": [
+            "oficial"
+          ],
+          "filtros": {},
+          "k": 10,
+          "fetch_k": 50,
+          "rrf_k": 60,
+          "evidencias": [
+            {
+              "chunk_id": "editais_normativo:57fb9e7cabe1fefe:chunk-12-824423b17f8a",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_57fb9e7cabe1fefe_57fb9e7cabe1.html",
+              "score": 0.031544957774465976
+            },
+            {
+              "chunk_id": "editais_normativo:8f720ba21db90bdc:chunk-192-ff5ff6f857fb",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_8f720ba21db90bdc_8f720ba21db9.html",
+              "score": 0.03149801587301587
+            },
+            {
+              "chunk_id": "editais_normativo:8f720ba21db90bdc:chunk-147-48a55b457df0",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_8f720ba21db90bdc_8f720ba21db9.html",
+              "score": 0.027046783625730993
+            },
+            {
+              "chunk_id": "editais_normativo:8f720ba21db90bdc:chunk-130-3cf07a311904",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_8f720ba21db90bdc_8f720ba21db9.html",
+              "score": 0.026553280111072546
+            },
+            {
+              "chunk_id": "editais_normativo:1f7354fb65590678:chunk-81-2c8bacafaf8f",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_1f7354fb65590678_1f7354fb6559.html",
+              "score": 0.026334026334026334
+            },
+            {
+              "chunk_id": "editais_normativo:a5b21177bdc78c93:pagina-17:chunk-5-0e5756903b22",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_a5b21177bdc78c93_a5b21177bdc7.pdf",
+              "score": 0.0261986301369863
+            },
+            {
+              "chunk_id": "editais_normativo:8f720ba21db90bdc:chunk-190-762f293a1062",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_8f720ba21db90bdc_8f720ba21db9.html",
+              "score": 0.025934278350515462
+            },
+            {
+              "chunk_id": "editais_normativo:8f720ba21db90bdc:chunk-59-b9990f0c8819",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_8f720ba21db90bdc_8f720ba21db9.html",
+              "score": 0.025728708679368183
+            },
+            {
+              "chunk_id": "editais_normativo:a5b21177bdc78c93:pagina-42:chunk-5-9806467296b0",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_a5b21177bdc78c93_a5b21177bdc7.pdf",
+              "score": 0.01639344262295082
+            },
+            {
+              "chunk_id": "editais_normativo:51d64c0a174ebcf7:pagina-31:chunk-2-2398f909390a",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_51d64c0a174ebcf7_51d64c0a174e.pdf",
+              "score": 0.016129032258064516
+            }
+          ]
+        }
+      ],
+      "tokens": {
+        "prompt": 1557,
+        "completion": 465,
+        "total": 2022
+      },
+      "embedding_calls": 0,
+      "embedding_cache_hits": 1,
+      "generation_calls": 1,
+      "sensitivity_events": [
+        {
+          "confidence_level": "alta",
+          "is_refusal": false,
+          "bases_consultadas": [
+            "normativa"
+          ],
+          "num_sources": 1,
+          "restritos_descartados": 0,
+          "mascaramentos": {},
+          "chunks_no_prompt": 4,
+          "chunks_fora_do_orcamento": 6
+        }
+      ],
+      "cited_evidence": [
+        {
+          "chunk_id": "editais_normativo:8f720ba21db90bdc:chunk-192-ff5ff6f857fb",
+          "base_id": "editais_normativo",
+          "source_file": "data/raw/v6/editais_normativo/reuso_8f720ba21db90bdc_8f720ba21db9.html",
+          "text_masked": "tado será adjudicado em favor da proposta originalmente vencedora do certame.\n§ 2º O disposto neste artigo somente se aplicará quando a melhor oferta inicial não tiver sido apresentada por microempresa ou empresa de pequeno porte.\n§ 3º No caso de pregão, a microempresa ou empresa de pequeno porte mais bem classificada será convocada para apresentar nova proposta no prazo máximo de 5 (cinco) minutos após o encerramento dos lances, sob pena de preclusão.",
+          "masking": {},
+          "inventory_version": "v6",
+          "chunk_content_sha256": "ff5ff6f857fb2221f3695be876b570765a1199fb5fe18593443d87fe5999d8f7",
+          "raw_file_validation": {
+            "sha256": "8f720ba21db90bdce089be8f9c14025755f7b2e65b46eb8f9f172184858d31ff",
+            "inventory_matches": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "P6.2",
+      "question": "Existem contratações de material de escritório no Rio de Janeiro em 2025 com informações de fornecedor, órgão e modalidade?",
+      "answer": "Sim, existem contratações de material de escritório no Rio de Janeiro em 2025 com informações de fornecedor, órgão e modalidade. Exemplos: 1) Contrato com SC SOLUCOES E EMPREENDIMENTOS LTDA (orgão: MUNICIPIO DE QUISSAMA, modalidade: Compras); 2) Contrato com LRD PUPE MERCANTIL LTDA (orgão: FUNDO MUNICIPAL DE ASSISTENCIA SOCIAL, modalidade: Compras).",
+      "route": {
+        "bases_selecionadas": [
+          "estruturada"
+        ],
+        "justificativa": "A pergunta requer evidencia das bases: estruturada.",
+        "confidence": 0.8
+      },
+      "confidence": "alta",
+      "refusal": false,
+      "refusal_reason": null,
+      "latencies_cli_ms": {
+        "rota": 398.827200056985,
+        "perguntar": 35891.92619989626
+      },
+      "retrieval": [
+        {
+          "bases": [
+            "estruturada"
+          ],
+          "escopos": [
+            "oficial"
+          ],
+          "filtros": {
+            "data_vigencia": [
+              {
+                "operator": ">=",
+                "value": "2025-01-01",
+                "optional": true
+              },
+              {
+                "operator": "<",
+                "value": "2026-01-01",
+                "optional": true
+              }
+            ]
+          },
+          "k": 10,
+          "fetch_k": 50,
+          "rrf_k": 60,
+          "evidencias": [
+            {
+              "chunk_id": "contratos_estruturado:c0f49000f9c2a391:chunk-1-e7c6651b79ae",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_f9220958f3964419_c0f49000f9c2.json",
+              "score": 0.029906956136464335
+            },
+            {
+              "chunk_id": "contratos_estruturado:95db6df453e39a4a:chunk-1-97d1d3bce7ae",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_0da426d3175b1170_95db6df453e3.json",
+              "score": 0.028205128205128206
+            },
+            {
+              "chunk_id": "contratos_estruturado:fc20c08e9ffc0053:chunk-1-a4e3be1c7df8",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_bf675ea6858a7aca_fc20c08e9ffc.json",
+              "score": 0.02736726874657909
+            },
+            {
+              "chunk_id": "contratos_estruturado:dce556273c13e09f:chunk-1-30293e18da23",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_8301ff839eae664f_dce556273c13.json",
+              "score": 0.02668564312399929
+            },
+            {
+              "chunk_id": "contratos_estruturado:8692a0442d0e6b7d:chunk-1-75fc9ac40400",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_c40fb6c8d5ccf6ef_8692a0442d0e.json",
+              "score": 0.02580128205128205
+            },
+            {
+              "chunk_id": "contratos_estruturado:2247102922059192:chunk-1-aab74e8297b8",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_6faf9e3ade226d39_224710292205.json",
+              "score": 0.025779967159277502
+            },
+            {
+              "chunk_id": "contratos_estruturado:308e10dc4e69408f:chunk-1-fcb816326d07",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_8f9659d4304e4ee5_308e10dc4e69.json",
+              "score": 0.02557544757033248
+            },
+            {
+              "chunk_id": "contratos_estruturado:a1f64de4bde32486:chunk-1-2a57efcb26f3",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_d727ca3a8e2a3fe1_a1f64de4bde3.json",
+              "score": 0.02523465148484382
+            },
+            {
+              "chunk_id": "contratos_estruturado:1539f807210b2f13:chunk-1-5206f447388a",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_5937b8e55b2bcfd6_1539f807210b.json",
+              "score": 0.02456928838951311
+            },
+            {
+              "chunk_id": "contratos_estruturado:6ec9899a4f21a663:chunk-1-b67bdf460a3f",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_eaabfa910c83040b_6ec9899a4f21.json",
+              "score": 0.023430301434776885
+            }
+          ]
+        }
+      ],
+      "tokens": {
+        "prompt": 1666,
+        "completion": 611,
+        "total": 2277
+      },
+      "embedding_calls": 0,
+      "embedding_cache_hits": 1,
+      "generation_calls": 1,
+      "sensitivity_events": [
+        {
+          "confidence_level": "alta",
+          "is_refusal": false,
+          "bases_consultadas": [
+            "estruturada"
+          ],
+          "num_sources": 2,
+          "restritos_descartados": 0,
+          "mascaramentos": {},
+          "chunks_no_prompt": 3,
+          "chunks_fora_do_orcamento": 7
+        }
+      ],
+      "cited_evidence": [
+        {
+          "chunk_id": "contratos_estruturado:c0f49000f9c2a391:chunk-1-e7c6651b79ae",
+          "base_id": "contratos_estruturado",
+          "source_file": "data/raw/v6/contratos_estruturado/registro_f9220958f3964419_c0f49000f9c2.json",
+          "text_masked": "{\n  \"anoContrato\": 2025,\n  \"categoriaProcesso\": {\n    \"id\": 2,\n    \"nome\": \"Compras\"\n  },\n  \"codigoPaisFornecedor\": \"BRA\",\n  \"dataAssinatura\": \"2025-01-20\",\n  \"dataAtualizacao\": \"2025-01-21T16:53:42\",\n  \"dataAtualizacaoGlobal\": \"2025-01-21T16:53:42\",\n  \"dataPublicacaoPncp\": \"2025-01-21T16:53:15\",\n  \"dataVigenciaFim\": \"2025-03-20\",\n  \"dataVigenciaInicio\": \"2025-01-20\",\n  \"emendaParlamentar\": null,\n  \"frutoAdesao\": null,\n  \"identificadorCipi\": null,\n  \"informacaoComplementar\": null,\n  \"niFornecedor\": \"19475521000123\",\n  \"niFornecedorSubContratado\": null,\n  \"nomeFornecedorSubContratado\": null,\n  \"nomeRazaoSocialFornecedor\": \"SC SOLUCOES E EMPREENDIMENTOS LTDA\",\n  \"numeroContratoEmpenho\": \"22\",\n  \"numeroControlePNCP\": \"31505027000160-2-000001/2025\",\n  \"numeroControlePncpAta\": null,\n  \"numeroControlePncpCompra\": \"31505027000160-1-000131/2024\",\n  \"numeroParcelas\": 1,\n  \"numeroRetificacao\": 0,\n  \"objetoContrato\": \"Aquisicao de Material de Consumo   Pontos de acesso a internet  e Aquisicao de Material Permanente  Pontos de acesso a internet  e Servico   Pontos de acesso a internet \",\n  \"orgaoEntidade\": {\n    \"cnpj\": \"31505027000160\",\n    \"esferaId\": \"M\",\n    \"poderId\": \"N\",\n    \"razaoSocial\": \"MUNICIPIO DE QUISSAMA\"\n  },\n  \"orgaoSubRogado\": null,\n  \"processo\": \"1111\",\n  \"receita\": false,\n  \"sequencialContrato\": 1,\n  \"temRemanejamento\": null,\n  \"tipoContrato\": {\n    \"id\": 1,\n    \"nome\": \"Contrato (termo inicial)\"\n  },\n  \"tipoPessoa\": \"PJ\",\n  \"tipoPessoaSubContratada\": null,\n  \"unidadeOrgao\": {\n    \"codigoIbge\": \"3304151\",\n    \"codigoUnidade\": \"0000\",\n    \"municipioNome\": \"Quissamã\",\n    \"nomeUnidade\": \"PREFEITURA MUNICIPAL DE QUISSAMA\",\n    \"ufNome\": \"Rio de Janeiro\",\n    \"ufSigla\": \"RJ\"\n  },\n  \"unidadeSubRogada\": null,\n  \"urlCipi\": null,\n  \"usuarioNome\": \"Governançabrasil Tecnologia e Gestão em Serviços\",\n  \"valorAcumulado\": 13210.0,\n  \"valorGlobal\": 13210.0,\n  \"valorInicial\": 13210.0,\n  \"valorParcela\": 13210.0\n}",
+          "masking": {},
+          "inventory_version": "v6",
+          "chunk_content_sha256": "e7c6651b79ae31df7912b18bebfa19e90aa9dd895168f3c4056fdf606570fa04",
+          "raw_file_validation": {
+            "sha256": "c0f49000f9c2a391fc3f24febbdb9bbad18ff5ab3e650b3f6bf754eba71eab3d",
+            "inventory_matches": true
+          }
+        },
+        {
+          "chunk_id": "contratos_estruturado:95db6df453e39a4a:chunk-1-97d1d3bce7ae",
+          "base_id": "contratos_estruturado",
+          "source_file": "data/raw/v6/contratos_estruturado/registro_0da426d3175b1170_95db6df453e3.json",
+          "text_masked": "{\n  \"anoContrato\": 2025,\n  \"categoriaProcesso\": {\n    \"id\": 2,\n    \"nome\": \"Compras\"\n  },\n  \"codigoPaisFornecedor\": null,\n  \"dataAssinatura\": \"2025-03-24\",\n  \"dataAtualizacao\": \"2025-06-17T16:26:11\",\n  \"dataAtualizacaoGlobal\": \"2025-06-17T16:26:11\",\n  \"dataPublicacaoPncp\": \"2025-06-17T16:26:11\",\n  \"dataVigenciaFim\": \"2025-09-23\",\n  \"dataVigenciaInicio\": \"2025-03-24\",\n  \"emendaParlamentar\": null,\n  \"frutoAdesao\": null,\n  \"identificadorCipi\": \"111.11-011\",\n  \"informacaoComplementar\": \"\",\n  \"niFornecedor\": \"46925633000101\",\n  \"niFornecedorSubContratado\": null,\n  \"nomeFornecedorSubContratado\": null,\n  \"nomeRazaoSocialFornecedor\": \"LRD PUPE MERCANTIL LTDA\",\n  \"numeroContratoEmpenho\": \"0097/25\",\n  \"numeroControlePNCP\": \"01197548000136-2-000002/2025\",\n  \"numeroControlePncpAta\": null,\n  \"numeroControlePncpCompra\": \"01197548000136-1-000003/2024\",\n  \"numeroParcelas\": 1,\n  \"numeroRetificacao\": 0,\n  \"objetoContrato\": \"Registro de preços para futura e eventual aquisição de material de expediente (papel A4) para atender a Secretaria Municipal de Desenvolvimento Humano e Social, Secretaria Municipal de Administração e Recursos Humanos, Secretaria Municipal de Saúde, Fundação Cultural Jornalista Oswaldo Lima e o Instituto Municipal de Trânsito e Transporte do Município de Campos dos Goytacazes.\",\n  \"orgaoEntidade\": {\n    \"cnpj\": \"01197548000136\",\n    \"esferaId\": \"M\",\n    \"poderId\": \"E\",\n    \"razaoSocial\": \"FUNDO MUNICIPAL DE ASSISTENCIA SOCIAL\"\n  },\n  \"orgaoSubRogado\": null,\n  \"processo\": \"000003/24\",\n  \"receita\": false,\n  \"sequencialContrato\": 2,\n  \"temRemanejamento\": null,\n  \"tipoContrato\": {\n    \"id\": 1,\n    \"nome\": \"Contrato (termo inicial)\"\n  },\n  \"tipoPessoa\": \"PJ\",\n  \"tipoPessoaSubContratada\": null,\n  \"unidadeOrgao\": {\n    \"codigoIbge\": \"3301009\",\n    \"codigoUnidade\": \"8\",\n    \"municipioNome\": \"Campos dos Goytacazes\",\n    \"nomeUnidade\": \"FUNDO MUNICIPAL DE ASSISTENCIA SOCIAL\",\n    \"ufNome\": \"Rio de Janeiro\",\n    \"ufSigla\": \"RJ\"\n  },\n  \"unidadeSubRogada\": null,\n  \"urlCipi\": \"\",\n  \"usuarioNome\": \"Fiorilli Software\",\n  \"valorAcumulado\": 0.0,\n  \"valorGlobal\": 194427.85,\n  \"valorInicial\": 194427.85,\n  \"valorParcela\": 0.0\n}",
+          "masking": {},
+          "inventory_version": "v6",
+          "chunk_content_sha256": "97d1d3bce7aee91fb532635d1af05f7808473d4d8667a1331f3d0a3a2989db69",
+          "raw_file_validation": {
+            "sha256": "95db6df453e39a4a0305b49a899bc85319b5fd7dce2bd320ccd73f770c3ec905",
+            "inventory_matches": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "P6.3",
+      "question": "Quais regras se aplicam à participação de microempresas e quais contratações de material de escritório do corpus usam modalidades compatíveis com essas regras?",
+      "answer": "As microempresas e empresas de pequeno porte estão sujeitas a regras como a dispensa de reuniões e assembleias (Art. 70), substituídas por deliberação representativa, e a possibilidade de participação em ações judiciais (Art. 74). Para contratações de material de escritório, as modalidades compatíveis dependem da aplicação das regras de simplificação previstas no Art. 49, III, que exigem que o tratamento diferenciado seja vantajoso à administração ou não represente prejuízo ao objeto contratado.",
+      "route": {
+        "bases_selecionadas": [
+          "normativa",
+          "estruturada"
+        ],
+        "justificativa": "A pergunta requer evidencia das bases: normativa, estruturada.",
+        "confidence": 0.85
+      },
+      "confidence": "alta",
+      "refusal": false,
+      "refusal_reason": null,
+      "latencies_cli_ms": {
+        "rota": 404.4065000489354,
+        "perguntar": 35220.72930005379
+      },
+      "retrieval": [
+        {
+          "bases": [
+            "estruturada",
+            "normativa"
+          ],
+          "escopos": [
+            "oficial"
+          ],
+          "filtros": {},
+          "k": 10,
+          "fetch_k": 50,
+          "rrf_k": 60,
+          "evidencias": [
+            {
+              "chunk_id": "editais_normativo:8f720ba21db90bdc:chunk-197-5429e2f21544",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_8f720ba21db90bdc_8f720ba21db9.html",
+              "score": 0.03125763125763126
+            },
+            {
+              "chunk_id": "editais_normativo:8f720ba21db90bdc:chunk-267-3d08704c8d5b",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_8f720ba21db90bdc_8f720ba21db9.html",
+              "score": 0.02788769549651404
+            },
+            {
+              "chunk_id": "editais_normativo:8f720ba21db90bdc:chunk-274-b595dd3cffbd",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_8f720ba21db90bdc_8f720ba21db9.html",
+              "score": 0.026333113890717574
+            },
+            {
+              "chunk_id": "editais_normativo:a5b21177bdc78c93:pagina-2:chunk-3-8202a87431df",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_a5b21177bdc78c93_a5b21177bdc7.pdf",
+              "score": 0.024696969696969696
+            },
+            {
+              "chunk_id": "editais_normativo:8f720ba21db90bdc:chunk-4-0eb913277ef9",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_8f720ba21db90bdc_8f720ba21db9.html",
+              "score": 0.024652147610405323
+            },
+            {
+              "chunk_id": "editais_normativo:8f720ba21db90bdc:chunk-280-3400459ddb02",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_8f720ba21db90bdc_8f720ba21db9.html",
+              "score": 0.019433962264150943
+            },
+            {
+              "chunk_id": "editais_normativo:8f720ba21db90bdc:chunk-195-2806c93b0dc5",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_8f720ba21db90bdc_8f720ba21db9.html",
+              "score": 0.01639344262295082
+            },
+            {
+              "chunk_id": "editais_normativo:8f720ba21db90bdc:chunk-196-314815a3d028",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_8f720ba21db90bdc_8f720ba21db9.html",
+              "score": 0.016129032258064516
+            },
+            {
+              "chunk_id": "editais_normativo:51d64c0a174ebcf7:pagina-29:chunk-1-b72dbcf428f8",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_51d64c0a174ebcf7_51d64c0a174e.pdf",
+              "score": 0.015873015873015872
+            },
+            {
+              "chunk_id": "editais_normativo:8f720ba21db90bdc:chunk-190-762f293a1062",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_8f720ba21db90bdc_8f720ba21db9.html",
+              "score": 0.015625
+            }
+          ]
+        }
+      ],
+      "tokens": {
+        "prompt": 1258,
+        "completion": 673,
+        "total": 1931
+      },
+      "embedding_calls": 0,
+      "embedding_cache_hits": 1,
+      "generation_calls": 1,
+      "sensitivity_events": [
+        {
+          "confidence_level": "alta",
+          "is_refusal": false,
+          "bases_consultadas": [
+            "normativa",
+            "estruturada"
+          ],
+          "num_sources": 3,
+          "restritos_descartados": 0,
+          "mascaramentos": {},
+          "chunks_no_prompt": 3,
+          "chunks_fora_do_orcamento": 7
+        }
+      ],
+      "cited_evidence": [
+        {
+          "chunk_id": "editais_normativo:8f720ba21db90bdc:chunk-197-5429e2f21544",
+          "base_id": "editais_normativo",
+          "source_file": "data/raw/v6/editais_normativo/reuso_8f720ba21db90bdc_8f720ba21db9.html",
+          "text_masked": "Art. 49. Não se aplica o disposto nos arts. 47 e 48 desta Lei Complementar quando:\nI -\n(Revogado pela Lei Complementar nº 147, de 7/8/2014, publicada no DOU de 8/8/2014, com produção de efeitos a partir de 1º de janeiro do primeiro ano subsequente ao da publicação)\nII - não houver um mínimo de 3 (três) fornecedores competitivos enquadrados como microempresas ou empresas de pequeno porte sediados local ou regionalmente e capazes de cumprir as exigências estabelecidas no instrumento convocatório;\nIII - o tratamento diferenciado e simplificado para as microempresas e empresas de pequeno porte não for vantajoso para a administração pública ou representar prejuízo ao conjunto ou complexo do objeto a ser contratado;\nIV - a licitação for dispensável ou inexigível, nos termos dos arts. 24 e 25 da Lei nº 8.666, de 21 de junho de 1993, excetuando- se as dispensas tratadas pelos incisos I e II do art. 24 da mesma Lei, nas quais a compra deverá ser feita preferencialmente de microempresas e empresas de pequeno porte, aplicando-se o disposto no inciso I do art. 48.\n(Inciso com redação dada pela Lei Complementar nº 147, de 7/8/2014)\nSeção II\nAcesso ao Mercado Externo\n(Seção acrescida pela Lei Co",
+          "masking": {},
+          "inventory_version": "v6",
+          "chunk_content_sha256": "5429e2f2154468ea478064903c7ce95c11163ee93db5e50145ea89a3f1f96e0f",
+          "raw_file_validation": {
+            "sha256": "8f720ba21db90bdce089be8f9c14025755f7b2e65b46eb8f9f172184858d31ff",
+            "inventory_matches": true
+          }
+        },
+        {
+          "chunk_id": "editais_normativo:8f720ba21db90bdc:chunk-267-3d08704c8d5b",
+          "base_id": "editais_normativo",
+          "source_file": "data/raw/v6/editais_normativo/reuso_8f720ba21db90bdc_8f720ba21db9.html",
+          "text_masked": "Art. 70. As microempresas e as empresas de pequeno porte são desobrigadas da realização de reuniões e assembleias em qualquer das situações previstas na legislação civil, as quais serão substituídas por deliberação representativa do primeiro número inteiro superior à metade do capital social.\n§ 1º O disposto no\ncaput\ndeste artigo não se aplica caso haja disposição contratual em contrário, caso ocorra hipótese de justa causa que enseje a exclusão de sócio ou caso um ou mais sócios ponham em risco a continuidade da empresa em virtude de atos de inegável gravidade.\n§ 2º Nos casos referidos no § 1º deste artigo, realizar-se-á reunião ou assembleia de acordo com a legislação civil.",
+          "masking": {},
+          "inventory_version": "v6",
+          "chunk_content_sha256": "3d08704c8d5bdeaac4a8af1ed4dee5360fdc4bfd59d2e9c1ff03a2c332e6b137",
+          "raw_file_validation": {
+            "sha256": "8f720ba21db90bdce089be8f9c14025755f7b2e65b46eb8f9f172184858d31ff",
+            "inventory_matches": true
+          }
+        },
+        {
+          "chunk_id": "editais_normativo:8f720ba21db90bdc:chunk-274-b595dd3cffbd",
+          "base_id": "editais_normativo",
+          "source_file": "data/raw/v6/editais_normativo/reuso_8f720ba21db90bdc_8f720ba21db9.html",
+          "text_masked": "Art. 74. Aplica-se às microempresas e às empresas de pequeno porte de que trata esta Lei Complementar o disposto no § 1º do art. 8º da Lei nº 9.099, de 26 de setembro de 1995, e no inciso I do\ncaput\ndo art. 6º da Lei nº 10.259, de 12 de julho de 2001, as quais, assim como as pessoas físicas capazes, passam a ser admitidas como proponentes de ação perante o Juizado Especial, excluídos os cessionários de direito de pessoas jurídicas.",
+          "masking": {},
+          "inventory_version": "v6",
+          "chunk_content_sha256": "b595dd3cffbd944d501651430fc624914f2ee7c5840ed439e460a1144177fc79",
+          "raw_file_validation": {
+            "sha256": "8f720ba21db90bdce089be8f9c14025755f7b2e65b46eb8f9f172184858d31ff",
+            "inventory_matches": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "F1",
+      "question": "Em 2025, órgãos estaduais do Rio de Janeiro pagaram mais por ambulâncias tipo D do que os municípios fluminenses? Compare a mediana do valor por veículo considerando apenas compras tecnicamente equivalentes, informe as modalidades usadas e cite os editais que mostram as especificações técnicas.",
+      "answer": "Não há evidência suficiente para comparar os valores de ambulâncias tipo D entre órgãos estaduais e municipais, pois os dados fornecidos não filtram especificamente esse tipo de veículo. As mediana mencionada para esfera estadual (R$ 277.811,82) e municipal (R$ 141.684,06) abrangem contratos com termos como 'ambulância', 'compare', 'veículo', etc., mas não especificam 'tipo D'. Além disso, os editais citados no contexto não mencionam especificações técnicas para ambulâncias.",
+      "route": {
+        "bases_selecionadas": [
+          "estruturada",
+          "agregada"
+        ],
+        "justificativa": "A pergunta requer evidencia das bases: estruturada, agregada.",
+        "confidence": 0.85
+      },
+      "confidence": "recusado",
+      "refusal": true,
+      "refusal_reason": "sem_evidencia",
+      "latencies_cli_ms": {
+        "rota": 395.4993999795988,
+        "perguntar": 41897.88679999765
+      },
+      "retrieval": [
+        {
+          "bases": [
+            "agregada",
+            "estruturada"
+          ],
+          "escopos": [
+            "oficial"
+          ],
+          "filtros": {
+            "data_vigencia": [
+              {
+                "operator": ">=",
+                "value": "2025-01-01",
+                "optional": true
+              },
+              {
+                "operator": "<",
+                "value": "2026-01-01",
+                "optional": true
+              }
+            ]
+          },
+          "k": 10,
+          "fetch_k": 50,
+          "rrf_k": 60,
+          "evidencias": [
+            {
+              "chunk_id": "contratos_estruturado:04237a07e0df9983:chunk-1-308c197ada8f",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_fcdd40bf3b7b32b3_04237a07e0df.json",
+              "score": 0.028381642512077296
+            },
+            {
+              "chunk_id": "contratos_estruturado:263d55f46c467e64:chunk-1-b69f0b23e10e",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_70f590ea7f639fa7_263d55f46c46.json",
+              "score": 0.027583600982429624
+            },
+            {
+              "chunk_id": "contratos_estruturado:69f78f1a941b046f:chunk-1-7674d65174d3",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_b8eb8bdd916aa7ad_69f78f1a941b.json",
+              "score": 0.02667140825035562
+            },
+            {
+              "chunk_id": "contratos_estruturado:b4a005f5f89ad359:chunk-1-927754b8c8af",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_1893e1e71c875244_b4a005f5f89a.json",
+              "score": 0.026387470207694927
+            },
+            {
+              "chunk_id": "contratos_estruturado:1a19a82d8ba50185:chunk-1-3e0d6107f46a",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_ef9bcc3f743854fd_1a19a82d8ba5.json",
+              "score": 0.02619736419157827
+            },
+            {
+              "chunk_id": "contratos_estruturado:2247102922059192:chunk-1-aab74e8297b8",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_6faf9e3ade226d39_224710292205.json",
+              "score": 0.02607709750566893
+            },
+            {
+              "chunk_id": "contratos_estruturado:67b2b2bac3ceff99:chunk-1-83b7f9432ede",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_ba875df73a5212e4_67b2b2bac3ce.json",
+              "score": 0.02578981302385558
+            },
+            {
+              "chunk_id": "contratos_estruturado:92750c19d56570b8:chunk-1-13442bf7e252",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_69d146307a456674_92750c19d565.json",
+              "score": 0.025525990099009903
+            },
+            {
+              "chunk_id": "contratos_estruturado:1539f807210b2f13:chunk-1-5206f447388a",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_5937b8e55b2bcfd6_1539f807210b.json",
+              "score": 0.02533373786407767
+            },
+            {
+              "chunk_id": "contratos_estruturado:a86c841c70ab10e2:chunk-1-e80b2a5bfc5e",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_11434845ea1ed78d_a86c841c70ab.json",
+              "score": 0.025278219395866455
+            }
+          ]
+        }
+      ],
+      "tokens": {
+        "prompt": 1824,
+        "completion": 795,
+        "total": 2619
+      },
+      "embedding_calls": 0,
+      "embedding_cache_hits": 1,
+      "generation_calls": 1,
+      "sensitivity_events": [
+        {
+          "confidence_level": "recusado",
+          "is_refusal": true,
+          "bases_consultadas": [
+            "estruturada",
+            "agregada"
+          ],
+          "num_sources": 0,
+          "restritos_descartados": 0,
+          "mascaramentos": {},
+          "chunks_no_prompt": 4,
+          "chunks_fora_do_orcamento": 8
+        }
+      ],
+      "cited_evidence": []
+    },
+    {
+      "case_id": "cenario1-marina",
+      "question": "Qual foi o valor médio por quilo de arroz contratado por municípios do RJ em 2025, e em quais modalidades?",
+      "answer": "Não há evidência suficiente para responder sobre o valor médio por quilo de arroz contratado em 2025, pois os registros fornecidos não mencionam contratações específicas de arroz ou cálculos por quilo.",
+      "route": {
+        "bases_selecionadas": [
+          "estruturada"
+        ],
+        "justificativa": "A pergunta requer evidencia das bases: estruturada.",
+        "confidence": 0.8
+      },
+      "confidence": "recusado",
+      "refusal": true,
+      "refusal_reason": "sem_evidencia",
+      "latencies_cli_ms": {
+        "rota": 403.21800007950515,
+        "perguntar": 20061.18309998419
+      },
+      "retrieval": [
+        {
+          "bases": [
+            "estruturada"
+          ],
+          "escopos": [
+            "oficial"
+          ],
+          "filtros": {
+            "data_vigencia": [
+              {
+                "operator": ">=",
+                "value": "2025-01-01",
+                "optional": true
+              },
+              {
+                "operator": "<",
+                "value": "2026-01-01",
+                "optional": true
+              }
+            ],
+            "esfera": {
+              "operator": "==",
+              "value": "municipal",
+              "optional": true
+            }
+          },
+          "k": 10,
+          "fetch_k": 50,
+          "rrf_k": 60,
+          "evidencias": [
+            {
+              "chunk_id": "contratos_estruturado:2247102922059192:chunk-1-aab74e8297b8",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_6faf9e3ade226d39_224710292205.json",
+              "score": 0.02904040404040404
+            },
+            {
+              "chunk_id": "contratos_estruturado:4c1e8046be5c04ca:chunk-1-b75dd562280f",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_9c214404a3bab54d_4c1e8046be5c.json",
+              "score": 0.028373015873015873
+            },
+            {
+              "chunk_id": "contratos_estruturado:a1f64de4bde32486:chunk-1-2a57efcb26f3",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_d727ca3a8e2a3fe1_a1f64de4bde3.json",
+              "score": 0.028068137824235385
+            },
+            {
+              "chunk_id": "contratos_estruturado:263d55f46c467e64:chunk-1-b69f0b23e10e",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_70f590ea7f639fa7_263d55f46c46.json",
+              "score": 0.02684684684684685
+            },
+            {
+              "chunk_id": "contratos_estruturado:04237a07e0df9983:chunk-1-308c197ada8f",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_fcdd40bf3b7b32b3_04237a07e0df.json",
+              "score": 0.026785714285714288
+            },
+            {
+              "chunk_id": "contratos_estruturado:a86c841c70ab10e2:chunk-1-e80b2a5bfc5e",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_11434845ea1ed78d_a86c841c70ab.json",
+              "score": 0.02661064425770308
+            },
+            {
+              "chunk_id": "contratos_estruturado:67b2b2bac3ceff99:chunk-1-83b7f9432ede",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_ba875df73a5212e4_67b2b2bac3ce.json",
+              "score": 0.024877149877149878
+            },
+            {
+              "chunk_id": "contratos_estruturado:1ecee118b59dd26f:chunk-1-774bc9056d69",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_6f5d0c0b51dabfc9_1ecee118b59d.json",
+              "score": 0.024610822831727205
+            },
+            {
+              "chunk_id": "contratos_estruturado:c0aa8cf880bbd1ea:chunk-1-e4b64e582082",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_42d43e62836063ca_c0aa8cf880bb.json",
+              "score": 0.024451318309029312
+            },
+            {
+              "chunk_id": "contratos_estruturado:85f77c1063974f1c:chunk-1-ddcff4b9ea0d",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_d74f0c4aeaab958b_85f77c106397.json",
+              "score": 0.02431476569407604
+            }
+          ]
+        }
+      ],
+      "tokens": {
+        "prompt": 1407,
+        "completion": 348,
+        "total": 1755
+      },
+      "embedding_calls": 0,
+      "embedding_cache_hits": 1,
+      "generation_calls": 1,
+      "sensitivity_events": [
+        {
+          "confidence_level": "recusado",
+          "is_refusal": true,
+          "bases_consultadas": [
+            "estruturada"
+          ],
+          "num_sources": 0,
+          "restritos_descartados": 0,
+          "mascaramentos": {},
+          "chunks_no_prompt": 3,
+          "chunks_fora_do_orcamento": 8
+        }
+      ],
+      "cited_evidence": []
+    },
+    {
+      "case_id": "cenario1-rodrigo",
+      "question": "Quais contratos de licenciamento de software foram assinados por órgãos estaduais do RJ acima de R$ 500 mil em 2025, e quem foram os fornecedores?",
+      "answer": "O contrato de licenciamento de software foi assinado pelo MINISTERIO PUBLICO DO ESTADO DO RIO DE JANEIRO, com o fornecedor ALTITUDO COMERCIO DE PRODUTOS LTDA, no valor de R$ 720.000,00.",
+      "route": {
+        "bases_selecionadas": [
+          "estruturada"
+        ],
+        "justificativa": "A pergunta requer evidencia das bases: estruturada.",
+        "confidence": 0.8
+      },
+      "confidence": "alta",
+      "refusal": false,
+      "refusal_reason": null,
+      "latencies_cli_ms": {
+        "rota": 398.4146999428049,
+        "perguntar": 43742.24429996684
+      },
+      "retrieval": [
+        {
+          "bases": [
+            "estruturada"
+          ],
+          "escopos": [
+            "oficial"
+          ],
+          "filtros": {
+            "valor": {
+              "operator": ">=",
+              "value": 500000.0,
+              "optional": true
+            },
+            "data_assinatura": [
+              {
+                "operator": ">=",
+                "value": "2025-01-01",
+                "optional": true
+              },
+              {
+                "operator": "<",
+                "value": "2026-01-01",
+                "optional": true
+              }
+            ],
+            "esfera": {
+              "operator": "==",
+              "value": "estadual",
+              "optional": true
+            }
+          },
+          "k": 10,
+          "fetch_k": 50,
+          "rrf_k": 60,
+          "evidencias": [
+            {
+              "chunk_id": "contratos_estruturado:96504be426fa8001:chunk-1-4367a1edf908",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_69acd4db3e94c748_96504be426fa.json",
+              "score": 0.03131881575727918
+            },
+            {
+              "chunk_id": "contratos_estruturado:73655626b048f3e1:chunk-1-9868e9d6507a",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_68c18b14c9392c62_73655626b048.json",
+              "score": 0.03128054740957967
+            },
+            {
+              "chunk_id": "contratos_estruturado:d08a27fa21d583ac:chunk-1-7d1eb41873b8",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_1f3f3ffa8e7ad35c_d08a27fa21d5.json",
+              "score": 0.03128054740957967
+            },
+            {
+              "chunk_id": "contratos_estruturado:55b28cf23a09abc6:chunk-1-c67cac42472c",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_4f06aea0ea7b86b8_55b28cf23a09.json",
+              "score": 0.03125763125763126
+            },
+            {
+              "chunk_id": "contratos_estruturado:56594328abe4ee4c:chunk-1-eb37fec24626",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_64b0f4a170134056_56594328abe4.json",
+              "score": 0.030886196246139225
+            },
+            {
+              "chunk_id": "contratos_estruturado:ada315a5bfc5d357:chunk-1-042c752bdde5",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_8d26fd5d302f3df4_ada315a5bfc5.json",
+              "score": 0.03057889822595705
+            },
+            {
+              "chunk_id": "contratos_estruturado:a18a62d71ad388a0:chunk-1-9f1c116b8929",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_fe1ecff4a2150b15_a18a62d71ad3.json",
+              "score": 0.030330882352941176
+            },
+            {
+              "chunk_id": "contratos_estruturado:1539f807210b2f13:chunk-1-5206f447388a",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_5937b8e55b2bcfd6_1539f807210b.json",
+              "score": 0.030117753623188408
+            },
+            {
+              "chunk_id": "contratos_estruturado:ebf49e546286912c:chunk-1-b0c14abd0511",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_cbfec6f8f918ad01_ebf49e546286.json",
+              "score": 0.02967032967032967
+            },
+            {
+              "chunk_id": "contratos_estruturado:1e651543b2ddc5a1:chunk-1-cba7c3efdcc8",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_27cc4d6a321ba619_1e651543b2dd.json",
+              "score": 0.029211087420042643
+            }
+          ]
+        }
+      ],
+      "tokens": {
+        "prompt": 1550,
+        "completion": 851,
+        "total": 2401
+      },
+      "embedding_calls": 0,
+      "embedding_cache_hits": 1,
+      "generation_calls": 1,
+      "sensitivity_events": [
+        {
+          "confidence_level": "alta",
+          "is_refusal": false,
+          "bases_consultadas": [
+            "estruturada"
+          ],
+          "num_sources": 1,
+          "restritos_descartados": 0,
+          "mascaramentos": {},
+          "chunks_no_prompt": 3,
+          "chunks_fora_do_orcamento": 8
+        }
+      ],
+      "cited_evidence": [
+        {
+          "chunk_id": "contratos_estruturado:73655626b048f3e1:chunk-1-9868e9d6507a",
+          "base_id": "contratos_estruturado",
+          "source_file": "data/raw/v6/contratos_estruturado/registro_68c18b14c9392c62_73655626b048.json",
+          "text_masked": "{\n  \"anoContrato\": 2025,\n  \"categoriaProcesso\": {\n    \"id\": 3,\n    \"nome\": \"Informática (TIC)\"\n  },\n  \"codigoPaisFornecedor\": null,\n  \"dataAssinatura\": \"2025-02-03\",\n  \"dataAtualizacao\": \"2025-02-05T10:20:46\",\n  \"dataAtualizacaoGlobal\": \"2025-05-05T15:50:34\",\n  \"dataPublicacaoPncp\": \"2025-02-05T10:20:45\",\n  \"dataVigenciaFim\": \"2026-02-03\",\n  \"dataVigenciaInicio\": \"2025-02-03\",\n  \"emendaParlamentar\": null,\n  \"frutoAdesao\": null,\n  \"identificadorCipi\": null,\n  \"informacaoComplementar\": null,\n  \"niFornecedor\": \"46006799000124\",\n  \"niFornecedorSubContratado\": null,\n  \"nomeFornecedorSubContratado\": null,\n  \"nomeRazaoSocialFornecedor\": \"ALTITUDO COMERCIO DE PRODUTOS LTDA\",\n  \"numeroContratoEmpenho\": \"7\",\n  \"numeroControlePNCP\": \"28305936000140-2-000008/2025\",\n  \"numeroControlePncpAta\": null,\n  \"numeroControlePncpCompra\": \"28305936000140-1-000273/2024\",\n  \"numeroParcelas\": 1,\n  \"numeroRetificacao\": 0,\n  \"objetoContrato\": \"Fornecimento de licenças de uso do software Autodesk AutoCAD, incluindo suporte técnico e atualizações, em conformidade com as especificações do Pregão Eletrônico n.º 61/2024.\",\n  \"orgaoEntidade\": {\n    \"cnpj\": \"28305936000140\",\n    \"esferaId\": \"E\",\n    \"poderId\": \"E\",\n    \"razaoSocial\": \"MINISTERIO PUBLICO DO ESTADO DO RIO DE JANEIRO\"\n  },\n  \"orgaoSubRogado\": null,\n  \"processo\": \"20.22.0001.0040383.2024-49\",\n  \"receita\": false,\n  \"sequencialContrato\": 8,\n  \"temRemanejamento\": null,\n  \"tipoContrato\": {\n    \"id\": 1,\n    \"nome\": \"Contrato (termo inicial)\"\n  },\n  \"tipoPessoa\": \"PJ\",\n  \"tipoPessoaSubContratada\": null,\n  \"unidadeOrgao\": {\n    \"codigoIbge\": \"3304557\",\n    \"codigoUnidade\": \"925153\",\n    \"municipioNome\": \"Rio de Janeiro\",\n    \"nomeUnidade\": \"ERJ-MINISTÉRIO PUBLICO ESTADO RIO DE JANEIRO\",\n    \"ufNome\": \"Rio de Janeiro\",\n    \"ufSigla\": \"RJ\"\n  },\n  \"unidadeSubRogada\": null,\n  \"urlCipi\": null,\n  \"usuarioNome\": \"Compras.gov.br\",\n  \"valorAcumulado\": null,\n  \"valorGlobal\": 720000.0,\n  \"valorInicial\": 720000.0,\n  \"valorParcela\": 720000.0\n}",
+          "masking": {},
+          "inventory_version": "v6",
+          "chunk_content_sha256": "9868e9d6507a38665135716ae0dd74d95c6ff842c53270676e0ec0a64f196115",
+          "raw_file_validation": {
+            "sha256": "73655626b048f3e1fac04ed52217604044f6f69572b934978214e50b05dcc2c6",
+            "inventory_matches": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "cenario1-claudia",
+      "question": "Sou MEI, posso participar de pregão eletrônico? Tem algum aberto pra material de escritório?",
+      "answer": "Sim, MEIs podem participar de pregão eletrônico conforme Lei 14.133/2021. No contexto fornecido, há um registro de preços para aquisição de materiais de expediente (chunk_id=contratos_estruturado:6810553f654233b3:chunk-1-c941d988bed8), mas não há evidência de licitações abertas no momento.",
+      "route": {
+        "bases_selecionadas": [
+          "normativa",
+          "estruturada"
+        ],
+        "justificativa": "A pergunta requer evidencia das bases: normativa, estruturada.",
+        "confidence": 0.85
+      },
+      "confidence": "alta",
+      "refusal": false,
+      "refusal_reason": null,
+      "latencies_cli_ms": {
+        "rota": 412.6444000285119,
+        "perguntar": 39201.666399952956
+      },
+      "retrieval": [
+        {
+          "bases": [
+            "estruturada",
+            "normativa"
+          ],
+          "escopos": [
+            "oficial"
+          ],
+          "filtros": {},
+          "k": 10,
+          "fetch_k": 50,
+          "rrf_k": 60,
+          "evidencias": [
+            {
+              "chunk_id": "contratos_estruturado:fa159dc62f71330f:chunk-1-862e3a6b12c9",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_6b75b1e6d1cd8d9c_fa159dc62f71.json",
+              "score": 0.031099324975891997
+            },
+            {
+              "chunk_id": "contratos_estruturado:e54d842ceef91a4e:chunk-1-af9d7c1cbcf7",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_78d0bf997be56fd0_e54d842ceef9.json",
+              "score": 0.02886002886002886
+            },
+            {
+              "chunk_id": "contratos_estruturado:6810553f654233b3:chunk-1-c941d988bed8",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_e06a49ad48693aa5_6810553f6542.json",
+              "score": 0.028782894736842105
+            },
+            {
+              "chunk_id": "contratos_estruturado:dad3832f2b1878d9:chunk-1-2f1c2ea96976",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_4209ffd9c0e3ff67_dad3832f2b18.json",
+              "score": 0.027346637102734665
+            },
+            {
+              "chunk_id": "editais_normativo:8f720ba21db90bdc:chunk-32-1612072f60cc",
+              "base_id": "editais_normativo",
+              "source_file": "data/raw/v6/editais_normativo/reuso_8f720ba21db90bdc_8f720ba21db9.html",
+              "score": 0.026767330130404943
+            },
+            {
+              "chunk_id": "contratos_estruturado:e28504c4bbb824cb:chunk-1-4bcca7ba28b8",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_e52a34c2a96e138a_e28504c4bbb8.json",
+              "score": 0.02625745950554135
+            },
+            {
+              "chunk_id": "contratos_estruturado:976e7f0d6deec29d:chunk-1-4e9a0f3e4548",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_d2f8de070a6232fd_976e7f0d6dee.json",
+              "score": 0.02482636323333826
+            },
+            {
+              "chunk_id": "contratos_estruturado:12213570e927d9c5:chunk-1-e34120a42cb5",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_9fdbfb2a3f6144c4_12213570e927.json",
+              "score": 0.02481203007518797
+            },
+            {
+              "chunk_id": "contratos_estruturado:e84c4a44358d9734:chunk-1-734f4a2ec71f",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_920caeec8cb14a10_e84c4a44358d.json",
+              "score": 0.02472929470295581
+            },
+            {
+              "chunk_id": "contratos_estruturado:e31d25061c9f9713:chunk-1-aa8324bf1788",
+              "base_id": "contratos_estruturado",
+              "source_file": "data/raw/v6/contratos_estruturado/registro_e7a5efc18d4c10f6_e31d25061c9f.json",
+              "score": 0.024722804914593947
+            }
+          ]
+        }
+      ],
+      "tokens": {
+        "prompt": 1538,
+        "completion": 632,
+        "total": 2170
+      },
+      "embedding_calls": 0,
+      "embedding_cache_hits": 1,
+      "generation_calls": 1,
+      "sensitivity_events": [
+        {
+          "confidence_level": "alta",
+          "is_refusal": false,
+          "bases_consultadas": [
+            "normativa",
+            "estruturada"
+          ],
+          "num_sources": 1,
+          "restritos_descartados": 0,
+          "mascaramentos": {},
+          "chunks_no_prompt": 3,
+          "chunks_fora_do_orcamento": 7
+        }
+      ],
+      "cited_evidence": [
+        {
+          "chunk_id": "contratos_estruturado:6810553f654233b3:chunk-1-c941d988bed8",
+          "base_id": "contratos_estruturado",
+          "source_file": "data/raw/v6/contratos_estruturado/registro_e06a49ad48693aa5_6810553f6542.json",
+          "text_masked": "{\n  \"amparoLegal\": {\n    \"codigo\": 1,\n    \"descricao\": \"pregão: modalidade de licitação obrigatória para aquisição de bens e serviços comuns\",\n    \"nome\": \"Lei 14.133/2021, Art. 28, I\"\n  },\n  \"anoCompra\": 2025,\n  \"dataAberturaProposta\": \"2025-04-01T08:00:00\",\n  \"dataAtualizacao\": \"2025-04-01T07:19:22\",\n  \"dataAtualizacaoGlobal\": \"2025-09-16T21:43:07\",\n  \"dataEncerramentoProposta\": \"2025-04-11T09:00:00\",\n  \"dataInclusao\": \"2025-04-01T07:19:22\",\n  \"dataPublicacaoPncp\": \"2025-04-01T07:19:22\",\n  \"emendaParlamentar\": null,\n  \"fontesOrcamentarias\": [],\n  \"informacaoComplementar\": \"Em caso de discordância existente entre as quantidades e especificações do objeto descritas no endereço eletrônico www.comprasnet.gov.br, com as quantidades e especificações constantes deste Edital, prevalecerão as constantes do Edital.     Para as respostas de esclarecimentos e impugnações deste edital acesse o link: https://cnetmobile.estaleiro.serpro.gov.br/comprasnet-web/public/landing?destino=quadro-informativo&compra=92933005900112025\",\n  \"justificativaPresencial\": null,\n  \"linkProcessoEletronico\": null,\n  \"linkSistemaOrigem\": \"https://cnetmobile.estaleiro.serpro.gov.br/comprasnet-web/public/landing?destino=acompanhamento-compra&compra=92933005900112025\",\n  \"modalidadeId\": 6,\n  \"modalidadeNome\": \"Pregão - Eletrônico\",\n  \"modoDisputaId\": 1,\n  \"modoDisputaNome\": \"Aberto\",\n  \"numeroCompra\": \"90011\",\n  \"numeroControlePNCP\": \"43327293000129-1-000001/2025\",\n  \"objetoCompra\": \"Aquisição de materiais de expediente e didático de forma parcelada para atendimento da Secretaria Municipal de Educação e das Unidades de Ensino da Rede Municipal, processado e julgado através da modalidade pregão, sob a forma eletrônica, mediante Sistema de Registro de Preços - SRP, pelo período de 12 (doze) meses.\",\n  \"orgaoEntidade\": {\n    \"cnpj\": \"43327293000129\",\n    \"esferaId\": \"M\",\n    \"poderId\": \"E\",\n    \"razaoSocial\": \"FUNDO MUNICIPAL DE EDUCACAO DE MENDES\"\n  },\n  \"orgaoSubRogado\": null,\n  \"processo\": \"6503/2024\",\n  \"sequencialCompra\": 1,\n  \"situacaoCompraId\": 1,\n  \"situacaoCompraNome\": \"Divulgada no PNCP\",\n  \"srp\": false,\n  \"tipoInstrumentoConvocatorioCodigo\": 1,\n  \"tipoInstrumentoConvocatorioNome\": \"Edital\",\n  \"unidadeOrgao\": {\n    \"codigoIbge\": \"3302809\",\n    \"codigoUnidade\": \"929330\",\n    \"municipioNome\": \"Mendes\",\n    \"nomeUnidade\": \"FUNDO MUNICIPAL DE EDUCAÇAO DE MENDES - RJ\",\n    \"ufNome\": \"Rio de Janeiro\",\n    \"ufSigla\": \"RJ\"\n  },\n  \"unidadeSubRogada\": null,\n  \"usuarioNome\": \"Compras.gov.br\",\n  \"valorTotalEstimado\": 389123.01,\n  \"valorTotalHomologado\": 185957.13\n}",
+          "masking": {},
+          "inventory_version": "v6",
+          "chunk_content_sha256": "c941d988bed8923f02b31d9e2fd31020cd72d114a41fc96dce4079be189362d1",
+          "raw_file_validation": {
+            "sha256": "6810553f654233b3d5cf7732743a604c8754391daac69af3aed658124bc7fbe5",
+            "inventory_matches": true
+          }
+        }
+      ]
+    }
+  ]
+}

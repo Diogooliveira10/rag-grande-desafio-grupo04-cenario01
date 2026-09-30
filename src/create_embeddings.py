@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -262,6 +263,7 @@ def create_embeddings(
     model: str | None = None,
     embed_batch: EmbeddingBatch | None = None,
     dry_run: bool = False,
+    encoding_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if batch_size < 1:
         raise ValueError("batch_size deve ser positivo")
@@ -290,7 +292,10 @@ def create_embeddings(
         if (
             cached
             and cached.get("embedding_cache_schema") == EMBEDDING_CACHE_SCHEMA
-            and cached.get("embedding_input_sha256") == input_digest
+            and (cached.get("embedding_input_sha256") == input_digest or (
+                encoding_config is not None and cached.get("encoding_config") == encoding_config
+            ))
+            and cached.get("encoding_config") == encoding_config
             and cached.get("embedding_provider") == provider
             and cached.get("embedding_endpoint") == endpoint
             and cached.get("embedding_model") == model
@@ -300,6 +305,8 @@ def create_embeddings(
                 pending.setdefault(digest, (str(chunk["text"]), input_digest))
                 continue
             cached_dimension = len(cached_vector)
+            if not all(math.isfinite(value) for value in cached_vector) or not any(cached_vector):
+                raise RuntimeError("cache contém vetor não finito ou norma nula")
             if embedding_dimension is None:
                 embedding_dimension = cached_dimension
             elif cached_dimension != embedding_dimension:
@@ -320,6 +327,7 @@ def create_embeddings(
         "provedor": provider,
         "endpoint": endpoint,
         "dry_run": dry_run,
+        "encoding_config": encoding_config,
     }
     summary["dimensao"] = embedding_dimension or 0
     report_path = report_path or output_path.with_name("embedding_report.json")
@@ -374,6 +382,8 @@ def create_embeddings(
         for (digest, (_, input_digest)), vector in zip(batch, vectors):
             if not isinstance(vector, list) or not vector:
                 raise RuntimeError(f"embedding vazio para o conteúdo {digest[:12]}")
+            if not all(math.isfinite(value) for value in vector) or not any(vector):
+                raise RuntimeError(f"embedding não finito ou norma nula para {digest[:12]}")
             by_digest[digest] = {
                 "chunk_content_sha256": digest,
                 "embedding_input_sha256": input_digest,
@@ -381,6 +391,7 @@ def create_embeddings(
                 "embedding_provider": provider,
                 "embedding_endpoint": endpoint,
                 "embedding_model": model,
+                "encoding_config": encoding_config,
                 "embedding": vector,
             }
         for vector in vectors:
@@ -395,29 +406,29 @@ def create_embeddings(
         summary["lotes"] = int(summary["lotes"]) + 1
         summary["gerados"] = int(summary["gerados"]) + len(batch)
         generated_records = [by_digest[digest] for digest, _ in batch]
-        generated_parts.extend(
-            _write_part_records(
-                output_path,
-                generated_records,
-                first_part_number=next_part_number,
-                max_part_bytes=max_part_bytes,
-            )
+        parts = _write_part_records(
+            output_path,
+            generated_records,
+            first_part_number=next_part_number,
+            max_part_bytes=max_part_bytes,
         )
-        next_part_number = _next_part_number(output_path)
+        generated_parts.extend(parts)
+        next_part_number += len(parts)
         summary["partes_geradas"] = len(generated_parts)
-        ordered = [
-            _materialize_record(
-                chunk,
-                by_digest[_content_sha256(str(chunk["text"]))],
-                _content_sha256(str(chunk["text"])),
-            )
-            for chunk in chunks
-            if _content_sha256(str(chunk["text"])) in by_digest
-        ]
-        _write_cache(output_path, ordered)
         if start + batch_size < len(pending_items) and pause_seconds:
             time.sleep(pause_seconds)
 
+    # Cada lote já está persistido atomicamente em partes para retomada.
+    # Materializar o corpus completo uma vez evita reescrever gigabytes a cada texto.
+    ordered = [
+        _materialize_record(
+            chunk,
+            by_digest[_content_sha256(str(chunk["text"]))],
+            _content_sha256(str(chunk["text"])),
+        )
+        for chunk in chunks
+    ]
+    _write_cache(output_path, ordered)
     _remove_part_files(output_path)
 
     _write_report(
@@ -465,6 +476,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--endpoint", help="sobrescreve o endpoint do provedor")
     parser.add_argument("--model", help="sobrescreve o modelo de embeddings")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--encoding-config", help="JSON da configuração de codificação e checkpoint")
     args = parser.parse_args(argv)
     try:
         summary = create_embeddings(
@@ -478,6 +490,7 @@ def main(argv: list[str] | None = None) -> int:
             endpoint=args.endpoint,
             model=args.model,
             dry_run=args.dry_run,
+            encoding_config=json.loads(args.encoding_config) if args.encoding_config else None,
         )
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as error:
         parser.error(str(error))

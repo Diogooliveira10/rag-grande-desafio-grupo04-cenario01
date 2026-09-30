@@ -1,0 +1,23 @@
+{
+  "version": "v6",
+  "target": 1400,
+  "files": 1400,
+  "by_base": {
+    "pca_agregado": 386,
+    "contratos_estruturado": 625,
+    "atas_conversacional": 376,
+    "editais_normativo": 13
+  },
+  "sphere_files": {
+    "estadual": 83,
+    "federal": 513,
+    "municipal": 804
+  },
+  "max_per_org_per_base": 5,
+  "organizations": 170,
+  "reused_files": 95,
+  "all_source_urls_public_http": true,
+  "absolute_machine_paths_in_metadata": false,
+  "sampling": "purposive; partial coverage; not a census",
+  "target_gap": 0
+}

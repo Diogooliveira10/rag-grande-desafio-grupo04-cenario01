@@ -961,7 +961,7 @@ class PNCPProvider:
                         SourceArtifact(
                             artifact_id=f"{source_ref.stable_id}:contratacao_vinculada",
                             source_ref=source_ref,
-                            url=purchase_base,
+                            url=self.client.consulta_base + self._purchase_path(purchase),
                             artifact_type="json",
                             content_type="application/json",
                             filename="contratacao_vinculada.json",

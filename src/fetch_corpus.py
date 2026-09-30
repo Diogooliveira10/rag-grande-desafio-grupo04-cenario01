@@ -1243,6 +1243,54 @@ def _discovery_configs_compatible(saved: Any, expected: dict[str, Any]) -> bool:
     )
 
 
+def _isolated_pca_checkpoint_matches_manifest(
+    checkpoint: dict[str, Any],
+    manifest: dict[str, Any] | None,
+) -> bool:
+    bases = (manifest or {}).get("bases", [])
+    if len(bases) != 1 or bases[0].get("base_id") != "pca_agregado":
+        return False
+
+    access = bases[0].get("acesso") or {}
+    if access.get("preserve_explicit_sources") is not True or access.get("censo") is not False:
+        return False
+
+    expected_refs = access.get("sources")
+    selection = (checkpoint.get("selection") or {}).get("pca_agregado")
+    items = checkpoint.get("items")
+    if not isinstance(expected_refs, list) or not isinstance(selection, list) or not isinstance(items, dict):
+        return False
+
+    try:
+        expected_ids = {
+            SourceRef.from_dict(source).stable_id
+            for source in expected_refs
+            if isinstance(source, dict)
+        }
+        selected_ids = {
+            SourceRef.from_dict(entry["source_ref"]).stable_id
+            for entry in selection
+            if isinstance(entry, dict) and isinstance(entry.get("source_ref"), dict)
+        }
+    except (TypeError, ValueError, KeyError):
+        return False
+
+    if len(expected_ids) != len(expected_refs) or expected_ids != selected_ids:
+        return False
+
+    for record in items.values():
+        if not isinstance(record, dict) or record.get("base_id") != "pca_agregado":
+            return False
+        source_value = record.get("source_ref")
+        if isinstance(source_value, dict):
+            try:
+                if SourceRef.from_dict(source_value).stable_id not in expected_ids:
+                    return False
+            except (TypeError, ValueError, KeyError):
+                return False
+    return True
+
+
 def _validate_checkpoint(
     checkpoint: dict[str, Any],
     manifest: dict[str, Any] | None,
@@ -1251,12 +1299,16 @@ def _validate_checkpoint(
     staging_path: Path,
     *,
     allow_discovery_manifest_drift: bool = False,
+    allow_isolated_pca_manifest_drift: bool = False,
     expected_external_inputs: dict[str, str] | None = None,
 ) -> ValidationResult:
     errors: list[str] = []
     if checkpoint.get("manifest_hash") != manifest_hash and not (
-        allow_discovery_manifest_drift
-        and _discovery_checkpoint_matches_manifest(checkpoint, manifest)
+        (allow_discovery_manifest_drift and _discovery_checkpoint_matches_manifest(checkpoint, manifest))
+        or (
+            allow_isolated_pca_manifest_drift
+            and _isolated_pca_checkpoint_matches_manifest(checkpoint, manifest)
+        )
     ):
         errors.append("manifest_hash incompatível")
     if checkpoint.get("version") not in {None, f"v{version}"}:
@@ -1278,6 +1330,7 @@ def _validate_checkpoint(
     }
     logical_by_base: dict[str, int] = {}
     source_ids_by_base: dict[str, set[str]] = {}
+    source_purchase_ids_by_base: dict[str, dict[str, str]] = {}
     for logical_id, record in items.items():
         if not isinstance(record, dict):
             errors.append(f"item {logical_id}: registro inválido")
@@ -1306,11 +1359,15 @@ def _validate_checkpoint(
             source_value = record.get("source_ref")
             if isinstance(source_value, dict):
                 try:
-                    source_id = SourceRef.from_dict(source_value).stable_id
+                    source_ref = SourceRef.from_dict(source_value)
+                    source_id = source_ref.stable_id
                 except (TypeError, ValueError, KeyError) as exc:
                     errors.append(f"item {logical_id}: SourceRef inválida: {exc}")
                 else:
                     source_ids_by_base.setdefault(base_id, set()).add(source_id)
+                    purchase_id = str(source_ref.key.get("numeroControlePNCPCompra") or "")
+                    if purchase_id:
+                        source_purchase_ids_by_base.setdefault(base_id, {})[source_id] = purchase_id
 
     selection = checkpoint.get("selection")
     if selection is not None:
@@ -1322,12 +1379,14 @@ def _validate_checkpoint(
                     errors.append(f"selection/{base_id}: não é uma lista")
                     continue
                 seen: set[str] = set()
+                selected_purchase_ids: set[str] = set()
                 for entry in entries:
                     if not isinstance(entry, dict) or not isinstance(entry.get("source_ref"), dict):
                         errors.append(f"selection/{base_id}: entrada inválida")
                         continue
                     try:
-                        source_id = SourceRef.from_dict(entry["source_ref"]).stable_id
+                        source_ref = SourceRef.from_dict(entry["source_ref"])
+                        source_id = source_ref.stable_id
                     except (TypeError, ValueError, KeyError) as exc:
                         errors.append(f"selection/{base_id}: SourceRef inválida: {exc}")
                         continue
@@ -1336,11 +1395,18 @@ def _validate_checkpoint(
                     seen.add(source_id)
                     if entry.get("stable_id") not in {None, source_id}:
                         errors.append(f"selection/{base_id}: stable_id divergente")
+                    purchase_id = str(source_ref.key.get("numeroControlePNCPCompra") or "")
+                    if purchase_id:
+                        selected_purchase_ids.add(purchase_id)
                 base = manifest_bases.get(base_id, {})
                 target = base.get("volume_alvo")
                 if target is not None and base.get("volume_regra") != "minimo" and len(entries) > int(target):
                     errors.append(f"selection/{base_id}: excede volume_alvo")
-                missing = source_ids_by_base.get(base_id, set()) - seen
+                missing = {
+                    source_id
+                    for source_id in source_ids_by_base.get(base_id, set()) - seen
+                    if source_purchase_ids_by_base.get(base_id, {}).get(source_id) not in selected_purchase_ids
+                }
                 if missing:
                     errors.append(f"selection/{base_id}: item fora da seleção congelada")
 
@@ -1443,6 +1509,7 @@ def _load_version_context(
     previous_items: dict[str, dict[str, Any]] | None = None,
     previous_version: int | None = None,
     allow_discovery_manifest_drift: bool = False,
+    allow_isolated_pca_manifest_drift: bool = False,
     external_inputs: dict[str, str] | None = None,
 ) -> _VersionContext:
     staging_path = RAW_ROOT / ".staging" / f"v{version}"
@@ -1459,6 +1526,7 @@ def _load_version_context(
             version,
             staging_path,
             allow_discovery_manifest_drift=allow_discovery_manifest_drift,
+            allow_isolated_pca_manifest_drift=allow_isolated_pca_manifest_drift,
             expected_external_inputs=external_inputs,
         )
         if not validation.ok:
@@ -1965,6 +2033,7 @@ def _collect_rest_endpoint(
         or access.get("tamanho_pagina")
         or 50
     )
+    size_field = str(pagination.get("campo_tamanho") or "tamanhoPagina") if page_field else ""
     page = int(params.get(page_field, 1) or 1) if page_field else 1
     output: list[dict[str, Any]] = []
     seen_pages: set[str] = set()
@@ -1982,6 +2051,8 @@ def _collect_rest_endpoint(
             page += 1
             continue
         previous = _previous_record(context, logical_id)
+        if previous and previous.get("origem") != url:
+            previous = None
         _wait_rate_limit(context, base)
         fallback_used = False
         fallback_attempted = False
@@ -2054,6 +2125,15 @@ def _collect_rest_endpoint(
                         or response.get("observacao")
                         or f"resposta JSON ausente (status={response.get('status')}, HTTP={response.get('http_status')})"
                     )
+                    if (
+                        page_field
+                        and size_field
+                        and page_size > 1
+                        and "limite local" in str(reason).casefold()
+                    ):
+                        page_size = max(1, page_size // 2)
+                        params[size_field] = page_size
+                        continue
                     failure = _failed_record(context, base, logical_id, url, str(reason), "json")
                     if fallback_attempted:
                         failure["fallback_backend"] = "compras_dados_abertos"
@@ -3171,6 +3251,7 @@ def _find_resumable_version(
     manifest: dict[str, Any] | None = None,
     *,
     allow_discovery_manifest_drift: bool = False,
+    allow_isolated_pca_manifest_drift: bool = False,
     expected_external_inputs: dict[str, str] | None = None,
 ) -> int | None:
     checkpoint_root = INVENTORY_ROOT / "checkpoints"
@@ -3181,6 +3262,7 @@ def _find_resumable_version(
         key=lambda path: _version_number(path.stem) or -1,
         reverse=True,
     )
+    resumable_candidates: list[tuple[int, int]] = []
     for checkpoint_path in checkpoints:
         version = _version_number(checkpoint_path.stem)
         if version is None:
@@ -3198,8 +3280,12 @@ def _find_resumable_version(
             allow_discovery_manifest_drift
             and _discovery_checkpoint_matches_manifest(checkpoint, manifest)
         )
+        isolated_pca_matches = (
+            allow_isolated_pca_manifest_drift
+            and _isolated_pca_checkpoint_matches_manifest(checkpoint, manifest)
+        )
         if (
-            (manifest_matches or discovery_matches)
+            (manifest_matches or discovery_matches or isolated_pca_matches)
             and external_inputs_match
             and checkpoint.get("state") in {"staging", "incomplete"}
             and (staging_path.exists() or discovery_matches)
@@ -3213,11 +3299,20 @@ def _find_resumable_version(
                 version,
                 staging_path,
                 allow_discovery_manifest_drift=allow_discovery_manifest_drift,
+                allow_isolated_pca_manifest_drift=allow_isolated_pca_manifest_drift,
                 expected_external_inputs=expected_external_inputs,
             )
             if validation.ok:
-                return version
-    return None
+                if allow_isolated_pca_manifest_drift:
+                    successful_items = sum(
+                        1
+                        for item in checkpoint.get("items", {}).values()
+                        if isinstance(item, dict) and item.get("status") == "ok"
+                    )
+                    resumable_candidates.append((successful_items, version))
+                else:
+                    return version
+    return max(resumable_candidates)[1] if resumable_candidates else None
 
 
 def _run_manifest_command(
@@ -3237,6 +3332,7 @@ def _run_manifest_command(
     manifest_hash = _manifest_hash(manifest_path)
     external_inputs: dict[str, str] = {}
     adopt_attempt_inventory: dict[str, Any] | None = None
+    adopt_attempt_base_id: str | None = None
     if official and not base_ids:
         manifest = _manifest_for_scope(manifest, official=True)
     if use_discovered_contracts:
@@ -3425,22 +3521,34 @@ def _run_manifest_command(
             not isinstance(attempt_payload, dict)
             or not isinstance(attempt_payload.get("arquivos"), list)
             or attempt_payload.get("official") is not False
+            or attempt_payload.get("completo") is not True
         ):
             raise ValueError("--adopt-attempt requer o inventário de uma tentativa experimental concluída")
+        attempt_base_ids = {
+            str(record.get("base_id") or "")
+            for record in attempt_payload["arquivos"]
+            if isinstance(record, dict) and record.get("base_id")
+        }
+        if len(attempt_base_ids) != 1 or not attempt_base_ids.issubset(
+            {"pca_agregado", "atas_conversacional"}
+        ):
+            raise ValueError(
+                "a tentativa precisa conter registros de uma única base: "
+                "pca_agregado ou atas_conversacional"
+            )
+        adopt_attempt_base_id = next(iter(attempt_base_ids))
         attempt_records = [
             record
             for record in attempt_payload["arquivos"]
-            if isinstance(record, dict) and record.get("base_id") == "pca_agregado"
+            if isinstance(record, dict) and record.get("base_id") == adopt_attempt_base_id
         ]
-        if not attempt_records or any(
-            record.get("base_id") != "pca_agregado"
-            for record in attempt_payload["arquivos"]
-            if isinstance(record, dict)
-        ):
-            raise ValueError("a tentativa precisa conter somente registros da base pca_agregado")
         if not any(record.get("status") == "ok" for record in attempt_records):
-            raise ValueError("a tentativa não tem artefatos Agregados bem-sucedidos para promover")
-        _validate_adopt_attempt_coverage(adopt_attempt_inventory_path, attempt_payload)
+            raise ValueError("a tentativa não tem artefatos bem-sucedidos para promover")
+        _validate_adopt_attempt_coverage(
+            adopt_attempt_inventory_path,
+            attempt_payload,
+            base_id=adopt_attempt_base_id,
+        )
         adopt_attempt_inventory = attempt_payload
         external_inputs["adopt_attempt_inventory_sha256"] = hashlib.sha256(attempt_bytes).hexdigest()
     logger.event(
@@ -3462,10 +3570,17 @@ def _run_manifest_command(
             )
             return 0
     allow_discovery_manifest_drift = command == "discover"
+    allow_isolated_pca_manifest_drift = (
+        command == "fetch"
+        and not official
+        and base_ids == ["pca_agregado"]
+        and source_inventory_path is not None
+    )
     resumable_version = _find_resumable_version(
         manifest_hash,
         manifest,
         allow_discovery_manifest_drift=allow_discovery_manifest_drift,
+        allow_isolated_pca_manifest_drift=allow_isolated_pca_manifest_drift,
         expected_external_inputs=external_inputs,
     )
     previous = None
@@ -3494,6 +3609,7 @@ def _run_manifest_command(
             previous_items=previous_items,
             previous_version=previous_version,
             allow_discovery_manifest_drift=allow_discovery_manifest_drift,
+            allow_isolated_pca_manifest_drift=allow_isolated_pca_manifest_drift,
             external_inputs=external_inputs,
         )
         if use_discovered_contracts:
@@ -3521,6 +3637,7 @@ def _run_manifest_command(
             adopted_count = _adopt_attempt_records(
                 context,
                 adopt_attempt_inventory,
+                base_id=adopt_attempt_base_id,
                 source_inventory_path=adopt_attempt_inventory_path,
             )
             context.selection = _selection_from_items(context.items)
@@ -3528,24 +3645,25 @@ def _run_manifest_command(
             logger.event(
                 "attempt_adoption",
                 "completed",
-                base_id="pca_agregado",
+                base_id=adopt_attempt_base_id,
                 adopted_records=adopted_count,
                 carried_forward_bases=carried_bases,
                 attempt_inventory=_relative_path(adopt_attempt_inventory_path),
             )
-            logger.event(
-                "discovery_selection",
-                "completed",
-                base_id="contratos_estruturado",
-                population="contrato_assinado_rj_unidades",
-                selected_contracts=selected_count,
-                scan_complete=bool(
-                    context.discovery.get("contratos_estruturado", {})
-                    .get("contrato_assinado_rj_unidades", {})
-                    .get("scan_completo")
-                ),
-                carried_forward_bases=carried_bases,
-            )
+            if use_discovered_contracts:
+                logger.event(
+                    "discovery_selection",
+                    "completed",
+                    base_id="contratos_estruturado",
+                    population="contrato_assinado_rj_unidades",
+                    selected_contracts=selected_count,
+                    scan_complete=bool(
+                        context.discovery.get("contratos_estruturado", {})
+                        .get("contrato_assinado_rj_unidades", {})
+                        .get("scan_completo")
+                    ),
+                    carried_forward_bases=carried_bases,
+                )
         logger.event(
             "version_resolution",
             "resumed" if resumable_version is not None else "started",
@@ -3868,9 +3986,10 @@ def _adopt_attempt_records(
     context: _VersionContext,
     inventory: dict[str, Any],
     *,
+    base_id: str,
     source_inventory_path: Path,
 ) -> int:
-    """Copy a completed isolated Agregada attempt into an official version."""
+    """Copy a completed isolated base attempt into an official version."""
     adopted = 0
     for candidate in inventory.get("arquivos", []):
         if not isinstance(candidate, dict):
@@ -3892,7 +4011,7 @@ def _adopt_attempt_records(
                 raise RuntimeError(f"registro da tentativa sem arquivo: {logical_id}")
             materialized = _materialize_previous_record(
                 context,
-                "pca_agregado",
+                base_id,
                 f"adotado_{hashlib.sha256(logical_id.encode('utf-8')).hexdigest()[:16]}",
                 candidate,
                 source_path.suffix or ".bin",
@@ -3911,6 +4030,8 @@ def _adopt_attempt_records(
 def _validate_adopt_attempt_coverage(
     inventory_path: Path,
     inventory: dict[str, Any],
+    *,
+    base_id: str,
 ) -> None:
     version = _version_number(str(inventory.get("version") or ""))
     if version is None:
@@ -3921,19 +4042,109 @@ def _validate_adopt_attempt_coverage(
     checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
     if checkpoint.get("state") != "promoted":
         raise ValueError("a tentativa ainda não terminou e não pode ser adotada")
-    selected = (checkpoint.get("selection") or {}).get("pca_agregado", [])
-    expected_contracts: set[str] = set()
+
+    selected = (checkpoint.get("selection") or {}).get(base_id, [])
+    if base_id == "atas_conversacional":
+        expected_purchases: set[str] = set()
+        for entry in selected:
+            source_value = entry.get("source_ref") if isinstance(entry, dict) else None
+            if not isinstance(source_value, dict):
+                continue
+            source_ref = SourceRef.from_dict(source_value)
+            control = str(source_ref.key.get("numeroControlePNCPCompra") or "")
+            if source_ref.provider.casefold() == "pncp" and control:
+                expected_purchases.add(control)
+        if not expected_purchases:
+            raise ValueError(
+                "checkpoint da tentativa não lista compras PNCP selecionadas em atas_conversacional"
+            )
+
+        records = [
+            record
+            for record in inventory.get("arquivos", [])
+            if isinstance(record, dict)
+            and record.get("base_id") == base_id
+            and record.get("status") == "ok"
+        ]
+        successful_purchase_queries = {
+            str(
+                (SourceRef.from_dict(record["source_ref"]).key).get(
+                    "numeroControlePNCPCompra"
+                )
+                or ""
+            )
+            for record in records
+            if record.get("resource_kind") == "atas_compra"
+            and isinstance(record.get("source_ref"), dict)
+        }
+        missing_purchases = expected_purchases - successful_purchase_queries
+        if missing_purchases:
+            raise ValueError(
+                f"tentativa incompleta: {len(missing_purchases)} de "
+                f"{len(expected_purchases)} compras selecionadas sem consulta de atas bem-sucedida"
+            )
+
+        ata_sources = {
+            SourceRef.from_dict(record["source_ref"]).stable_id
+            for record in records
+            if record.get("resource_kind") == "ata"
+            and isinstance(record.get("source_ref"), dict)
+        }
+        listed_document_sources = {
+            SourceRef.from_dict(record["source_ref"]).stable_id
+            for record in records
+            if record.get("resource_kind") == "documentos_ata"
+            and isinstance(record.get("source_ref"), dict)
+        }
+        if not ata_sources or ata_sources != listed_document_sources:
+            raise ValueError(
+                "tentativa incompleta: metadados das atas e listagens de documentos não correspondem"
+            )
+
+        listed_documents = 0
+        for record in records:
+            if record.get("resource_kind") != "documentos_ata":
+                continue
+            source_path = _path_from_record(record)
+            if source_path is None or not source_path.is_file():
+                raise ValueError("listagem de documentos da tentativa sem arquivo materializado")
+            payload = json.loads(source_path.read_text(encoding="utf-8"))
+            if not isinstance(payload, list):
+                raise ValueError("listagem de documentos da ata não contém uma lista")
+            listed_documents += len(payload)
+
+        downloaded_pdfs = sum(
+            1
+            for record in records
+            if (path := _path_from_record(record)) is not None
+            and path.suffix.casefold() == ".pdf"
+            and path.is_file()
+        )
+        if listed_documents != downloaded_pdfs:
+            raise ValueError(
+                f"tentativa incompleta: {listed_documents} documentos listados e "
+                f"{downloaded_pdfs} PDFs baixados"
+            )
+        return
+
+    if base_id != "pca_agregado":
+        raise ValueError(f"adoção de tentativa não suportada para {base_id}")
+    expected_contracts: dict[str, str] = {}
     for entry in selected:
         source_value = entry.get("source_ref") if isinstance(entry, dict) else None
         if not isinstance(source_value, dict):
             continue
         source_ref = SourceRef.from_dict(source_value)
         if source_ref.resource_type.casefold() == "contrato_assinado":
-            expected_contracts.add(source_ref.stable_id)
+            expected_contracts[source_ref.stable_id] = str(
+                source_ref.key.get("numeroControlePNCPCompra") or ""
+            )
     if not expected_contracts:
         raise ValueError("checkpoint da tentativa não lista contratos selecionados na base pca_agregado")
 
+    expected_purchases = {control for control in expected_contracts.values() if control}
     for resource_kind in ("contrato", "itens", "resultado_item"):
+        expected = set(expected_contracts) if resource_kind == "contrato" else expected_purchases
         available: set[str] = set()
         for record in inventory.get("arquivos", []):
             if (
@@ -3944,16 +4155,24 @@ def _validate_adopt_attempt_coverage(
             ):
                 continue
             source_value = record.get("source_ref")
-            if isinstance(source_value, dict):
-                available.add(SourceRef.from_dict(source_value).stable_id)
-        missing = expected_contracts - available
+            if not isinstance(source_value, dict):
+                continue
+            source_ref = SourceRef.from_dict(source_value)
+            identity = (
+                source_ref.stable_id
+                if resource_kind == "contrato"
+                else str(source_ref.key.get("numeroControlePNCPCompra") or "")
+            )
+            if identity:
+                available.add(identity)
+
+        missing = expected - available
         if missing:
+            unit = "contratos" if resource_kind == "contrato" else "compras vinculadas"
             raise ValueError(
-                f"tentativa incompleta: {len(missing)} de {len(expected_contracts)} contratos "
+                f"tentativa incompleta: {len(missing)} de {len(expected)} {unit} "
                 f"não têm recurso {resource_kind} bem-sucedido"
             )
-    print(json.dumps(report, ensure_ascii=False, sort_keys=True))
-    return 0
 
 
 def _manifest_main(argv: list[str]) -> int:
@@ -3982,7 +4201,7 @@ def _manifest_main(argv: list[str]) -> int:
             command_parser.add_argument(
                 "--adopt-attempt",
                 type=Path,
-                help="promove uma tentativa experimental isolada da pca_agregado, carregando as demais bases da versão anterior",
+                help="promove uma tentativa experimental isolada de pca_agregado ou atas_conversacional, carregando as demais bases da versão anterior",
             )
             command_parser.add_argument(
                 "--use-discovered-contracts",

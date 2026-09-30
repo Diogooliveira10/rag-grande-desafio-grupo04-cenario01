@@ -73,6 +73,7 @@ def responder(
     decisao = rotear_pergunta(query, run_id=run_id, query_id=query_id)
 
     chunks: list[Chunk] = []
+    filtros_relaxados: dict[str, dict[str, list[str]]] = {}
     refusal_reason_hint = None
     if decisao.bases_selecionadas:
         filtros = filtros_para_retrieve(analise.filtros)
@@ -100,6 +101,10 @@ def responder(
                 query_id=query_id,
             )
         chunks = [_chunk_from_retrieval(item) for item in resultados]
+        filtros_relaxados = {
+            item.metadata["base_id"]: item.metadata.get("extras", {}).get("filtros_relaxados", {})
+            for item in resultados if item.metadata.get("extras", {}).get("filtros_relaxados")
+        }
         # Ranking/estatística/comparação: o resultado SQL vai à frente, para
         # caber no orçamento do prompt antes dos trechos da busca.
         chunks = consultar_estruturado(
@@ -117,6 +122,19 @@ def responder(
         query_id=query_id,
         refusal_reason_hint=refusal_reason_hint,
     )
+    if filtros_relaxados:
+        labels = {"data_vigencia": "ano/período de vigência", "orgao": "órgão", "valor": "valor", "esfera": "esfera",
+                  "data_assinatura": "data de assinatura", "data_resultado": "data do resultado",
+                  "data_publicacao": "data de publicação", "ano_pca": "ano do PCA"}
+        bases = {"contratos_estruturado": "contratos", "atas_conversacional": "atas",
+                 "editais_normativo": "normas", "pca_agregado": "indicadores"}
+        notes = []
+        for base, reasons in sorted(filtros_relaxados.items()):
+            for reason, keys in sorted(reasons.items()):
+                fields = ", ".join(labels.get(key, key) for key in keys)
+                why = "metadados ausentes" if reason == "sem_campo" else "nenhum resultado com o recorte solicitado"
+                notes.append(f"{bases.get(base, base)}: {fields} ({why})")
+        resposta.answer += "\n\nBusca ampliada; filtros relaxados em " + "; ".join(notes) + "."
     return resposta.model_dump(mode="json")
 
 

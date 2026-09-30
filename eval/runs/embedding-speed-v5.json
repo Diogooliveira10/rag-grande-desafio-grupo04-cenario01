@@ -1,0 +1,301 @@
+{
+  "checkpoint": "D:\\LLM\\Qwen3-Embedding-0.6B.Q8_0.gguf",
+  "checkpoint_sha256": "e40d4a708d0b324fc133bae547bd64dec79edb885410ef262c1e5c2efb2050b3",
+  "backend": "llama.cpp/Vulkan",
+  "pooling": "last",
+  "context_size": 4096,
+  "pause_seconds": 0,
+  "sample": [
+    {
+      "base_id": "contratos_estruturado",
+      "chunk_id": "contratos_estruturado:4f90def74f5c2726:chunk-1-4f90def74f5c",
+      "chars": 2159
+    },
+    {
+      "base_id": "contratos_estruturado",
+      "chunk_id": "contratos_estruturado:29f58d8c49ee4fbf:chunk-1-29f58d8c49ee",
+      "chars": 2233
+    },
+    {
+      "base_id": "contratos_estruturado",
+      "chunk_id": "contratos_estruturado:a294c1f3eb26fc39:chunk-1-a294c1f3eb26",
+      "chars": 2338
+    },
+    {
+      "base_id": "contratos_estruturado",
+      "chunk_id": "contratos_estruturado:ca0be6281204e0b6:chunk-1-ca0be6281204",
+      "chars": 3110
+    },
+    {
+      "base_id": "editais_normativo",
+      "chunk_id": "editais_normativo:1f7354fb65590678:chunk-157-d08dac07c197",
+      "chars": 286
+    },
+    {
+      "base_id": "editais_normativo",
+      "chunk_id": "editais_normativo:a5b21177bdc78c93:pagina-48:chunk-6-2d31625910bf",
+      "chars": 705
+    },
+    {
+      "base_id": "editais_normativo",
+      "chunk_id": "editais_normativo:1f7354fb65590678:chunk-99-58188e03f3cc",
+      "chars": 1200
+    },
+    {
+      "base_id": "editais_normativo",
+      "chunk_id": "editais_normativo:a5b21177bdc78c93:pagina-67:chunk-3-72f2d9cbb04f",
+      "chars": 1200
+    },
+    {
+      "base_id": "atas_conversacional",
+      "chunk_id": "atas_conversacional:35abaeaf0cdad057:pagina-229:chunk-1-1f6591fbadac",
+      "chars": 764
+    },
+    {
+      "base_id": "atas_conversacional",
+      "chunk_id": "atas_conversacional:a1fd2990d6873fc7:pagina-5:chunk-1-34d1ccd84e6f",
+      "chars": 1199
+    },
+    {
+      "base_id": "atas_conversacional",
+      "chunk_id": "atas_conversacional:bec22e7bd5ed953e:pagina-149:chunk-2-41472a5ea1ff",
+      "chars": 1200
+    },
+    {
+      "base_id": "atas_conversacional",
+      "chunk_id": "atas_conversacional:890b692da5e36043:chunk-1-890b692da5e3",
+      "chars": 1866
+    },
+    {
+      "base_id": "pca_agregado",
+      "chunk_id": "pca_agregado:7ad7bfbad980ee8b:registro-14:chunk-1-67a2365ef4a6",
+      "chars": 1216
+    },
+    {
+      "base_id": "pca_agregado",
+      "chunk_id": "pca_agregado:c2c734b98fd2cf20:registro-136:chunk-1-5e9311ae5225",
+      "chars": 1717
+    },
+    {
+      "base_id": "pca_agregado",
+      "chunk_id": "pca_agregado:2cb15d9ae35574db:registro-110:chunk-1-8b4d4baf1a21",
+      "chars": 1806
+    },
+    {
+      "base_id": "pca_agregado",
+      "chunk_id": "pca_agregado:e32031aef3fc6deb:registro-1:chunk-1-af1acf0a530f",
+      "chars": 3384
+    }
+  ],
+  "results": [
+    {
+      "name": "gpu-t2-confirm",
+      "threads": 2,
+      "gpu_layers": "all",
+      "parallel": 1,
+      "ubatch": 2048,
+      "flash": "auto",
+      "server_context_size": 4096,
+      "batch_size": 1,
+      "seconds": [
+        3.2422615999821573,
+        3.2322003999724984,
+        3.231207799981348
+      ],
+      "documents_per_second": 4.9517087697338305,
+      "tokens_per_second": 3244.6071713680926,
+      "min_cosine_to_baseline": 0.9999999999999998,
+      "accepted": true
+    },
+    {
+      "name": "gpu-t2-confirm",
+      "threads": 2,
+      "gpu_layers": "all",
+      "parallel": 1,
+      "ubatch": 2048,
+      "flash": "auto",
+      "server_context_size": 4096,
+      "batch_size": 8,
+      "seconds": [
+        3.0530558000318706,
+        3.034930400084704,
+        3.050261399941519
+      ],
+      "documents_per_second": 5.271949564165769,
+      "tokens_per_second": 3454.4449519196205,
+      "min_cosine_to_baseline": 0.9999999999999998,
+      "accepted": true
+    },
+    {
+      "name": "gpu-t2-confirm",
+      "threads": 2,
+      "gpu_layers": "all",
+      "parallel": 1,
+      "ubatch": 2048,
+      "flash": "auto",
+      "server_context_size": 4096,
+      "batch_size": 16,
+      "seconds": [
+        3.0259564999723807,
+        3.042694100062363,
+        3.0385584000032395
+      ],
+      "documents_per_second": 5.287584272988075,
+      "tokens_per_second": 3464.689594875436,
+      "min_cosine_to_baseline": 0.9999999999999998,
+      "accepted": true
+    },
+    {
+      "name": "gpu-p2-small",
+      "threads": 2,
+      "gpu_layers": "all",
+      "parallel": 2,
+      "ubatch": 2048,
+      "flash": "auto",
+      "server_context_size": 8192,
+      "batch_size": 1,
+      "seconds": [
+        5.2056745999725536,
+        4.7179590000305325,
+        4.59825069992803
+      ],
+      "documents_per_second": 3.4795840949364556,
+      "tokens_per_second": 2279.9974782071126,
+      "min_cosine_to_baseline": 0.9999999999999998,
+      "accepted": true
+    },
+    {
+      "name": "gpu-p2-small",
+      "threads": 2,
+      "gpu_layers": "all",
+      "parallel": 2,
+      "ubatch": 2048,
+      "flash": "auto",
+      "server_context_size": 8192,
+      "batch_size": 8,
+      "seconds": [
+        4.9374030999606475,
+        4.42694430006668,
+        4.4169353999895975
+      ],
+      "documents_per_second": 3.6224211022053168,
+      "tokens_per_second": 2373.591427220034,
+      "min_cosine_to_baseline": 0.9999816362672916,
+      "accepted": true
+    },
+    {
+      "name": "gpu-p2-small",
+      "threads": 2,
+      "gpu_layers": "all",
+      "parallel": 2,
+      "ubatch": 2048,
+      "flash": "auto",
+      "server_context_size": 8192,
+      "batch_size": 16,
+      "seconds": [
+        4.373219599947333,
+        4.395221199956723,
+        4.398963400046341
+      ],
+      "documents_per_second": 3.658631732143679,
+      "tokens_per_second": 2397.3184424871456,
+      "min_cosine_to_baseline": 0.9999999999999998,
+      "accepted": true
+    },
+    {
+      "name": "gpu-p4-small",
+      "threads": 2,
+      "gpu_layers": "all",
+      "parallel": 4,
+      "ubatch": 2048,
+      "flash": "auto",
+      "server_context_size": 16384,
+      "batch_size": 1,
+      "seconds": [
+        5.1474909000098705,
+        4.734304699930362,
+        4.661854999954812
+      ],
+      "documents_per_second": 3.4321101793502993,
+      "tokens_per_second": 2248.8901950192835,
+      "min_cosine_to_baseline": 0.9999999999999998,
+      "accepted": true
+    },
+    {
+      "name": "gpu-p4-small",
+      "threads": 2,
+      "gpu_layers": "all",
+      "parallel": 4,
+      "ubatch": 2048,
+      "flash": "auto",
+      "server_context_size": 16384,
+      "batch_size": 8,
+      "seconds": [
+        4.727271000039764,
+        4.585552099975757,
+        4.579065299942158
+      ],
+      "documents_per_second": 3.494162880839919,
+      "tokens_per_second": 2289.550227670357,
+      "min_cosine_to_baseline": 0.9999999999999998,
+      "accepted": true
+    },
+    {
+      "name": "gpu-p4-small",
+      "threads": 2,
+      "gpu_layers": "all",
+      "parallel": 4,
+      "ubatch": 2048,
+      "flash": "auto",
+      "server_context_size": 16384,
+      "batch_size": 16,
+      "seconds": [
+        4.55097769992426,
+        4.542355200042948,
+        4.561191299930215
+      ],
+      "documents_per_second": 3.522401770748514,
+      "tokens_per_second": 2308.0537602829636,
+      "min_cosine_to_baseline": 0.9999999999999998,
+      "accepted": true
+    }
+  ],
+  "sample_tokens": [
+    928,
+    969,
+    983,
+    1304,
+    84,
+    201,
+    318,
+    287,
+    404,
+    367,
+    590,
+    760,
+    446,
+    775,
+    811,
+    1257
+  ],
+  "best": {
+    "name": "gpu-t2-confirm",
+    "threads": 2,
+    "gpu_layers": "all",
+    "parallel": 1,
+    "ubatch": 2048,
+    "flash": "auto",
+    "server_context_size": 4096,
+    "batch_size": 16,
+    "seconds": [
+      3.0259564999723807,
+      3.042694100062363,
+      3.0385584000032395
+    ],
+    "documents_per_second": 5.287584272988075,
+    "tokens_per_second": 3464.689594875436,
+    "min_cosine_to_baseline": 0.9999999999999998,
+    "accepted": true
+  },
+  "status": "ok"
+}

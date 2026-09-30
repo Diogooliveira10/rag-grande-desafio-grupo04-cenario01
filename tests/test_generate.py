@@ -23,6 +23,41 @@ def _chunk(chunk_id="c1", base_id="contratos_estruturado", conteudo="texto do ch
     )
 
 
+
+
+
+
+def test_publication_by_agencies_is_not_an_aggregate_request():
+    from src.structured_query import requer_calculo
+    assert not requer_calculo("Quais contratações de ambulâncias foram publicadas por órgãos públicos em 2025?")
+
+
+
+
+
+
+
+
+
+
+
+
+def test_context_keeps_contract_evidence_before_long_administrative_fields(monkeypatch):
+    record = {"administrativo": "x" * 2000, "numeroControlePNCP": "contrato-2025",
+              "valorGlobal": 500123.45, "nomeRazaoSocialFornecedor": "Fornecedor público",
+              "dataAssinatura": "2025-01-20", "objetoContrato": "Licenças de software"}
+    original = json.dumps(record, ensure_ascii=False)
+    assert json.loads(gen._compactar(original)) == record
+    monkeypatch.setattr(gen.config, "GENERATION_CHUNK_CHARS", 400)
+    chunk = _chunk(conteudo=original)
+    context = gen._chunks_no_orcamento([chunk])[0].content
+    assert "Licenças de software" in context
+    assert "500123.45" in context
+    assert "Fornecedor público" in context
+    assert "2025-01-20" in context
+    assert chunk.content == original
+
+
 # --------------------------------------------------------------------------
 # Guardrails determinísticos (não chamam o LLM)
 # --------------------------------------------------------------------------
@@ -68,6 +103,8 @@ def test_sem_chunks_recusa_sem_chamar_llm():
 
 def test_resposta_valida_com_fontes_reais():
     chunk = _chunk(chunk_id="c1", base_id="contratos_estruturado")
+    chunk.metadata.doc_type = "sql"
+    chunk.content = "3 registros; média R$ 4,20."
 
     def cliente_fake(mensagens):
         return json.dumps({
@@ -287,3 +324,24 @@ def test_prompt_mostra_titulo_do_documento_e_vigencia():
         "[chunk_id=c1 | base=contratos_estruturado | natureza=estruturada | "
         "documento=Ata de Registro de Preços nº 00178 | vigencia_ate=2026-10-22]"
     ) in usuario["content"]
+
+
+@pytest.mark.parametrize("query,answer,content", [
+    ("Qual foi a mediana do valor por ambulância?", "Resultado do modelo.", '{"valorGlobal": 900000}'),
+    ("Entre os fornecedores encontrados nesses contratos, existem atrasos?", "Resultado do modelo.", "Multa por atraso."),
+    ("Microempresa pode participar?", "Sim, conforme o Decreto nº 42.063/2009.", "Art. 29. Bens comuns."),
+    ("Qual a modalidade?", "Modalidade: Compras.", '{"tipoContrato": {"nome": "Compras"}}'),
+    ("Uma microempresa pode participar?", "Sim.", "Decreto nº 42.063/2009. Decreto nº 42.092/2009."),
+])
+def test_removed_added_guardrails_preserve_llm_response(query, answer, content):
+    calls = []
+    def client(messages):
+        calls.append(messages)
+        return json.dumps({"answer": answer, "is_refusal": False, "refusal_reason": None,
+                           "confidence_level": "alta", "sources_used": ["c1"]})
+    response = gen.gerar_resposta(query, [_chunk(conteudo=content)],
+                                 [Natureza.ESTRUTURADA, Natureza.NORMATIVA], cliente=client)
+    assert len(calls) == 1
+    assert not response.is_refusal
+    assert response.answer == answer
+    assert [source.chunk_id for source in response.sources_used] == ["c1"]

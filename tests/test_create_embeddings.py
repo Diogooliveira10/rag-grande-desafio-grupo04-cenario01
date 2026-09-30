@@ -88,6 +88,36 @@ def test_create_embeddings_dry_run_does_not_call_provider(tmp_path):
     assert (tmp_path / "embedding_report.json").exists()
 
 
+def test_resume_parts_and_refresh_provenance_without_reembedding(tmp_path):
+    input_path, output_path = tmp_path / "documents.jsonl", tmp_path / "embeddings.jsonl"
+    _write_chunks(input_path, ["primeiro", "segundo"])
+    calls = []
+    encoding = {"checkpoint_sha256": "verified", "pooling": "last"}
+
+    def interrupted(texts):
+        calls.extend(texts)
+        if texts == ["segundo"]:
+            raise RuntimeError("interrupted")
+        return [[1.0, 0.5]]
+
+    with pytest.raises(RuntimeError, match="interrupted"):
+        create_embeddings(input_path, output_path, batch_size=1, pause_seconds=0,
+                          encoding_config=encoding, embed_batch=interrupted)
+    assert list(tmp_path.glob("embeddings.part-*.jsonl"))
+    resumed = []
+    create_embeddings(input_path, output_path, batch_size=1, pause_seconds=0,
+                      encoding_config=encoding, embed_batch=lambda texts: resumed.extend(texts) or [[1.0, 0.5]])
+    assert resumed == ["segundo"]
+    chunks = [json.loads(line) for line in input_path.read_text(encoding="utf-8").splitlines()]
+    for chunk in chunks:
+        chunk.update(manifest_hash="new-manifest", inventory_version="v5")
+    input_path.write_text("".join(json.dumps(chunk) + "\n" for chunk in chunks), encoding="utf-8")
+    summary = create_embeddings(input_path, output_path, pause_seconds=0, encoding_config=encoding,
+                                embed_batch=lambda _: pytest.fail("unchanged encoding must reuse vectors"))
+    assert summary["reutilizados"] == 2
+    assert all(json.loads(line)["inventory_version"] == "v5" for line in output_path.read_text().splitlines())
+
+
 def test_create_embeddings_does_not_reuse_cache_without_current_input_fingerprint(tmp_path):
     input_path = tmp_path / "documents.jsonl"
     output_path = tmp_path / "embeddings.jsonl"
