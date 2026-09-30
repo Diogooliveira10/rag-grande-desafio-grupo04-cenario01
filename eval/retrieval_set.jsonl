@@ -32,3 +32,16 @@
 {"id": "R32", "pergunta": "Alguma ata registra preço de equipamentos para dentistas?", "bases": ["conversacional"], "relevante_contem": ["eventual aquisicao de equipamentos odontologicos"]}
 {"id": "R33", "pergunta": "Há ata para comprar material de cirurgia do coração?", "bases": ["conversacional"], "relevante_contem": ["insumos para cirurgia cardiaca"]}
 {"id": "R34", "pergunta": "Por quanto foi homologado o forro de PVC no pregão 62/2023?", "bases": ["conversacional"], "relevante_contem": ["forro de pvc, liso"]}
+{"id": "I01", "pergunta": "Contrato 42498733000148-2-000014/2025", "bases": ["estruturada"], "relevante_contem": ["\"numerocontrolepncp\": \"42498733000148-2-000014/2025\""], "tipo": "identificador"}
+{"id": "I02", "pergunta": "Quais contratos tem o fornecedor de CNPJ 05340639000130?", "bases": ["estruturada"], "relevante_contem": ["\"nifornecedor\": \"05340639000130\""], "tipo": "identificador"}
+{"id": "I03", "pergunta": "Quais contratos tem o fornecedor de CNPJ 05.340.639/0001-30?", "bases": ["estruturada"], "relevante_contem": ["\"nifornecedor\": \"05340639000130\""], "tipo": "identificador"}
+{"id": "I04", "pergunta": "Contrato nº 75/2025 da Gente Seguradora", "bases": ["estruturada"], "relevante_contem": ["\"numerocontratoempenho\": \"75/2025\"", "gente seguradora"], "tipo": "identificador"}
+{"id": "I05", "pergunta": "Contratos com a empresa 40213951000163", "bases": ["estruturada"], "relevante_contem": ["\"nifornecedor\": \"40213951000163\""], "tipo": "identificador"}
+{"id": "I06", "pergunta": "Detalhes do contrato 01612355000102-2-000017/2025", "bases": ["estruturada"], "relevante_contem": ["\"numerocontrolepncp\": \"01612355000102-2-000017/2025\""], "tipo": "identificador"}
+{"id": "I07", "pergunta": "Mensagens do sistema no pregão 90022/2025 da UASG 120645", "bases": ["conversacional"], "relevante_contem": ["pregao 90022/2025"], "tipo": "identificador"}
+{"id": "I08", "pergunta": "Qual ata tem o fornecedor CNPJ 44.292.391/0001-30?", "bases": ["conversacional"], "relevante_contem": ["44.292.391/0001-30"], "tipo": "identificador"}
+{"id": "I09", "pergunta": "Em que ata aparece a empresa 41.001.483/0001-26?", "bases": ["conversacional"], "relevante_contem": ["41.001.483/0001-26"], "tipo": "identificador"}
+{"id": "I10", "pergunta": "Qual ata tem o fornecedor CNPJ 44292391000130?", "bases": ["conversacional"], "relevante_contem": ["44.292.391/0001-30"], "tipo": "identificador"}
+{"id": "I11", "pergunta": "Resultado dos itens da compra 33663683000116-1-000354/2024", "bases": ["agregada"], "relevante_contem": ["33663683000116-1-000354/2024"], "tipo": "identificador"}
+{"id": "I12", "pergunta": "O que diz o art. 75 da Lei 14.133?", "bases": ["normativa"], "relevante_contem": ["art. 75. e dispensavel a licitacao"], "tipo": "identificador"}
+{"id": "I13", "pergunta": "Decreto 48.816", "bases": ["normativa"], "relevante_contem": ["decreto no 48.816"], "tipo": "identificador"}

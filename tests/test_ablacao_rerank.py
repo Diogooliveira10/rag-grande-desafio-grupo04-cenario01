@@ -52,3 +52,11 @@ def test_conjunto_do_repositorio_tem_ids_unicos_e_bases_validas():
     assert {base for caso in casos for base in caso.bases} <= {"normativa", "estruturada", "conversacional", "agregada"}
     assert all(caso.relevante_contem for caso in casos)
     assert all(json.dumps(caso.pergunta) for caso in casos)
+
+
+def test_conjunto_separa_perguntas_de_identificador():
+    casos = carregar_casos(CONJUNTO)
+    tipos = {caso.tipo for caso in casos}
+
+    assert tipos == {"parafrase", "identificador"}
+    assert sum(caso.tipo == "identificador" for caso in casos) >= 10

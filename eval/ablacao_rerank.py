@@ -10,7 +10,10 @@ pergunta foi escrita com outras palavras a partir de um trecho conhecido do
 corpus ("known-item"), e ``relevante_contem`` lista os trechos que um chunk
 precisa conter (sem acento/caixa) para contar como relevante — assim o rótulo
 sobrevive a uma reindexação que mude os ``chunk_id``. ``relevante_documento``,
-quando presente, restringe ao arquivo de origem.
+quando presente, restringe ao arquivo de origem. ``tipo`` separa as perguntas
+parafraseadas (padrão) das de ``identificador`` (CNPJ, número de controle,
+número de pregão), onde a busca lexical deveria ajudar; o relatório também
+resume cada tipo em separado.
 
 Cada pergunta é buscada só nas bases de ``bases`` (o roteamento não entra na
 conta) e só no escopo oficial, como no pipeline. Denso e BM25 devolvem
@@ -65,6 +68,7 @@ class CasoRecuperacao:
     bases: list[str]
     relevante_contem: list[str]
     relevante_documento: Optional[str] = None
+    tipo: str = "parafrase"
 
 
 def _normalizar(texto: str) -> str:
@@ -87,6 +91,7 @@ def carregar_casos(path: Path) -> list[CasoRecuperacao]:
                         bases=list(r["bases"]),
                         relevante_contem=list(r["relevante_contem"]),
                         relevante_documento=r.get("relevante_documento"),
+                        tipo=r.get("tipo", "parafrase"),
                     )
                 )
     return casos
@@ -151,7 +156,7 @@ def rodar_ablacao(
                 inicio = time.perf_counter()
                 rankings[nome] = reranker(caso.pergunta, lista[:n])
                 latencias_rerank[nome].append(int((time.perf_counter() - inicio) * 1000))
-        linha = {"id": caso.id, "pergunta": caso.pergunta}
+        linha = {"id": caso.id, "tipo": caso.tipo, "pergunta": caso.pergunta}
         for nome in configuracoes:
             posicao = posicao_do_primeiro_relevante(caso, rankings[nome])
             posicoes[nome].append(posicao)
@@ -163,6 +168,16 @@ def rodar_ablacao(
     return {
         "total": len(casos),
         "configuracoes": {nome: resumir(posicoes[nome]) for nome in configuracoes},
+        "por_tipo": {
+            tipo: {
+                "total": sum(1 for caso in casos if caso.tipo == tipo),
+                "configuracoes": {
+                    nome: resumir([p for caso, p in zip(casos, posicoes[nome]) if caso.tipo == tipo])
+                    for nome in configuracoes
+                },
+            }
+            for tipo in sorted({caso.tipo for caso in casos})
+        },
         "latencia_rerank_ms": {
             nome: {"media": int(statistics.mean(v)), "max": max(v)} for nome, v in latencias_rerank.items() if v
         },
@@ -184,6 +199,17 @@ def render_markdown(relatorio: dict[str, Any]) -> str:
     ]
     for nome, metricas in relatorio["configuracoes"].items():
         linhas.append(f"| {nome} | " + " | ".join(f"{metricas[c]:.2f}" for c in colunas) + " |")
+    if len(relatorio.get("por_tipo", {})) > 1:
+        for tipo, grupo in relatorio["por_tipo"].items():
+            linhas.extend([
+                "",
+                f"### Só perguntas do tipo `{tipo}` ({grupo['total']})",
+                "",
+                "| Configuração | " + " | ".join(colunas) + " |",
+                "|---|" + "---:|" * len(colunas),
+            ])
+            for nome, metricas in grupo["configuracoes"].items():
+                linhas.append(f"| {nome} | " + " | ".join(f"{metricas[c]:.2f}" for c in colunas) + " |")
     if relatorio.get("latencia_rerank_ms"):
         linhas.extend(["", "Latência do rerank por pergunta (ms):", ""])
         for nome, lat in relatorio["latencia_rerank_ms"].items():
