@@ -2,10 +2,25 @@
 
 **Residência TIC em Trilhas · PUC-Rio · Instituto ECOA**
 
+O snapshot oficial atual é a **v6**, com 1.400 arquivos nas quatro bases e limite
+de cinco arquivos por órgão e por base. São 804 arquivos municipais, 513 federais
+e 83 estaduais: uma amostra orientada às personas, sem garantia de censo.
+Consulte o [inventário](CORPUS_INVENTORY.md), o
+[registro da v6](docs/registro_execucao_v6.md) e o
+[fluxo de consulta da v6](docs/CLI.md#snapshot-oficial-v6).
+
+Os vetores em `data/embeddings/2026-09-30_12-08-51/`, os índices em `index/`,
+os documentos normalizados e o SQLite da v6 estão versionados para consulta.
+As credenciais ECOA continuam locais no `.env`. Os arquivos brutos são externos
+ao Git; as fontes públicas constam nos metadados. As entregas das atas estão em
+[PDF](atas-zip/atas_conversacional-v6.zip) e
+[Markdown](atas-zip/atas_conversacional-v6-md.zip), com 40 documentos cada.
+Embeddings e ZIP da v5 permanecem no disco, fora destes commits.
+
 ## API HTTP
 
-O backend FastAPI expõe `GET /health` e `POST /api/v1/query`. Para executar
-localmente:
+O backend FastAPI expõe `GET /health`, `POST /api/v1/query`, `POST /api/v1/feedback`
+e `GET /api/v1/history`. Para executar localmente:
 
 ```bash
 uvicorn app.api:app --reload --host 127.0.0.1 --port 8000
@@ -30,15 +45,17 @@ Contexto completo do desafio, dos outros dois cenários e dos padrões de engenh
 | Base | Natureza | Conteúdo | Fonte | Acesso |
 | --- | --- | --- | --- | --- |
 | `editais_normativo` | Normativa | Lei 14.133/2021, decretos estaduais, editais de licitação | Senado Federal, REDELOG-RJ, CGE-RJ, MPPI | PDF/HTML por URL |
-| `contratos_estruturado` | Estruturada | 160 contratações publicadas em 2025, UF=RJ | PNCP — API de consulta | REST paginado |
-| `atas_conversacional` | Conversacional | 20 atas de registro de preços do Estado do RJ: metadados, lista de arquivos e os PDFs das atas; e-mails de compras (base sintética, a ser criada com o tutor) | PNCP + base sintética | REST (JSON) + PDF |
-| `pca_agregado` | Agregada | Plano de Contratações Anual 2024–2025 do Estado do RJ, transformado em indicadores | PNCP | REST (CSV + JSON) |
+| `contratos_estruturado` | Estruturada | 625 contratos de órgãos do RJ, quase todos de 2025 (434 municipais, 159 federais, 32 estaduais) | PNCP — API de consulta | REST paginado |
+| `atas_conversacional` | Conversacional | 376 arquivos de atas de registro de preços: 336 JSON de metadados e 40 PDFs; e-mails de compras (base sintética, a ser criada com o tutor) | PNCP + base sintética | REST (JSON) + PDF |
+| `pca_agregado` | Agregada | 386 registros relacionados ao planejamento e ao resultado das compras: itens homologados, contratações vinculadas e um PCA confirmado (Secretaria de Saúde estadual) | PNCP | REST (JSON) |
+
+Números da v6 (limite de cinco arquivos por órgão e por base); detalhes em [CORPUS_INVENTORY.md](CORPUS_INVENTORY.md) e em [docs/registro_execucao_v6.md](docs/registro_execucao_v6.md).
 
 A definição declarativa de cada base — fonte, tipo de acesso, volume-alvo, campo de vigência, licença — vive em [corpus_manifest.yaml](corpus_manifest.yaml), que é a fonte única de verdade sobre o que entra no corpus. `data/raw/` nunca é versionado; qualquer pessoa reconstrói o corpus rodando o coletor contra o manifesto.
 
 Só as bases com `escopo: oficial` no manifesto (uma por natureza) respondem perguntas; as marcadas como `experimental` ficam fora da busca (`ESCOPOS_CONSULTADOS` em [src/pipeline.py](src/pipeline.py)).
 
-**Base agregada.** O CSV do PCA traz um item planejado por linha (~39,5 mil no Estado do RJ em 2025). Em vez de um chunk por linha, a preparação calcula indicadores com [src/pca_indicators.py](src/pca_indicators.py): visão geral, e totais, participação e ranking por categoria, unidade responsável, classe de catálogo e mês, além de rankings das 30 maiores unidades e classes. Cada indicador vira **um chunk** com os números já calculados (cerca de 1.000 no total). Assim o LLM cita valores prontos, em vez de tentar somar linhas.
+**Base agregada.** Quando a base traz o CSV do PCA (um item planejado por linha), a preparação calcula indicadores com [src/pca_indicators.py](src/pca_indicators.py): visão geral, e totais, participação e ranking por categoria, unidade responsável, classe de catálogo e mês. Cada indicador vira **um chunk** com os números já calculados, e assim o LLM cita valores prontos, em vez de tentar somar linhas. Na v6, com o limite por órgão, a base ficou com um único PCA confirmado; os 911 chunks são quase todos registros JSON (itens homologados e contratações vinculadas), com só 2 indicadores. Contas sobre esses registros (soma por fornecedor, ranking, mediana) passam pela etapa `consulta_sql`.
 
 **Base conversacional.** A API de atas do PNCP ignora o filtro `uf`; o recorte do RJ é feito pelo CNPJ do órgão (`cnpjs` no manifesto, o mesmo do PCA). Para cada ata, o coletor baixa o JSON de metadados, a listagem `/arquivos` e cada PDF anunciado nela. Parte desses PDFs é escaneada, sem texto; com o Tesseract instalado, a preparação aplica OCR nessas páginas ([src/ocr.py](src/ocr.py)). Os chunks do PDF herdam da mesma ata a vigência (`dataVigenciaFim`) e o título do documento, que também aparecem para o LLM no cabeçalho de cada trecho — assim ele distingue a ata de uma publicação no Diário Oficial anexada a ela.
 
@@ -93,17 +110,20 @@ Estágios (mesmos nomes usados no campo `stage` do log estruturado): `query_anal
 - `query_analysis` ([src/query_analysis.py](src/query_analysis.py)): extrai da pergunta, sem LLM, filtros de ano, valor (mínimo, máximo, faixa) e órgão.
 - `roteamento` ([src/router.py](src/router.py)): escolhe as bases antes de buscar.
 - `retrieval_denso` / `retrieval_bm25` / `fusao_rrf` ([src/retrieve.py](src/retrieve.py)): busca híbrida com filtros de metadado. Os filtros são aplicados base a base: numa base sem o campo filtrado, ou em que o filtro excluiria todos os chunks, ele é ignorado e o log registra isso em `extra.filtros_ignorados`. Se ainda assim os filtros zerarem o resultado, [src/pipeline.py](src/pipeline.py) refaz a busca sem eles.
+- `rerank` ([src/rerank.py](src/rerank.py)): um cross-encoder local (`RERANK_MODEL`, padrão `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`, roda em CPU) reordena os `RERANK_CANDIDATES` (padrão 10) primeiros do RRF. Chunks JSON vão para o modelo com os campos de conteúdo primeiro (`objetoCompra`, título, órgão...), porque o modelo só lê 512 tokens. Se o modelo falhar, o log registra erro e o resultado volta a ser o do RRF. O `retrieve` aplica o reranker que receber; `reranker_padrao()` devolve o cross-encoder, ou `None` com `RERANK_ENABLED=false`. **A ligação no `responder` ([src/pipeline.py](src/pipeline.py)) ainda está pendente.** Na ablação no corpus v6 (47 perguntas rotuladas, 13 delas de identificador como CNPJ e número de contrato), o hit@3 sobe de 0,64 (só RRF) para 0,83 com o rerank, a melhor configuração medida; o denso sozinho não acha identificadores (0,31) e o BM25 sozinho erra as perguntas parafraseadas: ver [docs/ABLACAO_RERANK.md](docs/ABLACAO_RERANK.md). Na primeira execução o modelo (~470 MB) é baixado para o cache do Hugging Face.
 - `consulta_sql` ([src/structured_query.py](src/structured_query.py) + [src/structured_db.py](src/structured_db.py)): perguntas de conta sobre as bases estruturada e agregada (ranking, estatística com média e mediana, comparação entre esferas, evolução no tempo, agrupamento) são respondidas por uma consulta SQL pré-escrita e parametrizada — o LLM nunca escreve SQL. O resultado entra como chunk (`doc_type="sql"`, `chunk_id` começando com `sql:`) antes dos chunks da busca. Se o termo pedido não existe no objeto de nenhuma contratação, o resultado diz isso em vez de calcular sobre outro assunto. Falha no banco é registrada no log e a resposta segue só com a busca.
 - `geracao` ([src/generate.py](src/generate.py)): guardrails determinísticos antes do LLM, prompt limitado à janela do modelo (`GENERATION_CONTEXT_CHARS` no total e `GENERATION_CHUNK_CHARS` por chunk; o log registra `chunks_no_prompt` e `chunks_fora_do_orcamento`) e saída pedida em JSON (`response_format`).
 - `validacao` ([src/generate.py](src/generate.py)): checa a saída do LLM. JSON inválido vira recusa segura, citação de chunk que não foi recuperado é descartada (`extra.citacoes_descartadas`) e dado pessoal na resposta é mascarado.
 
 [src/pipeline.py](src/pipeline.py) une as etapas numa única função (`responder`).
 
-**Ainda não implementados:** `rerank` (o `retrieve` aceita um reranker plugável, mas nenhum é usado; o modelo de rerank da turma ainda não foi liberado) e `feedback`.
+`feedback` ([src/history_store.py](src/history_store.py)): toda chamada a `POST /api/v1/query` recebe um `query_id` e é salva (pergunta + resposta completa) num SQLite local (`data/app_state/historico.sqlite`, fora do Git — diferente da base derivada de `structured_db.py`, este é estado da aplicação e não é remontado). `POST /api/v1/feedback` associa uma avaliação (`positivo`/`negativo` + comentário opcional) a um `query_id` já registrado (404 se não existir) e grava o evento no log estruturado com `stage="feedback"`. `GET /api/v1/history?limit=N` devolve as consultas mais recentes com o feedback recebido. Testes em [tests/test_history_store.py](tests/test_history_store.py) e [tests/test_app_api.py](tests/test_app_api.py).
+
+O modelo de rerank da turma ainda não tem endpoint; quando tiver, basta um reranker com a mesma assinatura em [src/rerank.py](src/rerank.py).
 
 O parsing da geração aceita as variações de chave que o modelo da turma produz na prática (`sources` em vez de `sources_used`, `confidence` numérico em vez de `confidence_level`) e registra no log, em `extra.chaves_fora_do_contrato`, quando isso acontece. Toda etapa registra log estruturado via [src/obs.py](src/obs.py) (JSONL em `logs/pipeline-AAAA-MM-DD.jsonl`, com `run_id`, `stage`, latência e tokens).
 
-Uma pergunta via `responder` gera, no log, uma linha por stage — `query_analysis`, `roteamento`, `retrieval_denso`, `retrieval_bm25`, `fusao_rrf`, `rerank` (só com reranker), `consulta_sql` (só em pergunta de conta), `geracao` e `validacao` (só quando o LLM foi chamado) — todas com o mesmo `run_id` e `query_id`. `geracao` traz `tokens` e `modelo` a partir de `response.usage` do SDK OpenAI; `retrieval_denso` traz os tokens do embedding da pergunta quando usa o embedding padrão do servidor. Etapa que falha grava `status: "erro"` com `extra.error_type`. Dados pessoais da pergunta são mascarados antes de ir para o log. Testes em [tests/test_pipeline_logs.py](tests/test_pipeline_logs.py); os testes gravam log num diretório temporário ([tests/conftest.py](tests/conftest.py)), nunca em `logs/`.
+Uma pergunta via `responder` gera, no log, uma linha por stage — `query_analysis`, `roteamento`, `retrieval_denso`, `retrieval_bm25`, `fusao_rrf`, `rerank` (só com reranker; traz `modelo`), `consulta_sql` (só em pergunta de conta), `geracao` e `validacao` (só quando o LLM foi chamado) — todas com o mesmo `run_id` e `query_id`. `geracao` traz `tokens` e `modelo` a partir de `response.usage` do SDK OpenAI; `retrieval_denso` traz os tokens do embedding da pergunta quando usa o embedding padrão do servidor. Etapa que falha grava `status: "erro"` com `extra.error_type`. Dados pessoais da pergunta são mascarados antes de ir para o log. Testes em [tests/test_pipeline_logs.py](tests/test_pipeline_logs.py); os testes gravam log num diretório temporário ([tests/conftest.py](tests/conftest.py)), nunca em `logs/`.
 
 ## Estrutura do repositório
 
@@ -113,19 +133,19 @@ Uma pergunta via `responder` gera, no log, uma linha por stage — `query_analys
 ├── CORPUS_INVENTORY.md           ← inventário legível do corpus coletado
 ├── data/
 │   ├── raw/vN/                  ← versão imutável de cada coleta (staging em raw/.staging/ até promoção)
-│   ├── normalized/              ← chunks normalizados (JSONL), saída de src/prepare_documents.py (ignorado pelo Git)
+│   ├── normalized/              ← chunks normalizados (JSONL), saída de src/prepare_documents.py (o snapshot da v6 está versionado; novas saídas continuam ignoradas)
 │   ├── embeddings/               ← embeddings versionados (cache + partes), gerados por src/create_embeddings.py
 │   ├── inventory/                ← inventário por versão (JSON), checkpoints e diffs entre versões
 │   ├── runs/                    ← relatórios de execução de cada coleta
 │   └── attempts/                ← coletas e preparações experimentais (--data-root), fora do Git
-├── index/                       ← índice vetorial por base (index/<base_id>/vectors.jsonl), fora do Git
+├── index/                       ← índice vetorial por base (vectors.jsonl + vectors.faiss); o índice da v6 está versionado
 ├── logs/                        ← log estruturado do pipeline (pipeline-AAAA-MM-DD.jsonl), fora do Git
 ├── eval/                        ← golden set das personas e harness de avaliação (run_eval.py)
 ├── tests/fixtures/               ← amostras locais para testes offline
 ├── tests/                       ← testes de contrato (pytest), offline
 ├── app/
 │   ├── cli.py                   ← interface de linha de comando: rota e resposta completa do pipeline
-│   └── api.py                   ← API HTTP (FastAPI): GET /health e POST /api/v1/query
+│   └── api.py                   ← API HTTP (FastAPI): /health, /api/v1/query, /api/v1/feedback, /api/v1/history
 ├── src/
 │   ├── fetch_corpus.py          ← coleta determinística e versionada do corpus
 │   ├── providers/               ← provedores declarativos de fontes (pncp.py: contratações, atas + PDFs, PCA)
@@ -149,9 +169,11 @@ Uma pergunta via `responder` gera, no log, uma linha por stage — `query_analys
 │   ├── structured_query.py      ← consultas SQL fixas (ranking, estatística, evolução, agrupamento) como evidência
 │   ├── router.py                ← roteamento determinístico (Adaptive RAG)
 │   ├── retrieve.py              ← recuperação híbrida: denso + BM25 + RRF, filtros de metadado por base, rerank plugável
+│   ├── rerank.py                ← rerank por cross-encoder local sobre os candidatos do RRF
 │   ├── generate.py              ← geração com guardrails, prompt na janela do modelo e validação da saída do LLM
 │   ├── sensitivity.py           ← política de sensibilidade: mascaramento de CPF/telefone/e-mail e filtro de restritos
 │   ├── pipeline.py              ← une query_analysis + roteamento + recuperação + geração numa função (responder)
+│   ├── history_store.py         ← histórico de consultas e feedback do usuário (SQLite local, data/app_state/)
 │   ├── obs.py                   ← logging estruturado (JSONL) e contagem de tokens
 │   └── schema.py                ← modelos Pydantic (chunk, roteamento, resposta, recusa)
 ├── llm_ecoa.py                  ← exemplo mínimo de geração e embedding via endpoint compartilhado
@@ -438,9 +460,14 @@ py .\eval\run_eval.py check                                     # valida o golde
 py .\eval\run_eval.py run --pipeline eval.adapters:rota_apenas   # só roteamento (src/router.py), rápido e offline
 py .\eval\run_eval.py run --pipeline src.pipeline:responder      # pipeline completo: roteamento + recuperação + geração
 py .\eval\run_eval.py run --pipeline src.pipeline:responder_incluindo_experimentais   # idem, incluindo bases experimentais
+py .\eval\run_eval.py run --pipeline eval.adapters:pipeline_completo   # pipeline completo + tokens e latência por etapa (lidos do log)
+py .\eval\run_eval.py run --pipeline eval.adapters:pipeline_completo --ids P1.1 G1   # só alguns casos
+py .\eval\ablacao_rerank.py --candidatos 10 30                 # ablação da recuperação: denso, BM25, RRF, RRF + rerank
 ```
 
 `eval/adapters.py:rota_apenas` avalia só o estágio de roteamento, sem chamar o LLM — útil para checar regressão rápida. `src/pipeline.py:responder` roda o pipeline completo (roteamento + recuperação híbrida via `retrieve.py` + geração via `generate.py`), chamando o LLM de verdade a cada pergunta do golden set.
+
+O relatório (`eval/runs/<run_id>/REPORT.md`) traz rota e recusa (o que define o acerto), citação, confiança, latência e tokens, e o texto de cada resposta. Um caso que dá erro aparece como ERRO sem interromper a rodada. Os casos `G1`–`G3` testam os guardrails do cenário (dados bancários, credenciais em e-mail, juízo de fraude). A ablação do rerank usa outro conjunto, [eval/retrieval_set.jsonl](eval/retrieval_set.jsonl), com o trecho relevante de cada pergunta rotulado; resultado e decisão em [docs/ABLACAO_RERANK.md](docs/ABLACAO_RERANK.md).
 
 ### Endpoint de modelos (compartilhado com toda a turma)
 

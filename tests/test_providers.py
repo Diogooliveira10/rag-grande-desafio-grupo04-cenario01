@@ -291,13 +291,13 @@ def test_pncp_signed_contract_search_fails_closed_for_incomplete_roster(tmp_path
         )
 
 
-def test_pncp_national_contract_discovery_filters_rj_and_resumes_completed_pages():
+def test_pncp_verified_contract_discovery_filters_rj_and_resumes_completed_pages():
     rj_1 = {
         "numeroControlePNCP": "11111111000100-2-000001/2025",
         "numeroControlePNCPCompra": "11111111000100-1-000001/2025",
         "dataAssinatura": "2025-04-01",
         "tipoContrato": {"id": 1, "nome": "Contrato"},
-        "unidadeOrgao": {"ufSigla": "RJ"},
+        "unidadeOrgao": {"ufSigla": "RJ", "codigoUnidade": "1"},
     }
     sp = {
         "numeroControlePNCP": "22222222000100-2-000001/2025",
@@ -306,16 +306,16 @@ def test_pncp_national_contract_discovery_filters_rj_and_resumes_completed_pages
         "unidadeOrgao": {"ufSigla": "SP"},
     }
     rj_2 = {
-        "numeroControlePNCP": "33333333000100-2-000002/2025",
+        "numeroControlePNCP": "11111111000100-2-000002/2025",
         "dataAssinatura": "2025-05-01",
         "tipoContrato": {"id": 1, "nome": "Contrato"},
-        "unidadeOrgao": {"ufSigla": "RJ"},
+        "unidadeOrgao": {"ufSigla": "RJ", "codigoUnidade": "1"},
     }
     rj_1_without_purchase_link = {
         "numeroControlePNCP": "11111111000100-2-000001/2025",
         "dataAssinatura": "2025-04-01",
         "tipoContrato": {"id": 1, "nome": "Contrato"},
-        "unidadeOrgao": {"ufSigla": "RJ"},
+        "unidadeOrgao": {"ufSigla": "RJ", "codigoUnidade": "1"},
     }
 
     class FakeClient:
@@ -358,6 +358,9 @@ def test_pncp_national_contract_discovery_filters_rj_and_resumes_completed_pages
             "tamanhoPagina": 500,
         },
         "discovery_state": state,
+        "verified_unit_scopes": [
+            {"cnpj": "11111111000100", "codigoUnidadeAdministrativa": "1", "ufSigla": "RJ"},
+        ],
     }
 
     def interrupt_after_first_page(report):
@@ -385,10 +388,10 @@ def test_pncp_national_contract_discovery_filters_rj_and_resumes_completed_pages
 
     results = PNCPProvider(client).search({**query, "on_discovery_page": record_page})
     assert client.requested_pages == [1, 2]
-    assert all("cnpjOrgao" not in call for call in client.calls)
+    assert all(call["cnpjOrgao"] == "11111111000100" for call in client.calls)
+    assert all(call["codigoUnidadeAdministrativa"] == "1" for call in client.calls)
     assert {candidate.source_ref.key["cnpj"] for candidate in results} == {
         "11111111000100",
-        "33333333000100",
     }
     assert len(results) == 2
     contract = next(candidate for candidate in results if candidate.candidate_id == rj_1["numeroControlePNCP"])

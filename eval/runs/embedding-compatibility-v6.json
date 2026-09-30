@@ -1,0 +1,228 @@
+{
+  "status": "passed",
+  "local_checkpoint": "D:\\LLM\\Qwen3-Embedding-0.6B.Q8_0.gguf",
+  "local_checkpoint_sha256": "e40d4a708d0b324fc133bae547bd64dec79edb885410ef262c1e5c2efb2050b3",
+  "local_backend": "llama.cpp",
+  "remote_model": "xagi/qwen3-embedding:0.6b-q4_k_m",
+  "remote_backend": "ECOA/Ollama",
+  "pooling": "last",
+  "context_size": 4096,
+  "threads": 2,
+  "batch_size": 1,
+  "pause_seconds": 0,
+  "queries": [
+    "Qual foi o valor médio por quilo de arroz contratado por municípios do RJ em 2025?",
+    "Quais exigências do edital de contratação de ambulâncias?",
+    "O que as atas de registro de preços dizem sobre fornecedores?",
+    "Qual o valor total planejado no PCA de 2025 por unidade?"
+  ],
+  "gpu_layers": "all",
+  "parallel": 1,
+  "server_context_size": 4096,
+  "ubatch_size": 2048,
+  "flash_attention": "auto",
+  "query_instruction": "Instruct: Given a public procurement question, retrieve relevant passages that answer the query\n",
+  "document_instruction": null,
+  "documents": [
+    {
+      "chunk_id": "contratos_estruturado:000417cefe3d4d5f:chunk-1-000417cefe3d",
+      "base_id": "contratos_estruturado",
+      "source_file": "data/raw/v5/contratos_estruturado/reuso_000417cefe3d4d5f_000417cefe3d.json",
+      "text_sha256": "000417cefe3d4d5fff33582d29013a9a8e413aa61e67771cda024460d4869de6"
+    },
+    {
+      "chunk_id": "contratos_estruturado:00126d56baaaad6c:chunk-1-00126d56baaa",
+      "base_id": "contratos_estruturado",
+      "source_file": "data/raw/v5/contratos_estruturado/reuso_00126d56baaaad6c_00126d56baaa.json",
+      "text_sha256": "00126d56baaaad6c684181a1d9d0cf150f05b514614902bcb6101dd7e756b093"
+    },
+    {
+      "chunk_id": "contratos_estruturado:002355a118683da0:chunk-1-002355a11868",
+      "base_id": "contratos_estruturado",
+      "source_file": "data/raw/v5/contratos_estruturado/reuso_002355a118683da0_002355a11868.json",
+      "text_sha256": "002355a118683da0ad1262cf33355fc1ab3108f90ec460ed11cfc47421b143e9"
+    },
+    {
+      "chunk_id": "contratos_estruturado:0035244d60289dd7:chunk-1-0035244d6028",
+      "base_id": "contratos_estruturado",
+      "source_file": "data/raw/v5/contratos_estruturado/reuso_0035244d60289dd7_0035244d6028.json",
+      "text_sha256": "0035244d60289dd7c6b1ccde693452079e73872879a2053b2022ba92ef7d9710"
+    },
+    {
+      "chunk_id": "contratos_estruturado:006ac14361dc00e1:chunk-1-006ac14361dc",
+      "base_id": "contratos_estruturado",
+      "source_file": "data/raw/v5/contratos_estruturado/reuso_006ac14361dc00e1_006ac14361dc.json",
+      "text_sha256": "006ac14361dc00e157a266f66e76e1cfcc58f896ea5838df6c9fe3e08d6be42f"
+    },
+    {
+      "chunk_id": "editais_normativo:1f7354fb65590678:chunk-1-c987f2fa1247",
+      "base_id": "editais_normativo",
+      "source_file": "data/raw/v5/editais_normativo/reuso_1f7354fb65590678_1f7354fb6559.html",
+      "text_sha256": "c987f2fa12470f43be8e4daaa7df8176bbda11a4f57610992c28e12f2a995b13"
+    },
+    {
+      "chunk_id": "editais_normativo:1f7354fb65590678:chunk-2-ca4d15ab9905",
+      "base_id": "editais_normativo",
+      "source_file": "data/raw/v5/editais_normativo/reuso_1f7354fb65590678_1f7354fb6559.html",
+      "text_sha256": "ca4d15ab990596a45c0ea4869318fd6a0a9cc27eaf74c824f7e40a00fd6fc3e0"
+    },
+    {
+      "chunk_id": "editais_normativo:1f7354fb65590678:chunk-3-5e76f9fcce75",
+      "base_id": "editais_normativo",
+      "source_file": "data/raw/v5/editais_normativo/reuso_1f7354fb65590678_1f7354fb6559.html",
+      "text_sha256": "5e76f9fcce75a99982597df7cc0225045accfeaf97aa714805217acde1310070"
+    },
+    {
+      "chunk_id": "editais_normativo:1f7354fb65590678:chunk-4-ba5efca5e2cf",
+      "base_id": "editais_normativo",
+      "source_file": "data/raw/v5/editais_normativo/reuso_1f7354fb65590678_1f7354fb6559.html",
+      "text_sha256": "ba5efca5e2cfde2b1af521860cd56a491e71e630f74cc8efe1f8c8c051ee14b6"
+    },
+    {
+      "chunk_id": "editais_normativo:1f7354fb65590678:chunk-5-5526acbdc637",
+      "base_id": "editais_normativo",
+      "source_file": "data/raw/v5/editais_normativo/reuso_1f7354fb65590678_1f7354fb6559.html",
+      "text_sha256": "5526acbdc6375ff3cdd43c0fb140010aaad4c6898b4dcfcb3a5a913d01c17b8c"
+    },
+    {
+      "chunk_id": "atas_conversacional:c0cadb9fc9bb0fcb:chunk-1-c0cadb9fc9bb",
+      "base_id": "atas_conversacional",
+      "source_file": "data/raw/v5/atas_conversacional/adotado_002ca9206d0d83d2_c0cadb9fc9bb.json",
+      "text_sha256": "c0cadb9fc9bb0fcb07893af2fc023d18be35ea29f141e3c5554ba9191844bea8"
+    },
+    {
+      "chunk_id": "atas_conversacional:72362dd58fe491d4:chunk-1-72362dd58fe4",
+      "base_id": "atas_conversacional",
+      "source_file": "data/raw/v5/atas_conversacional/adotado_007254f1c58f0da9_72362dd58fe4.json",
+      "text_sha256": "72362dd58fe491d468529362f55edae3319281791bfa111c188fec4129a62cc1"
+    },
+    {
+      "chunk_id": "atas_conversacional:7bfa248f07c4736d:registro-1:chunk-1-b29644a38f0d",
+      "base_id": "atas_conversacional",
+      "source_file": "data/raw/v5/atas_conversacional/adotado_00751b05636e221c_7bfa248f07c4.json",
+      "text_sha256": "b29644a38f0d7e384d582c0f4c53f1c5241a9f18bd5ee3edec7672b5da929fc4"
+    },
+    {
+      "chunk_id": "atas_conversacional:a3f3a2dfc24dcdf6:chunk-1-a3f3a2dfc24d",
+      "base_id": "atas_conversacional",
+      "source_file": "data/raw/v5/atas_conversacional/adotado_0094f5012f28bfdb_a3f3a2dfc24d.json",
+      "text_sha256": "a3f3a2dfc24dcdf6c193873c58c631d4155feefa2028fd4c590ac562ebb71a40"
+    },
+    {
+      "chunk_id": "atas_conversacional:de6a02a763fad196:chunk-1-de6a02a763fa",
+      "base_id": "atas_conversacional",
+      "source_file": "data/raw/v5/atas_conversacional/adotado_009826669dfd73d8_de6a02a763fa.json",
+      "text_sha256": "de6a02a763fad196955325b382fd5c1b3adc19543727e9b24e7836bb7815d098"
+    },
+    {
+      "chunk_id": "pca_agregado:000417cefe3d4d5f:chunk-1-000417cefe3d",
+      "base_id": "pca_agregado",
+      "source_file": "data/raw/v5/pca_agregado/reuso_000417cefe3d4d5f_000417cefe3d.json",
+      "text_sha256": "000417cefe3d4d5fff33582d29013a9a8e413aa61e67771cda024460d4869de6"
+    },
+    {
+      "chunk_id": "pca_agregado:00126d56baaaad6c:chunk-1-00126d56baaa",
+      "base_id": "pca_agregado",
+      "source_file": "data/raw/v5/pca_agregado/reuso_00126d56baaaad6c_00126d56baaa.json",
+      "text_sha256": "00126d56baaaad6c684181a1d9d0cf150f05b514614902bcb6101dd7e756b093"
+    },
+    {
+      "chunk_id": "pca_agregado:002355a118683da0:chunk-1-002355a11868",
+      "base_id": "pca_agregado",
+      "source_file": "data/raw/v5/pca_agregado/reuso_002355a118683da0_002355a11868.json",
+      "text_sha256": "002355a118683da0ad1262cf33355fc1ab3108f90ec460ed11cfc47421b143e9"
+    },
+    {
+      "chunk_id": "pca_agregado:0035244d60289dd7:chunk-1-0035244d6028",
+      "base_id": "pca_agregado",
+      "source_file": "data/raw/v5/pca_agregado/reuso_0035244d60289dd7_0035244d6028.json",
+      "text_sha256": "0035244d60289dd7c6b1ccde693452079e73872879a2053b2022ba92ef7d9710"
+    },
+    {
+      "chunk_id": "pca_agregado:004febcc07e83d8e:registro-1:chunk-1-0bf3d9adec59",
+      "base_id": "pca_agregado",
+      "source_file": "data/raw/v5/pca_agregado/reuso_004febcc07e83d8e_004febcc07e8.json",
+      "text_sha256": "0bf3d9adec5987954f8aae6a7da20592e2afa5c85cc2e1aa097e7155195494cf"
+    }
+  ],
+  "remote_details": {
+    "parent_model": "/Users/michael/.ollama/models/blobs/sha256-44f67b5875def0e90ae67247b141a5a861538efb8d8b0f783eef3d94211d9dcd",
+    "format": "gguf",
+    "family": "qwen3",
+    "families": [
+      "qwen3"
+    ],
+    "parameter_size": "595.78M",
+    "quantization_level": "Q4_K_M"
+  },
+  "remote_model_info": {
+    "general.architecture": "qwen3",
+    "general.base_model.0.name": "Qwen3 0.6B Base",
+    "general.base_model.0.organization": "Qwen",
+    "general.base_model.0.repo_url": "https://huggingface.co/Qwen/Qwen3-0.6B-Base",
+    "general.base_model.count": 1,
+    "general.basename": "qwen3-embedding",
+    "general.file_type": 15,
+    "general.license": "apache-2.0",
+    "general.parameter_count": 595776512,
+    "general.quantization_version": 2,
+    "general.size_label": "0.6B",
+    "general.tags": null,
+    "general.type": "model",
+    "qwen3.attention.head_count": 16,
+    "qwen3.attention.head_count_kv": 8,
+    "qwen3.attention.key_length": 128,
+    "qwen3.attention.layer_norm_rms_epsilon": 1e-06,
+    "qwen3.attention.value_length": 128,
+    "qwen3.block_count": 28,
+    "qwen3.context_length": 32768,
+    "qwen3.embedding_length": 1024,
+    "qwen3.feed_forward_length": 3072,
+    "qwen3.pooling_type": 3,
+    "qwen3.rope.freq_base": 1000000,
+    "tokenizer.ggml.add_bos_token": false,
+    "tokenizer.ggml.add_eos_token": true,
+    "tokenizer.ggml.bos_token_id": 151643,
+    "tokenizer.ggml.eos_token_id": 151643,
+    "tokenizer.ggml.eot_token_id": 151645,
+    "tokenizer.ggml.merges": null,
+    "tokenizer.ggml.model": "gpt2",
+    "tokenizer.ggml.padding_token_id": 151643,
+    "tokenizer.ggml.pre": "qwen2",
+    "tokenizer.ggml.token_type": null,
+    "tokenizer.ggml.tokens": null
+  },
+  "remote_calls": [
+    {
+      "latency_ms": 5474.1126000881195
+    },
+    {
+      "latency_ms": 812.2750000329688
+    },
+    {
+      "latency_ms": 160.19610001239926
+    },
+    {
+      "latency_ms": 161.76289995200932
+    }
+  ],
+  "dimension": 1024,
+  "cosines": [
+    0.9759231587800044,
+    0.9722136350017702,
+    0.966865865576631,
+    0.9778127487732773
+  ],
+  "top5_overlaps": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+  ],
+  "mean_top5_overlap": 1.0,
+  "thresholds": {
+    "min_query_cosine": 0.95,
+    "mean_top5_overlap": 0.8
+  },
+  "compatible": true
+}

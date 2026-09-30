@@ -3,6 +3,68 @@
 Os comandos abaixo foram conferidos com as interfaces atuais em `src/`. Para
 consultar todas as opções de um comando, acrescente `--help`.
 
+## Snapshot oficial v6
+
+A v6 é a versão ativa: 1.400 arquivos, cinco arquivos por órgão/base no máximo
+e 5.621 chunks indexados. As referências a v3 nas seções de coleta abaixo são
+exemplos históricos; para consultar o snapshot pronto, use a CLI existente:
+
+```powershell
+python app/cli.py rota "Quais fornecedores receberam o maior valor total em contratos no conjunto de dados de 2025?"
+python app/cli.py perguntar "Quais fornecedores receberam o maior valor total em contratos no conjunto de dados de 2025?"
+```
+
+Configure as credenciais ECOA no `.env` a partir de `.env.example`. A recuperação
+usa `index/`, `data/normalized/documents.jsonl` e o SQLite em `data/structured/`.
+Os vetores documentais já estão armazenados: essas consultas enviam ao ECOA a
+pergunta e o contexto para resposta, sem regerar os embeddings dos documentos.
+O cache de queries é local e não versionado. O snapshot não comprova que uma
+licitação de 2025 continue aberta hoje.
+
+Para conferir o corpus materializado e compilar os exemplos PostgreSQL offline:
+
+```powershell
+python eval/runs/audit_v6.py
+python eval/runs/compile_sql_v6.py
+python -m pytest -q
+```
+
+A auditoria completa também exige os arquivos brutos referenciados pelo
+inventário, que permanecem fora do Git. A compilação SQL não conecta ao
+PostgreSQL, não executa comandos e não aplica DDL. O caminho de cálculo já
+existente nas consultas usa SQLite. Para preservar esse comportamento local,
+deixe a configuração de PostgreSQL/Neon desativada no ambiente.
+
+Os scripts de execução foram preservados em `eval/runs/`: `discover_v6.py`
+descobre fontes, `curate_v6.py` aplica a seleção e os limites, e `pipeline_v6.py`
+prepara, embeda, indexa e avalia. São os scripts da execução registrada, com
+pré-requisitos nos relatórios de descoberta/curadoria; não execute a curadoria
+novamente sobre a v6 já promovida. Uma nova coleta precisa de nova versão e dos
+arquivos brutos das fontes anteriores para reutilização. A avaliação ECOA é uma
+integração explícita, separada dos testes offline, com pausas entre perguntas.
+
+Para testar a compatibilidade local/ECOA antes de uma nova geração:
+
+```powershell
+python src/run_local_embeddings.py --compatibility-test `
+  --input data/normalized/v6/contratos_estruturado/documents.jsonl `
+  --threads 2 --gpu-layers all --context-size 4096 --ubatch-size 2048 `
+  --report eval/runs/embedding-compatibility-v6.json
+```
+
+O modelo local padrão é `D:\LLM\Qwen3-Embedding-0.6B.Q8_0.gguf`; ajuste
+`--model-path` e `--llama-exe` conforme o ambiente. Q8 local e Q4 ECOA são
+artefatos distintos. O melhor perfil medido usou lote 16, duas threads e Vulkan;
+os resultados são específicos da máquina registrada, não uma garantia de
+velocidade em outro ambiente. Sem `--output`, a geração organiza os vetores em
+pastas com data/hora e base. Para retomar, informe o JSONL já existente.
+
+Os ZIPs versionados em `atas-zip/` contêm somente os 40 PDFs de atas da v6 e seus
+40 Markdown correspondentes. Os scripts `export_atas_v6_md.py` e
+`zip_atas_v6.ps1 -Markdown` preservam os caminhos relativos e recusam sobrescrever
+uma entrega existente. Consulte [o registro da v6](registro_execucao_v6.md)
+para distribuição, hashes, avaliação factual e pendências.
+
 ## Preparar o ambiente
 
 No PowerShell, na raiz do repositório:
@@ -315,9 +377,9 @@ versão candidata em `data/attempts/agregada/` antes da promoção, ou os caminh
 versionados de `data/` para uma versão já promovida. Este fluxo não gera
 embeddings.
 
-Quando a coleta isolada da Agregada terminar e o inventário experimental estiver
-concluído, promova seus artefatos para a próxima versão oficial sem repetir a
-coleta das outras bases:
+Quando uma coleta isolada da Agregada ou da Conversacional terminar e o inventário
+experimental estiver concluído, promova seus artefatos para a próxima versão
+oficial sem repetir a coleta das outras bases. Para a Agregada:
 
 ```powershell
 py -m src.fetch_corpus update `
@@ -326,11 +388,23 @@ py -m src.fetch_corpus update `
   --adopt-attempt data/attempts/agregada_lote/inventory/v1.json
 ```
 
-Esse comando exige uma tentativa concluída e confere no checkpoint se cada
-contrato selecionado tem detalhe, itens e consulta de resultados bem-sucedidos.
-Depois copia os arquivos para o staging oficial, carrega as demais bases da
-versão anterior e passa pela validação/promoção normal. Falhas de vínculo da
-contratação permanecem no inventário; uma tentativa incompleta não é promovida.
+Para a Conversacional:
+
+```powershell
+py -m src.fetch_corpus update `
+  --manifest corpus_manifest.yaml `
+  --official `
+  --adopt-attempt data/attempts/conversacional_pncp_v2/inventory/v1.json
+```
+
+O comando exige uma tentativa completa e confere no checkpoint a cobertura
+específica da base. Na Agregada, cada contrato selecionado precisa ter detalhe,
+itens e consulta de resultados bem-sucedidos. Na Conversacional, cada compra
+selecionada precisa ter consulta de atas bem-sucedida; as atas encontradas devem
+ter metadados e listagem de documentos, e todos os documentos listados precisam
+ter arquivo baixado. Depois, os arquivos são copiados para o staging oficial,
+as demais bases são carregadas da versão anterior e a validação/promoção normal
+é executada. Uma tentativa incompleta não é promovida.
 
 ### Carregar a Agregada em PostgreSQL/Neon
 
@@ -483,10 +557,42 @@ misturar materializações de versões diferentes.
 relatório. O padrão usa o provedor `ecoa`, lotes de 64 e uma pausa de 10 segundos
 entre lotes. Os provedores aceitos são `ecoa`, `ollama`, `openai` e `custom`.
 
+Para gerar documentos localmente com o checkpoint dedicado, use uma base por
+execução:
+
+```powershell
+python -m src.run_local_embeddings --run `
+  --input data/normalized/v5/contratos_estruturado/documents.jsonl
+```
+
+Sem `--output`, esse comando grava em
+`data/embeddings/AAAA-MM-DD_HH-MM-SS_microssegundos/<base>/embeddings.jsonl`.
+O relatório e os checkpoints parciais ficam junto do JSONL. Para retomar uma
+execução, informe em `--output` o mesmo caminho já criado. Para agrupar as quatro
+bases na mesma pasta datada, informe esse caminho explicitamente para cada base.
+O padrão local usa Qwen3-Embedding Q8, pooling `last`, contexto 4096, quatro
+threads, lote de um texto e pausa zero. Todos os textos são validados contra o
+limite de tokens antes da geração; documentos não recebem instrução de query.
+
+A configuração mais rápida medida nesta máquina (RTX 3050 Laptop) foi:
+
+```powershell
+python -m src.run_local_embeddings --run `
+  --input data/normalized/v5/contratos_estruturado/documents.jsonl `
+  --threads 2 --gpu-layers all --parallel 1 --ubatch-size 2048 `
+  --batch-size 16 --pause-seconds 0 --flash-attn auto
+```
+
+O contexto continua em 4096 tokens por slot, mas o lote interno de 2048 exige
+textos com menos de 2048 tokens. `token_validation.json` registra a validação
+completa da base; um texto fora do limite interrompe a geração antes do primeiro
+lote. O benchmark e a comparação com ECOA estão em `eval/runs`.
+
 ## O que estas CLIs ainda não fazem
 
-`corpus_search` faz busca em metadados; não é a busca híbrida do RAG. O
-repositório ainda não tem uma CLI integrada de roteamento adaptativo, busca
-densa + BM25, fusão RRF, reranking, geração de resposta com citações, aplicação
-dos guardrails descritos no enunciado ou histórico/feedback do usuário. Veja o
+`corpus_search` faz busca em metadados; não é a busca híbrida do RAG.
+Os comandos `python app/cli.py rota "Pergunta"` e
+`python app/cli.py perguntar "Pergunta"` usam o pipeline de consulta existente.
+Esta etapa ainda não entrega cross-encoder com ablação, histórico/feedback
+persistidos, execução PostgreSQL ou a trilha real de e-mails do desafio. Veja o
 [status da arquitetura](../ARQUITETURA.md).

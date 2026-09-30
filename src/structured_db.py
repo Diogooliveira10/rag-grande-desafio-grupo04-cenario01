@@ -53,6 +53,11 @@ _COLUNAS_CONTRATACOES = {
     "data_publicacao": "TEXT",
     "ano_publicacao": "INTEGER",
     "mes_publicacao": "TEXT",
+    "data_assinatura": "TEXT",
+    "ano_assinatura": "INTEGER",
+    "mes_assinatura": "TEXT",
+    "tipo_registro": "TEXT",
+    "fornecedor": "TEXT",
     "modalidade": "TEXT",
     "modo_disputa": "TEXT",
     "situacao": "TEXT",
@@ -70,6 +75,7 @@ _COLUNAS_CONTRATACOES = {
     "objeto_normalizado": "TEXT",
     "valor_estimado": "{REAL}",
     "valor_homologado": "{REAL}",
+    "valor_contratado": "{REAL}",
     "valor": "{REAL}",
 }
 _COLUNAS_PCA = {
@@ -245,9 +251,12 @@ def _linha_contratacao(chunk: Mapping[str, Any], registro: dict[str, Any]) -> di
     orgao = registro.get("orgaoEntidade") or {}
     unidade = registro.get("unidadeOrgao") or {}
     data_publicacao = _data(registro.get("dataPublicacaoPncp"))
+    data_assinatura = _data(registro.get("dataAssinatura"))
+    contrato_assinado = "-2-" in str(numero_controle)
+    contratado = _numero(registro.get("valorGlobal")) if contrato_assinado else None
     estimado = _numero(registro.get("valorTotalEstimado"))
     homologado = _numero(registro.get("valorTotalHomologado"))
-    objeto = " ".join(str(registro.get("objetoCompra") or "").split())
+    objeto = " ".join(str(registro.get("objetoContrato") or registro.get("objetoCompra") or "").split())
     return {
         "numero_controle_pncp": numero_controle,
         "chunk_id": chunk.get("chunk_id"),
@@ -256,7 +265,12 @@ def _linha_contratacao(chunk: Mapping[str, Any], registro: dict[str, Any]) -> di
         "data_publicacao": data_publicacao,
         "ano_publicacao": int(data_publicacao[:4]) if data_publicacao else None,
         "mes_publicacao": data_publicacao[:7] if data_publicacao else None,
-        "modalidade": registro.get("modalidadeNome"),
+        "data_assinatura": data_assinatura,
+        "ano_assinatura": int(data_assinatura[:4]) if data_assinatura else None,
+        "mes_assinatura": data_assinatura[:7] if data_assinatura else None,
+        "tipo_registro": "contrato_assinado" if contrato_assinado else "publicacao_compra",
+        "fornecedor": registro.get("nomeRazaoSocialFornecedor"),
+        "modalidade": registro.get("modalidadeNome") or (chunk.get("extras") or {}).get("modalidade"),
         "modo_disputa": registro.get("modoDisputaNome"),
         "situacao": registro.get("situacaoCompraNome"),
         "srp": int(bool(registro.get("srp"))) if registro.get("srp") is not None else None,
@@ -273,9 +287,9 @@ def _linha_contratacao(chunk: Mapping[str, Any], registro: dict[str, Any]) -> di
         "objeto_normalizado": normalizar(objeto),
         "valor_estimado": estimado,
         "valor_homologado": homologado,
-        # Homologado é o valor efetivamente praticado; sem ele, vale o estimado.
-        # Zero no PNCP é "ainda não informado", não valor real.
-        "valor": homologado or estimado or None,
+        "valor_contratado": contratado,
+        # Contratos usam valorGlobal; compras conservam a distinção dos campos.
+        "valor": contratado if contrato_assinado else homologado or estimado or None,
     }
 
 
@@ -349,6 +363,7 @@ def construir_banco(documents_file: Path = DOCUMENTS_FILE, banco: Optional[Banco
         "destino": banco.descricao(),
         "documents_file": str(documents_file),
         "source_sha256": _sha256(documents_file),
+        "schema_version": "2",
         "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "contratacoes": len(contratacoes),
         "pca_planos": len(planos),
@@ -406,7 +421,11 @@ def garantir_banco(
         return banco
     with banco.sessao():
         registrado = _sha_registrado(banco)
-    if registrado == _sha256(documents_file):
+        try:
+            versao = banco.consultar("SELECT valor FROM meta WHERE chave = ?", ["schema_version"])
+        except Exception:
+            versao = []
+    if registrado == _sha256(documents_file) and versao and versao[0]["valor"] == "2":
         return banco
     try:
         construir_banco(documents_file, banco)

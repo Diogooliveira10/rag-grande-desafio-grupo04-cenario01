@@ -1,0 +1,161 @@
+"""Estágio rerank: cross-encoder plugado no retrieve, sem baixar modelo nos testes."""
+
+import json
+
+import pytest
+
+import config
+from src import obs
+from src.rerank import CrossEncoderReranker, reranker_padrao, texto_para_rerank
+from src.retrieve import RetrievalResult, retrieve
+
+
+def _resultado(chunk_id, texto, score):
+    return RetrievalResult(chunk_id=chunk_id, content=texto, metadata={}, score=score, rrf_score=score)
+
+
+def _nota_por_palavra(palavra):
+    """score_fn falso: 1.0 quando o texto contém a palavra, 0.0 senão."""
+    return lambda pares: [1.0 if palavra in texto else 0.0 for _, texto in pares]
+
+
+@pytest.fixture
+def indice(tmp_path):
+    """Seis chunks: o que fala de microempresa é o último para denso e BM25."""
+    textos = [f"contrato de ambulancias numero {i}" for i in range(5)] + [
+        "microempresa pode participar de pregao"
+    ]
+    index_dir = tmp_path / "index"
+    (index_dir / "contratos_estruturado").mkdir(parents=True)
+    linhas = []
+    for i, texto in enumerate(textos):
+        chunk_id = f"c{i}"
+        linhas.append({
+            "chunk_id": chunk_id,
+            "base_id": "contratos_estruturado",
+            "text": texto,
+            "embedding": [1.0, 0.0] if i < 5 else [0.0, 1.0],
+            "metadata": {
+                "chunk_id": chunk_id, "base_id": "contratos_estruturado",
+                "source_file": f"{chunk_id}.json", "doc_type": "json", "natureza": "estruturada",
+            },
+        })
+    conteudo = "\n".join(json.dumps(linha, ensure_ascii=False) for linha in linhas)
+    (index_dir / "contratos_estruturado" / "vectors.jsonl").write_text(conteudo, encoding="utf-8")
+    documents = tmp_path / "documents.jsonl"
+    documents.write_text(conteudo, encoding="utf-8")
+    return {"index_dir": index_dir, "documents_file": documents, "embed_fn": lambda textos: [[1.0, 0.0]]}
+
+
+def _registros():
+    arquivo = next(obs.default_logger.logs_dir.glob("pipeline-*.jsonl"))
+    return [json.loads(linha) for linha in arquivo.read_text(encoding="utf-8").splitlines()]
+
+
+def test_reranker_reordena_pela_nota_e_guarda_a_do_rrf():
+    reranker = CrossEncoderReranker(score_fn=_nota_por_palavra("microempresa"))
+    entrada = [_resultado("a", "ambulancia", 0.9), _resultado("b", "microempresa", 0.1)]
+
+    saida = reranker("pergunta", entrada)
+
+    assert [item.chunk_id for item in saida] == ["b", "a"]
+    assert saida[0].score == 1.0
+    assert saida[0].rerank_score == 1.0
+    assert saida[0].rrf_score == 0.1
+    assert entrada[0].score == 0.9  # não altera os resultados recebidos
+
+
+def test_reranker_sem_resultados_nao_chama_o_modelo():
+    def falha(_pares):
+        raise AssertionError("não deveria pontuar lista vazia")
+
+    assert CrossEncoderReranker(score_fn=falha)("pergunta", []) == []
+
+
+def test_reranker_rejeita_numero_de_notas_diferente():
+    reranker = CrossEncoderReranker(score_fn=lambda pares: [1.0])
+
+    with pytest.raises(ValueError, match="1 notas para 2 chunks"):
+        reranker("pergunta", [_resultado("a", "x", 1.0), _resultado("b", "y", 0.5)])
+
+
+def test_reranker_padrao_respeita_rerank_enabled(monkeypatch):
+    monkeypatch.setattr(config, "RERANK_ENABLED", False)
+    assert reranker_padrao() is None
+
+    monkeypatch.setattr(config, "RERANK_ENABLED", True)
+    monkeypatch.setattr(config, "RERANK_MODEL", "modelo-x")
+    reranker = reranker_padrao()
+    assert isinstance(reranker, CrossEncoderReranker)
+    assert reranker.modelo == "modelo-x"
+
+
+def test_retrieve_entrega_mais_candidatos_ao_reranker_do_que_top_k(indice):
+    """O chunk certo fica fora do top 2 do RRF; o rerank sobre 6 candidatos o traz ao topo."""
+    sem_rerank = retrieve("contrato microempresa", None, top_k=2, **indice)
+    assert "c5" not in [item.chunk_id for item in sem_rerank]
+
+    reranker = CrossEncoderReranker("modelo-teste", score_fn=_nota_por_palavra("microempresa"))
+    com_rerank = retrieve("contrato microempresa", None, top_k=2, reranker=reranker, rerank_k=6, **indice)
+
+    assert len(com_rerank) == 2
+    assert com_rerank[0].chunk_id == "c5"
+    rerank = [r for r in _registros() if r["stage"] == "rerank"][-1]
+    assert rerank["status"] == "ok"
+    assert rerank["modelo"] == "modelo-teste"
+    assert rerank["extra"]["rerank_k"] == 6
+
+
+def test_retrieve_volta_para_o_rrf_quando_o_reranker_falha(indice):
+    def quebrado(_query, _resultados):
+        raise OSError("modelo indisponível")
+
+    sem_rerank = retrieve("contrato", None, top_k=2, **indice)
+    com_falha = retrieve("contrato", None, top_k=2, reranker=quebrado, **indice)
+
+    assert [item.chunk_id for item in com_falha] == [item.chunk_id for item in sem_rerank]
+    rerank = [r for r in _registros() if r["stage"] == "rerank"][-1]
+    assert rerank["status"] == "erro"
+    assert rerank["extra"]["error_type"] == "OSError"
+
+
+def test_texto_para_rerank_poe_o_objeto_do_json_na_frente():
+    conteudo = json.dumps(
+        {
+            "amparoLegal": {"codigo": 2, "descricao": "pregão"},
+            "anoCompra": 2025,
+            "linkSistemaOrigem": "https://exemplo.gov.br/x",
+            "dataEncerramento": None,
+            "objetoCompra": "Curso de pós-graduação em Gestão Pública",
+            "valorTotalEstimado": 150000.5,
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+    texto = texto_para_rerank(conteudo)
+
+    assert texto.startswith("objetoCompra: Curso de pós-graduação em Gestão Pública")
+    assert "descricao: pregão" in texto
+    assert "valorTotalEstimado: 150000.5" in texto
+    assert "https://" not in texto
+    assert "dataEncerramento" not in texto
+
+
+def test_texto_para_rerank_mantem_texto_comum_e_json_truncado():
+    assert texto_para_rerank("Art. 94. A divulgação no PNCP") == "Art. 94. A divulgação no PNCP"
+    truncado = '{ "anoCompra": 2025, "objetoCompra": "Reforma da escola", "orgao'
+    assert texto_para_rerank(truncado).startswith("objetoCompra: Reforma da escola")
+
+
+def test_reranker_pontua_o_texto_compacto_do_json():
+    vistos = []
+
+    def score_fn(pares):
+        vistos.extend(texto for _, texto in pares)
+        return [0.0 for _ in pares]
+
+    conteudo = '{"anoCompra": 2025, "objetoCompra": "ambulancia tipo D"}'
+    CrossEncoderReranker(score_fn=score_fn)("pergunta", [_resultado("a", conteudo, 1.0)])
+
+    assert vistos == ["objetoCompra: ambulancia tipo D; anoCompra: 2025"]

@@ -37,6 +37,8 @@ COL_DATA = "Data Desejada"
 COLUNAS_OBRIGATORIAS = frozenset({COL_UNIDADE, COL_CATEGORIA, COL_CLASSE, COL_VALOR_TOTAL})
 
 TOP_N = 5
+# Equivalências precisam de revisão explícita; nomes e unidades originais são preservados.
+ALIASES_REVISADOS: dict[str, str] = {}
 TOP_RANKING = 30
 _MAX_DESCRICAO = 120
 _MESES = (

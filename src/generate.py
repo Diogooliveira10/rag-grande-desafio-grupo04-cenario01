@@ -149,7 +149,20 @@ def _compactar(conteudo: str) -> str:
         dados = json.loads(conteudo)
     except (TypeError, ValueError):
         return " ".join(conteudo.split())
-    return json.dumps(_sem_vazios(dados), ensure_ascii=False, separators=(",", ":"))
+    dados = _sem_vazios(dados)
+    if isinstance(dados, dict):
+        # Os campos de evidência devem caber antes de campos administrativos
+        # extensos. Apenas reordena o registro, preservando valores e unidades.
+        prioridade = (
+            "numeroControlePNCP", "valorGlobal", "valorInicial", "valorTotalHomologado",
+            "valorTotalEstimado", "valorUnitarioHomologado", "valorTotal", "unidadeMedida",
+            "quantidadeHomologada", "nomeRazaoSocialFornecedor", "dataAssinatura", "anoPca",
+            "descricao", "descricaoResumida", "objetoContrato", "objetoCompra", "objeto",
+            "orgaoEntidade", "unidadeOrgao",
+        )
+        dados = {**{campo: dados[campo] for campo in prioridade if campo in dados},
+                 **{campo: valor for campo, valor in dados.items() if campo not in prioridade}}
+    return json.dumps(dados, ensure_ascii=False, separators=(",", ":"))
 
 
 def _chunks_no_orcamento(chunks: list[Chunk]) -> list[Chunk]:

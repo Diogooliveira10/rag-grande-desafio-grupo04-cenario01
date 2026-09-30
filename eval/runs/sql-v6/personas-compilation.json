@@ -1,0 +1,313 @@
+[
+  {
+    "id": "P1.1",
+    "question": "Quais fornecedores firmaram três ou mais contratos de serviços ou licenciamento de tecnologia com órgãos estaduais do Rio de Janeiro em 2025, considerando apenas contratos acima de R$ 500 mil?",
+    "executed": false,
+    "status": "compiled_offline",
+    "consulta": {
+      "tabela": "contratacoes",
+      "tipo": "agrupamento",
+      "ordem": "DESC",
+      "limite": 10,
+      "agrupar_por": "modalidade",
+      "ano": 2025,
+      "valor_min": 500000,
+      "valor_max": null,
+      "esfera": "estadual",
+      "termos_objeto": [
+        "tecnolog"
+      ],
+      "dataset": "contratos_estruturado",
+      "versao": "v6",
+      "metrica": "contagem",
+      "campo": null,
+      "agrupamentos": [
+        "fornecedor"
+      ],
+      "referencia_temporal": "assinatura",
+      "ano_final": null,
+      "filtros_analiticos": [],
+      "valor_min_exclusivo": true,
+      "minimo_por_grupo": 3
+    },
+    "sql": "SELECT fornecedor, COUNT(*) AS resultado FROM contratos_fatos WHERE inventory_version = %s AND EXTRACT(YEAR FROM data_assinatura) BETWEEN %s AND %s AND valor > %s AND esfera = %s AND objeto_normalizado LIKE %s GROUP BY fornecedor HAVING COUNT(*) >= %s ORDER BY resultado DESC, fornecedor LIMIT %s",
+    "parameters": [
+      "v6",
+      2025,
+      2025,
+      500000,
+      "estadual",
+      "%tecnolog%",
+      3,
+      10
+    ],
+    "limitations": [
+      "Snapshot intencional com teto de cinco fontes por órgão/base; não representa censo.",
+      "Termos literais; sem equivalências ou aliases de itens aprovados.",
+      "As tabelas de fatos PostgreSQL não foram criadas nem carregadas."
+    ]
+  },
+  {
+    "id": "P1.2",
+    "question": "Entre os fornecedores encontrados nesses contratos, existem atas ou registros que mencionem atraso de entrega, descumprimento de prazo ou problema de fornecimento?",
+    "executed": false,
+    "status": "no_arithmetic_compilation_required"
+  },
+  {
+    "id": "P1.3",
+    "question": "Esses contratos e registros comprovam que algum dos fornecedores fraudou licitações ou agiu de forma ilegal?",
+    "executed": false,
+    "status": "no_arithmetic_compilation_required"
+  },
+  {
+    "id": "P2.1",
+    "question": "Quais contratações de ambulâncias tipo D foram publicadas por órgãos públicos do Rio de Janeiro em 2025? Informe órgão contratante, fornecedor, modalidade e valor contratado quando esses dados estiverem disponíveis.",
+    "executed": false,
+    "status": "no_arithmetic_compilation_required"
+  },
+  {
+    "id": "P2.2",
+    "question": "Qual foi a mediana do valor por ambulância tipo D nas contratações de municípios do Rio de Janeiro em 2025 e como esse valor se compara ao das contratações feitas por órgãos estaduais?",
+    "executed": false,
+    "status": "unsupported_unit_price_and_technical_equivalence",
+    "reason": "O compilador atual não representa preço por veículo e equivalência técnica documentada; não substituir por mediana de valores globais."
+  },
+  {
+    "id": "P2.3",
+    "question": "Quais editais estão ligados às contratações de ambulâncias tipo D encontradas e quais especificações técnicas devem ser consideradas para saber se as compras podem ser comparadas?",
+    "executed": false,
+    "status": "no_arithmetic_compilation_required"
+  },
+  {
+    "id": "P3.1",
+    "question": "Qual regra estava vigente em 2025 para a pesquisa de preços nas contratações públicas e quais documentos do corpus tratam desse procedimento?",
+    "executed": false,
+    "status": "no_arithmetic_compilation_required"
+  },
+  {
+    "id": "P3.2",
+    "question": "Para uma contratação publicada no Rio de Janeiro em 2025, quais normas do corpus se aplicam à modalidade registrada no processo?",
+    "executed": false,
+    "status": "no_arithmetic_compilation_required"
+  },
+  {
+    "id": "P3.3",
+    "question": "Quais licitações de tecnologia estarão abertas no Rio de Janeiro no próximo mês e quais empresas provavelmente vencerão esses processos?",
+    "executed": false,
+    "status": "no_arithmetic_compilation_required"
+  },
+  {
+    "id": "P4.1",
+    "question": "Quais órgãos do Rio de Janeiro contrataram serviços de manutenção de computadores em 2025 e quais foram os valores desses contratos?",
+    "executed": false,
+    "status": "no_arithmetic_compilation_required"
+  },
+  {
+    "id": "P4.2",
+    "question": "Quais modalidades apareceram com mais frequência nas contratações de manutenção de computadores encontradas em 2025?",
+    "executed": false,
+    "status": "compiled_offline",
+    "consulta": {
+      "tabela": "contratacoes",
+      "tipo": "agrupamento",
+      "ordem": "DESC",
+      "limite": 10,
+      "agrupar_por": "modalidade",
+      "ano": 2025,
+      "valor_min": null,
+      "valor_max": null,
+      "esfera": null,
+      "termos_objeto": [
+        "manutenc",
+        "computador"
+      ],
+      "dataset": "contratos_estruturado",
+      "versao": "v6",
+      "metrica": "contagem",
+      "campo": null,
+      "agrupamentos": [
+        "modalidade"
+      ],
+      "referencia_temporal": "assinatura",
+      "ano_final": null,
+      "filtros_analiticos": [],
+      "valor_min_exclusivo": false,
+      "minimo_por_grupo": null
+    },
+    "sql": "SELECT modalidade, COUNT(*) AS resultado FROM contratos_fatos WHERE inventory_version = %s AND EXTRACT(YEAR FROM data_assinatura) BETWEEN %s AND %s AND objeto_normalizado LIKE %s AND objeto_normalizado LIKE %s GROUP BY modalidade ORDER BY resultado DESC, modalidade LIMIT %s",
+    "parameters": [
+      "v6",
+      2025,
+      2025,
+      "%manutenc%",
+      "%computador%",
+      10
+    ],
+    "limitations": [
+      "Snapshot intencional com teto de cinco fontes por órgão/base; não representa censo.",
+      "Termos literais; sem equivalências ou aliases de itens aprovados.",
+      "As tabelas de fatos PostgreSQL não foram criadas nem carregadas."
+    ]
+  },
+  {
+    "id": "P4.3",
+    "question": "Quais regras do corpus tratam da modalidade mais usada nessas contratações?",
+    "executed": false,
+    "status": "requires_previous_calculation_and_normative_sources",
+    "reason": "O cálculo da modalidade está em P4.2; a aplicação da regra exige evidência normativa e vínculo com o processo."
+  },
+  {
+    "id": "P5.1",
+    "question": "Quais foram as dez maiores contratações registradas no Rio de Janeiro em 2025 por valor contratado?",
+    "executed": false,
+    "status": "compiled_offline",
+    "consulta": {
+      "tabela": "contratacoes",
+      "tipo": "agrupamento",
+      "ordem": "DESC",
+      "limite": 10,
+      "agrupar_por": "modalidade",
+      "ano": 2025,
+      "valor_min": null,
+      "valor_max": null,
+      "esfera": null,
+      "termos_objeto": [],
+      "dataset": "contratos_estruturado",
+      "versao": "v6",
+      "metrica": "maximo",
+      "campo": null,
+      "agrupamentos": [
+        "numero_controle_pncp"
+      ],
+      "referencia_temporal": "assinatura",
+      "ano_final": null,
+      "filtros_analiticos": [],
+      "valor_min_exclusivo": false,
+      "minimo_por_grupo": null
+    },
+    "sql": "SELECT numero_controle_pncp, MAX(valor) AS resultado FROM contratos_fatos WHERE inventory_version = %s AND EXTRACT(YEAR FROM data_assinatura) BETWEEN %s AND %s GROUP BY numero_controle_pncp ORDER BY resultado DESC, numero_controle_pncp LIMIT %s",
+    "parameters": [
+      "v6",
+      2025,
+      2025,
+      10
+    ],
+    "limitations": [
+      "Snapshot intencional com teto de cinco fontes por órgão/base; não representa censo.",
+      "Termos literais; sem equivalências ou aliases de itens aprovados.",
+      "As tabelas de fatos PostgreSQL não foram criadas nem carregadas."
+    ]
+  },
+  {
+    "id": "P5.2",
+    "question": "Quais fornecedores receberam o maior valor total em contratos no conjunto de dados de 2025?",
+    "executed": false,
+    "status": "compiled_offline",
+    "consulta": {
+      "tabela": "contratacoes",
+      "tipo": "agrupamento",
+      "ordem": "DESC",
+      "limite": 10,
+      "agrupar_por": "modalidade",
+      "ano": 2025,
+      "valor_min": null,
+      "valor_max": null,
+      "esfera": null,
+      "termos_objeto": [],
+      "dataset": "contratos_estruturado",
+      "versao": "v6",
+      "metrica": "soma",
+      "campo": null,
+      "agrupamentos": [
+        "fornecedor"
+      ],
+      "referencia_temporal": "assinatura",
+      "ano_final": null,
+      "filtros_analiticos": [],
+      "valor_min_exclusivo": false,
+      "minimo_por_grupo": null
+    },
+    "sql": "SELECT fornecedor, SUM(valor) AS resultado FROM contratos_fatos WHERE inventory_version = %s AND EXTRACT(YEAR FROM data_assinatura) BETWEEN %s AND %s GROUP BY fornecedor ORDER BY resultado DESC, fornecedor LIMIT %s",
+    "parameters": [
+      "v6",
+      2025,
+      2025,
+      10
+    ],
+    "limitations": [
+      "Snapshot intencional com teto de cinco fontes por órgão/base; não representa censo.",
+      "Termos literais; sem equivalências ou aliases de itens aprovados.",
+      "As tabelas de fatos PostgreSQL não foram criadas nem carregadas."
+    ]
+  },
+  {
+    "id": "P5.3",
+    "question": "Houve aumento no valor médio das contratações de tecnologia ao longo de 2025?",
+    "executed": false,
+    "status": "compiled_offline",
+    "consulta": {
+      "tabela": "contratacoes",
+      "tipo": "agrupamento",
+      "ordem": "ASC",
+      "limite": 12,
+      "agrupar_por": "modalidade",
+      "ano": 2025,
+      "valor_min": null,
+      "valor_max": null,
+      "esfera": null,
+      "termos_objeto": [
+        "tecnolog"
+      ],
+      "dataset": "contratos_estruturado",
+      "versao": "v6",
+      "metrica": "media",
+      "campo": null,
+      "agrupamentos": [
+        "mes_assinatura"
+      ],
+      "referencia_temporal": "assinatura",
+      "ano_final": null,
+      "filtros_analiticos": [],
+      "valor_min_exclusivo": false,
+      "minimo_por_grupo": null
+    },
+    "sql": "SELECT EXTRACT(MONTH FROM data_assinatura) AS mes_assinatura, AVG(valor) AS resultado FROM contratos_fatos WHERE inventory_version = %s AND EXTRACT(YEAR FROM data_assinatura) BETWEEN %s AND %s AND objeto_normalizado LIKE %s GROUP BY EXTRACT(MONTH FROM data_assinatura) ORDER BY resultado ASC, mes_assinatura LIMIT %s",
+    "parameters": [
+      "v6",
+      2025,
+      2025,
+      "%tecnolog%",
+      12
+    ],
+    "limitations": [
+      "Snapshot intencional com teto de cinco fontes por órgão/base; não representa censo.",
+      "Termos literais; sem equivalências ou aliases de itens aprovados.",
+      "As tabelas de fatos PostgreSQL não foram criadas nem carregadas."
+    ]
+  },
+  {
+    "id": "P6.1",
+    "question": "Uma microempresa pode participar de pregão eletrônico segundo as regras presentes no corpus?",
+    "executed": false,
+    "status": "no_arithmetic_compilation_required"
+  },
+  {
+    "id": "P6.2",
+    "question": "Existem contratações de material de escritório no Rio de Janeiro em 2025 com informações de fornecedor, órgão e modalidade?",
+    "executed": false,
+    "status": "no_arithmetic_compilation_required"
+  },
+  {
+    "id": "P6.3",
+    "question": "Quais regras se aplicam à participação de microempresas e quais contratações de material de escritório do corpus usam modalidades compatíveis com essas regras?",
+    "executed": false,
+    "status": "no_arithmetic_compilation_required"
+  },
+  {
+    "id": "F1",
+    "question": "Em 2025, órgãos estaduais do Rio de Janeiro pagaram mais por ambulâncias tipo D do que os municípios fluminenses? Compare a mediana do valor por veículo considerando apenas compras tecnicamente equivalentes, informe as modalidades usadas e cite os editais que mostram as especificações técnicas.",
+    "executed": false,
+    "status": "unsupported_unit_price_and_technical_equivalence",
+    "reason": "O compilador atual não representa preço por veículo e equivalência técnica documentada; não substituir por mediana de valores globais."
+  }
+]

@@ -53,6 +53,8 @@ class ChunkMetadata(BaseModel):
     document_content_sha256: Optional[str] = None
     chunk_content_sha256: Optional[str] = None
     chunking_strategy: Optional[str] = None
+    inventory_version: Optional[str] = None
+    inventory_hash: Optional[str] = None
     extras: dict = Field(default_factory=dict)  # orgao, modalidade, valor, municipio...
 
 
@@ -83,6 +85,10 @@ class QueryFilters(BaseModel):
     valor_min: Optional[float] = None
     valor_max: Optional[float] = None
     orgao: Optional[str] = None
+    filtros_analiticos: dict[str, str] = Field(default_factory=dict)
+    metrica: Optional[str] = None
+    agrupamentos: list[str] = Field(default_factory=list)
+    referencia_temporal: Optional[str] = None
 
     def intervalo_de_anos(self) -> tuple[Optional[int], Optional[int]]:
         """(primeiro ano, último ano), inclusivos; None = sem limite daquele lado."""

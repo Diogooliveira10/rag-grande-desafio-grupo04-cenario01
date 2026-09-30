@@ -26,6 +26,12 @@ pytest-of-*/
 # Data and logs
 index/
 logs/
+# Snapshots locais: a v6 validada é adicionada explicitamente ao Git.
+data/embeddings/*/
+data/embeddings/query_cache.jsonl
+atas-zip/*
+!atas-zip/atas_conversacional-v6.zip
+!atas-zip/atas_conversacional-v6-md.zip
 data/raw/
 data/runs/
 data/inventory/checkpoints/
@@ -39,6 +45,7 @@ data/smoke/
 data/smoke_v2/
 data/source_catalog/
 data/structured/
+data/app_state/
 tests/reports/corpus-validation-*.md
 
 # Resultados gerados pelas checagens

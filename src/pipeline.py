@@ -36,6 +36,7 @@ def responder(
     reranker: Optional[RerankFn] = None,
     cliente: Optional[ClienteLLM] = None,
     run_id: Optional[str] = None,
+    query_id: Optional[str] = None,
     escopos: Optional[Sequence[str]] = ESCOPOS_CONSULTADOS,
 ) -> dict[str, Any]:
     """Roda query_analysis + roteamento + recuperação híbrida + geração para uma pergunta.
@@ -61,14 +62,18 @@ def responder(
 
     ``run_id`` e ``query_id`` são repassados a todas as etapas, amarrando no
     log (``logs/pipeline-AAAA-MM-DD.jsonl``) os stages de uma mesma pergunta.
+    Passe ``query_id`` quando o chamador (ex.: ``app/api.py``, para o
+    histórico em ``src/history_store.py``) precisa saber o id *antes* da
+    resposta pronta; por padrão um novo id é gerado aqui.
     """
     run_id = run_id or new_run_id()
-    query_id = new_query_id()
+    query_id = query_id or new_query_id()
 
     analise = analisar_query(query, run_id=run_id, query_id=query_id)
     decisao = rotear_pergunta(query, run_id=run_id, query_id=query_id)
 
     chunks: list[Chunk] = []
+    filtros_relaxados: dict[str, dict[str, list[str]]] = {}
     refusal_reason_hint = None
     if decisao.bases_selecionadas:
         filtros = filtros_para_retrieve(analise.filtros)
@@ -96,6 +101,10 @@ def responder(
                 query_id=query_id,
             )
         chunks = [_chunk_from_retrieval(item) for item in resultados]
+        filtros_relaxados = {
+            item.metadata["base_id"]: item.metadata.get("extras", {}).get("filtros_relaxados", {})
+            for item in resultados if item.metadata.get("extras", {}).get("filtros_relaxados")
+        }
         # Ranking/estatística/comparação: o resultado SQL vai à frente, para
         # caber no orçamento do prompt antes dos trechos da busca.
         chunks = consultar_estruturado(
@@ -113,6 +122,19 @@ def responder(
         query_id=query_id,
         refusal_reason_hint=refusal_reason_hint,
     )
+    if filtros_relaxados:
+        labels = {"data_vigencia": "ano/período de vigência", "orgao": "órgão", "valor": "valor", "esfera": "esfera",
+                  "data_assinatura": "data de assinatura", "data_resultado": "data do resultado",
+                  "data_publicacao": "data de publicação", "ano_pca": "ano do PCA"}
+        bases = {"contratos_estruturado": "contratos", "atas_conversacional": "atas",
+                 "editais_normativo": "normas", "pca_agregado": "indicadores"}
+        notes = []
+        for base, reasons in sorted(filtros_relaxados.items()):
+            for reason, keys in sorted(reasons.items()):
+                fields = ", ".join(labels.get(key, key) for key in keys)
+                why = "metadados ausentes" if reason == "sem_campo" else "nenhum resultado com o recorte solicitado"
+                notes.append(f"{bases.get(base, base)}: {fields} ({why})")
+        resposta.answer += "\n\nBusca ampliada; filtros relaxados em " + "; ".join(notes) + "."
     return resposta.model_dump(mode="json")
 
 

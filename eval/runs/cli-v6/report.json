@@ -1,0 +1,431 @@
+{
+  "run_id": "cli-v6",
+  "built_at": "2026-09-30T17:44:53.711138+00:00",
+  "total": 22,
+  "acertos": 13,
+  "taxa_acerto": 0.5909,
+  "por_tipo": {
+    "cross_source": {
+      "total": 12,
+      "acertos": 6
+    },
+    "estruturada": {
+      "total": 1,
+      "acertos": 1
+    },
+    "factual": {
+      "total": 2,
+      "acertos": 2
+    },
+    "filtro": {
+      "total": 4,
+      "acertos": 2
+    },
+    "fora_de_escopo": {
+      "total": 1,
+      "acertos": 1
+    },
+    "recusa": {
+      "total": 1,
+      "acertos": 1
+    },
+    "vigencia": {
+      "total": 1,
+      "acertos": 0
+    }
+  },
+  "resultados": [
+    {
+      "id": "P1.1",
+      "tipo": "filtro",
+      "bases_esperadas": [
+        "estruturada"
+      ],
+      "bases_obtidas": [
+        "estruturada"
+      ],
+      "is_refusal_esperado": false,
+      "is_refusal_obtido": true,
+      "refusal_reason_esperado": null,
+      "refusal_reason_obtido": "sem_evidencia",
+      "rota_ok": true,
+      "refusal_ok": false,
+      "acertou": false
+    },
+    {
+      "id": "P1.2",
+      "tipo": "cross_source",
+      "bases_esperadas": [
+        "conversacional",
+        "estruturada"
+      ],
+      "bases_obtidas": [
+        "conversacional",
+        "estruturada"
+      ],
+      "is_refusal_esperado": false,
+      "is_refusal_obtido": false,
+      "refusal_reason_esperado": null,
+      "refusal_reason_obtido": null,
+      "rota_ok": true,
+      "refusal_ok": true,
+      "acertou": true
+    },
+    {
+      "id": "P1.3",
+      "tipo": "recusa",
+      "bases_esperadas": [],
+      "bases_obtidas": [],
+      "is_refusal_esperado": true,
+      "is_refusal_obtido": true,
+      "refusal_reason_esperado": "juizo_legalidade_contrato",
+      "refusal_reason_obtido": "juizo_legalidade_contrato",
+      "rota_ok": true,
+      "refusal_ok": true,
+      "acertou": true
+    },
+    {
+      "id": "P2.1",
+      "tipo": "factual",
+      "bases_esperadas": [
+        "estruturada"
+      ],
+      "bases_obtidas": [
+        "estruturada"
+      ],
+      "is_refusal_esperado": false,
+      "is_refusal_obtido": false,
+      "refusal_reason_esperado": null,
+      "refusal_reason_obtido": null,
+      "rota_ok": true,
+      "refusal_ok": true,
+      "acertou": true
+    },
+    {
+      "id": "P2.2",
+      "tipo": "cross_source",
+      "bases_esperadas": [
+        "agregada",
+        "estruturada"
+      ],
+      "bases_obtidas": [
+        "agregada",
+        "estruturada"
+      ],
+      "is_refusal_esperado": false,
+      "is_refusal_obtido": true,
+      "refusal_reason_esperado": null,
+      "refusal_reason_obtido": "sem_evidencia",
+      "rota_ok": true,
+      "refusal_ok": false,
+      "acertou": false
+    },
+    {
+      "id": "P2.3",
+      "tipo": "cross_source",
+      "bases_esperadas": [
+        "estruturada",
+        "normativa"
+      ],
+      "bases_obtidas": [
+        "estruturada"
+      ],
+      "is_refusal_esperado": false,
+      "is_refusal_obtido": true,
+      "refusal_reason_esperado": null,
+      "refusal_reason_obtido": "sem_evidencia",
+      "rota_ok": false,
+      "refusal_ok": false,
+      "acertou": false
+    },
+    {
+      "id": "P3.1",
+      "tipo": "vigencia",
+      "bases_esperadas": [
+        "normativa"
+      ],
+      "bases_obtidas": [
+        "estruturada",
+        "normativa"
+      ],
+      "is_refusal_esperado": false,
+      "is_refusal_obtido": false,
+      "refusal_reason_esperado": null,
+      "refusal_reason_obtido": null,
+      "rota_ok": false,
+      "refusal_ok": true,
+      "acertou": false
+    },
+    {
+      "id": "P3.2",
+      "tipo": "cross_source",
+      "bases_esperadas": [
+        "estruturada",
+        "normativa"
+      ],
+      "bases_obtidas": [
+        "estruturada",
+        "normativa"
+      ],
+      "is_refusal_esperado": false,
+      "is_refusal_obtido": false,
+      "refusal_reason_esperado": null,
+      "refusal_reason_obtido": null,
+      "rota_ok": true,
+      "refusal_ok": true,
+      "acertou": true
+    },
+    {
+      "id": "P3.3",
+      "tipo": "fora_de_escopo",
+      "bases_esperadas": [],
+      "bases_obtidas": [],
+      "is_refusal_esperado": true,
+      "is_refusal_obtido": true,
+      "refusal_reason_esperado": "fora_de_escopo",
+      "refusal_reason_obtido": "fora_de_escopo",
+      "rota_ok": true,
+      "refusal_ok": true,
+      "acertou": true
+    },
+    {
+      "id": "P4.1",
+      "tipo": "filtro",
+      "bases_esperadas": [
+        "estruturada"
+      ],
+      "bases_obtidas": [
+        "estruturada"
+      ],
+      "is_refusal_esperado": false,
+      "is_refusal_obtido": false,
+      "refusal_reason_esperado": null,
+      "refusal_reason_obtido": null,
+      "rota_ok": true,
+      "refusal_ok": true,
+      "acertou": true
+    },
+    {
+      "id": "P4.2",
+      "tipo": "cross_source",
+      "bases_esperadas": [
+        "agregada",
+        "estruturada"
+      ],
+      "bases_obtidas": [
+        "agregada",
+        "estruturada"
+      ],
+      "is_refusal_esperado": false,
+      "is_refusal_obtido": true,
+      "refusal_reason_esperado": null,
+      "refusal_reason_obtido": "sem_evidencia",
+      "rota_ok": true,
+      "refusal_ok": false,
+      "acertou": false
+    },
+    {
+      "id": "P4.3",
+      "tipo": "cross_source",
+      "bases_esperadas": [
+        "estruturada",
+        "normativa"
+      ],
+      "bases_obtidas": [
+        "estruturada",
+        "normativa"
+      ],
+      "is_refusal_esperado": false,
+      "is_refusal_obtido": true,
+      "refusal_reason_esperado": null,
+      "refusal_reason_obtido": "sem_evidencia",
+      "rota_ok": true,
+      "refusal_ok": false,
+      "acertou": false
+    },
+    {
+      "id": "P5.1",
+      "tipo": "filtro",
+      "bases_esperadas": [
+        "estruturada"
+      ],
+      "bases_obtidas": [
+        "agregada",
+        "estruturada"
+      ],
+      "is_refusal_esperado": false,
+      "is_refusal_obtido": false,
+      "refusal_reason_esperado": null,
+      "refusal_reason_obtido": null,
+      "rota_ok": false,
+      "refusal_ok": true,
+      "acertou": false
+    },
+    {
+      "id": "P5.2",
+      "tipo": "cross_source",
+      "bases_esperadas": [
+        "agregada",
+        "estruturada"
+      ],
+      "bases_obtidas": [
+        "agregada",
+        "estruturada"
+      ],
+      "is_refusal_esperado": false,
+      "is_refusal_obtido": false,
+      "refusal_reason_esperado": null,
+      "refusal_reason_obtido": null,
+      "rota_ok": true,
+      "refusal_ok": true,
+      "acertou": true
+    },
+    {
+      "id": "P5.3",
+      "tipo": "cross_source",
+      "bases_esperadas": [
+        "agregada",
+        "estruturada"
+      ],
+      "bases_obtidas": [
+        "agregada",
+        "estruturada"
+      ],
+      "is_refusal_esperado": false,
+      "is_refusal_obtido": false,
+      "refusal_reason_esperado": null,
+      "refusal_reason_obtido": null,
+      "rota_ok": true,
+      "refusal_ok": true,
+      "acertou": true
+    },
+    {
+      "id": "P6.1",
+      "tipo": "factual",
+      "bases_esperadas": [
+        "normativa"
+      ],
+      "bases_obtidas": [
+        "normativa"
+      ],
+      "is_refusal_esperado": false,
+      "is_refusal_obtido": false,
+      "refusal_reason_esperado": null,
+      "refusal_reason_obtido": null,
+      "rota_ok": true,
+      "refusal_ok": true,
+      "acertou": true
+    },
+    {
+      "id": "P6.2",
+      "tipo": "filtro",
+      "bases_esperadas": [
+        "estruturada"
+      ],
+      "bases_obtidas": [
+        "estruturada"
+      ],
+      "is_refusal_esperado": false,
+      "is_refusal_obtido": false,
+      "refusal_reason_esperado": null,
+      "refusal_reason_obtido": null,
+      "rota_ok": true,
+      "refusal_ok": true,
+      "acertou": true
+    },
+    {
+      "id": "P6.3",
+      "tipo": "cross_source",
+      "bases_esperadas": [
+        "estruturada",
+        "normativa"
+      ],
+      "bases_obtidas": [
+        "estruturada",
+        "normativa"
+      ],
+      "is_refusal_esperado": false,
+      "is_refusal_obtido": false,
+      "refusal_reason_esperado": null,
+      "refusal_reason_obtido": null,
+      "rota_ok": true,
+      "refusal_ok": true,
+      "acertou": true
+    },
+    {
+      "id": "F1",
+      "tipo": "cross_source",
+      "bases_esperadas": [
+        "agregada",
+        "estruturada",
+        "normativa"
+      ],
+      "bases_obtidas": [
+        "agregada",
+        "estruturada"
+      ],
+      "is_refusal_esperado": false,
+      "is_refusal_obtido": true,
+      "refusal_reason_esperado": null,
+      "refusal_reason_obtido": "sem_evidencia",
+      "rota_ok": false,
+      "refusal_ok": false,
+      "acertou": false
+    },
+    {
+      "id": "cenario1-marina",
+      "tipo": "cross_source",
+      "bases_esperadas": [
+        "agregada",
+        "estruturada"
+      ],
+      "bases_obtidas": [
+        "estruturada"
+      ],
+      "is_refusal_esperado": false,
+      "is_refusal_obtido": true,
+      "refusal_reason_esperado": null,
+      "refusal_reason_obtido": "sem_evidencia",
+      "rota_ok": false,
+      "refusal_ok": false,
+      "acertou": false
+    },
+    {
+      "id": "cenario1-rodrigo",
+      "tipo": "estruturada",
+      "bases_esperadas": [
+        "estruturada"
+      ],
+      "bases_obtidas": [
+        "estruturada"
+      ],
+      "is_refusal_esperado": false,
+      "is_refusal_obtido": false,
+      "refusal_reason_esperado": null,
+      "refusal_reason_obtido": null,
+      "rota_ok": true,
+      "refusal_ok": true,
+      "acertou": true
+    },
+    {
+      "id": "cenario1-claudia",
+      "tipo": "cross_source",
+      "bases_esperadas": [
+        "estruturada",
+        "normativa"
+      ],
+      "bases_obtidas": [
+        "estruturada",
+        "normativa"
+      ],
+      "is_refusal_esperado": false,
+      "is_refusal_obtido": false,
+      "refusal_reason_esperado": null,
+      "refusal_reason_obtido": null,
+      "rota_ok": true,
+      "refusal_ok": true,
+      "acertou": true
+    }
+  ],
+  "scope": "rota/recusa; correção factual revisada separadamente em factual-review.json"
+}

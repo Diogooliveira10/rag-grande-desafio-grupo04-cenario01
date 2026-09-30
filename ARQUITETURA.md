@@ -20,7 +20,7 @@ Escolhemos o cenário de Contratações Públicas pela disponibilidade de dados 
 - `geracao`
 - `validacao`
 
-O estágio `rerank` é opcional e está disponível apenas como ponto de extensão. O estágio `feedback` está planejado, mas ainda não foi integrado ao pipeline.
+O estágio `rerank` é opcional e está disponível apenas como ponto de extensão. O estágio `feedback` roda fora do pipeline de resposta (é acionado por `POST /api/v1/feedback`, depois que o cliente já recebeu a resposta), mas já está integrado à API e à observabilidade.
 
 ### Diagrama do fluxo
 
@@ -35,7 +35,8 @@ flowchart TD
     E --> G[geracao]
     F --> G
     G --> H[validacao]
-    H -. planejado .-> I[feedback]
+    H -. resposta ao cliente .-> J[POST /api/v1/feedback]
+    J -. stage=feedback .-> I[feedback]
 ```
 
 ### Stages
@@ -48,7 +49,7 @@ flowchart TD
 - `rerank`: está previsto e o `retrieve` aceita um reranker plugável, mas ainda não há modelo ativo no pipeline oficial.
 - `geracao`: gera a resposta somente a partir das evidências recuperadas, com guardrails e política de sensibilidade.
 - `validacao`: valida a saída do LLM, trata JSON inválido, remove citações inexistentes e mascara dados pessoais quando necessário.
-- `feedback`: previsto na arquitetura e na observabilidade, mas ainda não integrado ao fluxo principal.
+- `feedback`: não roda dentro de `responder`, e sim quando o usuário avalia uma resposta já entregue. `POST /api/v1/feedback` associa a avaliação (`positivo`/`negativo` + comentário opcional) ao `query_id` da consulta original (404 se ele não existir) e grava o evento no log com esse mesmo `run_id`, amarrando-o aos demais stages da pergunta. Persistência e histórico em [src/history_store.py](src/history_store.py).
 
 ### Estado atual
 
@@ -63,7 +64,8 @@ Já estão implementados:
 - observabilidade estruturada por `run_id`, `query_id`, stage, latência e uso de tokens;
 - coleta e versionamento do corpus por manifesto;
 - preparação de documentos, OCR, embeddings e indexação;
-- API FastAPI com `GET /health` e `POST /api/v1/query`;
+- API FastAPI com `GET /health`, `POST /api/v1/query`, `POST /api/v1/feedback` e `GET /api/v1/history`;
+- feedback do usuário e histórico de consultas persistidos em SQLite local ([src/history_store.py](src/history_store.py));
 - CORS configurado para desenvolvimento local e para a origem `https://etuarda.github.io`;
 - demonstração do frontend publicada em [https://etuarda.github.io/frontendRAG/](https://etuarda.github.io/frontendRAG/), ainda pendente de integração completa com a API;
 - suporte a certificados HTTPS com `certifi` sem desabilitar validação SSL;
@@ -117,8 +119,8 @@ As tarefas são distribuídas entre os integrantes a cada encontro conforme as n
 - Gerar novamente os embeddings após a consolidação do corpus oficial.
 - Rodar o golden set completo com o pipeline e o índice definitivos.
 - Integrar um modelo de `rerank` quando estiver disponível.
-- Implementar o estágio de `feedback` no fluxo principal.
-- Finalizar a integração do frontend com a API e incorporar o frontend ao repositório principal.
+- Finalizar a integração do frontend com a API e incorporar o frontend ao repositório principal (inclui consumir `query_id`/`feedback`/`history`, hoje sem cliente).
+- Decidir se o histórico de `src/history_store.py` precisa de um mecanismo de expurgo/anonimização (hoje ele não expira e guarda a pergunta em texto puro) e se `GET /api/v1/history` precisa de autenticação antes de qualquer deploy público (a API hoje não tem autenticação em nenhum endpoint).
 - Obter a base sintética de e-mails de compras fornecida pelo desafio.
 - Validar/corrigir o comportamento de `update --dry-run` quando existe `data/inventory/vN.json` sem a pasta correspondente em `data/raw/vN/`.
 - Garantir que qualquer diretório local usado para armazenar índices esteja coberto pelo `.gitignore`; atualmente, o diretório previsto e ignorado é `index/`.

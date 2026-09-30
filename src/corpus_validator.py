@@ -52,14 +52,32 @@ def validate_manifest_contract(manifest: dict[str, Any], *, official: bool = Tru
             errors.append(
                 f"bases oficiais divergentes: esperadas={sorted(expected)} obtidas={sorted(actual)}"
             )
-        for base_id, target in OFFICIAL_BASE_TARGETS.items():
-            base = bases.get(base_id)
-            if base is None:
-                continue
-            if base.get("volume_alvo") != target:
-                errors.append(
-                    f"{base_id}: volume_alvo esperado={target} obtido={base.get('volume_alvo')}"
-                )
+        curation = manifest.get("curadoria_v6")
+        if curation is None:
+            for base_id, target in OFFICIAL_BASE_TARGETS.items():
+                base = bases.get(base_id)
+                if base is None:
+                    continue
+                if base.get("volume_alvo") != target:
+                    errors.append(
+                        f"{base_id}: volume_alvo esperado={target} obtido={base.get('volume_alvo')}"
+                    )
+        elif not isinstance(curation, dict):
+            errors.append("curadoria_v6 deve ser um objeto")
+        else:
+            target = curation.get("alvo_arquivos_total")
+            limit = curation.get("limite_por_orgao_por_base")
+            if type(target) is not int or target < 1:
+                errors.append("curadoria_v6: alvo_arquivos_total deve ser inteiro positivo")
+            else:
+                try:
+                    obtained = sum(int(base.get("volume_alvo")) for base in bases.values())
+                    if obtained != target:
+                        errors.append(f"curadoria_v6: soma dos volumes esperada={target} obtida={obtained}")
+                except (TypeError, ValueError):
+                    errors.append("curadoria_v6: volumes inválidos")
+            if type(limit) is not int or limit < 1:
+                errors.append("curadoria_v6: limite_por_orgao_por_base deve ser inteiro positivo")
 
     for base_id, base in bases.items():
         if base.get("selecao_deterministica") is not True:
