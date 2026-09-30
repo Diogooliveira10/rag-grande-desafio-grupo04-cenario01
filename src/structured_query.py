@@ -18,7 +18,7 @@ from __future__ import annotations
 import hashlib
 import re
 import statistics
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
@@ -37,7 +37,32 @@ _NUMEROS_POR_EXTENSO = {
     "doze": 12, "quinze": 15, "vinte": 20, "trinta": 30, "cinquenta": 50,
 }
 
-_RE_PCA = re.compile(r"\bpca\b|\bplanos? (?:anual )?de contratac|\bplanejad")
+_RE_PCA = re.compile(r"\bpca\b|\bplanos? (?:anua(?:l|is) )?de contratac|\bplanos? anua(?:l|is)\b|\bplanejad")
+_RE_CONTRATOS = re.compile(r"\bcontrat(?:o|os|ad[oa]s?|acao|acoes|ou|aram)\b")
+_MESES = {
+    "janeiro": 1, "fevereiro": 2, "marco": 3, "abril": 4, "maio": 5, "junho": 6,
+    "julho": 7, "agosto": 8, "setembro": 9, "outubro": 10, "novembro": 11, "dezembro": 12,
+}
+# "Rio de Janeiro" não é o mês de janeiro.
+_RE_MES = re.compile(r"(?<!\brio de )\b(" + "|".join(_MESES) + r")\b")
+# Modalidade é coluna, não objeto: (padrão na pergunta, termos que a modalidade
+# gravada precisa conter, sem acento). A mais específica vem antes.
+_MODALIDADES = (
+    (re.compile(r"\bpregao eletronico\b"), ("pregao", "eletronic")),
+    (re.compile(r"\bpregao presencial\b"), ("pregao", "presencial")),
+    (re.compile(r"\bpregao\b|\bpregoes\b"), ("pregao",)),
+    (re.compile(r"\bdispensas?\b"), ("dispensa",)),
+    (re.compile(r"\binexigibilidade|\binexigive"), ("inexigibilidade",)),
+    (re.compile(r"\bconcorrencias?\b"), ("concorrencia",)),
+    (re.compile(r"\bleil(?:ao|oes)\b"), ("leilao",)),
+    (re.compile(r"\bcredenciamentos?\b"), ("credenciamento",)),
+    (re.compile(r"\bdialogo competitivo\b"), ("dialogo",)),
+)
+_ESFERAS = (("estadual", r"\bestadua"), ("municipal", r"\bmunicip"), ("federal", r"\bfedera"))
+# Palavras do nome do órgão que não ajudam a distinguir um órgão de outro.
+_PALAVRAS_ORGAO_VAZIAS = frozenset(
+    "de da do das dos e no na nos nas em estado estadual municipal rio janeiro rj pca plano planos".split()
+)
 _RE_RANKING = re.compile(r"\b(?:maior(?:es)?|menor(?:es)?|top|ranking)\b")
 _RE_N_RANKING = re.compile(r"\b(\d{1,2}|" + "|".join(_NUMEROS_POR_EXTENSO) + r")\s+(?:maiores|menores)\b")
 _RE_EVOLUCAO = re.compile(r"\bao longo\b|\bevolu|\baument|\bcresc|\bqueda\b|\bpor mes\b|\bmensa")
@@ -45,8 +70,13 @@ _RE_AGRUPAMENTO = re.compile(
     r"\bmais frequen|\bmais usad|\bmais comu|\bpor modalidade|\bpor orgao|\bpor municipio|\bpor esfera"
 )
 _RE_COMPARACAO = re.compile(r"\bmais car[oa]s?\b|\bmais barat|\bpag(?:ou|aram|am|a) mais\b|\bcompar")
-_RE_ESTATISTICA = re.compile(r"\bmedia\b|\bmedio\b|\bmediana\b|\btotal\b|\bsoma\b|\bquant[oa]s\b|\bquantidade\b")
-_RE_CONTAGEM_CONTRATOS = re.compile(r"\b(?:\d+|um|dois|tres|quatro|cinco)\s+ou\s+mais\s+contratos?\b")
+_RE_ESTATISTICA = re.compile(r"\bmedia\b|\bmedio\b|\bmediana\b|\btotal\b|\bsoma\b|\bquant[oa]s?\b|\bquantidade\b")
+_RE_CONTAGEM_CONTRATOS = re.compile(
+    r"\b(?:\d+|um|dois|tres|quatro|cinco)\s+ou\s+mais\s+(?:contratos?|contratac(?:ao|oes))\b"
+)
+_RE_AGENTE = re.compile(r"\b[a-z]+(?:ad|id|it)[oa]s? por (?:orgaos|municipios|esferas)\b")
+# Pergunta que pede os registros em si: "quais órgãos contrataram…", "existem contratações de…".
+_RE_LISTAGEM = re.compile(r"^(?:quais|qual|existem?|ha|houve|liste|listar|mostre|mostrar)\b")
 
 
 def requer_calculo(query: str) -> bool:
@@ -77,6 +107,20 @@ _PALAVRAS_GENERICAS = frozenset(
     ranking longo aumento evolucao crescimento queda mensal plano planos anual planejado planejada pca
     tipo tipos corpus base bases numero fornecedor fornecedores empresa empresas receberam recebeu
     usado usada usadas usados comum comuns pagaram pagou pago paga pagos caro cara caros barato
+    publicado publicados assinado assinada assinados assinadas assinatura assinaturas vigente vigentes vigencia
+    compare comparar compara comparado comparados comparacao data datas federal federais uniao nacional
+    fevereiro marco abril maio junho julho agosto setembro outubro novembro dezembro
+    semestre trimestre existem quantidade registro registros realizado realizadas realizados
+    servico servicos aquisicao aquisicoes fornecimento prestacao especializada especializado
+    informacao informacoes detalhe detalhes firmaram firmou celebraram disponiveis disponivel
+    apenas somente considerando considerada considerado consideradas considerados desse dessa desses dessas
+    nesse nessa nesses nessas neste nesta nestes nestas deste desta destes destas aqui estiver estiverem
+    feita feito feitas feitos ligado ligada ligados ligadas devem deve devia podem pode poderia saber
+    tratam trata tratar cite citar citem mostram mostra mostrar informe tecnicamente tecnica tecnicas
+    equivalente equivalentes especificacao especificacoes edital editais regra regras norma normas
+    lei leis documento documentos usam usou usaram compativel compativeis participacao participar
+    encontrou encontraram sendo tendo havia haviam ainda tambem muito muitos muita muitas outro outra
+    outros outras mesmo mesma mesmos mesmas qualquer quaisquer algo nenhum nenhuma cujo cuja cujos cujas
     """.split()
 )
 
@@ -109,6 +153,15 @@ class Consulta:
     filtros_analiticos: tuple[tuple[str, Any], ...] = field(default_factory=tuple)
     valor_min_exclusivo: bool = False
     minimo_por_grupo: Optional[int] = None
+    # Mês (1-12) dentro do ano da consulta: "média de janeiro de 2025".
+    mes: Optional[int] = None
+    # Termos (sem acento) que a modalidade gravada precisa conter, e os valores
+    # da coluna que casaram (resolvidos contra o banco em executar_consulta).
+    modalidade_termos: tuple[str, ...] = field(default_factory=tuple)
+    modalidades: Optional[tuple[str, ...]] = None
+    # Palavras do órgão pedido e os nomes de órgão/unidade do banco que casaram.
+    orgao_termos: tuple[str, ...] = field(default_factory=tuple)
+    orgaos: Optional[tuple[str, ...]] = None
 
 
 # Contrato de compilação apenas: estas tabelas de fatos não são criadas aqui.
@@ -233,10 +286,15 @@ def _singular(token: str) -> str:
     return token[:-1] if token.endswith("s") and len(token) > 4 else token
 
 
+# Radicais que nunca descrevem o objeto, em qualquer flexão ("comparando", "publicaram").
+_RADICAIS_GENERICOS = ("compar", "publica", "assina", "vigen", "contrat", "registr", "realiz")
+
+
 def _termos_do_objeto(texto: str) -> tuple[str, ...]:
     termos: list[str] = []
     for token in re.findall(r"[a-z]{4,}", texto):
-        if token in _PALAVRAS_GENERICAS or token.rstrip("s") in _PALAVRAS_GENERICAS or token in _NUMEROS_POR_EXTENSO:
+        if (token in _PALAVRAS_GENERICAS or token.rstrip("s") in _PALAVRAS_GENERICAS
+                or token in _NUMEROS_POR_EXTENSO or token.startswith(_RADICAIS_GENERICOS)):
             continue
         termo = _singular(token)
         if termo not in termos:
@@ -256,16 +314,25 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
     # maior que 2000", o "maior" não pede ranking, e "acima"/"milhão" não
     # descrevem o objeto contratado.
     texto = structured_db.normalizar(texto_sem_filtros(query))
-    if Natureza.AGREGADA in bases and (_RE_PCA.search(texto) or Natureza.ESTRUTURADA not in bases):
+    # "Valor total contratado" é pergunta de contratos mesmo quando o roteador
+    # só escolheu a agregada (por causa do "total"); PCA só quando a pergunta
+    # fala de plano/PCA.
+    fala_de_contratos = bool(_RE_CONTRATOS.search(texto)) and not _RE_PCA.search(texto)
+    if Natureza.AGREGADA in bases and not fala_de_contratos and (
+        _RE_PCA.search(texto) or Natureza.ESTRUTURADA not in bases
+    ):
         tabela = "pca_planos"
-    elif Natureza.ESTRUTURADA in bases:
+    elif Natureza.ESTRUTURADA in bases or (Natureza.AGREGADA in bases and fala_de_contratos):
         tabela = "contratacoes"
     else:
         return None
 
+    # Particípio + "por" + plural é o agente, não agrupamento: "publicadas por
+    # órgãos públicos", "contratados por municípios". "Total por órgão" agrupa.
+    texto_agrupamento = _RE_AGENTE.sub(" ", texto)
     if _RE_EVOLUCAO.search(texto):
         tipo = "evolucao"
-    elif _RE_AGRUPAMENTO.search(texto):
+    elif _RE_AGRUPAMENTO.search(texto_agrupamento):
         tipo = "agrupamento"
     elif _RE_COMPARACAO.search(texto):
         tipo = "estatistica"  # sai quebrada por esfera, que é a comparação pedida
@@ -273,8 +340,21 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
         tipo = "ranking"
     elif _RE_ESTATISTICA.search(texto):
         tipo = "estatistica"
+    elif (tabela == "contratacoes" and bases <= {Natureza.ESTRUTURADA, Natureza.AGREGADA}
+          and _RE_LISTAGEM.search(texto)):
+        # "Quais órgãos contrataram manutenção de computadores em 2025?": filtro
+        # por metadado e objeto, que a busca por texto não garante. Só vira
+        # consulta se sobrar termo de objeto (verificado abaixo).
+        tipo = "listagem"
     else:
         return None
+
+    minimo_por_grupo = None
+    if tabela == "contratacoes" and (contagem := _RE_CONTAGEM_CONTRATOS.search(texto)):
+        # "fornecedores com três ou mais contratos": agrupa e exige o mínimo.
+        numero = contagem.group(0).split()[0]
+        minimo_por_grupo = int(numero) if numero.isdigit() else _NUMEROS_POR_EXTENSO.get(numero, 1)
+        tipo = "agrupamento"
 
     limite = LIMITE_RANKING
     if n := _RE_N_RANKING.search(texto):
@@ -282,11 +362,11 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
     agrupar_por = "modalidade"
     if tabela == "pca_planos":
         agrupar_por = "unidade_nome"
-    elif "por orgao" in texto:
+    elif "por orgao" in texto_agrupamento:
         agrupar_por = "orgao_nome"
-    elif "por municipio" in texto:
+    elif "por municipio" in texto_agrupamento:
         agrupar_por = "municipio"
-    elif "por esfera" in texto:
+    elif "por esfera" in texto_agrupamento:
         agrupar_por = "esfera"
 
     metrica = "contagem"
@@ -294,15 +374,49 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
         tipo = "agrupamento"
         agrupar_por = "fornecedor"
         metrica = "soma"
+    if minimo_por_grupo is not None:
+        agrupar_por = "fornecedor"
 
     esfera = None
     if tabela == "contratacoes":
-        estadual, municipal = "estadua" in texto, "municip" in texto
-        if estadual != municipal:  # as duas juntas = comparação, que já sai quebrada por esfera
-            esfera = "estadual" if estadual else "municipal"
+        # "por município(s)" é agrupamento, não filtro de esfera.
+        sem_agrupamento = re.sub(r"\bpor (?:municipios?|orgaos?|esferas?)\b", " ", texto)
+        citadas = [nome for nome, padrao in _ESFERAS if re.search(padrao, sem_agrupamento)]
+        if len(citadas) == 1:  # várias juntas = comparação, que já sai quebrada por esfera
+            esfera = citadas[0]
+
+    modalidade_termos: tuple[str, ...] = ()
+    texto_objeto = texto
+    if tabela == "contratacoes":
+        for padrao, termos in _MODALIDADES:
+            if padrao.search(texto):
+                modalidade_termos = termos
+                texto_objeto = padrao.sub(" ", texto_objeto)
+                break
+
+    # O mês vem da pergunta original: o query_analysis já tira "janeiro de 2025"
+    # do texto quando vira filtro de ano.
+    mes = None
+    achado = _RE_MES.search(structured_db.normalizar(query))
+    if achado and filtros.ano is not None and filtros.ano_final in (None, filtros.ano):
+        mes = _MESES[achado.group(1)]
+
+    orgao_termos: tuple[str, ...] = ()
+    if filtros.orgao:
+        palavras = re.findall(r"[a-z]+", structured_db.normalizar(filtros.orgao))
+        orgao_termos = tuple(p for p in palavras if p not in _PALAVRAS_ORGAO_VAZIAS and len(p) > 2)
+        for palavra in palavras:  # o órgão não descreve o objeto contratado
+            texto_objeto = re.sub(rf"\b{re.escape(palavra)}\b", " ", texto_objeto)
 
     so_menor = re.search(r"\bmenor(?:es)?\b", texto) and not re.search(r"\bmaior(?:es)?\b", texto)
     primeiro_ano, ultimo_ano = filtros.intervalo_de_anos()
+    # Contratos assinados não trazem modalidade no PNCP; com filtro de
+    # modalidade a consulta usa as compras publicadas, que trazem.
+    referencia_temporal = ("assinatura" if tabela == "contratacoes" and not modalidade_termos and
+                           re.search(r"\bcontratos?\b|\bcontratad", texto) else None)
+    termos_objeto = _termos_do_objeto(texto_objeto) if tabela == "contratacoes" else ()
+    if tipo == "listagem" and not termos_objeto and not modalidade_termos:
+        return None  # "Quais contratos existem?" sem assunto: a busca normal responde
     return Consulta(
         tabela=tabela,
         tipo=tipo,
@@ -318,9 +432,12 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
         valor_min=filtros.valor_min,
         valor_max=filtros.valor_max,
         esfera=esfera,
-        termos_objeto=_termos_do_objeto(texto) if tabela == "contratacoes" else (),
-        referencia_temporal=("assinatura" if tabela == "contratacoes" and
-                             re.search(r"\bcontratos?\b|\bcontratad", texto) else None),
+        termos_objeto=termos_objeto,
+        referencia_temporal=referencia_temporal,
+        minimo_por_grupo=minimo_por_grupo,
+        mes=mes,
+        modalidade_termos=modalidade_termos,
+        orgao_termos=orgao_termos,
     )
 
 
@@ -366,6 +483,23 @@ def _where(consulta: Consulta, termos: Iterable[str], juncao: str = "AND") -> tu
     if consulta.esfera:
         condicoes.append("esfera = ?")
         parametros.append(consulta.esfera)
+    if consulta.mes is not None and consulta.ano is not None and consulta.tabela == "contratacoes":
+        coluna_mes = "mes_assinatura" if consulta.referencia_temporal == "assinatura" else "mes_publicacao"
+        condicoes.append(f"{coluna_mes} = ?")
+        parametros.append(f"{consulta.ano}-{consulta.mes:02d}")
+    for coluna_valores, valores in (
+        (("modalidade",), consulta.modalidades),
+        (("orgao_nome", "unidade_nome"), consulta.orgaos),
+    ):
+        if valores is None:
+            continue
+        if not valores:  # pedido que não casou com nada do banco: nenhum registro
+            condicoes.append("1 = 0")
+            continue
+        marcadores = ", ".join("?" for _ in valores)
+        condicoes.append("(" + " OR ".join(f"{coluna} IN ({marcadores})" for coluna in coluna_valores) + ")")
+        for _coluna in coluna_valores:
+            parametros.extend(valores)
     termos = list(termos)
     if termos:
         condicoes.append("(" + f" {juncao} ".join("objeto_normalizado LIKE ?" for _ in termos) + ")")
@@ -397,17 +531,30 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
     where, parametros = _where(consulta, termos, juncao)
     coluna_valor = _coluna_valor(consulta)
 
-    if consulta.tipo == "ranking":
-        where_valor = where + (" AND " if where else " WHERE ") + f"{coluna_valor} IS NOT NULL"
+    if consulta.tipo in ("ranking", "listagem"):
+        # Listagem mostra também registros sem valor (depois dos com valor) e
+        # diz quantos casaram no total.
+        where_valor = where if consulta.tipo == "listagem" else (
+            where + (" AND " if where else " WHERE ") + f"{coluna_valor} IS NOT NULL")
         if consulta.tabela == "pca_planos":
             colunas = "ano_pca, unidade_nome, quantidade_itens, valor_total AS valor"
         else:
-            colunas = "data_publicacao, orgao_nome, esfera, municipio, modalidade, objeto, valor"
+            colunas = "data_publicacao, orgao_nome, esfera, municipio, modalidade, fornecedor, objeto, valor"
+        ordem = (f"CASE WHEN {coluna_valor} IS NULL THEN 1 ELSE 0 END, {coluna_valor} {consulta.ordem}"
+                 if consulta.tipo == "listagem" else f"{coluna_valor} {consulta.ordem}")
         sql = (
             f"SELECT {colunas} FROM {consulta.tabela}{where_valor} "
-            f"ORDER BY {coluna_valor} {consulta.ordem} LIMIT {consulta.limite}"
+            f"ORDER BY {ordem} LIMIT {consulta.limite}"
         )
         linhas = banco.consultar(sql, parametros)
+        if consulta.tipo == "listagem" and consulta.tabela == "contratacoes":
+            total = banco.consultar(f"SELECT COUNT(*) AS n FROM {consulta.tabela}{where}", parametros)[0]["n"]
+            return sql, [f"{total} registros atendem aos filtros; os {len(linhas)} de maior valor:"] + [
+                f"{i}. {_brl(l['valor'])} | {l['data_publicacao']} | {l['orgao_nome']} ({l['esfera']}, {l['municipio']}) | "
+                f"modalidade: {l['modalidade'] or 'não informada'} | fornecedor: {l['fornecedor'] or 'não informado'} | "
+                f"{_resumir(l['objeto'], 70)}"
+                for i, l in enumerate(linhas, 1)
+            ]
         if consulta.tabela == "pca_planos":
             return sql, [
                 f"{i}. {_brl(l['valor'])} | PCA {l['ano_pca']} | {l['unidade_nome']} | {l['quantidade_itens']} itens"
@@ -421,18 +568,29 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
 
     if consulta.tipo == "agrupamento":
         coluna = consulta.agrupar_por
-        ordem = (f"COALESCE(SUM({coluna_valor}), 0) {consulta.ordem}, n DESC"
-                 if consulta.metrica == "soma" else f"n DESC, COALESCE(SUM({coluna_valor}), 0) DESC")
+        # O grupo "não informado" vai para o fim: em "modalidade mais usada", os
+        # contratos sem modalidade não são uma modalidade.
+        ordem = f"CASE WHEN {coluna} IS NULL THEN 1 ELSE 0 END, " + (
+            f"COALESCE(SUM({coluna_valor}), 0) {consulta.ordem}, n DESC"
+            if consulta.metrica == "soma" else f"n DESC, COALESCE(SUM({coluna_valor}), 0) DESC")
+        if coluna == "fornecedor":  # registro sem fornecedor não é um fornecedor
+            where = where + (" AND " if where else " WHERE ") + "fornecedor IS NOT NULL"
         sql = (
             f"SELECT {coluna} AS grupo, COUNT(*) AS n, SUM({coluna_valor}) AS total "
-            f"FROM {consulta.tabela}{where} GROUP BY {coluna} ORDER BY {ordem}"
+            f"FROM {consulta.tabela}{where} GROUP BY {coluna}"
         )
+        if consulta.minimo_por_grupo is not None:
+            sql += f" HAVING COUNT(*) >= {int(consulta.minimo_por_grupo)}"
+        sql += f" ORDER BY {ordem}"
         if consulta.metrica == "soma":
             sql += f" LIMIT {consulta.limite}"
-        return sql, [
+        grupos = [
             f"{'Fornecedor ' if coluna == 'fornecedor' else ''}{l['grupo'] or 'não informado'}: {l['n']} registros, total {_brl(l['total'])}"
             for l in banco.consultar(sql, parametros)
         ]
+        if not grupos and consulta.minimo_por_grupo is not None:
+            grupos = [f"Nenhum {coluna} tem {consulta.minimo_por_grupo} ou mais registros com esses filtros."]
+        return sql, grupos
 
     if consulta.tipo == "evolucao":
         coluna_periodo = "ano_pca" if consulta.tabela == "pca_planos" else (
@@ -448,8 +606,14 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
     # Python porque SQLite não tem função de mediana.
     coluna_esfera = "esfera" if consulta.tabela == "contratacoes" else "NULL"
     sql = f"SELECT {coluna_esfera} AS esfera, {coluna_valor} AS valor FROM {consulta.tabela}{where}"
-    linhas = [l for l in banco.consultar(sql, parametros) if l["valor"] is not None]
-    resultado = [f"Geral: {_estatisticas([float(l['valor']) for l in linhas])}"]
+    todas = banco.consultar(sql, parametros)
+    linhas = [l for l in todas if l["valor"] is not None]
+    # A contagem vale para todos os registros; as contas de valor, só para os que têm valor.
+    sem_valor = len(todas) - len(linhas)
+    geral = f"Geral: {_estatisticas([float(l['valor']) for l in linhas])}"
+    if sem_valor:
+        geral = f"Geral: {len(todas)} registros no total, {sem_valor} sem valor informado; valores: " + geral[7:]
+    resultado = [geral]
     if consulta.tabela == "contratacoes":
         por_esfera: dict[str, list[float]] = {}
         for l in linhas:
@@ -483,25 +647,89 @@ def _cabecalho(consulta: Consulta, total_tabela: int, termos: tuple[str, ...], j
         filtros.append(f"valor<={_brl(consulta.valor_max)}")
     if consulta.esfera:
         filtros.append(f"esfera={consulta.esfera}")
+    if consulta.mes is not None and consulta.ano is not None:
+        filtros.append(f"mês={consulta.mes:02d}/{consulta.ano}")
+    if consulta.minimo_por_grupo is not None:
+        filtros.append(f"só {consulta.agrupar_por} com {consulta.minimo_por_grupo} ou mais registros")
+    if consulta.modalidades is not None:
+        filtros.append(
+            f"modalidade em {', '.join(consulta.modalidades)}" if consulta.modalidades
+            else f"modalidade {' '.join(consulta.modalidade_termos)} (nenhum registro do corpus tem essa modalidade)"
+        )
+    if consulta.orgaos is not None:
+        filtros.append(
+            f"órgão em {', '.join(consulta.orgaos[:5])}{'…' if len(consulta.orgaos) > 5 else ''}" if consulta.orgaos
+            else f"órgão {' '.join(consulta.orgao_termos)} (nenhum órgão do corpus casa com esse nome)"
+        )
     if termos:
         filtros.append(f"objeto contém {(' e ' if juncao == 'AND' else ' ou ').join(termos)}")
     return f"{origem} Filtros: {', '.join(filtros) or 'nenhum'}. Cálculo: {consulta.tipo}."
 
 
+def _palavras_casam(pedidas: Iterable[str], nome: str) -> bool:
+    """Toda palavra pedida casa com alguma do nome, por prefixo nos dois sentidos:
+    "secretaria saude" casa com "SECRETARIA DE ESTADO DE SAUDE" e com "SECRET ESTADO SAUDE"."""
+    palavras = re.findall(r"[a-z]+", structured_db.normalizar(nome))
+    return all(
+        any(p.startswith(pedida) or (len(p) >= 4 and pedida.startswith(p)) for p in palavras)
+        for pedida in pedidas
+    )
+
+
+def _resolver_valores(consulta: Consulta, banco: Banco) -> Consulta:
+    """Troca os termos de modalidade e de órgão pelos valores do banco que casam.
+
+    A comparação é feita aqui, sem acento e sem caixa, para valer igual no
+    SQLite e no Postgres; o SQL recebe só ``coluna IN (...)``.
+    """
+    mudancas: dict[str, Any] = {}
+    if consulta.modalidade_termos and consulta.tabela == "contratacoes":
+        valores = banco.consultar(
+            "SELECT DISTINCT modalidade AS v FROM contratacoes WHERE modalidade IS NOT NULL"
+        )
+        mudancas["modalidades"] = tuple(sorted(
+            l["v"] for l in valores
+            if all(t in structured_db.normalizar(l["v"]) for t in consulta.modalidade_termos)
+        ))
+    if consulta.orgao_termos:
+        nomes: set[str] = set()
+        for coluna in ("orgao_nome", "unidade_nome"):
+            nomes |= {
+                l["v"] for l in banco.consultar(
+                    f"SELECT DISTINCT {coluna} AS v FROM {consulta.tabela} WHERE {coluna} IS NOT NULL"
+                )
+            }
+        mudancas["orgaos"] = tuple(sorted(n for n in nomes if _palavras_casam(consulta.orgao_termos, n)))
+    return replace(consulta, **mudancas) if mudancas else consulta
+
+
 def executar_consulta(consulta: Consulta, banco: Banco) -> tuple[str, str, list[str]]:
     """Roda a consulta e devolve (sql, cabeçalho, linhas de resultado).
 
-    Termos do objeto são tentados com E; se nada casa, com OU; se ainda nada,
-    o resultado diz que nenhuma contratação do corpus tem esse objeto (em vez
-    de calcular sobre contratações de outro assunto).
+    Termos do objeto são tentados todos com E. Se nada casa, ficam só os termos
+    que casam com algum registro (com os demais filtros), de novo com E; se
+    ainda nada, esses mesmos termos com OU ("ambulâncias e pavimentação" é a
+    união dos dois assuntos). Termos que não casam com nada ficam de fora do
+    OU, para uma palavra solta da pergunta não trazer registros de outro
+    assunto. Se nenhum termo casa, o resultado diz que nenhuma contratação do
+    corpus tem esse objeto, em vez de calcular sobre contratações de outro assunto.
     """
     total = banco.consultar(f"SELECT COUNT(*) AS n FROM {consulta.tabela}")[0]["n"]
+    consulta = _resolver_valores(consulta, banco)
+
+    def contagem(termos: tuple[str, ...], juncao: str = "AND") -> int:
+        where, parametros = _where(consulta, termos, juncao)
+        return banco.consultar(f"SELECT COUNT(*) AS n FROM {consulta.tabela}{where}", parametros)[0]["n"]
+
     tentativas = [(consulta.termos_objeto, "AND")]
     if len(consulta.termos_objeto) > 1:
-        tentativas.append((consulta.termos_objeto, "OR"))
+        uteis = tuple(termo for termo in consulta.termos_objeto if contagem((termo,)))
+        if uteis and uteis != consulta.termos_objeto:
+            tentativas.append((uteis, "AND"))
+        if len(uteis) > 1:
+            tentativas.append((uteis, "OR"))
     for termos, juncao in tentativas:
-        where, parametros = _where(consulta, termos, juncao)
-        if not termos or banco.consultar(f"SELECT 1 AS ok FROM {consulta.tabela}{where} LIMIT 1", parametros):
+        if not termos or contagem(termos, juncao):
             sql, linhas = _executar(banco, consulta, termos, juncao)
             return sql, _cabecalho(consulta, total, termos, juncao), linhas
     where, _ = _where(consulta, consulta.termos_objeto, "OR")

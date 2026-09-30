@@ -148,7 +148,7 @@ def test_detecta_tipo_de_conta(pergunta, tipo):
 
 
 def test_pergunta_sem_conta_ou_sem_base_estruturada_nao_vira_sql():
-    assert sq.detectar_consulta("Quais contratos de ambulâncias foram publicados?", QueryFilters(), ESTRUTURADA) is None
+    assert sq.detectar_consulta("Quais contratos existem?", QueryFilters(), ESTRUTURADA) is None
     assert sq.detectar_consulta("Qual o valor médio?", QueryFilters(), [Natureza.NORMATIVA]) is None
 
 
@@ -198,7 +198,7 @@ def test_objeto_inexistente_nao_calcula_sobre_outro_assunto(base):
     assert "média" not in chunk.content
 
 
-def test_termos_sem_combinacao_exata_caem_para_ou(base):
+def test_termos_sem_combinacao_exata_caem_para_ou_entre_os_que_existem(base):
     [chunk] = _consultar("Qual o valor total de ambulâncias e pavimentação?", base)
 
     assert "objeto contém ambulancia ou pavimentacao" in chunk.content
@@ -371,3 +371,155 @@ def test_fornecedores_ordenados_pela_soma_dos_contratos_assinados(tmp_path):
     texto = str(resultado)
     assert texto.index('Fornecedor B') < texto.index('Fornecedor A')
     assert '900' in texto and '200' in texto
+
+
+# --------------------------------------------------------------------------
+# Regressões apontadas na revisão da Pâmela (30/09): palavra comum, modalidade,
+# esfera, agrupamento, tabela, PCA no plural, mês, contagem e órgão.
+# --------------------------------------------------------------------------
+
+
+def _detectar(pergunta, bases=ESTRUTURADA, **filtros):
+    return sq.detectar_consulta(pergunta, QueryFilters(**filtros), bases)
+
+
+def test_palavras_comuns_nao_viram_termo_do_objeto():
+    consulta = _detectar("Quantas contratações foram publicadas e assinadas em 2025, comparando a data?", ano=2025)
+
+    assert consulta.termos_objeto == ()
+
+
+def test_modalidade_vira_filtro_de_coluna_e_nao_termo_do_objeto(base):
+    consulta = _detectar("Quantas contratações por pregão eletrônico em 2025?", ano=2025)
+    assert consulta.modalidade_termos == ("pregao", "eletronic")
+    assert consulta.termos_objeto == ()
+
+    [chunk] = _consultar("Quantas contratações por pregão eletrônico em 2025?", base, ano=2025)
+    assert "modalidade em Pregão - Eletrônico" in chunk.content
+    assert "Geral: 2 registros" in chunk.content  # M-1 e M-2; E-1 é concorrência e F-1 é de 2024
+
+
+def test_modalidade_que_nao_existe_no_corpus_diz_isso(base):
+    [chunk] = _consultar("Quantas contratações por leilão em 2025?", base, ano=2025)
+
+    assert "nenhum registro do corpus tem essa modalidade" in chunk.content
+    assert "0 registros" in chunk.content
+
+
+def test_federais_vira_filtro_de_esfera(base):
+    consulta = _detectar("Qual o total das contratações federais?")
+    assert consulta.esfera == "federal"
+    assert consulta.termos_objeto == ()
+
+    [chunk] = _consultar("Qual o total das contratações federais?", base)
+    assert "esfera=federal" in chunk.content
+    assert "Geral: 1 registros" in chunk.content
+
+
+def test_agrupar_por_municipios_nao_filtra_so_os_municipais():
+    consulta = _detectar("Quantas contratações por municípios?")
+
+    assert consulta.tipo == "agrupamento"
+    assert consulta.agrupar_por == "municipio"
+    assert consulta.esfera is None
+
+
+def test_valor_contratado_vai_para_contratacoes_mesmo_so_com_a_agregada():
+    consulta = _detectar("Qual o valor total contratado em 2025?", bases=[Natureza.AGREGADA], ano=2025)
+
+    assert consulta.tabela == "contratacoes"
+
+
+@pytest.mark.parametrize("pergunta", [
+    "Qual o valor total dos planos anuais de contratação de 2025?",
+    "Qual o valor total dos planos anuais de 2025?",
+])
+def test_planos_anuais_no_plural_sao_pca(pergunta):
+    assert _detectar(pergunta, bases=AGREGADA, ano=2025).tabela == "pca_planos"
+
+
+def test_mes_da_pergunta_filtra_o_mes_e_rio_de_janeiro_nao_e_mes(base):
+    assert _detectar("Qual a média das contratações de janeiro de 2025?", ano=2025).mes == 1
+    assert _detectar("Qual a média das contratações do Rio de Janeiro em 2025?", ano=2025).mes is None
+
+    [chunk] = _consultar("Qual a média das contratações de janeiro de 2025?", base, ano=2025)
+    assert "mês=01/2025" in chunk.content
+    assert "Geral: 1 registros" in chunk.content  # só M-1 é de janeiro
+
+
+def test_contagem_inclui_registros_sem_valor(tmp_path):
+    documents = escrever_documents(
+        tmp_path / "documents.jsonl",
+        contratacoes=[
+            _contratacao("A-1", valor_estimado=100.0),
+            _contratacao("A-2", valor_estimado=None),
+        ],
+    )
+    banco = Banco(sqlite_path=tmp_path / "base.sqlite")
+    structured_db.construir_banco(documents, banco)
+
+    [chunk] = sq.consultar_estruturado(
+        "Quantas contratações em 2025?", QueryFilters(ano=2025), ESTRUTURADA,
+        banco=banco, documents_file=documents,
+    )
+
+    assert "2 registros no total, 1 sem valor informado" in chunk.content
+    assert "1 registros; total R$ 100,00" in chunk.content
+
+
+def test_filtro_de_orgao_chega_ao_sql_sem_virar_objeto(base):
+    consulta = _detectar("Qual o total planejado pela Educação no PCA 2025?", bases=AGREGADA, ano=2025,
+                         orgao="Educação no PCA")
+    assert consulta.orgao_termos == ("educacao",)
+
+    [chunk] = _consultar("Qual o total planejado pela Educação no PCA 2025?", base, bases=AGREGADA, ano=2025,
+                         orgao="Educação no PCA")
+    assert "órgão em Educação" in chunk.content
+    assert "total R$ 3.000,00" in chunk.content
+
+
+def test_orgao_que_nao_existe_no_corpus_diz_isso(base):
+    [chunk] = _consultar("Qual o total planejado pela Defesa Civil no PCA 2025?", base, bases=AGREGADA, ano=2025,
+                         orgao="Defesa Civil")
+
+    assert "nenhum órgão do corpus casa com esse nome" in chunk.content
+
+
+@pytest.mark.parametrize("nome", ["SECRETARIA DE ESTADO DE SAUDE", "SECRET ESTADO SAÚDE"])
+def test_nome_de_orgao_casa_sem_acento_caixa_e_com_abreviacao(nome):
+    assert sq._palavras_casam(("secretaria", "saude"), nome)
+    assert not sq._palavras_casam(("secretaria", "educacao"), nome)
+
+
+def test_listagem_devolve_registros_com_orgao_fornecedor_e_modalidade(base):
+    consulta = _detectar("Quais contratos de ambulâncias foram publicados?")
+    assert consulta.tipo == "listagem"
+
+    [chunk] = _consultar("Quais contratações de ambulâncias existem em 2025?", base, ano=2025)
+    assert "3 registros atendem aos filtros" in chunk.content  # M-1, M-2 e E-1
+    assert "fornecedor:" in chunk.content and "modalidade: Concorrência - Eletrônica" in chunk.content
+
+
+def test_listagem_nao_roda_com_base_normativa_nem_sem_assunto():
+    assert _detectar("Quais contratações de ambulâncias existem?", bases=[Natureza.NORMATIVA, Natureza.ESTRUTURADA]) is None
+    assert _detectar("Quais contratos existem em 2025?", ano=2025) is None
+
+
+def test_palavra_solta_da_pergunta_nao_entra_no_ou(base):
+    [chunk] = _consultar("Qual o total de ambulâncias e pavimentação desse período?", base)
+
+    assert "objeto contém ambulancia ou pavimentacao" in chunk.content
+
+
+def test_agente_da_passiva_nao_vira_agrupamento():
+    consulta = _detectar("Qual o total das contratações publicadas por órgãos públicos em 2025?", ano=2025)
+    assert consulta.tipo == "estatistica"
+    assert _detectar("Qual o total por órgão em 2025?", ano=2025).agrupar_por == "orgao_nome"
+
+
+def test_minimo_de_contratos_por_fornecedor(base):
+    consulta = _detectar("Quais fornecedores têm três ou mais contratações de ambulância?")
+    assert (consulta.tipo, consulta.agrupar_por, consulta.minimo_por_grupo) == ("agrupamento", "fornecedor", 3)
+
+    [chunk] = _consultar("Quais fornecedores têm três ou mais contratações de ambulância?", base)
+    assert "Nenhum fornecedor tem 3 ou mais registros" in chunk.content

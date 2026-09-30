@@ -58,11 +58,20 @@ _NORMATIVE_PATTERNS = (
     r"\b(posso|pode|podem) participar\b",
     r"\btratamento diferenciado\b",
     r"\bvigente[s]?\b",
+    # Edital e especificação técnica são documentos da base normativa.
+    r"\bedita(l|is)\b",
+    r"\bespecificac(ao|oes) tecnicas?\b",
+    r"\btermos? de referencia\b",
 )
+
+# O domínio em geral ("as contratações públicas") não pede registro de
+# contratação: sozinho, não leva à base estruturada.
+_DOMINIO_GENERICO = re.compile(r"\b(contratacoes|compras|licitacoes) publicas\b")
 
 _STRUCTURED_PATTERNS = (
     r"\bcontrato[s]?\b",
     r"\bcontrata(c|ç)(ao|ões|oes)\b",
+    r"\bcontratad[oa]s?\b",
     r"\bfornecedor(es)?\b",
     r"\borgaos?\b",
     r"\bcnpj\b",
@@ -88,7 +97,6 @@ _AGGREGATED_PATTERNS = (
     r"\bmediana\b",
     r"\bmedia[s]?\b",
     r"\btotal\b",
-    r"\bmaior(es)?\b",
     r"\bfrequencia\b",
     r"\bconcentra(c|ç)(ao|oes|ões)\b",
     r"\baumento\b",
@@ -197,7 +205,7 @@ def _rotear(query: str) -> RouteDecision:
     bases: list[Natureza] = []
     if _contains_pattern(text, _NORMATIVE_PATTERNS):
         bases.append(Natureza.NORMATIVA)
-    if _contains_pattern(text, _STRUCTURED_PATTERNS):
+    if _contains_pattern(_DOMINIO_GENERICO.sub(" ", text), _STRUCTURED_PATTERNS):
         bases.append(Natureza.ESTRUTURADA)
     if _contains_pattern(text, _CONVERSATIONAL_PATTERNS):
         bases.append(Natureza.CONVERSACIONAL)

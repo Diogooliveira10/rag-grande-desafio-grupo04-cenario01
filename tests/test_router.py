@@ -84,3 +84,22 @@ def test_recusa_carrega_o_motivo_certo_na_justificativa(pergunta, motivo):
 
     assert decisao.bases_selecionadas == []
     assert inferir_motivo_recusa(decisao.justificativa) == motivo
+
+
+def test_edital_e_especificacao_tecnica_vao_para_a_normativa():
+    decisao = rotear_pergunta("Quais editais tratam das especificações técnicas das ambulâncias contratadas?")
+
+    assert Natureza.NORMATIVA in decisao.bases_selecionadas
+    assert Natureza.ESTRUTURADA in decisao.bases_selecionadas
+
+
+def test_contratacoes_publicas_em_geral_nao_levam_a_estruturada():
+    decisao = rotear_pergunta("Qual regra estava vigente em 2025 para a pesquisa de preços nas contratações públicas?")
+
+    assert decisao.bases_selecionadas == [Natureza.NORMATIVA]
+
+
+def test_ranking_de_contratacoes_nao_vai_para_a_agregada():
+    decisao = rotear_pergunta("Quais foram as dez maiores contratações do Rio de Janeiro em 2025?")
+
+    assert decisao.bases_selecionadas == [Natureza.ESTRUTURADA]

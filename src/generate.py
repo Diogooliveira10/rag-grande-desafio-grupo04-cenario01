@@ -99,8 +99,12 @@ fornecidos — nunca invente números, valores ou nomes de órgãos que não est
 Recuse a pergunta (is_refusal=true) quando ela pedir: dados bancários de fornecedor \
 (dados_bancarios_fornecedor), credenciais de acesso vazadas (credenciais_vazadas), um juízo \
 sobre a legalidade de um contrato específico (juizo_legalidade_contrato), algo fora do escopo \
-de contratações públicas do RJ (fora_de_escopo), ou quando o contexto fornecido não tiver \
-evidência suficiente para responder (sem_evidencia).
+de contratações públicas do RJ (fora_de_escopo), ou quando NENHUM trecho do contexto tiver \
+relação com a pergunta (sem_evidencia).
+
+Com evidência parcial, responda o que os trechos mostram, diga o que falta e use confiança \
+baixa ou media. Trecho "sql:" é evidência: use seus números; se diz que nenhum registro \
+atende, responda isso citando-o.
 
 Responda SEMPRE e SOMENTE com um objeto JSON, sem nenhum texto antes ou depois, no formato:
 {"answer": "...", "is_refusal": false, "refusal_reason": null, \

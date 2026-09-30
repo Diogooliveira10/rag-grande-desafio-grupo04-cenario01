@@ -32,14 +32,14 @@ def test_rota_apenas_acerta_os_casos_de_recusa_e_fora_de_escopo():
 
 
 def test_rota_apenas_nao_regride_abaixo_da_taxa_observada():
-    """Trava de regressão: o roteador acerta 18/22 (15/19 + os 3 guardrails) — uma queda aqui é sinal real."""
+    """Trava de regressão: o roteador acerta 22/22 desde 30/09 — uma queda aqui é sinal real."""
     cases = load_golden_set(GOLDEN_SET)
 
     report = run_eval(cases, rota_apenas)
 
-    assert report["acertos"] >= 18, (
+    assert report["acertos"] >= 22, (
         f"roteador regrediu: {report['acertos']}/{report['total']} "
-        f"(esperado >= 18) — veja eval/runs/ para o relatório completo"
+        f"(esperado >= 22) — veja eval/runs/ para o relatório completo"
     )
 
 
