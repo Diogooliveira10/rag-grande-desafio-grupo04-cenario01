@@ -29,6 +29,12 @@ EMBEDDING_MODEL = _env("EMBEDDING_MODEL", "xagi/qwen3-embedding:0.6b-q4_k_m")
 # de 1.500 tokens, com folga para a resposta.
 GENERATION_CONTEXT_CHARS = int(_env("GENERATION_CONTEXT_CHARS", "3500"))
 GENERATION_CHUNK_CHARS = int(_env("GENERATION_CHUNK_CHARS", "900"))
+# Rerank por cross-encoder local (src/rerank.py). O modelo da turma ainda não
+# tem endpoint; RERANK_MODEL aceita qualquer CrossEncoder do sentence-transformers.
+RERANK_ENABLED = _env("RERANK_ENABLED", "true").lower() in {"1", "true", "sim", "yes"}
+RERANK_MODEL = _env("RERANK_MODEL", "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1")
+RERANK_CANDIDATES = int(_env("RERANK_CANDIDATES", "10"))
+RERANK_MAX_LENGTH = int(_env("RERANK_MAX_LENGTH", "512"))
 OLLAMA_LOCAL_URL = _env("OLLAMA_LOCAL_URL", "http://localhost:11434/v1")
 OLLAMA_LOCAL_API_KEY = _env("OLLAMA_LOCAL_API_KEY", "ollama")
 OLLAMA_LOCAL_EMBEDDING_MODEL = _env("OLLAMA_LOCAL_EMBEDDING_MODEL", EMBEDDING_MODEL)

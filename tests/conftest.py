@@ -1,5 +1,6 @@
 import pytest
 
+import config
 from src import obs, structured_query
 
 
@@ -7,6 +8,12 @@ from src import obs, structured_query
 def _logs_em_diretorio_temporario(tmp_path, monkeypatch):
     """Nenhum teste escreve no logs/ real do repositório."""
     monkeypatch.setattr(obs.default_logger, "logs_dir", tmp_path / "logs")
+
+
+@pytest.fixture(autouse=True)
+def _sem_modelo_de_rerank(monkeypatch):
+    """Nenhum teste baixa ou carrega o cross-encoder; quem testa rerank passa o seu."""
+    monkeypatch.setattr(config, "RERANK_ENABLED", False)
 
 
 @pytest.fixture(autouse=True)

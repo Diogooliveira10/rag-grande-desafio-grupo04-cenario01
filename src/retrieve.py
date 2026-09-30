@@ -39,6 +39,7 @@ class RetrievalResult:
     dense_score: float | None = None
     sparse_score: float | None = None
     rrf_score: float | None = None
+    rerank_score: float | None = None
     document_id: str | None = None
     source_path: str | None = None
     _record: dict[str, Any] = field(default_factory=dict, repr=False)
@@ -56,6 +57,7 @@ class RetrievalResult:
             "dense_score": self.dense_score,
             "sparse_score": self.sparse_score,
             "rrf_score": self.rrf_score,
+            "rerank_score": self.rerank_score,
             "document_id": self.document_id,
             "source_path": self.source_path,
         }
@@ -597,10 +599,18 @@ def retrieve(
     reranker: RerankFn | None = None,
     escopos: Iterable[str] | None = None,
     fetch_k: int | None = None,
+    rerank_k: int | None = None,
     run_id: str = "sem-run-id",
     query_id: str = "sem-query-id",
 ) -> list[RetrievalResult]:
     """Executa dense + BM25 + RRF e aplica reranker somente se fornecido.
+
+    Com ``reranker``, o RRF entrega ``rerank_k`` candidatos (padrão
+    ``max(top_k, config.RERANK_CANDIDATES)``) e o reranker escolhe os ``top_k``
+    finais entre eles — assim ele pode trazer para cima um chunk que o RRF
+    deixou abaixo do corte. Se o reranker falhar (ex.: modelo indisponível), o
+    stage ``rerank`` é registrado com ``status: "erro"`` e o resultado volta a
+    ser o do RRF.
 
     ``escopos`` restringe a busca às bases com esse ``escopo`` no manifesto
     (ex.: ``("oficial",)``); ``None`` não filtra por escopo.
@@ -693,14 +703,20 @@ def retrieve(
             escopos=escopos,
         )
         span.set_result(_resumo(sparse))
+    if reranker is not None:
+        rerank_k = max(top_k, rerank_k if rerank_k is not None else config.RERANK_CANDIDATES)
     with _span(Stage.FUSAO_RRF, rrf_k=DEFAULT_RRF_K) as span:
-        fused = reciprocal_rank_fusion([dense, sparse], top_k=top_k)
+        fused = reciprocal_rank_fusion([dense, sparse], top_k=rerank_k if reranker is not None else top_k)
         span.set_result(_resumo(fused))
     if reranker is not None and fused:
-        with _span(Stage.RERANK) as span:
-            reranked = list(reranker(query, fused))[:top_k]
-            span.set_result(_resumo(reranked))
-        return reranked
+        try:
+            with _span(Stage.RERANK, rerank_k=rerank_k) as span:
+                span.modelo = getattr(reranker, "modelo", None)
+                reranked = list(reranker(query, fused))[:top_k]
+                span.set_result(_resumo(reranked))
+            return reranked
+        except Exception:  # noqa: BLE001 - o span já registrou o erro; segue com o RRF
+            return fused[:top_k]
     return fused
 
 

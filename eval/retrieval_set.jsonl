@@ -1,0 +1,32 @@
+{"id": "R01", "pergunta": "Em quanto tempo depois da assinatura o contrato precisa aparecer no portal nacional para ter validade?", "bases": ["normativa"], "relevante_contem": ["condicao indispensavel para a eficacia do contrato"]}
+{"id": "R02", "pergunta": "Empresas podem se juntar para disputar uma licitação em conjunto?", "bases": ["normativa"], "relevante_contem": ["participar de licitacao em consorcio"]}
+{"id": "R03", "pergunta": "Como é corrigido o preço de um serviço contínuo depois de doze meses?", "bases": ["normativa"], "relevante_contem": ["interregno minimo de 1 (um) ano", "reajustamento"]}
+{"id": "R04", "pergunta": "O que a lei entende por estudo técnico preliminar?", "bases": ["normativa"], "relevante_contem": ["estudo tecnico preliminar: documento constitutivo"]}
+{"id": "R05", "pergunta": "Quais tipos de procedimento licitatório existem na nova lei?", "bases": ["normativa"], "relevante_contem": ["sao modalidades de licitacao"]}
+{"id": "R06", "pergunta": "Em que situação a administração pode contratar sem licitar porque não há concorrência possível?", "bases": ["normativa"], "relevante_contem": ["inexigivel a licitacao quando inviavel a competicao"]}
+{"id": "R07", "pergunta": "Que punições uma empresa pode receber por cometer infrações em licitações e contratos?", "bases": ["normativa"], "relevante_contem": ["declaracao de inidoneidade para licitar ou contratar", "advertencia"]}
+{"id": "R08", "pergunta": "Qualquer pessoa pode contestar um edital por irregularidade? Até quando?", "bases": ["normativa"], "relevante_contem": ["impugnar edital de licitacao por irregularidade"]}
+{"id": "R09", "pergunta": "A administração pode pagar o fornecedor antes de receber o produto?", "bases": ["normativa"], "relevante_contem": ["antecipacao de pagamento somente sera permitida"]}
+{"id": "R10", "pergunta": "Pequenos negócios têm algum benefício nas licitações pela nova lei?", "bases": ["normativa"], "relevante_contem": ["lei complementar no 123"]}
+{"id": "R11", "pergunta": "Como se calcula o valor estimado de uma compra comparando com o mercado?", "bases": ["normativa"], "relevante_contem": ["compativel com os valores praticados pelo mercado"]}
+{"id": "R12", "pergunta": "Por quanto tempo um contrato de serviço contínuo pode ser renovado?", "bases": ["normativa"], "relevante_contem": ["prorrogados sucessivamente", "vigencia maxima decenal"]}
+{"id": "R13", "pergunta": "Qual percentual do valor do contrato pode ser exigido como garantia?", "bases": ["normativa"], "relevante_contem": ["5% (cinco por cento) do valor inicial do contrato"]}
+{"id": "R14", "pergunta": "Quais órgãos e decretos estaduais do Rio regulamentam as compras públicas?", "bases": ["normativa"], "relevante_contem": ["decreto", "rio de janeiro"], "relevante_documento": "editais_normativo_003"}
+{"id": "R15", "pergunta": "Quanto o estado do Rio planeja gastar ao todo com o plano de contratações de 2025?", "bases": ["agregada"], "relevante_contem": ["61.119.549.484,04"]}
+{"id": "R16", "pergunta": "Qual o orçamento previsto no plano de 2025 para consertar e manter aparelhos elétricos e eletrônicos?", "bases": ["agregada"], "relevante_contem": ["classe \"manutencao, instalacao e conservacao de maquinas e equipamentos eletricos"]}
+{"id": "R17", "pergunta": "Quanto está planejado em 2025 para meias e luvas femininas?", "bases": ["agregada"], "relevante_contem": ["classe \"meias, luvas e complementos de vestuario para mulher\""]}
+{"id": "R18", "pergunta": "Quanto a secretaria de educação do estado planejou contratar em 2025?", "bases": ["agregada"], "relevante_contem": ["unidade \"secretaria de estado de educacao\" no pca 2025"]}
+{"id": "R19", "pergunta": "Qual unidade do governo do Rio tem o maior plano de compras em 2025?", "bases": ["agregada"], "relevante_contem": ["centro de tecn de informacao e comun do erj", "1a de 91 unidades"]}
+{"id": "R20", "pergunta": "Quanto das contratações do plano de 2025 estava previsto para o mês de fevereiro?", "bases": ["agregada"], "relevante_contem": ["mes de fevereiro de 2025"]}
+{"id": "R21", "pergunta": "Qual a divisão do plano 2025 entre compras de materiais e contratação de serviços?", "bases": ["agregada"], "relevante_contem": ["categoria \"servico\" no pca 2025"]}
+{"id": "R22", "pergunta": "Quais os tipos de item com mais dinheiro planejado no plano de contratações 2025?", "bases": ["agregada"], "relevante_contem": ["classes de catalogo com maior valor", "pca"]}
+{"id": "R23", "pergunta": "Qual era o valor total do plano de contratações do estado em 2024?", "bases": ["agregada"], "relevante_contem": ["34.666.340.315,11"]}
+{"id": "R24", "pergunta": "Houve licitação para reformar o sistema contra incêndio de um pavilhão da Fiocruz?", "bases": ["estruturada"], "relevante_contem": ["prevencao e combate a incendio e panico", "pavilhao"]}
+{"id": "R25", "pergunta": "Que contratação a Marinha fez para um curso de pós-graduação?", "bases": ["estruturada"], "relevante_contem": ["curso de pos-graduacao em gestao"]}
+{"id": "R26", "pergunta": "Existe compra de equipamento para teste de faísca em geomembrana nas Indústrias Nucleares?", "bases": ["estruturada"], "relevante_contem": ["spark test"]}
+{"id": "R27", "pergunta": "A Fiocruz contratou porteiros e recepcionistas?", "bases": ["estruturada"], "relevante_contem": ["servicos de portaria e atendimento ao publico"]}
+{"id": "R28", "pergunta": "Qual projeto transforma a Arena Olímpica em campus do instituto federal?", "bases": ["estruturada"], "relevante_contem": ["arena olimpica 2"]}
+{"id": "R29", "pergunta": "Teve leilão de mercadorias apreendidas pela Receita?", "bases": ["estruturada"], "relevante_contem": ["alienacao de mercadorias apreendidas pela receita federal"]}
+{"id": "R30", "pergunta": "Há ata de registro de preços para serviço de borracharia e conserto de pneus da frota?", "bases": ["conversacional"], "relevante_contem": ["pneus"]}
+{"id": "R31", "pergunta": "Existe ata para compra de kits de exame de toxoplasmose e sífilis?", "bases": ["conversacional"], "relevante_contem": ["toxoplasmose"]}
+{"id": "R32", "pergunta": "Alguma ata registra preços para contratar árbitros de campeonatos esportivos?", "bases": ["conversacional"], "relevante_contem": ["servicos de arbitragem"]}

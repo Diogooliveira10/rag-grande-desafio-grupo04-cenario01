@@ -93,17 +93,18 @@ Estágios (mesmos nomes usados no campo `stage` do log estruturado): `query_anal
 - `query_analysis` ([src/query_analysis.py](src/query_analysis.py)): extrai da pergunta, sem LLM, filtros de ano, valor (mínimo, máximo, faixa) e órgão.
 - `roteamento` ([src/router.py](src/router.py)): escolhe as bases antes de buscar.
 - `retrieval_denso` / `retrieval_bm25` / `fusao_rrf` ([src/retrieve.py](src/retrieve.py)): busca híbrida com filtros de metadado. Os filtros são aplicados base a base: numa base sem o campo filtrado, ou em que o filtro excluiria todos os chunks, ele é ignorado e o log registra isso em `extra.filtros_ignorados`. Se ainda assim os filtros zerarem o resultado, [src/pipeline.py](src/pipeline.py) refaz a busca sem eles.
+- `rerank` ([src/rerank.py](src/rerank.py)): um cross-encoder local (`RERANK_MODEL`, padrão `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`, roda em CPU) reordena os `RERANK_CANDIDATES` (padrão 10) primeiros do RRF. Chunks JSON vão para o modelo com os campos de conteúdo primeiro (`objetoCompra`, título, órgão...), porque o modelo só lê 512 tokens. Se o modelo falhar, o log registra erro e o resultado volta a ser o do RRF. O `retrieve` aplica o reranker que receber; `reranker_padrao()` devolve o cross-encoder, ou `None` com `RERANK_ENABLED=false`. **A ligação no `responder` ([src/pipeline.py](src/pipeline.py)) ainda está pendente.** Na ablação com 32 perguntas rotuladas, o hit@3 subiu de 0,69 (só RRF) para 0,88: ver [docs/ABLACAO_RERANK.md](docs/ABLACAO_RERANK.md). Na primeira execução o modelo (~470 MB) é baixado para o cache do Hugging Face.
 - `consulta_sql` ([src/structured_query.py](src/structured_query.py) + [src/structured_db.py](src/structured_db.py)): perguntas de conta sobre as bases estruturada e agregada (ranking, estatística com média e mediana, comparação entre esferas, evolução no tempo, agrupamento) são respondidas por uma consulta SQL pré-escrita e parametrizada — o LLM nunca escreve SQL. O resultado entra como chunk (`doc_type="sql"`, `chunk_id` começando com `sql:`) antes dos chunks da busca. Se o termo pedido não existe no objeto de nenhuma contratação, o resultado diz isso em vez de calcular sobre outro assunto. Falha no banco é registrada no log e a resposta segue só com a busca.
 - `geracao` ([src/generate.py](src/generate.py)): guardrails determinísticos antes do LLM, prompt limitado à janela do modelo (`GENERATION_CONTEXT_CHARS` no total e `GENERATION_CHUNK_CHARS` por chunk; o log registra `chunks_no_prompt` e `chunks_fora_do_orcamento`) e saída pedida em JSON (`response_format`).
 - `validacao` ([src/generate.py](src/generate.py)): checa a saída do LLM. JSON inválido vira recusa segura, citação de chunk que não foi recuperado é descartada (`extra.citacoes_descartadas`) e dado pessoal na resposta é mascarado.
 
 [src/pipeline.py](src/pipeline.py) une as etapas numa única função (`responder`).
 
-**Ainda não implementados:** `rerank` (o `retrieve` aceita um reranker plugável, mas nenhum é usado; o modelo de rerank da turma ainda não foi liberado) e `feedback`.
+**Ainda não implementado:** `feedback`. O modelo de rerank da turma ainda não tem endpoint; quando tiver, basta um reranker com a mesma assinatura em [src/rerank.py](src/rerank.py).
 
 O parsing da geração aceita as variações de chave que o modelo da turma produz na prática (`sources` em vez de `sources_used`, `confidence` numérico em vez de `confidence_level`) e registra no log, em `extra.chaves_fora_do_contrato`, quando isso acontece. Toda etapa registra log estruturado via [src/obs.py](src/obs.py) (JSONL em `logs/pipeline-AAAA-MM-DD.jsonl`, com `run_id`, `stage`, latência e tokens).
 
-Uma pergunta via `responder` gera, no log, uma linha por stage — `query_analysis`, `roteamento`, `retrieval_denso`, `retrieval_bm25`, `fusao_rrf`, `rerank` (só com reranker), `consulta_sql` (só em pergunta de conta), `geracao` e `validacao` (só quando o LLM foi chamado) — todas com o mesmo `run_id` e `query_id`. `geracao` traz `tokens` e `modelo` a partir de `response.usage` do SDK OpenAI; `retrieval_denso` traz os tokens do embedding da pergunta quando usa o embedding padrão do servidor. Etapa que falha grava `status: "erro"` com `extra.error_type`. Dados pessoais da pergunta são mascarados antes de ir para o log. Testes em [tests/test_pipeline_logs.py](tests/test_pipeline_logs.py); os testes gravam log num diretório temporário ([tests/conftest.py](tests/conftest.py)), nunca em `logs/`.
+Uma pergunta via `responder` gera, no log, uma linha por stage — `query_analysis`, `roteamento`, `retrieval_denso`, `retrieval_bm25`, `fusao_rrf`, `rerank` (só com reranker; traz `modelo`), `consulta_sql` (só em pergunta de conta), `geracao` e `validacao` (só quando o LLM foi chamado) — todas com o mesmo `run_id` e `query_id`. `geracao` traz `tokens` e `modelo` a partir de `response.usage` do SDK OpenAI; `retrieval_denso` traz os tokens do embedding da pergunta quando usa o embedding padrão do servidor. Etapa que falha grava `status: "erro"` com `extra.error_type`. Dados pessoais da pergunta são mascarados antes de ir para o log. Testes em [tests/test_pipeline_logs.py](tests/test_pipeline_logs.py); os testes gravam log num diretório temporário ([tests/conftest.py](tests/conftest.py)), nunca em `logs/`.
 
 ## Estrutura do repositório
 
@@ -149,6 +150,7 @@ Uma pergunta via `responder` gera, no log, uma linha por stage — `query_analys
 │   ├── structured_query.py      ← consultas SQL fixas (ranking, estatística, evolução, agrupamento) como evidência
 │   ├── router.py                ← roteamento determinístico (Adaptive RAG)
 │   ├── retrieve.py              ← recuperação híbrida: denso + BM25 + RRF, filtros de metadado por base, rerank plugável
+│   ├── rerank.py                ← rerank por cross-encoder local sobre os candidatos do RRF
 │   ├── generate.py              ← geração com guardrails, prompt na janela do modelo e validação da saída do LLM
 │   ├── sensitivity.py           ← política de sensibilidade: mascaramento de CPF/telefone/e-mail e filtro de restritos
 │   ├── pipeline.py              ← une query_analysis + roteamento + recuperação + geração numa função (responder)
@@ -438,9 +440,14 @@ py .\eval\run_eval.py check                                     # valida o golde
 py .\eval\run_eval.py run --pipeline eval.adapters:rota_apenas   # só roteamento (src/router.py), rápido e offline
 py .\eval\run_eval.py run --pipeline src.pipeline:responder      # pipeline completo: roteamento + recuperação + geração
 py .\eval\run_eval.py run --pipeline src.pipeline:responder_incluindo_experimentais   # idem, incluindo bases experimentais
+py .\eval\run_eval.py run --pipeline eval.adapters:pipeline_completo   # pipeline completo + tokens e latência por etapa (lidos do log)
+py .\eval\run_eval.py run --pipeline eval.adapters:pipeline_completo --ids P1.1 G1   # só alguns casos
+py .\eval\ablacao_rerank.py --candidatos 10 30                 # ablação da recuperação: denso, BM25, RRF, RRF + rerank
 ```
 
 `eval/adapters.py:rota_apenas` avalia só o estágio de roteamento, sem chamar o LLM — útil para checar regressão rápida. `src/pipeline.py:responder` roda o pipeline completo (roteamento + recuperação híbrida via `retrieve.py` + geração via `generate.py`), chamando o LLM de verdade a cada pergunta do golden set.
+
+O relatório (`eval/runs/<run_id>/REPORT.md`) traz rota e recusa (o que define o acerto), citação, confiança, latência e tokens, e o texto de cada resposta. Um caso que dá erro aparece como ERRO sem interromper a rodada. Os casos `G1`–`G3` testam os guardrails do cenário (dados bancários, credenciais em e-mail, juízo de fraude). A ablação do rerank usa outro conjunto, [eval/retrieval_set.jsonl](eval/retrieval_set.jsonl), com o trecho relevante de cada pergunta rotulado; resultado e decisão em [docs/ABLACAO_RERANK.md](docs/ABLACAO_RERANK.md).
 
 ### Endpoint de modelos (compartilhado com toda a turma)
 
