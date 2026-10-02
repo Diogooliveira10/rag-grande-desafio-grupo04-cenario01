@@ -38,8 +38,9 @@ import json
 import statistics
 import sys
 import time
+import unicodedata
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -69,6 +70,10 @@ class EvalCase:
     e_pergunta_de_falha_esperada: bool
     hipotese_falha: Optional[str] = None
     comportamento_esperado: Optional[str] = None
+    deve_conter: list[str] = field(default_factory=list)
+    nao_deve_conter: list[str] = field(default_factory=list)
+    fontes_esperadas_prefixo: list[str] = field(default_factory=list)
+    confianca_maxima: Optional[str] = None
 
 
 def load_golden_set(path: Path) -> list[EvalCase]:
@@ -92,6 +97,10 @@ def load_golden_set(path: Path) -> list[EvalCase]:
                     e_pergunta_de_falha_esperada=bool(record.get("e_pergunta_de_falha_esperada", False)),
                     hipotese_falha=record.get("hipotese_falha"),
                     comportamento_esperado=record.get("comportamento_esperado"),
+                    deve_conter=list(record.get("deve_conter") or []),
+                    nao_deve_conter=list(record.get("nao_deve_conter") or []),
+                    fontes_esperadas_prefixo=list(record.get("fontes_esperadas_prefixo") or []),
+                    confianca_maxima=record.get("confianca_maxima"),
                 )
             )
     ids = [case.id for case in cases]
@@ -99,6 +108,58 @@ def load_golden_set(path: Path) -> list[EvalCase]:
     if duplicated:
         raise ValueError(f"IDs duplicados no golden set: {duplicated}")
     return cases
+
+
+def _normalizar_texto(valor: Any) -> str:
+    texto = unicodedata.normalize("NFKD", str(valor)).encode("ascii", "ignore").decode("ascii")
+    return " ".join(texto.lower().split())
+
+
+def _content_ok(case: EvalCase, response: dict[str, Any]) -> bool:
+    answer = str(response.get("answer") or "")
+    answer_norm = _normalizar_texto(answer)
+
+    for item in case.deve_conter:
+        if _normalizar_texto(item) not in answer_norm:
+            return False
+
+    for item in case.nao_deve_conter:
+        if _normalizar_texto(item) in answer_norm:
+            return False
+
+    fontes = response.get("sources_used") or []
+    if case.fontes_esperadas_prefixo:
+        if not isinstance(fontes, list) or not fontes:
+            return False
+        prefixes = tuple(_normalizar_texto(p) for p in case.fontes_esperadas_prefixo)
+        fonte_ok = False
+        for fonte in fontes:
+            if isinstance(fonte, dict):
+                nomes = [fonte.get("base_id"), fonte.get("source_file"), fonte.get("chunk_id")]
+            else:
+                nomes = [str(fonte)]
+            for nome in nomes:
+                if nome is None:
+                    continue
+                nome_norm = _normalizar_texto(nome)
+                if any(nome_norm.startswith(prefix) for prefix in prefixes):
+                    fonte_ok = True
+                    break
+            if fonte_ok:
+                break
+        if not fonte_ok:
+            return False
+
+    if case.confianca_maxima is not None:
+        ordem = {"baixa": 0, "media": 1, "alta": 2, "recusado": 0}
+        conf_obtida = _normalizar_texto(response.get("confidence_level") or "")
+        conf_esperada = _normalizar_texto(case.confianca_maxima)
+        if conf_obtida not in ordem or conf_esperada not in ordem:
+            return False
+        if ordem[conf_obtida] > ordem[conf_esperada]:
+            return False
+
+    return True
 
 
 def evaluate_case(case: EvalCase, response: dict[str, Any]) -> dict[str, Any]:
@@ -122,6 +183,8 @@ def evaluate_case(case: EvalCase, response: dict[str, Any]) -> dict[str, Any]:
     else:
         citacao_ok = n_fontes == 0 if is_refusal_obtido else n_fontes > 0
 
+    content_ok = _content_ok(case, response)
+
     return {
         "id": case.id,
         "tipo": case.tipo,
@@ -133,6 +196,7 @@ def evaluate_case(case: EvalCase, response: dict[str, Any]) -> dict[str, Any]:
         "refusal_reason_obtido": refusal_reason_obtido,
         "rota_ok": rota_ok,
         "refusal_ok": refusal_ok,
+        "content_ok": content_ok,
         "acertou": rota_ok and refusal_ok,
         "n_fontes": n_fontes,
         "citacao_ok": citacao_ok,
@@ -167,6 +231,7 @@ def _resumo_metricas(resultados: list[dict[str, Any]]) -> dict[str, Any]:
     confianca: dict[str, int] = defaultdict(int)
     tokens_total = 0
     tokens_por_etapa: dict[str, int] = defaultdict(int)
+    content_cases = [r for r in resultados if r.get("content_ok") is not None]
     for resultado in resultados:
         if resultado.get("confidence_level"):
             confianca[str(resultado["confidence_level"])] += 1
@@ -174,10 +239,28 @@ def _resumo_metricas(resultados: list[dict[str, Any]]) -> dict[str, Any]:
         tokens_total += int(metricas.get("tokens_total", 0))
         for etapa, dados in (metricas.get("etapas") or {}).items():
             tokens_por_etapa[etapa] += int(dados.get("tokens", 0))
+    total = len(resultados) or 1
+    routing_accuracy = sum(1 for r in resultados if r.get("rota_ok")) / total
+    refusal_accuracy = sum(1 for r in resultados if r.get("refusal_ok")) / total
+    content_accuracy = (
+        sum(1 for r in content_cases if r.get("content_ok")) / len(content_cases)
+        if content_cases else None
+    )
+    citation_presence = sum(1 for r in resultados if int(r.get("n_fontes") or 0) > 0) / total if total else 0.0
+    expected_source_accuracy = (
+        sum(1 for r in resultados if r.get("content_ok") is not False) / total
+        if any(r.get("content_ok") is not None for r in resultados)
+        else None
+    )
     return {
         "erros": sum(1 for r in resultados if r.get("erro")),
         "citacao_avaliada": len(citacoes),
         "citacao_ok": sum(citacoes),
+        "routing_accuracy": round(routing_accuracy, 4),
+        "refusal_accuracy": round(refusal_accuracy, 4),
+        "content_accuracy": None if content_accuracy is None else round(content_accuracy, 4),
+        "citation_presence": round(citation_presence, 4),
+        "expected_source_accuracy": None if expected_source_accuracy is None else round(expected_source_accuracy, 4),
         "confianca": dict(sorted(confianca.items())),
         "latencia_ms": {
             "media": int(statistics.mean(latencias)) if latencias else 0,
@@ -241,6 +324,16 @@ def render_report_markdown(report: dict[str, Any], run_id: str, built_at: str) -
     latencia = metricas.get("latencia_ms") or {}
     if metricas:
         lines.extend(["", "## Métricas", ""])
+        if "routing_accuracy" in metricas:
+            lines.append(f"- routing_accuracy: **{metricas['routing_accuracy']:.4f}**")
+        if "refusal_accuracy" in metricas:
+            lines.append(f"- refusal_accuracy: **{metricas['refusal_accuracy']:.4f}**")
+        if metricas.get("content_accuracy") is not None:
+            lines.append(f"- content_accuracy: **{metricas['content_accuracy']:.4f}**")
+        if metricas.get("citation_presence") is not None:
+            lines.append(f"- citation_presence: **{metricas['citation_presence']:.4f}**")
+        if metricas.get("expected_source_accuracy") is not None:
+            lines.append(f"- expected_source_accuracy: **{metricas['expected_source_accuracy']:.4f}**")
         if metricas.get("citacao_avaliada"):
             lines.append(f"- Citação correta: **{metricas['citacao_ok']}/{metricas['citacao_avaliada']}**")
         if metricas.get("confianca"):
