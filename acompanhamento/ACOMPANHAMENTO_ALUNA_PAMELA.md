@@ -178,3 +178,54 @@ Hoje trabalhei nos filtros do query_analysis e em como eles são usados na busca
 
 - Usei o Claude Code para diagnosticar os erros, escrever as correções e os testes, rodar as revisões adversariais (agentes tentando quebrar o código) e resolver os conflitos do merge.
 - Eu direcionei o que corrigir a partir dos casos do Renato, pedi a revisão completa do código que usa os filtros e decidi manter as funcionalidades do João no merge. Conferi os resultados rodando os testes e os comandos de verificação.
+
+## Encontro 9 - 2026-10-02
+
+### Relato individual - Pâmela de Freitas
+
+Hoje trabalhei na extração de órgão, esfera e modalidade do query_analysis, a partir do que o Renato pediu.
+
+#### Órgão com "no PCA" junto do nome
+
+- O nome do órgão pegava o que vinha depois: "Secretaria de Saúde no PCA", "Prefeitura de Niterói no PNCP".
+- Agora "no", "na" e "em" encerram o nome, e siglas do sistema (PCA, PNCP, Lei, Edital…) também.
+
+#### Agora funciona
+
+- Reconhecer órgão sem depender de maiúscula: "prefeitura de niterói", "secretaria municipal de saúde".
+- Palavras novas de início de nome: fundo, comando, banco, defensoria, município, procuradoria, controladoria, polícia, companhia, empresa pública.
+- Siglas de órgãos: SEEDUC, SES, DPE, DETRAN, UERJ, FIOCRUZ, TCE-RJ…
+- Esfera federal quando aparece "federal" ou "federais".
+- Modalidade (pregão, dispensa, concorrência, inexigibilidade…), só quando a pergunta é sobre os dados. "Como funciona o pregão?" não vira filtro.
+
+#### Revisão adversarial e reescrita
+
+- Antes de mandar, pus um agente de IA para tentar quebrar a parte nova. Ele achou 24 tipos de erro, como:
+    - o nome engolia palavras ("Comando da Marinha e informe");
+    - cidades eram cortadas ("prefeitura de são", sem "gonçalo");
+    - palavras comuns viravam órgão ("banco de sangue", "PVC", "MAIOR").
+- Mudei a abordagem: em vez de adivinhar onde o nome termina, o nome é **conferido contra a lista real de órgãos do corpus** (353 nomes, em `data/config/orgaos_corpus.json`, gerada com `py -m src.query_analysis orgaos`) e contra a lista dos 92 municípios do RJ.
+- Também corrigi: "no município do Rio" (lugar) e "legislação federal" não viram esfera; "pouca concorrência", "dispensa médica" e "não foram por dispensa" não viram modalidade.
+- No SQL do Renato, "prefeitura de niterói" passou a trazer os 5 contratos da prefeitura, e não mais 12.
+
+#### Testes
+
+- Régua do agente revisor:
+    - 216 perguntas escritas à mão: de 130 para **210 certas**;
+    - 13.440 frases combinadas: de 67,7% para **93,8%**.
+- Suíte completa: **879 testes passando**, sem regressão nas revisões anteriores.
+- Branch `pamela-orgao-esfera-modalidade`.
+
+#### Pendências e avisos
+
+- Órgão em minúsculas que não está no corpus, e sem município no nome, fica sem filtro de órgão, de propósito: sem a lista, é mais seguro não chutar onde o nome termina.
+- Encontrei três pontos no SQL do Renato, para ele avaliar:
+    - "UERJ" e "Prefeitura do Rio de Janeiro" casam com órgãos errados, porque o SQL descarta "estado", "rio" e "janeiro";
+    - o SQL calcula esfera e modalidade por conta própria e lê "Lei federal" como esfera;
+    - "Quantos pregões eletrônicos?" não gera consulta.
+- Quando o corpus mudar, é preciso rodar `py -m src.query_analysis orgaos` de novo.
+
+### Uso de assistentes de IA:
+
+- Usei o Claude Code para eescrever os testes, rodar a revisão adversarial com um agente e conferir os resultados no SQL com a base local.
+- Eu trouxe os pedidos e os casos do Renato, decidi não mexer no módulo de SQL dele, e conferi os resultados com os testes e com o caso da prefeitura de Niterói.
