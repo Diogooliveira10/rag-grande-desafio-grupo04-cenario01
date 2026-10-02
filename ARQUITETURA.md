@@ -102,7 +102,7 @@ O índice oficial vigente ([index/manifest.json](index/manifest.json)) usa embed
 - cerca de 885 dos 2.524 chunks de atas vêm de OCR malsucedido (texto ilegível/garbage);
 - os indicadores do PCA (`pca_agregado`) estão praticamente ausentes do corpus coletado (só um PCA confirmado, da Secretaria de Saúde estadual);
 - os 448 contratos assinados não têm o campo `modalidade` preenchido — o PNCP não traz modalidade em contrato assinado, só nas compras publicadas;
-- há um registro de "ambulância tipo D" com valor zero, um caso isolado e não um padrão.
+- há só 1 registro de "ambulância tipo D" (valor R$ 0,00), insuficiente para perguntas de mediana ou comparação entre esferas; há também 21 contratos de R$ 0,00 e 6 de R$ 0,01 na base de contratos, que ainda entram nas contas de média/mediana sem filtro de valor mínimo.
 
 Os diretórios `index/`, `data/normalized/`, `data/inventory/*.json`, `data/embeddings/2026-09-30_12-08-51/` e `atas-zip/*.zip`, além de `data/structured/*.sqlite`, estão no `.gitignore`, mas são versionados via `git add -f` (forçado) para que o time compartilhe o índice e o corpus processado sem reprocessar tudo localmente; o `-text` do `.gitattributes` nesses caminhos preserva os bytes exatos (sem conversão CRLF/LF), porque os hashes de proveniência dependem deles. `data/app_state/` (onde fica o histórico de perguntas dos usuários, `src/history_store.py`) **não** está nessa lista e permanece fora do Git. A geração do corpus normalizado depende de OCR local (Tesseract + pacote de idioma português) instalado na máquina de quem roda o `prepare`.
 
@@ -137,6 +137,7 @@ As tarefas são distribuídas entre os integrantes a cada encontro conforme as n
 - Evitar vazamento de identificadores internos e da mensagem "Busca ampliada" nas respostas ao usuário final.
 - Decidir o tratamento definitivo para os diretórios ignorados pelo `.gitignore` mas versionados via `git add -f` (`index/`, `data/normalized/`, `data/inventory/*.json`, `data/embeddings/2026-09-30_12-08-51/`, `data/structured/*.sqlite`, `atas-zip/*.zip`).
 - Mesclar ao `main` os ajustes de extração conservadora de filtros que a Pâmela está fazendo no `query_analysis` (branch separada, ainda não mesclada).
+- Filtrar valores simbólicos (21 contratos de R$ 0,00 e 6 de R$ 0,01) das contas de média/mediana em `consulta_sql`, que hoje entram sem filtro de valor mínimo.
 - Preparação do Demo Day (23/10).
 
 ---
