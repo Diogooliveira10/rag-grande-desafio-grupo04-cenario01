@@ -544,3 +544,72 @@ def test_agrupamento_por_modalidade_deixa_sem_modalidade_fora_dos_grupos(tmp_pat
     assert "Pregão - Eletrônico: 1 registros" in chunk.content
     assert "não informado" not in chunk.content
     assert "(2 registros sem informação de modalidade ficaram fora dos grupos.)" in chunk.content
+
+
+def _base_de_contratos(tmp_path, contratos):
+    registros = []
+    for numero, (assinatura, publicacao, valor) in enumerate(contratos, 1):
+        registro = _contratacao(f"111-2-{numero:06d}/2025", data=publicacao)
+        registro.update(dataAssinatura=assinatura, valorGlobal=valor, nomeRazaoSocialFornecedor="F")
+        registros.append(registro)
+    # Uma compra publicada em março, que não é contrato.
+    registros.append(_contratacao("C-1", data="2025-03-15T00:00:00", valor_estimado=50.0))
+    documents = escrever_documents(tmp_path / "documents.jsonl", contratacoes=registros)
+    banco = Banco(sqlite_path=tmp_path / "base.sqlite")
+    structured_db.construir_banco(documents, banco)
+    return {"banco": banco, "documents_file": documents}
+
+
+def test_contratos_publicados_contam_pela_data_de_publicacao(tmp_path):
+    base = _base_de_contratos(tmp_path, [
+        ("2025-02-20", "2025-03-02T00:00:00", 100.0),  # assinado em fevereiro, publicado em março
+        ("2025-03-10", "2025-03-12T00:00:00", 200.0),
+    ])
+    pergunta = "Quantos contratos foram publicados em março de 2025?"
+    consulta = sq.detectar_consulta(pergunta, QueryFilters(ano=2025, referencia_temporal="publicacao"), ESTRUTURADA)
+    assert (consulta.referencia_temporal, consulta.so_contratos) == ("publicacao", True)
+
+    [chunk] = _consultar(pergunta, base, ano=2025, referencia_temporal="publicacao")
+    assert "Geral: 2 registros" in chunk.content  # os dois contratos; a compra fica fora
+
+    [chunk] = _consultar("Quantos contratos foram assinados em março de 2025?", base,
+                         ano=2025, referencia_temporal="assinatura")
+    assert "Geral: 1 registros" in chunk.content
+
+
+def test_valor_simbolico_nao_entra_na_mediana_nem_no_ranking(tmp_path):
+    base = _base_de_contratos(tmp_path, [
+        ("2025-03-10", "2025-03-12T00:00:00", 0.0),
+        ("2025-03-09", "2025-03-12T00:00:00", 0.01),
+        ("2025-03-11", "2025-03-12T00:00:00", 100.0),
+        ("2025-03-12", "2025-03-12T00:00:00", 300.0),
+    ])
+    [chunk] = _consultar("Qual a mediana dos contratos de ambulância em 2025?", base, ano=2025)
+    assert "4 registros no total, 2 sem valor informado (vazio ou abaixo de R$ 1,00)" in chunk.content
+    assert "mediana R$ 200,00" in chunk.content
+
+    [chunk] = _consultar("Quais os menores contratos de ambulância em 2025?", base, ano=2025)
+    assert "R$ 0,00" not in chunk.content and "R$ 0,01" not in chunk.content
+
+
+def test_orgao_nao_reconhecido_vira_filtro_de_orgao_pelos_termos(tmp_path):
+    registros = []
+    for numero, (orgao, objeto, valor) in enumerate([
+        ("COMANDO DA AERONAUTICA", "Aquisição de medicamentos", 1000.0),
+        ("COMANDO DA AERONAUTICA", "Serviço de limpeza", 500.0),
+        ("MUNICIPIO X", "Manutenção de aeronave do comando de bombeiros", 70.0),
+    ], 1):
+        registro = _contratacao(f"111-2-{numero:06d}/2025")
+        registro.update(dataAssinatura="2025-03-01", valorGlobal=valor, nomeRazaoSocialFornecedor="F")
+        registro["orgaoEntidade"]["razaoSocial"] = orgao
+        registro["objetoCompra"] = objeto
+        registros.append(registro)
+    documents = escrever_documents(tmp_path / "documents.jsonl", contratacoes=registros)
+    banco = Banco(sqlite_path=tmp_path / "base.sqlite")
+    structured_db.construir_banco(documents, banco)
+
+    # O query_analysis não extraiu órgão (QueryFilters sem orgao).
+    [chunk] = _consultar("Quanto o comando da aeronáutica contratou em 2025?",
+                         {"banco": banco, "documents_file": documents}, ano=2025)
+    assert "órgão em COMANDO DA AERONAUTICA" in chunk.content
+    assert "Geral: 2 registros; total R$ 1.500,00" in chunk.content

@@ -72,6 +72,9 @@ _STRUCTURED_PATTERNS = (
     r"\bcontrato[s]?\b",
     r"\bcontrata(c|ç)(ao|ões|oes)\b",
     r"\bcontratad[oa]s?\b",
+    # "Quanto o órgão X contratou/comprou em 2025?" pede registro de contratação.
+    r"\bcontrat(ou|aram)\b",
+    r"\bcompr(ou|aram)\b",
     r"\bfornecedor(es)?\b",
     r"\borgaos?\b",
     r"\bcnpj\b",

@@ -103,3 +103,12 @@ def test_ranking_de_contratacoes_nao_vai_para_a_agregada():
     decisao = rotear_pergunta("Quais foram as dez maiores contratações do Rio de Janeiro em 2025?")
 
     assert decisao.bases_selecionadas == [Natureza.ESTRUTURADA]
+
+
+@pytest.mark.parametrize("pergunta", [
+    "Quanto o Comando da Aeronáutica contratou em 2025?",
+    "Quanto a Prefeitura de Niterói comprou em 2025?",
+    "Quais órgãos contrataram serviços de limpeza?",
+])
+def test_verbo_contratar_ou_comprar_vai_para_a_estruturada(pergunta):
+    assert Natureza.ESTRUTURADA in rotear_pergunta(pergunta).bases_selecionadas

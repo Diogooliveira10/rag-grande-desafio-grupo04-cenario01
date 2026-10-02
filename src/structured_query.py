@@ -113,6 +113,7 @@ _PALAVRAS_GENERICAS = frozenset(
     semestre trimestre existem quantidade registro registros realizado realizadas realizados
     servico servicos aquisicao aquisicoes fornecimento prestacao especializada especializado
     informacao informacoes detalhe detalhes firmaram firmou celebraram disponiveis disponivel
+    assinou assinaram contratou contrataram comprou compraram gastou gastaram
     apenas somente considerando considerada considerado consideradas considerados desse dessa desses dessas
     nesse nessa nesses nessas neste nesta nestes nestas deste desta destes destas aqui estiver estiverem
     feita feito feitas feitos ligado ligada ligados ligadas devem deve devia podem pode poderia saber
@@ -162,6 +163,9 @@ class Consulta:
     # Palavras do órgão pedido e os nomes de órgão/unidade do banco que casaram.
     orgao_termos: tuple[str, ...] = field(default_factory=tuple)
     orgaos: Optional[tuple[str, ...]] = None
+    # A pergunta fala de contratos: só os contratos assinados, mesmo quando o
+    # ano é o da publicação ("contratos publicados em março").
+    so_contratos: bool = False
 
 
 # Contrato de compilação apenas: estas tabelas de fatos não são criadas aqui.
@@ -412,8 +416,13 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
     primeiro_ano, ultimo_ano = filtros.intervalo_de_anos()
     # Contratos assinados não trazem modalidade no PNCP; com filtro de
     # modalidade a consulta usa as compras publicadas, que trazem.
-    referencia_temporal = ("assinatura" if tabela == "contratacoes" and not modalidade_termos and
-                           re.search(r"\bcontratos?\b|\bcontratad", texto) else None)
+    so_contratos = bool(tabela == "contratacoes" and not modalidade_termos and
+                        re.search(r"\bcontratos?\b|\bcontratad|\bcontrat(?:ou|aram)\b", texto))
+    # Contrato conta pela assinatura, salvo quando a pergunta pede a publicação.
+    referencia_temporal = (
+        ("publicacao" if filtros.referencia_temporal == "publicacao" else "assinatura")
+        if so_contratos else None
+    )
     termos_objeto = _termos_do_objeto(texto_objeto) if tabela == "contratacoes" else ()
     if tipo == "listagem" and not termos_objeto and not modalidade_termos:
         return None  # "Quais contratos existem?" sem assunto: a busca normal responde
@@ -438,6 +447,7 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
         mes=mes,
         modalidade_termos=modalidade_termos,
         orgao_termos=orgao_termos,
+        so_contratos=so_contratos,
     )
 
 
@@ -449,7 +459,7 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
 def _coluna_valor(consulta: Consulta) -> str:
     if consulta.tabela == "pca_planos":
         return "valor_total"
-    return "valor_contratado" if consulta.referencia_temporal == "assinatura" else "valor"
+    return "valor_contratado" if consulta.so_contratos or consulta.referencia_temporal == "assinatura" else "valor"
 
 
 def _where(consulta: Consulta, termos: Iterable[str], juncao: str = "AND") -> tuple[str, list[Any]]:
@@ -457,7 +467,7 @@ def _where(consulta: Consulta, termos: Iterable[str], juncao: str = "AND") -> tu
     parametros: list[Any] = []
     coluna_ano = "ano_pca" if consulta.tabela == "pca_planos" else (
         "ano_assinatura" if consulta.referencia_temporal == "assinatura" else "ano_publicacao")
-    if consulta.tabela == "contratacoes" and consulta.referencia_temporal == "assinatura":
+    if consulta.tabela == "contratacoes" and (consulta.so_contratos or consulta.referencia_temporal == "assinatura"):
         condicoes.append("tipo_registro = ?")
         parametros.append("contrato_assinado")
     if consulta.ano is not None:
@@ -518,6 +528,15 @@ def _resumir(texto: Any, limite: int) -> str:
     return texto if len(texto) <= limite else texto[:limite].rstrip() + "…"
 
 
+# Abaixo disso o valor é simbólico (R$ 0,00 ou R$ 0,01 de registro de preços),
+# não o valor do contrato: fica fora de média, mediana e ranking.
+_VALOR_MINIMO_INFORMADO = 1.0
+
+
+def _tem_valor(valor: Any) -> bool:
+    return valor is not None and float(valor) >= _VALOR_MINIMO_INFORMADO
+
+
 def _estatisticas(valores: list[float]) -> str:
     if not valores:
         return "0 registros com valor"
@@ -535,7 +554,7 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
         # Listagem mostra também registros sem valor (depois dos com valor) e
         # diz quantos casaram no total.
         where_valor = where if consulta.tipo == "listagem" else (
-            where + (" AND " if where else " WHERE ") + f"{coluna_valor} IS NOT NULL")
+            where + (" AND " if where else " WHERE ") + f"{coluna_valor} >= {_VALOR_MINIMO_INFORMADO}")
         if consulta.tabela == "pca_planos":
             colunas = "ano_pca, unidade_nome, quantidade_itens, valor_total AS valor"
         else:
@@ -606,7 +625,7 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
         sql = f"SELECT {coluna_periodo} AS periodo, {coluna_valor} AS valor FROM {consulta.tabela}{where}"
         por_periodo: dict[Any, list[float]] = {}
         for l in banco.consultar(sql, parametros):
-            if l["valor"] is not None:
+            if _tem_valor(l["valor"]):
                 por_periodo.setdefault(l["periodo"], []).append(float(l["valor"]))
         return sql, [f"{periodo}: {_estatisticas(valores)}" for periodo, valores in sorted(por_periodo.items())]
 
@@ -615,12 +634,13 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
     coluna_esfera = "esfera" if consulta.tabela == "contratacoes" else "NULL"
     sql = f"SELECT {coluna_esfera} AS esfera, {coluna_valor} AS valor FROM {consulta.tabela}{where}"
     todas = banco.consultar(sql, parametros)
-    linhas = [l for l in todas if l["valor"] is not None]
-    # A contagem vale para todos os registros; as contas de valor, só para os que têm valor.
+    linhas = [l for l in todas if _tem_valor(l["valor"])]
+    # A contagem vale para todos os registros; as contas de valor, só para os que
+    # têm valor (R$ 0,00 e R$ 0,01 no PNCP não são o valor e puxariam média e mediana).
     sem_valor = len(todas) - len(linhas)
     geral = f"Geral: {_estatisticas([float(l['valor']) for l in linhas])}"
     if sem_valor:
-        geral = f"Geral: {len(todas)} registros no total, {sem_valor} sem valor informado; valores: " + geral[7:]
+        geral = f"Geral: {len(todas)} registros no total, {sem_valor} sem valor informado (vazio ou abaixo de R$ 1,00); valores: " + geral[7:]
     resultado = [geral]
     if consulta.tabela == "contratacoes":
         por_esfera: dict[str, list[float]] = {}
@@ -699,7 +719,13 @@ def _resolver_valores(consulta: Consulta, banco: Banco) -> Consulta:
             l["v"] for l in valores
             if all(t in structured_db.normalizar(l["v"]) for t in consulta.modalidade_termos)
         ))
-    if consulta.orgao_termos:
+    # Órgão que o query_analysis não reconheceu (minúsculas, "Fundo", "Comando"…)
+    # chega como termos do objeto; com duas palavras ou mais que formam o nome de
+    # um órgão do banco ("comando aeronautica"), vira filtro de órgão.
+    termos_como_orgao = (
+        not consulta.orgao_termos and len(consulta.termos_objeto) >= 2 and consulta.tabela == "contratacoes"
+    )
+    if consulta.orgao_termos or termos_como_orgao:
         nomes: set[str] = set()
         for coluna in ("orgao_nome", "unidade_nome"):
             nomes |= {
@@ -707,7 +733,12 @@ def _resolver_valores(consulta: Consulta, banco: Banco) -> Consulta:
                     f"SELECT DISTINCT {coluna} AS v FROM {consulta.tabela} WHERE {coluna} IS NOT NULL"
                 )
             }
-        mudancas["orgaos"] = tuple(sorted(n for n in nomes if _palavras_casam(consulta.orgao_termos, n)))
+        if consulta.orgao_termos:
+            mudancas["orgaos"] = tuple(sorted(n for n in nomes if _palavras_casam(consulta.orgao_termos, n)))
+        else:
+            casados = tuple(sorted(n for n in nomes if _palavras_casam(consulta.termos_objeto, n)))
+            if casados:
+                mudancas.update(orgaos=casados, orgao_termos=consulta.termos_objeto, termos_objeto=())
     return replace(consulta, **mudancas) if mudancas else consulta
 
 
