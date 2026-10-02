@@ -29,10 +29,13 @@ Regras principais:
 from __future__ import annotations
 
 import calendar
+import json
 import re
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Optional, Sequence
 
 from src.obs import Stage, default_logger
@@ -777,11 +780,29 @@ def _extrair_periodo(texto: str, bloqueados: Sequence[Span]) -> tuple[_Periodo, 
 # --------------------------------------------------------------------------
 
 _GATILHOS_ORGAO = frozenset(
+    """
+    secretaria prefeitura ministerio tribunal instituto fundacao autarquia universidade
+    departamento camara assembleia orgao agencia fundo comando banco defensoria municipio
+    procuradoria controladoria policia companhia empresa conselho
+    """.split()
+)
+# Gatilho que só vale com a palavra seguinte: "empresa pública", não "a empresa X".
+_GATILHO_EXIGE = {"empresa": frozenset({"publica", "municipal", "estadual"})}
+# Gatilho + palavra que não é órgão, mesmo com maiúscula ("Banco de Preços" é
+# ferramenta de pesquisa de preços).
+_NAO_E_ORGAO = frozenset(
     {
-        "secretaria", "prefeitura", "ministerio", "tribunal", "instituto",
-        "fundacao", "autarquia", "universidade", "departamento", "camara",
-        "assembleia", "orgao", "agencia",
+        ("banco", "precos"), ("banco", "preco"), ("banco", "dados"), ("banco", "horas"),
+        ("banco", "sangue"), ("camara", "ar"), ("fundo", "reserva"),
     }
+)
+# Adjetivos logo depois do gatilho: "Secretaria Municipal de Saúde", "Polícia
+# Militar", "Defensoria Pública", "Procuradoria Geral".
+_QUALIFICADORES_DE_ORGAO = frozenset(
+    """
+    municipal estadual federal nacional regional geral publica publico especial executiva
+    executivo militar civil legislativa metropolitana superior extraordinaria
+    """.split()
 )
 # Dentro do nome só entram estas conectoras ("Secretaria de Ciência e
 # Tecnologia", "Tribunal de Contas do Estado"). "No", "na", "em" encerram o
@@ -793,44 +814,466 @@ _FIM_DO_NOME_DO_ORGAO = frozenset(
     "em no na nos nas pelo pela pelos pelas para "
     "pca pncp sei siga lei decreto portaria edital pregao ata atas contrato contratos".split()
 )
-_PONTUACAO = ".,;:!?"
+# Palavras que não fazem parte de nome de órgão, mesmo depois de "de".
+_NAO_SAO_NOME = frozenset(
+    """
+    qual quais quanto quantos quantas que como onde quando cujo cuja contratacao contratacoes
+    compra compras valor valores acima abaixo maior menor maiores menores total media mediana
+    ano anos mes meses ate entre mais menos todos todas algum alguma cada outro outros
+    o a os as um uma
+    janeiro fevereiro marco abril maio junho julho agosto setembro outubro novembro dezembro
+    """.split()
+) | _FIM_DO_NOME_DO_ORGAO
+# Como o PNCP grava: "Prefeitura de Niterói" aparece como "MUNICIPIO DE NITEROI".
+_SINONIMOS_DE_ORGAO = {"prefeitura": "municipio"}
+# Siglas de órgãos do RJ, pelo nome que aparece no PNCP.
+_SIGLAS_DE_ORGAO = {
+    "seeduc": "Secretaria de Estado de Educação",
+    "ses": "Secretaria de Estado de Saúde",
+    "sefaz": "Secretaria de Estado de Fazenda",
+    "seplag": "Secretaria de Estado de Planejamento e Gestão",
+    "seap": "Secretaria de Estado de Administração Penitenciária",
+    "dpe": "Defensoria Pública do Estado",
+    "dperj": "Defensoria Pública do Estado",
+    "pge": "Procuradoria Geral do Estado",
+    "tce": "Tribunal de Contas do Estado",
+    "tcerj": "Tribunal de Contas do Estado",
+    "tjrj": "Tribunal de Justiça do Estado do Rio de Janeiro",
+    "mprj": "Ministério Público do Estado do Rio de Janeiro",
+    "alerj": "Assembleia Legislativa do Estado do Rio de Janeiro",
+    "detran": "Departamento de Trânsito",
+    "cedae": "Companhia Estadual de Águas e Esgotos",
+    "uerj": "Universidade do Estado do Rio de Janeiro",
+    "uenf": "Universidade Estadual do Norte Fluminense",
+    "faetec": "Fundação de Apoio à Escola Técnica",
+    "pmerj": "Polícia Militar do Estado do Rio de Janeiro",
+    "pcerj": "Polícia Civil do Estado do Rio de Janeiro",
+    "cbmerj": "Corpo de Bombeiros Militar do Estado do Rio de Janeiro",
+    "inea": "Instituto Estadual do Ambiente",
+    "degase": "Departamento Geral de Ações Socioeducativas",
+    # Órgãos federais com sede no RJ
+    "fiocruz": "Fundação Oswaldo Cruz",
+    "ufrj": "Universidade Federal do Rio de Janeiro",
+    "uff": "Universidade Federal Fluminense",
+    "unirio": "Universidade Federal do Estado do Rio de Janeiro",
+    "ufrrj": "Universidade Federal Rural do Rio de Janeiro",
+    "inca": "Instituto Nacional de Câncer",
+}
+_PONTUACAO = ".,;:!?()\"'“”‘’"
+_PALAVRAS_FUNCIONAIS = frozenset("de da do das dos em no na e a o os as que para com por pela pelo".split())
+
+# --------------------------------------------------------------------------
+# Catálogo de órgãos do corpus: os nomes de órgão e de unidade que existem na
+# base (data/config/orgaos_corpus.json, gerado por
+# ``py -m src.query_analysis orgaos`` a partir da base SQL). Com ele, o nome só
+# cresce enquanto ainda corresponde a um órgão de verdade: "prefeitura de são
+# gonçalo" vai até o fim, "Comando da Marinha e informe" para em "Marinha", e
+# "banco de sangue" não vira órgão.
+# --------------------------------------------------------------------------
+
+ORGAOS_CORPUS_PATH = Path(__file__).resolve().parents[1] / "data" / "config" / "orgaos_corpus.json"
+_TOKEN_DE_NOME_RE = re.compile(r"[a-z0-9]+")
+_VAZIAS_DE_NOME = frozenset("de do da dos das e em a o rj".split())
+_SIGLA_NO_NOME_RE = re.compile(r"(?:^|\s-\s)([A-Z]{2,12})(?:/[A-Z]{2})?(?=\s-\s|\s*$)|^([A-Z]{3,12})\s-\s")
 
 
-def _extrair_orgao(query_original: str) -> Optional[str]:
-    if not any(caractere.islower() for caractere in query_original):
-        # Pergunta toda em maiúsculas: a heurística de nome próprio não
-        # funciona ("SECRETARIA DE SAUDE ACIMA").
+@dataclass(frozen=True)
+class _Catalogo:
+    nomes: tuple[str, ...]
+    tokens: tuple[tuple[str, ...], ...]
+    siglas: dict[str, str]  # sigla normalizada -> nome do órgão
+
+
+def _tokens_de_nome(texto: str) -> list[str]:
+    return [t for t in _TOKEN_DE_NOME_RE.findall(_normalize(texto)) if t not in _VAZIAS_DE_NOME]
+
+
+@lru_cache(maxsize=1)
+def _catalogo_de_orgaos() -> Optional[_Catalogo]:
+    if not ORGAOS_CORPUS_PATH.exists():
         return None
-    tokens = query_original.split()
-    for indice, bruto in enumerate(tokens):
-        if _normalize(bruto.strip(_PONTUACAO)) not in _GATILHOS_ORGAO:
+    dados = json.loads(ORGAOS_CORPUS_PATH.read_text(encoding="utf-8"))
+    nomes = tuple(dados.get("nomes", []))
+    return _Catalogo(nomes, tuple(tuple(_tokens_de_nome(n)) for n in nomes), dict(dados.get("siglas", {})))
+
+
+def _token_casa(da_pergunta: str, do_nome: str) -> bool:
+    """Igual, ou abreviado no nome ("SECRET ESTADO SAÚDE")."""
+    if da_pergunta == do_nome:
+        return True
+    return len(do_nome) >= 4 and len(da_pergunta) >= 4 and (
+        da_pergunta.startswith(do_nome) or do_nome.startswith(da_pergunta)
+    )
+
+
+def _orgao_do_catalogo(chaves: Sequence[str], exigir_algum: Sequence[str] = ()) -> Optional[str]:
+    """Primeiro órgão do catálogo que contém todas as palavras-chave (e, se
+    pedido, ao menos uma de ``exigir_algum``)."""
+    catalogo = _catalogo_de_orgaos()
+    if not catalogo or not chaves:
+        return None
+    for nome, tokens in zip(catalogo.nomes, catalogo.tokens):
+        if exigir_algum and not any(token in exigir_algum for token in tokens):
             continue
-        palavras = [bruto.strip(_PONTUACAO)]
-        cursor = indice + 1
-        while cursor < len(tokens):
-            bruta = tokens[cursor]
-            limpa = bruta.strip(_PONTUACAO)
-            if not limpa or _normalize(limpa) in _FIM_DO_NOME_DO_ORGAO:
-                break  # "Secretaria de Saúde do PCA", "Prefeitura de Niterói Edital 5/2024"
-            eh_conectora = _normalize(limpa) in _PALAVRA_CONECTORA
-            if limpa[0].isupper() or eh_conectora:
-                palavras.append(limpa)
-                cursor += 1
-                if bruta and bruta[-1] in _PONTUACAO:
-                    break
-                continue
-            break
-        # Remove conectoras penduradas no fim (ex.: "Secretaria de" sem continuação).
-        while len(palavras) > 1 and _normalize(palavras[-1]) in _PALAVRA_CONECTORA:
-            palavras.pop()
-        if len(palavras) > 1:
-            return " ".join(palavras)
+        if all(any(_token_casa(chave, token) for token in tokens) for chave in chaves):
+            return nome
     return None
+
+
+def gerar_catalogo_de_orgaos(destino: Path = ORGAOS_CORPUS_PATH) -> dict[str, Any]:
+    """Grava o catálogo de órgãos a partir da base SQL do corpus."""
+    from datetime import datetime, timezone
+
+    from src import structured_db
+
+    banco = structured_db.garantir_banco()
+    nomes: set[str] = set()
+    for tabela in ("contratacoes", "pca_planos"):
+        for coluna in ("orgao_nome", "unidade_nome"):
+            for linha in banco.consultar(f"SELECT DISTINCT {coluna} AS nome FROM {tabela} WHERE {coluna} IS NOT NULL"):
+                nome = " ".join(str(linha["nome"]).split())
+                if nome:
+                    nomes.add(nome)
+    siglas: dict[str, str] = {}
+    for nome in sorted(nomes):
+        if " " not in nome:
+            continue  # nome de uma palavra só ("GERAL") não traz sigla
+        for achado in _SIGLA_NO_NOME_RE.finditer(nome):
+            sigla = _normalize(achado.group(1) or achado.group(2))
+            if sigla not in ("rj", "pr") and sigla not in siglas:
+                siglas[sigla] = nome
+    dados = {
+        "gerado_em": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "fonte": "nomes de órgão e unidade da base SQL (src/structured_db.py) do corpus",
+        "nomes": sorted(nomes),
+        "siglas": dict(sorted(siglas.items())),
+    }
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    destino.write_text(json.dumps(dados, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _catalogo_de_orgaos.cache_clear()
+    return dados
+
+
+def _sem_pista_de_maiuscula(tokens: Sequence[str]) -> bool:
+    """Pergunta TODA EM MAIÚSCULAS ou Toda Com Inicial Maiúscula: a maiúscula
+    não indica nome próprio. Numa frase normal, "de", "da", "em" vêm em
+    minúscula, mesmo com muitos nomes próprios."""
+    palavras = [t for t in (tok.strip(_PONTUACAO) for tok in tokens) if t[:1].isalpha()]
+    if not palavras:
+        return True
+    if not any(c.islower() for p in palavras for c in p):
+        return True
+    funcionais = [p for p in palavras if p.lower() in _PALAVRAS_FUNCIONAIS]
+    if funcionais:
+        return sum(p[0].isupper() for p in funcionais) / len(funcionais) >= 0.5
+    return sum(p[0].isupper() for p in palavras) / len(palavras) >= 0.8
+
+
+def _nome_a_partir_do_gatilho(tokens: Sequence[str], indice: int, sem_caixa: bool) -> Optional[str]:
+    def limpa(i: int) -> str:
+        return tokens[i].strip(_PONTUACAO) if i < len(tokens) else ""
+
+    def nome_proprio(palavra: str) -> bool:
+        # Inicial maiúscula numa frase normal; SIGLA toda em maiúscula não conta.
+        return not sem_caixa and palavra[:1].isupper() and not (len(palavra) > 1 and palavra.isupper())
+
+    gatilho = _normalize(limpa(indice))
+    palavras = [limpa(indice)]
+    chaves = [_SINONIMOS_DE_ORGAO.get(gatilho, gatilho)]
+    cursor = indice + 1
+    while cursor < len(tokens) and _normalize(limpa(cursor)) in _QUALIFICADORES_DE_ORGAO:
+        palavras.append(limpa(cursor))
+        chaves.append(_normalize(limpa(cursor)))
+        cursor += 1
+    inicio_do_nome = len(chaves)
+
+    def confere(nome: Sequence[str]) -> Optional[str]:
+        """O nome existe no corpus? Para prefeitura, bastam as palavras da
+        cidade num órgão municipal ("Câmara Municipal de São Gonçalo"); para
+        cabeças fortes, as palavras do nome; para as demais ("câmara",
+        "fundo", "comando"), a cabeça também tem de estar no nome."""
+        if gatilho in ("prefeitura", "municipio"):
+            return _orgao_do_catalogo(nome, exigir_algum=("municipio", "municipal", "prefeitura"))
+        if gatilho in _GATILHOS_FORTES:
+            return _orgao_do_catalogo(nome)
+        return _orgao_do_catalogo(list(chaves[:inicio_do_nome]) + list(nome))
+
+    com_maiuscula: list[bool] = []
+    parou_em_palavra_colada = False
+    antes_do_municipio: Optional[list[str]] = None
+    while cursor < len(tokens):
+        if tokens[cursor - 1][-1:] in _PONTUACAO or tokens[cursor][:1] in "(\"'“‘":
+            break  # vírgula, ponto, aspas ou "(SES)" encerram o nome
+        palavra = limpa(cursor)
+        normal = _normalize(palavra)
+        if not palavra or normal in _FIM_DO_NOME_DO_ORGAO:
+            break
+        if normal in ("de", "do", "da") and (tamanho := _municipio_em(tokens, cursor + 1)):
+            # Município do RJ: entra inteiro e confirmado ("de são gonçalo", "de maricá").
+            if antes_do_municipio is None:
+                antes_do_municipio = list(chaves[inicio_do_nome:])
+            palavras += [palavra] + [limpa(i) for i in range(cursor + 1, cursor + 1 + tamanho)]
+            chaves += [_normalize(limpa(i)) for i in range(cursor + 1, cursor + 1 + tamanho)]
+            com_maiuscula.append(True)
+            cursor += 1 + tamanho
+            continue
+        if normal in _PALAVRA_CONECTORA:
+            seguinte = limpa(cursor + 1)
+            normal_seguinte = _normalize(seguinte)
+            if (
+                not seguinte
+                or not seguinte[0].isalpha()
+                or normal_seguinte in _NAO_SAO_NOME
+                or normal_seguinte in _PALAVRA_CONECTORA
+                or (normal == "e" and normal_seguinte in _GATILHOS_ORGAO)
+            ):
+                break  # "de 2025", "de qual", "e da Prefeitura", "e o valor"
+            novas_palavras, novas_chaves, passo = [palavra, seguinte], [normal_seguinte], 2
+        elif (
+            palavra[:1].isalpha()
+            and normal not in _GATILHOS_ORGAO
+            and normal not in _NAO_SAO_NOME
+            and len(chaves) > inicio_do_nome or nome_proprio(palavra)
+        ) and normal not in _GATILHOS_ORGAO:
+            # Palavra colada, sem conectora: "Prefeitura Niterói", "são gonçalo".
+            novas_palavras, novas_chaves, passo = [palavra], [normal], 1
+        else:
+            break
+        fim = cursor + passo
+        if novas_chaves[-1] == "rio" and [_normalize(limpa(fim)), _normalize(limpa(fim + 1))] == ["de", "janeiro"]:
+            novas_palavras += [limpa(fim), limpa(fim + 1)]  # "Rio de Janeiro" é um nome só
+            novas_chaves.append("janeiro")
+            fim += 2
+        # Cresce se ainda corresponde a um órgão do corpus, ou se é nome próprio.
+        if not (confere(chaves[inicio_do_nome:] + novas_chaves) or nome_proprio(novas_palavras[-1])):
+            parou_em_palavra_colada = passo == 1
+            break
+        palavras += novas_palavras
+        chaves += novas_chaves
+        com_maiuscula.append(nome_proprio(novas_palavras[-1]))
+        cursor = fim
+    if antes_do_municipio is not None:
+        # Com município: vale para prefeitura/câmara/cabeça forte, ou se o que
+        # vem antes da cidade existe no corpus ("fundo municipal de saúde").
+        # "banco de sangue de niterói" não.
+        if (
+            gatilho in ("prefeitura", "municipio", "camara")
+            or gatilho in _GATILHOS_FORTES
+            or not antes_do_municipio
+            or confere(antes_do_municipio)
+            or all(com_maiuscula)
+        ):
+            return " ".join(palavras)
+        return None
+    if parou_em_palavra_colada and chaves[-1] in _COMECOS_DE_NOME_COMPOSTO:
+        return None  # "prefeitura de são" + palavra que não deu para confirmar: nome pela metade
+    if chaves[-1] in _CONTINUA_SEM_CATALOGO and _normalize(limpa(cursor)) in ("de", "do", "da"):
+        # "secretaria de estado" + "de educação" que não está no corpus: nome incompleto.
+        return _nome_sem_catalogo(tokens, indice) if gatilho in _GATILHOS_FORTES else None
+    if len(chaves) > inicio_do_nome and (confere(chaves[inicio_do_nome:]) or all(com_maiuscula)):
+        return " ".join(palavras)
+    if len(chaves) == inicio_do_nome > 1 and gatilho in _GATILHOS_FORTES and all(nome_proprio(p) for p in palavras[1:]):
+        return " ".join(palavras)  # "Defensoria Pública", "Procuradoria Geral"
+    if gatilho in _GATILHOS_FORTES:
+        return _nome_sem_catalogo(tokens, indice)
+    return None  # "órgão federal", ou nome em minúsculas que não existe no corpus: "banco de sangue"
+
+
+# Os 92 municípios do RJ: depois de "de/do/da", entram inteiros no nome do
+# órgão, com ou sem maiúscula ("fundo municipal de saúde de maricá",
+# "prefeitura de são gonçalo"), mesmo que o órgão não esteja no corpus.
+_MUNICIPIOS_RJ = tuple(
+    sorted(
+        (
+            tuple(_normalize(nome).split())
+            for nome in """
+            Angra dos Reis|Aperibé|Araruama|Areal|Armação dos Búzios|Arraial do Cabo|Barra do Piraí|Barra Mansa
+            |Belford Roxo|Bom Jardim|Bom Jesus do Itabapoana|Cabo Frio|Cachoeiras de Macacu|Cambuci
+            |Campos dos Goytacazes|Cantagalo|Carapebus|Cardoso Moreira|Carmo|Casimiro de Abreu
+            |Comendador Levy Gasparian|Conceição de Macabu|Cordeiro|Duas Barras|Duque de Caxias
+            |Engenheiro Paulo de Frontin|Guapimirim|Iguaba Grande|Itaboraí|Itaguaí|Italva|Itaocara|Itaperuna
+            |Itatiaia|Japeri|Laje do Muriaé|Macaé|Macuco|Magé|Mangaratiba|Maricá|Mendes|Mesquita|Miguel Pereira
+            |Miracema|Natividade|Nilópolis|Niterói|Nova Friburgo|Nova Iguaçu|Paracambi|Paraíba do Sul|Paraty
+            |Paty do Alferes|Petrópolis|Pinheiral|Piraí|Porciúncula|Porto Real|Quatis|Queimados|Quissamã|Resende
+            |Rio Bonito|Rio Claro|Rio das Flores|Rio das Ostras|Rio de Janeiro|Santa Maria Madalena
+            |Santo Antônio de Pádua|São Fidélis|São Francisco de Itabapoana|São Gonçalo|São João da Barra
+            |São João de Meriti|São José de Ubá|São José do Vale do Rio Preto|São Pedro da Aldeia
+            |São Sebastião do Alto|Sapucaia|Saquarema|Seropédica|Silva Jardim|Sumidouro|Tanguá|Teresópolis
+            |Trajano de Moraes|Três Rios|Valença|Varre-Sai|Vassouras|Volta Redonda
+            """.replace("\n", "").split("|")
+            if nome.strip()
+        ),
+        key=len,
+        reverse=True,
+    )
+)
+
+
+def _municipio_em(tokens: Sequence[str], inicio: int) -> int:
+    """Quantos tokens a partir de ``inicio`` formam um município do RJ (0 se nenhum)."""
+    for municipio in _MUNICIPIOS_RJ:
+        trecho = [_normalize(t.strip(_PONTUACAO)) for t in tokens[inicio: inicio + len(municipio)]]
+        if tuple(trecho) == municipio:
+            return len(municipio)
+    return 0
+
+
+# Primeira palavra de nome composto de cidade: parar nela corta o nome ao meio.
+_COMECOS_DE_NOME_COMPOSTO = frozenset(
+    "sao santa santo nova novo barra volta tres duque angra campos cabo bom porto paty "
+    "engenheiro casimiro armacao silva sapucaia miguel conceicao".split()
+)
+# Cabeças de nome que quase nunca são substantivo comum: sem catálogo, o nome
+# ainda é lido, mas só um nível ("procuradoria geral do estado").
+_GATILHOS_FORTES = frozenset(
+    "secretaria ministerio tribunal defensoria procuradoria controladoria policia assembleia companhia autarquia".split()
+)
+_CONTINUA_SEM_CATALOGO = frozenset({"estado", "governo"})
+
+
+def _nome_sem_catalogo(tokens: Sequence[str], indice: int) -> Optional[str]:
+    def limpa(i: int) -> str:
+        return tokens[i].strip(_PONTUACAO) if i < len(tokens) else ""
+
+    palavras = [limpa(indice)]
+    cursor = indice + 1
+    while cursor < len(tokens) and _normalize(limpa(cursor)) in _QUALIFICADORES_DE_ORGAO:
+        palavras.append(limpa(cursor))
+        cursor += 1
+    niveis = 0
+    while cursor + 1 < len(tokens) and niveis < 2:
+        if tokens[cursor - 1][-1:] in _PONTUACAO or tokens[cursor][:1] in "(\"'“‘":
+            break
+        conectora, palavra = _normalize(limpa(cursor)), limpa(cursor + 1)
+        normal = _normalize(palavra)
+        if (
+            conectora not in ("de", "do", "da", "dos", "das")
+            or not palavra[:1].isalpha()
+            or normal in _NAO_SAO_NOME
+            or normal in _PALAVRA_CONECTORA
+            or normal in _GATILHOS_ORGAO
+        ):
+            break
+        palavras += [limpa(cursor), palavra]
+        cursor += 2
+        if normal == "rio" and [_normalize(limpa(cursor)), _normalize(limpa(cursor + 1))] == ["de", "janeiro"]:
+            palavras += [limpa(cursor), limpa(cursor + 1)]
+            cursor += 2
+        niveis += 1
+        if _normalize(limpa(cursor)) in ("de", "do", "da") and (tamanho := _municipio_em(tokens, cursor + 1)):
+            # "secretaria municipal de saúde de niterói": o município entra.
+            palavras += [limpa(i) for i in range(cursor, cursor + 1 + tamanho)]
+            break
+        if normal not in _CONTINUA_SEM_CATALOGO and normal != "rio":
+            # "secretaria de ciência e tecnologia": um "e" + palavra ainda entra.
+            seguinte = _normalize(limpa(cursor + 1))
+            if (
+                _normalize(limpa(cursor)) == "e"
+                and limpa(cursor + 1)[:1].isalpha()
+                and tokens[cursor - 1][-1:] not in _PONTUACAO
+                and seguinte not in _NAO_SAO_NOME
+                and seguinte not in _PALAVRA_CONECTORA
+                and seguinte not in _GATILHOS_ORGAO
+                and seguinte not in _VERBOS_COMUNS_DEPOIS_DO_NOME
+            ):
+                palavras += [limpa(cursor), limpa(cursor + 1)]
+            break  # "secretaria de saúde", não "secretaria de saúde de ambulâncias"
+    return " ".join(palavras) if len(palavras) > 1 and niveis else None
+
+
+# Depois de "nome e", palavras que começam outra oração: "secretaria de saúde e
+# informe", "e compare", "e liste".
+_VERBOS_COMUNS_DEPOIS_DO_NOME = frozenset(
+    "informe informar compare comparar liste listar mostre mostrar diga traga some calcule qual quais quanto".split()
+)
+
+
+def _sigla_de_orgao(tokens: Sequence[str]) -> tuple[Optional[str], Optional[str]]:
+    """(nome do órgão, sigla como está no texto normalizado) para SEEDUC, TCE-RJ, FESAUDE..."""
+    catalogo = _catalogo_de_orgaos()
+    for bruto in tokens:
+        token = bruto.strip(_PONTUACAO)
+        for parte in re.split(r"[-/]", token):
+            normal = _normalize(parte)
+            if normal in _SIGLAS_DE_ORGAO:
+                return _SIGLAS_DE_ORGAO[normal], _normalize(token)
+            if catalogo and parte.isupper() and len(parte) >= 2 and normal in catalogo.siglas:
+                return catalogo.siglas[normal], _normalize(token)
+    return None, None
+
+
+def _extrair_orgao(query_original: str) -> tuple[Optional[str], Optional[str]]:
+    """Nome do órgão citado na pergunta, e a sigla usada (ou None).
+
+    Começa numa palavra de início de nome ("secretaria", "prefeitura",
+    "fundo"...), com ou sem maiúscula, e segue por adjetivos ("municipal") e
+    por "de/do/da/dos/das/e" + nome, enquanto o nome corresponde a um órgão do
+    corpus ou é nome próprio. Sem gatilho, aceita sigla conhecida (SEEDUC,
+    SES, DPE...) ou que apareça no nome de um órgão do corpus (FESAUDE).
+    """
+    tokens = query_original.split()
+    sem_caixa = _sem_pista_de_maiuscula(tokens)
+    for indice, bruto in enumerate(tokens):
+        gatilho = _normalize(bruto.strip(_PONTUACAO))
+        if gatilho not in _GATILHOS_ORGAO:
+            continue
+        depois = [_normalize(t.strip(_PONTUACAO)) for t in tokens[indice + 1: indice + 3]]
+        if gatilho in _GATILHO_EXIGE and (not depois or depois[0] not in _GATILHO_EXIGE[gatilho]):
+            continue
+        if len(depois) == 2 and depois[0] in _PALAVRA_CONECTORA and (gatilho, depois[1]) in _NAO_E_ORGAO:
+            continue
+        nome = _nome_a_partir_do_gatilho(tokens, indice, sem_caixa)
+        if nome:
+            return nome, None
+    return _sigla_de_orgao(tokens)
 
 
 # --------------------------------------------------------------------------
 # API pública
 # --------------------------------------------------------------------------
+
+
+# Só o adjetivo (e "municípios" no plural, como esfera) indica esfera: "no
+# município do Rio de Janeiro" é lugar, não filtro.
+_ESFERAS = (
+    ("estadual", r"\bestadua(?:l|is)\b"),
+    ("municipal", r"\bmunicipa(?:l|is)\b|\bmunicipios\b"),
+    ("federal", r"\bfedera(?:l|is)\b"),
+)
+# Norma sem número também não é esfera: "legislação federal", "lei estadual".
+_NORMA_COM_ESFERA_RE = re.compile(
+    r"\b(?:leis?|legislac(?:ao|oes)|decretos?|normas?|constituicao|regulamentos?|resoluc(?:ao|oes)|portarias?)"
+    r"\s+(?:federa(?:l|is)|estadua(?:l|is)|municipa(?:l|is))\b"
+)
+# "Concorrência" e "dispensa" no sentido comum, não de modalidade.
+_SENTIDO_COMUM_DE_MODALIDADE_RE = re.compile(
+    r"\b(?:pouca|muita|baixa|alta|ampla|livre|sem|maior|menor|forte|fraca)\s+concorrencia\b"
+    r"|\bconcorrencia\s+(?:entre|de\s+mercado|desleal|livre)\b"
+    r"|\bdispensas?\s+(?:de\s+)?(?:garantia|servidor\w*|ponto|medica|licenca|pagamento|multa)\b"
+)
+# Modalidade da Lei 14.133, com o termo que o campo "modalidade" do PNCP
+# contém (sem acento). A mais específica vem antes.
+_MODALIDADES = (
+    (r"\bpreg(?:ao|oes)\s+eletronicos?\b", "pregao eletronico"),
+    (r"\bpreg(?:ao|oes)\s+presenciais\b|\bpreg(?:ao|oes)\s+presencial\b", "pregao presencial"),
+    (r"\bpregao\b|\bpregoes\b", "pregao"),
+    (r"\bdispensas?\b", "dispensa"),
+    (r"\binexigibilidades?\b|\binexigive\w*", "inexigibilidade"),
+    (r"\bconcorrencias?\b", "concorrencia"),
+    (r"\bleil(?:ao|oes)\b", "leilao"),
+    (r"\bcredenciamentos?\b", "credenciamento"),
+    (r"\bdialogo\s+competitivo\b", "dialogo competitivo"),
+)
+# Modalidade só vira filtro em pergunta sobre os dados: com palavra de contrato
+# ou compra, ou no plural com conta ("quantos pregões", "total das dispensas").
+# "Quantas fases tem o pregão?" e "limites de valor para dispensa" são regra.
+_PERGUNTA_SOBRE_CONTRATOS_RE = re.compile(
+    r"\b(?:contratos|contratac(?:ao|oes)|compras?|gast\w*|contrat(?:ou|aram|ados|adas)|adquir\w*"
+    r"|publicad[oa]s|homologad[oa]s|realizad[oa]s)\b"
+)
+_PERGUNTA_COM_CONTA_RE = re.compile(
+    r"\b(?:quant[oa]s|quantidade|total|soma|media|medio|mediana|maiores|menores|ranking|valor(?:es)?)\b"
+)
 
 
 def _analisar_com_trechos(query: str) -> tuple[QueryFilters, str, list[Span]]:
@@ -860,11 +1303,32 @@ def _analisar_com_trechos(query: str) -> tuple[QueryFilters, str, list[Span]]:
         ("resultado", "resultado"), ("homolog", "resultado"),
         ("pca", "pca"), ("publicac", "publicacao"), ("publicad", "publicacao"),
     ) if termo in resto), None)
-    analiticos = {}
-    # "por município" pede agrupamento, não filtro de esfera municipal.
-    sem_agrupamento = re.sub(r"\bpor\s+municipios?\b", " ", resto)
-    if ("estadua" in sem_agrupamento) != ("municip" in sem_agrupamento):
-        analiticos["esfera"] = "estadual" if "estadua" in sem_agrupamento else "municipal"
+    analiticos: dict[str, str] = {}
+    # Esfera e modalidade saem do texto sem filtros e sem citações de norma
+    # ("Lei federal 14.133" não é esfera federal; "Lei do Pregão" não é
+    # modalidade). "Por município" pede agrupamento, não filtro de esfera.
+    sem_normas = _NORMA_COM_ESFERA_RE.sub(" ", _sem_trechos(texto, trechos + bloqueados))
+    sem_agrupamento = re.sub(r"\bpor\s+(?:municipios?|orgaos?|esferas?)\b", " ", sem_normas)
+    esferas = [nome for nome, padrao in _ESFERAS if re.search(padrao, sem_agrupamento)]
+    if len(esferas) == 1:  # várias juntas = comparação entre esferas
+        analiticos["esfera"] = esferas[0]
+    sem_sentido_comum = _SENTIDO_COMUM_DE_MODALIDADE_RE.sub(" ", sem_normas)
+    achadas = [(m, nome) for padrao, nome in _MODALIDADES if (m := re.search(padrao, sem_sentido_comum))]
+    familias = {nome.split()[0] for _, nome in achadas}
+    orgao, sigla = _extrair_orgao(query)
+    if len(familias) == 1:  # "pregões e dispensas" juntos é comparação: sem filtro
+        achada, nome = achadas[0]
+        plural = achada.group().split()[0].endswith("s")
+        negada = re.search(r"\bnao\b(?:\s+\w+){0,3}\s*$", sem_sentido_comum[: achada.start()])
+        if not negada and (
+            _PERGUNTA_SOBRE_CONTRATOS_RE.search(sem_sentido_comum)
+            or (plural and (_PERGUNTA_COM_CONTA_RE.search(sem_sentido_comum) or orgao))
+        ):
+            analiticos["modalidade"] = nome
+    if sigla:
+        # "contratos da SEEDUC": o órgão vira o nome por extenso, e a sigla sai
+        # do texto para não ser lida como objeto do contrato.
+        trechos = trechos + [m.span() for m in re.finditer(rf"\b{re.escape(sigla)}\b", texto)]
     filtros = QueryFilters(
         ano=periodo.ano,
         ano_final=periodo.ano_final,
@@ -872,7 +1336,7 @@ def _analisar_com_trechos(query: str) -> tuple[QueryFilters, str, list[Span]]:
         ano_ate=periodo.ano_ate,
         valor_min=valores.valor_min,
         valor_max=valores.valor_max,
-        orgao=_extrair_orgao(query),
+        orgao=orgao,
         metrica=metrica,
         agrupamentos=agrupamentos,
         referencia_temporal=referencia,
@@ -967,9 +1431,15 @@ def filtros_para_retrieve(filtros: QueryFilters) -> dict[str, Any]:
             datas.append({"operator": "<", "value": date(ultimo_ano + 1, 1, 1)})
         if datas:
             resultado[campo] = datas
-    for campo in ("esfera", "municipio", "uf", "modalidade", "fornecedor"):
+    for campo in ("esfera", "municipio", "uf", "fornecedor"):
         if filtros.filtros_analiticos.get(campo) is not None:
             resultado[campo] = {"operator": "==", "value": filtros.filtros_analiticos[campo]}
+    if filtros.filtros_analiticos.get("modalidade"):
+        # No PNCP a modalidade vem como "Pregão - Eletrônico": contém cada palavra.
+        resultado["modalidade"] = [
+            {"operator": "contains", "value": palavra}
+            for palavra in filtros.filtros_analiticos["modalidade"].split()
+        ]
     # Filtros vindos da pergunta são opcionais: chunk sem o campo continua na
     # busca (ex.: indicador do PCA sem data_vigencia); só sai quem tem o campo
     # com valor fora do filtro.
@@ -983,3 +1453,13 @@ def _marcar_opcional(condicao: Any) -> Any:
 
 
 __all__ = ["analisar_query", "filtros_para_retrieve", "texto_sem_filtros"]
+
+
+if __name__ == "__main__":
+    import sys
+
+    if sys.argv[1:] == ["orgaos"]:
+        gerado = gerar_catalogo_de_orgaos()
+        print(f"{len(gerado['nomes'])} nomes e {len(gerado['siglas'])} siglas em {ORGAOS_CORPUS_PATH}")
+    else:
+        print("uso: py -m src.query_analysis orgaos   (regenera data/config/orgaos_corpus.json)")
