@@ -34,6 +34,14 @@ Revisão em `cli-v6/factual-review.json` registra limites por caso. Falhas relev
 
 Esta etapa não completa todos os requisitos do desafio: cross-encoder e ablação, feedback/histórico persistidos, execução PostgreSQL e trilha de e-mails continuam pendentes. Fixture sintético não substitui automaticamente os e-mails. A avaliação evidenciou os defeitos acima; corpus e ZIPs estão entregues, mas não se afirma que todas as respostas estejam corretas.
 
+**Atualização 2026-10-02.** O parágrafo acima registra o estado no momento desta execução. Depois dela:
+
+- Cross-encoder e ablação: concluídos. `src/rerank.py` (`mmarco-mMiniLMv2-L12`, CPU) reordena os 10 primeiros do RRF e está ligado no `responder` (`RERANK_ENABLED`, `RERANK_CANDIDATES=10`). Na ablação sobre a v6 (47 perguntas, 13 de identificador), RRF + rerank@10 teve hit@3 0,83 e MRR@10 0,78, contra 0,64/0,62 do RRF sem rerank; detalhes em [ABLACAO_RERANK.md](ABLACAO_RERANK.md).
+- Feedback e histórico persistidos: concluídos. `POST /api/v1/feedback` e `GET /api/v1/history`, gravados em SQLite por `src/history_store.py`. O frontend, mantido em repositório separado, ainda não usa esses endpoints.
+- Execução PostgreSQL: `src/structured_db.py` e `src/structured_query.py` executam as consultas no Postgres quando `DATABASE_URL` está definida e no SQLite da v6 quando não está. As avaliações abaixo usaram o SQLite.
+- Golden set com o pipeline completo sobre a v6 (`eval/runs/golden-v6-final`): 22/22 em rota e recusa e citação 21/22, depois das correções de SQL, roteamento e recusas indevidas. Continua não sendo taxa de correção factual: a conferência contra o SQLite ainda encontra respostas erradas (P2.1, P4.2, P4.3, P5.3) e F1 sem fonte.
+- Trilha de e-mails: continua pendente, aguardando a base sintética do desafio.
+
 
 
 ## Artefatos versionados e preservação
