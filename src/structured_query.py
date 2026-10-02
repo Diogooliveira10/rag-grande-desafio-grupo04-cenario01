@@ -48,8 +48,8 @@ _RE_MES = re.compile(r"(?<!\brio de )\b(" + "|".join(_MESES) + r")\b")
 # Modalidade é coluna, não objeto: (padrão na pergunta, termos que a modalidade
 # gravada precisa conter, sem acento). A mais específica vem antes.
 _MODALIDADES = (
-    (re.compile(r"\bpregao eletronico\b"), ("pregao", "eletronic")),
-    (re.compile(r"\bpregao presencial\b"), ("pregao", "presencial")),
+    (re.compile(r"\bpreg(?:ao|oes) eletronicos?\b"), ("pregao", "eletronic")),
+    (re.compile(r"\bpreg(?:ao|oes) presencia(?:l|is)\b"), ("pregao", "presencial")),
     (re.compile(r"\bpregao\b|\bpregoes\b"), ("pregao",)),
     (re.compile(r"\bdispensas?\b"), ("dispensa",)),
     (re.compile(r"\binexigibilidade|\binexigive"), ("inexigibilidade",)),
@@ -59,9 +59,17 @@ _MODALIDADES = (
     (re.compile(r"\bdialogo competitivo\b"), ("dialogo",)),
 )
 _ESFERAS = (("estadual", r"\bestadua"), ("municipal", r"\bmunicip"), ("federal", r"\bfedera"))
-# Palavras do nome do órgão que não ajudam a distinguir um órgão de outro.
-_PALAVRAS_ORGAO_VAZIAS = frozenset(
-    "de da do das dos e no na nos nas em estado estadual municipal rio janeiro rj pca plano planos".split()
+# Palavras do nome do órgão que não ajudam a distinguir um órgão de outro. "Estado",
+# "Rio" e "Janeiro" ficam: sem elas, "Universidade do Estado do Rio de Janeiro"
+# vira "universidade" e "Prefeitura do Rio de Janeiro" vira "prefeitura".
+_PALAVRAS_ORGAO_VAZIAS = frozenset("de da do das dos e no na nos nas em pca plano planos".split())
+# Palavra do nome do banco que muda o órgão quando a pergunta não a diz:
+# "Universidade do Estado do RJ" não é a "Universidade FEDERAL do Estado do RJ".
+_QUALIFICADORES_DE_ORGAO = frozenset({"federal", "regional"})
+# Citação de norma não é esfera nem modalidade: "Lei federal 14.133", "Lei do Pregão".
+_RE_CITACAO_DE_NORMA = re.compile(
+    r"\b(?:lei|decreto|portaria|resolucao|instrucao normativa)\s+(?:complementar\s+)?"
+    r"(?:federal|estadual|municipal)\b|\blei do pregao\b"
 )
 _RE_RANKING = re.compile(r"\b(?:maior(?:es)?|menor(?:es)?|top|ranking)\b")
 _RE_N_RANKING = re.compile(r"\b(\d{1,2}|" + "|".join(_NUMEROS_POR_EXTENSO) + r")\s+(?:maiores|menores)\b")
@@ -384,22 +392,31 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
     if minimo_por_grupo is not None:
         agrupar_por = "fornecedor"
 
+    # Esfera e modalidade: vale o que o query_analysis já extraiu; a detecção
+    # local só cobre quem chama sem esses filtros, e ignora citação de norma.
+    analiticos = filtros.filtros_analiticos or {}
+    sem_normas = _RE_CITACAO_DE_NORMA.sub(" ", texto)
     esfera = None
     if tabela == "contratacoes":
-        # "por município(s)" é agrupamento, não filtro de esfera.
-        sem_agrupamento = re.sub(r"\bpor (?:municipios?|orgaos?|esferas?)\b", " ", texto)
-        citadas = [nome for nome, padrao in _ESFERAS if re.search(padrao, sem_agrupamento)]
-        if len(citadas) == 1:  # várias juntas = comparação, que já sai quebrada por esfera
-            esfera = citadas[0]
+        if analiticos.get("esfera"):
+            esfera = analiticos["esfera"]
+        else:
+            # "por município(s)" é agrupamento, não filtro de esfera.
+            sem_agrupamento = re.sub(r"\bpor (?:municipios?|orgaos?|esferas?)\b", " ", sem_normas)
+            citadas = [nome for nome, padrao in _ESFERAS if re.search(padrao, sem_agrupamento)]
+            if len(citadas) == 1:  # várias juntas = comparação, que já sai quebrada por esfera
+                esfera = citadas[0]
 
     modalidade_termos: tuple[str, ...] = ()
     texto_objeto = texto
     if tabela == "contratacoes":
+        pedida = analiticos.get("modalidade")
         for padrao, termos in _MODALIDADES:
-            if padrao.search(texto):
+            if padrao.search(pedida if pedida else sem_normas):
                 modalidade_termos = termos
-                texto_objeto = padrao.sub(" ", texto_objeto)
                 break
+        for padrao, _ in _MODALIDADES:  # a modalidade não descreve o objeto
+            texto_objeto = padrao.sub(" ", texto_objeto)
 
     # O mês vem da pergunta original: o query_analysis já tira "janeiro de 2025"
     # do texto quando vira filtro de ano.
@@ -756,6 +773,18 @@ def _palavras_casam(pedidas: Iterable[str], nome: str) -> bool:
     )
 
 
+def _orgao_casa(pedidas: tuple[str, ...], nome: str) -> bool:
+    """O nome do banco é do órgão pedido: casa palavra a palavra ("prefeitura"
+    vale também como "município") e não tem qualificador que a pergunta não diz."""
+    palavras = set(re.findall(r"[a-z]+", structured_db.normalizar(nome)))
+    if (palavras & _QUALIFICADORES_DE_ORGAO) - set(pedidas):
+        return False
+    variantes = [pedidas]
+    if "prefeitura" in pedidas:
+        variantes.append(tuple("municipio" if p == "prefeitura" else p for p in pedidas))
+    return any(_palavras_casam(variante, nome) for variante in variantes)
+
+
 def _resolver_valores(consulta: Consulta, banco: Banco) -> Consulta:
     """Troca os termos de modalidade e de órgão pelos valores do banco que casam.
 
@@ -792,9 +821,9 @@ def _resolver_valores(consulta: Consulta, banco: Banco) -> Consulta:
                 )
             }
         if consulta.orgao_termos:
-            mudancas["orgaos"] = tuple(sorted(n for n in nomes if _palavras_casam(consulta.orgao_termos, n)))
+            mudancas["orgaos"] = tuple(sorted(n for n in nomes if _orgao_casa(consulta.orgao_termos, n)))
         else:
-            casados = tuple(sorted(n for n in nomes if _palavras_casam(consulta.termos_objeto, n)))
+            casados = tuple(sorted(n for n in nomes if _orgao_casa(consulta.termos_objeto, n)))
             if casados:
                 mudancas.update(orgaos=casados, orgao_termos=consulta.termos_objeto, termos_objeto=())
     return replace(consulta, **mudancas) if mudancas else consulta

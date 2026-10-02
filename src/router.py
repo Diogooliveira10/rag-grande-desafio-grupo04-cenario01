@@ -76,6 +76,9 @@ _STRUCTURED_PATTERNS = (
     r"\bcontrat(ou|aram)\b",
     r"\bcompr(ou|aram)\b",
     r"\bcompras?\b",
+    # Modalidade no plural conta registros ("quantos pregões em 2025?"); no
+    # singular costuma ser pergunta de regra ("posso participar de pregão?").
+    r"\b(pregoes|dispensas|inexigibilidades|concorrencias)\b",
     r"\bfornecedor(es)?\b",
     r"\borgaos?\b",
     r"\bcnpj\b",

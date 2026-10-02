@@ -687,3 +687,45 @@ def test_base_sem_a_coluna_nova_roda_sem_deduplicar(tmp_path):
     consulta = sq.detectar_consulta("Qual o total das compras de ambulância em 2025?", QueryFilters(ano=2025), ESTRUTURADA)
 
     assert sq._resolver_valores(consulta, base["banco"]).deduplicar is False
+
+
+def test_orgao_com_estado_e_rio_nao_casa_com_orgao_federal_nem_com_outra_prefeitura(tmp_path):
+    registros = []
+    for numero, (orgao, unidade) in enumerate([
+        ("UNIVERSIDADE FEDERAL DO ESTADO DO RIO DE JANEIRO", "MEC-UNIRIO"),
+        ("MUNICIPIO DE RIO DE JANEIRO", "MRJ-PREFEITURA MUNICIPAL DO RIO DE JANEIRO"),
+        ("MUNICIPIO DE NITEROI", "MRJ- PREFEITURA MUNICIPAL DE NITEROI"),
+    ], 1):
+        registro = _contratacao(f"111-2-{numero:06d}/2025")
+        registro.update(dataAssinatura="2025-03-01", valorGlobal=100.0 * numero, nomeRazaoSocialFornecedor="F")
+        registro["orgaoEntidade"]["razaoSocial"] = orgao
+        registro["unidadeOrgao"]["nomeUnidade"] = unidade
+        registros.append(registro)
+    documents = escrever_documents(tmp_path / "documents.jsonl", contratacoes=registros)
+    banco = Banco(sqlite_path=tmp_path / "base.sqlite")
+    structured_db.construir_banco(documents, banco)
+    base = {"banco": banco, "documents_file": documents}
+
+    [chunk] = _consultar("Quanto a UERJ contratou em 2025?", base, ano=2025,
+                         orgao="Universidade do Estado do Rio de Janeiro")
+    assert "nenhum órgão do corpus casa" in chunk.content
+
+    [chunk] = _consultar("Quanto a Prefeitura do Rio de Janeiro contratou em 2025?", base, ano=2025,
+                         orgao="Prefeitura do Rio de Janeiro")
+    assert "Geral: 1 registros; total R$ 200,00" in chunk.content
+
+
+def test_citacao_de_lei_nao_vira_esfera_e_vale_o_filtro_do_query_analysis():
+    pergunta = "Quantas compras com base na Lei federal 14.133 foram publicadas em 2025?"
+    assert _detectar(pergunta, ano=2025).esfera is None
+
+    consulta = _detectar("Quantos contratos estaduais em 2025?", ano=2025,
+                         filtros_analiticos={"esfera": "municipal"})
+    assert consulta.esfera == "municipal"  # o query_analysis decide
+
+
+def test_modalidade_no_plural_vem_do_query_analysis_e_sai_do_objeto():
+    consulta = _detectar("Quantos pregões eletrônicos foram publicados em 2025?", ano=2025,
+                         filtros_analiticos={"modalidade": "pregao eletronico"})
+    assert consulta.modalidade_termos == ("pregao", "eletronic")
+    assert consulta.termos_objeto == ()

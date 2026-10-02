@@ -111,6 +111,12 @@ def test_ranking_de_contratacoes_nao_vai_para_a_agregada():
     "Quais órgãos contrataram serviços de limpeza?",
     "Quais compras de ambulância foram feitas em 2025?",
     "Qual o valor total das compras de tecnologia em 2025?",
+    "Quantos pregões eletrônicos em 2025?",
+    "Quantas dispensas em 2025?",
 ])
 def test_verbo_contratar_ou_comprar_vai_para_a_estruturada(pergunta):
     assert Natureza.ESTRUTURADA in rotear_pergunta(pergunta).bases_selecionadas
+
+
+def test_modalidade_no_singular_continua_pergunta_de_regra():
+    assert rotear_pergunta("Uma microempresa pode participar de pregão eletrônico?").bases_selecionadas == [Natureza.NORMATIVA]
