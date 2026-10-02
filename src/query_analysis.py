@@ -783,7 +783,16 @@ _GATILHOS_ORGAO = frozenset(
         "assembleia", "orgao", "agencia",
     }
 )
-_PALAVRA_CONECTORA = frozenset({"de", "do", "da", "dos", "das", "e", "em", "no", "na"})
+# Dentro do nome só entram estas conectoras ("Secretaria de Ciência e
+# Tecnologia", "Tribunal de Contas do Estado"). "No", "na", "em" encerram o
+# nome: "Secretaria de Saúde no PCA" é a Secretaria de Saúde.
+_PALAVRA_CONECTORA = frozenset({"de", "do", "da", "dos", "das", "e"})
+# Palavras que encerram o nome mesmo com maiúscula ("Prefeitura De Maricá Em
+# 2025"): preposições de lugar e siglas/termos do sistema que vêm depois dele.
+_FIM_DO_NOME_DO_ORGAO = frozenset(
+    "em no na nos nas pelo pela pelos pelas para "
+    "pca pncp sei siga lei decreto portaria edital pregao ata atas contrato contratos".split()
+)
 _PONTUACAO = ".,;:!?"
 
 
@@ -801,8 +810,8 @@ def _extrair_orgao(query_original: str) -> Optional[str]:
         while cursor < len(tokens):
             bruta = tokens[cursor]
             limpa = bruta.strip(_PONTUACAO)
-            if not limpa:
-                break
+            if not limpa or _normalize(limpa) in _FIM_DO_NOME_DO_ORGAO:
+                break  # "Secretaria de Saúde do PCA", "Prefeitura de Niterói Edital 5/2024"
             eh_conectora = _normalize(limpa) in _PALAVRA_CONECTORA
             if limpa[0].isupper() or eh_conectora:
                 palavras.append(limpa)
