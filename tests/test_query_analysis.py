@@ -599,7 +599,10 @@ def test_regressoes_da_revisao_adversarial(pergunta, anos, vmin, vmax):
 
 
 def test_pergunta_toda_em_maiusculas_nao_estende_o_orgao():
-    assert qa.analisar_query("QUAIS CONTRATOS DA SECRETARIA DE SAUDE ACIMA DE 1 MILHAO EM 2025").filtros.orgao is None
+    # Sem pista de maiúscula, o nome é lido como em minúsculas: para no "ACIMA".
+    assert qa.analisar_query("QUAIS CONTRATOS DA SECRETARIA DE SAUDE ACIMA DE 1 MILHAO EM 2025").filtros.orgao == (
+        "SECRETARIA DE SAUDE"
+    )
 
 
 def test_texto_sem_filtros_tira_expressoes_de_valor_mesmo_quando_o_ou_descarta_o_filtro():
@@ -706,3 +709,130 @@ def test_texto_sem_filtros_tira_expressoes_de_tempo(pergunta, esperado):
 ])
 def test_orgao_termina_antes_de_no_na_em_e_de_siglas_do_sistema(pergunta, orgao):
     assert qa.analisar_query(pergunta).filtros.orgao == orgao
+
+# Órgão sem depender de maiúscula, gatilhos novos, siglas, esfera e modalidade (02/10).
+@pytest.mark.parametrize("pergunta, orgao", [
+    ("quantos contratos da prefeitura de niterói em 2025?", "prefeitura de niterói"),
+    ("contratos da secretaria municipal de saúde de niterói", "secretaria municipal de saúde de niterói"),
+    ("fundo municipal de saude de marica", "fundo municipal de saude de marica"),
+    ("Comando da Aeronáutica contratou o quê?", "Comando da Aeronáutica"),
+    ("defensoria publica do estado contratos acima de 1 milhao", "defensoria publica do estado"),
+    ("contratos do municipio de niteroi", "municipio de niteroi"),
+    ("procuradoria geral do estado", "procuradoria geral do estado"),
+    ("controladoria geral do estado em 2025", "controladoria geral do estado"),
+    ("policia militar do estado do rio de janeiro", "policia militar do estado do rio de janeiro"),
+    ("companhia estadual de aguas e esgotos", "companhia estadual de aguas e esgotos"),
+    ("secretaria de estado de saude contratos", "secretaria de estado de saude"),
+    ("secretaria de ciencia e tecnologia", "secretaria de ciencia e tecnologia"),
+    ("secretaria de saude e prefeitura de niteroi", "secretaria de saude"),
+    ("prefeitura de niteroi de ambulancias", "prefeitura de niteroi"),
+    ("Contratos Da Secretaria De Saúde Acima De 1 Milhão", "Secretaria De Saúde"),
+    ("contratos da SEEDUC em 2025", "Secretaria de Estado de Educação"),
+    ("contratos da ses acima de 1 milhão", "Secretaria de Estado de Saúde"),
+    ("DPE contratou o que em 2025?", "Defensoria Pública do Estado"),
+    ("contratos da SEOBRAS", None),  # sigla desconhecida e fora do corpus
+    ("pesquisa de preços no banco de preços", None),
+    ("a empresa ganhou contratos", None),
+    ("contratos de TI acima de 1 milhão", None),
+    ("Lei 14.133, art. 75, inciso II", None),
+    ("contratos da prefeitura de qual cidade?", None),
+])
+def test_orgao_com_e_sem_maiuscula_e_siglas(pergunta, orgao):
+    assert qa.analisar_query(pergunta).filtros.orgao == orgao
+
+
+def test_sigla_de_orgao_sai_do_texto_sem_filtros():
+    assert "seeduc" not in qa.texto_sem_filtros("Qual o total dos contratos da SEEDUC?")
+
+
+@pytest.mark.parametrize("pergunta, esfera", [
+    ("contratos federais em 2025", "federal"),
+    ("contratos dos órgãos federais", "federal"),
+    ("contratos da secretaria municipal de saúde", "municipal"),
+    ("média dos contratos federais e estaduais", None),
+    ("o que diz a Lei federal 14.133 sobre pregão?", None),
+    ("quantos contratos por município em 2025?", None),
+])
+def test_esfera_inclui_federal(pergunta, esfera):
+    assert qa.analisar_query(pergunta).filtros.filtros_analiticos.get("esfera") == esfera
+
+
+@pytest.mark.parametrize("pergunta, modalidade", [
+    ("quantos pregões eletrônicos em 2025?", "pregao eletronico"),
+    ("contratos por dispensa acima de 50 mil", "dispensa"),
+    ("inexigibilidades da prefeitura de niteroi", "inexigibilidade"),
+    ("quantas concorrências em 2025?", "concorrencia"),
+    ("como funciona o pregao eletronico?", None),
+    ("MEI pode participar de pregão?", None),
+    ("o que diz a lei do pregão de 2002?", None),
+])
+def test_modalidade_so_em_pergunta_sobre_dados(pergunta, modalidade):
+    assert qa.analisar_query(pergunta).filtros.filtros_analiticos.get("modalidade") == modalidade
+
+
+def test_modalidade_vira_contains_de_cada_palavra_na_busca():
+    filtros = qa.analisar_query("quantos pregões eletrônicos em 2025?").filtros
+    assert qa.filtros_para_retrieve(filtros)["modalidade"] == [
+        {"operator": "contains", "value": "pregao", "optional": True},
+        {"operator": "contains", "value": "eletronico", "optional": True},
+    ]
+
+# Catálogo de órgãos do corpus e municípios do RJ (02/10, revisão adversarial).
+@pytest.mark.parametrize("pergunta, orgao", [
+    ("Quantos contratos do Comando da Marinha e informe o valor total", "Comando da Marinha"),
+    ("liste os contratos da secretaria de saúde e informe o total", "secretaria de saúde"),
+    ("Qual o total da Secretaria de Saúde e da Prefeitura de Niterói?", "Secretaria de Saúde"),
+    ("Quantas compras da Prefeitura de Niterói de material de limpeza?", "Prefeitura de Niterói"),
+    ("Quantos contratos da Secretaria Municipal de Saúde de ambulâncias em 2025?", "Secretaria Municipal de Saúde"),
+    ("quantos contratos do município de são gonçalo em 2025?", "município de são gonçalo"),
+    ("gastos do municipio de volta redonda em 2024", "municipio de volta redonda"),
+    ("contratos da prefeitura de campos dos goytacazes", "prefeitura de campos dos goytacazes"),
+    ("fundo municipal de saude de marica", "fundo municipal de saude de marica"),
+    ("câmara municipal de três rios contratou o quê?", "câmara municipal de três rios"),
+    ("prefeitura de petropolis contratos", "prefeitura de petropolis"),
+    ("Total Gasto pela Prefeitura de São Gonçalo em 2025", "Prefeitura de São Gonçalo"),
+    ("Quanto a Secretaria de Estado de Saúde (SES) planejou gastar no PCA de 2025?", "Secretaria de Estado de Saúde"),
+    ("Quantos contratos da Prefeitura do Rio de Janeiro de janeiro a março de 2025", "Prefeitura do Rio de Janeiro"),
+    ("procuradoria geral do estado", "procuradoria geral do estado"),
+    ("Contratos da FIOCRUZ em 2025", "Fundação Oswaldo Cruz"),
+    ("contratos do TCE-RJ", "Tribunal de Contas do Estado"),
+    ('Quantos contratos da "Prefeitura de Niterói" em 2025?', "Prefeitura de Niterói"),
+    # não é órgão
+    ("Qual o total gasto por órgão federal em 2025?", None),
+    ("Quantos contratos de empresa pública em 2025?", None),
+    ("qual órgão de saúde mais contratou?", None),
+    ("aquisição de câmara de conservação de vacinas", None),
+    ("contratos com banco de sangue", None),
+    ("Qual é a conta bancária e a agência do fornecedor do maior contrato?", None),
+    ("banco de sangue de niteroi", None),
+    ("Por quanto foi homologado o forro de PVC no pregão 62/2023?", None),
+    ("Quantos contratos de EPI em 2025?", None),
+    ("Qual o MAIOR contrato de 2025?", None),
+    ("Quais contratos NÃO foram por dispensa?", None),
+])
+def test_orgao_confere_com_catalogo_e_municipios(pergunta, orgao):
+    assert qa.analisar_query(pergunta).filtros.orgao == orgao
+
+
+@pytest.mark.parametrize("pergunta, esfera", [
+    ("quantos contratos no município do Rio de Janeiro em 2025?", None),
+    ("contratos de municípios em 2025", "municipal"),
+    ("o que diz a legislação federal sobre dispensa?", None),
+    ("lei estadual sobre pesquisa de preços", None),
+])
+def test_esfera_nao_vem_de_lugar_nem_de_norma(pergunta, esfera):
+    assert qa.analisar_query(pergunta).filtros.filtros_analiticos.get("esfera") == esfera
+
+
+@pytest.mark.parametrize("pergunta", [
+    "Compare o valor médio de pregões e dispensas em 2025",
+    "Como funciona a dispensa de licitação?",
+    "Quais os limites de valor para dispensa?",
+    "Quantas fases tem o pregão?",
+    "MEI pode participar de pregões eletrônicos?",
+    "Quais contratos tiveram pouca concorrência?",
+    "quantos dias de dispensa medica o servidor pode ter?",
+    "quantos contratos não foram por dispensa em 2025?",
+])
+def test_modalidade_nao_vira_filtro_em_comparacao_regra_ou_sentido_comum(pergunta):
+    assert qa.analisar_query(pergunta).filtros.filtros_analiticos.get("modalidade") is None
