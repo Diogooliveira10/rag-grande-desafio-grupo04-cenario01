@@ -96,3 +96,25 @@ Rodei a suíte local antes de abrir a PR (462 passed, 2 failed pré-existentes e
 Imprevisto: depois de abrir a PR, dei git pull numa hora ruim (estando na minha branch, então só atualizou o tracking dela, não o main local) e o Renato tinha avançado bastante o main em paralelo (recoleta v6 do corpus, rerank). Reconciliei dando merge do main atualizado na minha branch (fast-forward) e confirmei com git log/git branch --contains que meu commit já estava no main — a PR só ficou marcada como "Closed" em vez de "Merged" porque o merge foi feito direto por fora do botão do GitHub. Suíte final depois da reconciliação: 556 passed.
 
 Uso de IA: usei o Claude pra revisar a arquitetura do histórico (decidir por que um SQLite separado fazia mais sentido do que reaproveitar o structured_db.py ou o log JSONL do obs.py), na construção do esqueleto do history_store.py e dos endpoints novos. Rodei os testes, decidi o formato dos endpoints (avaliação positivo/negativo, 404 pra query_id desconhecido) e revisei cada mudança antes de commitar fui eu.
+
+## Encontro 8 — 02/10/2026
+
+Contexto: tarefa de hoje era atualizar o ARQUITETURA.md a partir de um checklist de revisão (Felipe Rafael), que comparava o documento — ainda descrevendo o estado de 28/09, sem rerank, sem SQL, índice v1 — com o código e os dados reais do main.
+
+## O que fiz:
+
+Antes de aplicar qualquer correção do checklist, fui no código conferir cada ponto. Três afirmações do primeiro checklist não batiam com o que eu via no generate.py e no config.py (GENERATION_TIMEOUT, a conversão de recusa indevida, os números da ablação do rerank) — em vez de forçar isso no documento, suspeitei que meu main local estivesse desatualizado. Dei git fetch + git log main..origin/main e confirmei: 28 commits atrás, incluindo exatamente os três pontos que faltavam (6b60b6d, db851dd). Dei merge do main na minha branch antes de continuar.
+
+Reescrevi o ARQUITETURA.md: pipeline de 7 pra 9 estágios (entrou consulta_sql e rerank deixou de ser "opcional, sem modelo ativo"), diagrama mermaid refeito com o branch de consulta_sql e o loop de nova busca sem filtros, descrições de cada estágio atualizadas, estado atual, corpus/índice v6 (1.400 arquivos, 5.621 vetores) e pendências reescritos do zero.
+
+Recebi uma segunda revisão, mais detalhada, apontando a ordem real de execução (rerank roda antes de consulta_sql no pipeline.py, não em paralelo como eu tinha desenhado), dois erros factuais sobre o .gitignore/.gitattributes (data/app_state/ não é versionado à força — guarda o histórico de pergunta dos usuários; o -text preserva os bytes exatos pros hashes de proveniência, não é "CRLF conforme o caso") e pendências que faltavam (os erros de conteúdo do golden set por caso específico — P2.1, P4.2, P4.3, P5.3, F1 sem fonte — e o ajuste de filtros da Pâmela ainda numa branch separada).
+
+Fui conferir cada ponto antes de aceitar: li structured_query.py (detectar_consulta, pra confirmar que consulta_sql só roda em pergunta de conta e também consulta pca_planos), query_analysis.py (confirmar que todo filtro é marcado opcional, sem exceção), pipeline.py (confirmar a ordem real das chamadas) e o registro_execucao_v6.md, que bateu palavra por palavra com os erros do golden set apontados na revisão.
+
+Dois pontos eu não conseguia confirmar sem consultar o banco direto: a contagem exata de contratos com valor zero/simbólico e o registro único de "ambulância tipo D". Usei o CLI que já existe (py -m src.structured_db sql) e confirmei: 1 registro de ambulância tipo D, 21 contratos de R$ 0,00, 6 de R$ 0,01 — e descobri, nessa checagem, que esses valores simbólicos ainda entram sem filtro nas contas de média/mediana, uma pendência nova que nem o checklist tinha listado.
+
+Rodei pytest -q pra confirmar o número real de testes: 793, que não batia nem com o que eu tinha escrito antes (783) nem com o que a segunda revisão apontava (799).
+
+Fiz os commits e pushes de cada rodada de correção na branch marco/feedback-historico.
+
+Uso de IA: usei o Claude pra comparar o documento com o código a cada rodada, rodar os diffs de git e redigir o texto de cada seção reescrita. Rodei os comandos, confirmei os resultados e decidi quando um ponto ficava "aceito" ou "sinalizado sem fonte" fui eu; os commits e pushes também.
