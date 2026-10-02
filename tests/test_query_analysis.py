@@ -690,3 +690,19 @@ def test_regressoes_da_terceira_rodada(pergunta, anos, vmin, vmax):
 ])
 def test_texto_sem_filtros_tira_expressoes_de_tempo(pergunta, esperado):
     assert qa.texto_sem_filtros(pergunta) == esperado
+
+
+@pytest.mark.parametrize("pergunta, orgao", [
+    ("Qual o total da Secretaria de Saúde no PCA?", "Secretaria de Saúde"),
+    ("Qual o total da Secretaria de Saúde do PCA de 2025?", "Secretaria de Saúde"),
+    ("Contratos da Prefeitura de Niterói na Saúde", "Prefeitura de Niterói"),
+    ("Contratos da Prefeitura de Niterói no PNCP em 2025", "Prefeitura de Niterói"),
+    ("Contratos da Prefeitura do Rio no RJ", "Prefeitura do Rio"),
+    ("Contratos da Prefeitura de Niterói Edital 5/2024", "Prefeitura de Niterói"),
+    ("Contratos Da Prefeitura De Maricá Em 2025", "Prefeitura De Maricá"),
+    ("Prefeitura Do Rio No PNCP", "Prefeitura Do Rio"),
+    ("Contratos da Secretaria de Ciência e Tecnologia", "Secretaria de Ciência e Tecnologia"),
+    ("Tribunal de Contas do Estado do Rio de Janeiro", "Tribunal de Contas do Estado do Rio de Janeiro"),
+])
+def test_orgao_termina_antes_de_no_na_em_e_de_siglas_do_sistema(pergunta, orgao):
+    assert qa.analisar_query(pergunta).filtros.orgao == orgao
