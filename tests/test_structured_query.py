@@ -729,3 +729,18 @@ def test_modalidade_no_plural_vem_do_query_analysis_e_sai_do_objeto():
                          filtros_analiticos={"modalidade": "pregao eletronico"})
     assert consulta.modalidade_termos == ("pregao", "eletronic")
     assert consulta.termos_objeto == ()
+
+
+@pytest.mark.parametrize("pergunta", [
+    "Quantos contratos seguem a Lei federal 14.133 em 2025?",
+    "Quantos contratos fundamentados na Lei 14.133 foram assinados em 2025?",
+    "Quantos contratos baseados no Decreto 12.343/2024 em 2025?",
+])
+def test_citacao_de_norma_nao_vira_objeto_e_o_resultado_avisa(pergunta):
+    from src.query_analysis import _analisar
+
+    consulta = sq.detectar_consulta(pergunta, _analisar(pergunta), ESTRUTURADA)
+    assert consulta.termos_objeto == ()
+    assert consulta.esfera is None
+    assert consulta.norma_citada
+    assert "NÃO é filtro" in sq._cabecalho(consulta, 10, (), "AND")

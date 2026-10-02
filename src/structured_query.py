@@ -67,6 +67,10 @@ _PALAVRAS_ORGAO_VAZIAS = frozenset("de da do das dos e no na nos nas em pca plan
 # "Universidade do Estado do RJ" não é a "Universidade FEDERAL do Estado do RJ".
 _QUALIFICADORES_DE_ORGAO = frozenset({"federal", "regional"})
 # Citação de norma não é esfera nem modalidade: "Lei federal 14.133", "Lei do Pregão".
+_RE_NORMA_NUMERADA = re.compile(
+    r"\b(?:lei|decreto|portaria|resolucao|instrucao normativa)(?:\s+complementar)?"
+    r"(?:\s+(?:federal|estadual|municipal))?(?:\s+n[o.]?)?\s+\d|\blei do pregao\b"
+)
 _RE_CITACAO_DE_NORMA = re.compile(
     r"\b(?:lei|decreto|portaria|resolucao|instrucao normativa)\s+(?:complementar\s+)?"
     r"(?:federal|estadual|municipal)\b|\blei do pregao\b"
@@ -122,6 +126,9 @@ _PALAVRAS_GENERICAS = frozenset(
     servico servicos aquisicao aquisicoes fornecimento prestacao especializada especializado
     informacao informacoes detalhe detalhes firmaram firmou celebraram disponiveis disponivel
     assinou assinaram contratou contrataram comprou compraram gastou gastaram
+    seguem segue seguindo base baseado baseada baseados baseadas fundamentado fundamentada fundamentados
+    fundamentadas fundamento amparo amparado amparada amparados amparadas conforme lei leis decreto decretos
+    portaria portarias norma normas
     apenas somente considerando considerada considerado consideradas considerados desse dessa desses dessas
     nesse nessa nesses nessas neste nesta nestes nestas deste desta destes destas aqui estiver estiverem
     feita feito feitas feitos ligado ligada ligados ligadas devem deve devia podem pode poderia saber
@@ -177,6 +184,9 @@ class Consulta:
     # Compra publicada e contrato assinado da mesma contratação contam uma vez
     # (resolvido em _resolver_valores: exige a coluna numero_controle_compra).
     deduplicar: bool = False
+    # A pergunta cita lei/decreto ("contratos que seguem a Lei 14.133"): a norma
+    # não é filtro, e o resultado avisa isso em vez de parecer uma contagem por lei.
+    norma_citada: bool = False
 
 
 # Contrato de compilação apenas: estas tabelas de fatos não são criadas aqui.
@@ -468,6 +478,7 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
         modalidade_termos=modalidade_termos,
         orgao_termos=orgao_termos,
         so_contratos=so_contratos,
+        norma_citada=bool(_RE_NORMA_NUMERADA.search(texto)),
     )
 
 
@@ -727,6 +738,10 @@ def _cabecalho(consulta: Consulta, total_tabela: int, termos: tuple[str, ...], j
             f"Consulta SQL na tabela contratacoes: {total_tabela} registros da amostra PNCP/RJ. "
             "Contratos: valorGlobal; compras: homologado ou estimado. Valores informados, não pagamentos."
         )
+        if consulta.norma_citada:
+            origem += (" A norma citada na pergunta NÃO é filtro desta conta: os contratos assinados do PNCP"
+                       " não trazem o amparo legal, então o resultado vale para todos os registros com os"
+                       " demais filtros, e não só para os que seguem essa norma.")
         if consulta.deduplicar:
             origem += (" Contratação com compra e contrato no corpus conta uma vez"
                        + (" (pela compra, que traz a modalidade)." if _usa_modalidade(consulta) else " (pelo contrato)."))
