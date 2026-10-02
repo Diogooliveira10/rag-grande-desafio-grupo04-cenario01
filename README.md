@@ -2,6 +2,8 @@
 
 **Residência TIC em Trilhas · PUC-Rio · Instituto ECOA**
 
+Sistema de **Adaptive RAG** sobre contratações públicas do Estado do Rio de Janeiro: dado uma pergunta em linguagem natural, o sistema decide sozinho **onde buscar** (norma, registro estruturado, conversa ou número agregado) antes de buscar, recupera evidência híbrida (densa + BM25 + RRF + rerank) e gera uma resposta citando fontes — ou recusa, quando o caso exige.
+
 O snapshot oficial atual é a **v6**, com 1.400 arquivos nas quatro bases e limite
 de cinco arquivos por órgão e por base. São 804 arquivos municipais, 513 federais
 e 83 estaduais: uma amostra orientada às personas, sem garantia de censo.
@@ -16,40 +18,6 @@ ao Git; as fontes públicas constam nos metadados. As entregas das atas estão e
 [PDF](atas-zip/atas_conversacional-v6.zip) e
 [Markdown](atas-zip/atas_conversacional-v6-md.zip), com 40 documentos cada.
 Embeddings e ZIP da v5 permanecem no disco, fora destes commits.
-
-## API HTTP
-
-O backend FastAPI expõe `GET /health`, `POST /api/v1/query`, `POST /api/v1/feedback`
-e `GET /api/v1/history`. Para executar localmente:
-
-```bash
-uvicorn app.api:app --reload --host 127.0.0.1 --port 8000
-```
-
-O frontend é mantido em um projeto separado e publicado em
-[etuarda.github.io/frontendRAG](https://etuarda.github.io/frontendRAG/). Este
-repositório contém somente o backend/RAG e o contrato HTTP usado por essa
-interface. A origem do GitHub Pages (`https://etuarda.github.io`) e os
-servidores Vite locais em `localhost:5173` e `127.0.0.1:5173` já estão
-permitidos por CORS.
-
-No projeto externo do frontend, configure `VITE_API_BASE_URL` com a URL pública
-HTTPS deste backend, sem `/api/v1/query` no final, e mantenha
-`VITE_USE_MOCKS=false`. Por exemplo, para um backend publicado em
-`https://rag-api.exemplo.com`:
-
-```env
-VITE_API_BASE_URL=https://rag-api.exemplo.com
-VITE_USE_MOCKS=false
-```
-
-O frontend chamará `POST <VITE_API_BASE_URL>/api/v1/query` e
-`GET <VITE_API_BASE_URL>/health`. Origens adicionais do frontend podem ser
-informadas, separadas por vírgula, em `CORS_ALLOW_ORIGINS` no ambiente do
-backend. Como CORS trabalha com origem, a configuração usa
-`https://etuarda.github.io`, sem o caminho `/frontendRAG/`.
-
-Sistema de **Adaptive RAG** sobre contratações públicas do Estado do Rio de Janeiro: dado uma pergunta em linguagem natural, o sistema decide sozinho **onde buscar** (norma, registro estruturado, conversa ou número agregado) antes de buscar, recupera evidência híbrida (densa + BM25 + RRF + rerank) e gera uma resposta citando fontes — ou recusa, quando o caso exige.
 
 ## Por que este cenário
 
@@ -137,8 +105,6 @@ Estágios (mesmos nomes usados no campo `stage` do log estruturado): `query_anal
 [src/pipeline.py](src/pipeline.py) une as etapas numa única função (`responder`).
 
 `feedback` ([src/history_store.py](src/history_store.py)): toda chamada a `POST /api/v1/query` recebe um `query_id` e é salva (pergunta + resposta completa) num SQLite local (`data/app_state/historico.sqlite`, fora do Git — diferente da base derivada de `structured_db.py`, este é estado da aplicação e não é remontado). `POST /api/v1/feedback` associa uma avaliação (`positivo`/`negativo` + comentário opcional) a um `query_id` já registrado (404 se não existir) e grava o evento no log estruturado com `stage="feedback"`. `GET /api/v1/history?limit=N` devolve as consultas mais recentes com o feedback recebido. Testes em [tests/test_history_store.py](tests/test_history_store.py) e [tests/test_app_api.py](tests/test_app_api.py).
-
-O modelo de rerank da turma ainda não tem endpoint; quando tiver, basta um reranker com a mesma assinatura em [src/rerank.py](src/rerank.py).
 
 O parsing da geração aceita as variações de chave que o modelo da turma produz na prática (`sources` em vez de `sources_used`, `confidence` numérico em vez de `confidence_level`) e registra no log, em `extra.chaves_fora_do_contrato`, quando isso acontece. Toda etapa registra log estruturado via [src/obs.py](src/obs.py) (JSONL em `logs/pipeline-AAAA-MM-DD.jsonl`, com `run_id`, `stage`, latência e tokens).
 
@@ -470,7 +436,7 @@ py app/cli.py perguntar                                                    # sem
 py app/cli.py perguntar --incluir-experimentais "Quais sanções a norma prevê para o fornecedor que não recolher a multa?"
 ```
 
-Com o endpoint compartilhado, cada resposta completa leva alguns minutos (o vetor da pergunta e, principalmente, a geração).
+Com o endpoint compartilhado, a maior parte do tempo é a geração: na última rodada do golden set a resposta completa levou 23 s na mediana e 35 s na média, com picos acima de 3 minutos quando o servidor está carregado (a geração tem limite de `GENERATION_TIMEOUT=180` s e uma nova tentativa). Na primeira pergunta de um processo, o rerank leva ~15 s a mais para carregar o modelo.
 
 **8. Rodar a avaliação (golden set das personas)**
 
@@ -486,7 +452,39 @@ py .\eval\ablacao_rerank.py --candidatos 10 30                 # ablação da re
 
 `eval/adapters.py:rota_apenas` avalia só o estágio de roteamento, sem chamar o LLM — útil para checar regressão rápida. `src/pipeline.py:responder` roda o pipeline completo (roteamento + recuperação híbrida via `retrieve.py` + geração via `generate.py`), chamando o LLM de verdade a cada pergunta do golden set.
 
-O relatório (`eval/runs/<run_id>/REPORT.md`) traz rota e recusa (o que define o acerto), citação, confiança, latência e tokens, e o texto de cada resposta. Um caso que dá erro aparece como ERRO sem interromper a rodada. Os casos `G1`–`G3` testam os guardrails do cenário (dados bancários, credenciais em e-mail, juízo de fraude). A ablação do rerank usa outro conjunto, [eval/retrieval_set.jsonl](eval/retrieval_set.jsonl), com o trecho relevante de cada pergunta rotulado; resultado e decisão em [docs/ABLACAO_RERANK.md](docs/ABLACAO_RERANK.md).
+O relatório (`eval/runs/<run_id>/REPORT.md`) traz rota e recusa (o que define o acerto), citação, confiança, latência e tokens, e o texto de cada resposta. Um caso que dá erro aparece como ERRO sem interromper a rodada. Na rodada `golden-v6-final` (corpus v6, rerank ligado) foram 22/22 em rota e recusa e citação em 21/22; esse número não mede se o conteúdo da resposta está certo, porque o golden set ainda não tem gabarito de conteúdo. Os casos `G1`–`G3` testam os guardrails do cenário (dados bancários, credenciais em e-mail, juízo de fraude). A ablação do rerank usa outro conjunto, [eval/retrieval_set.jsonl](eval/retrieval_set.jsonl), com o trecho relevante de cada pergunta rotulado; resultado e decisão em [docs/ABLACAO_RERANK.md](docs/ABLACAO_RERANK.md).
+
+**9. Subir a API HTTP (backend do frontend)**
+
+O backend FastAPI expõe `GET /health`, `POST /api/v1/query`, `POST /api/v1/feedback`
+e `GET /api/v1/history`:
+
+```bash
+uvicorn app.api:app --reload --host 127.0.0.1 --port 8000
+```
+
+O frontend é mantido em um projeto separado e publicado em
+[etuarda.github.io/frontendRAG](https://etuarda.github.io/frontendRAG/); este
+repositório contém somente o backend/RAG e o contrato HTTP usado por essa
+interface. A origem do GitHub Pages (`https://etuarda.github.io`) e os
+servidores Vite locais em `localhost:5173` e `127.0.0.1:5173` já estão
+permitidos por CORS ([app/api.py](app/api.py)); origens adicionais podem ser
+informadas, separadas por vírgula, em `CORS_ALLOW_ORIGINS`. Como CORS trabalha
+com origem, a configuração usa `https://etuarda.github.io`, sem o caminho
+`/frontendRAG/`.
+
+No projeto do frontend, configure `VITE_API_BASE_URL` com a URL pública HTTPS
+deste backend, sem `/api/v1/query` no final, e mantenha `VITE_USE_MOCKS=false`:
+
+```env
+VITE_API_BASE_URL=https://rag-api.exemplo.com
+VITE_USE_MOCKS=false
+```
+
+Hoje o frontend chama `GET /health` e `POST /api/v1/query`; `POST /api/v1/feedback`
+e `GET /api/v1/history` ainda não têm tela. O site publicado só responde de
+verdade quando houver um backend acessível por HTTPS público; sem isso, use o
+frontend local (Vite) apontando para `http://127.0.0.1:8000`.
 
 ### Endpoint de modelos (compartilhado com toda a turma)
 
