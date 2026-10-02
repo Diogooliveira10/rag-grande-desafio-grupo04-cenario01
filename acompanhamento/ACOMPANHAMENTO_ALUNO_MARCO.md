@@ -99,7 +99,7 @@ Uso de IA: usei o Claude pra revisar a arquitetura do histórico (decidir por qu
 
 ## Encontro 8 — 02/10/2026
 
-Contexto: tarefa de hoje era atualizar o ARQUITETURA.md a partir de um checklist de revisão (Felipe Rafael), que comparava o documento — ainda descrevendo o estado de 28/09, sem rerank, sem SQL, índice v1 — com o código e os dados reais do main.
+Contexto: tarefa de hoje era atualizar o ARQUITETURA.md a partir de um checklist de revisão que comparava o documento, ainda descrevendo o estado de 28/09, sem rerank, sem SQL, índice v1  com o código e os dados reais do main.
 
 ## O que fiz:
 
