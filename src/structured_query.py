@@ -166,6 +166,9 @@ class Consulta:
     # A pergunta fala de contratos: só os contratos assinados, mesmo quando o
     # ano é o da publicação ("contratos publicados em março").
     so_contratos: bool = False
+    # Compra publicada e contrato assinado da mesma contratação contam uma vez
+    # (resolvido em _resolver_valores: exige a coluna numero_controle_compra).
+    deduplicar: bool = False
 
 
 # Contrato de compilação apenas: estas tabelas de fatos não são criadas aqui.
@@ -510,11 +513,51 @@ def _where(consulta: Consulta, termos: Iterable[str], juncao: str = "AND") -> tu
         condicoes.append("(" + " OR ".join(f"{coluna} IN ({marcadores})" for coluna in coluna_valores) + ")")
         for _coluna in coluna_valores:
             parametros.extend(valores)
+    if consulta.deduplicar and consulta.tabela == "contratacoes":
+        condicoes.append(_SEM_DUPLICATA_MODALIDADE if _usa_modalidade(consulta) else _SEM_DUPLICATA)
     termos = list(termos)
     if termos:
-        condicoes.append("(" + f" {juncao} ".join("objeto_normalizado LIKE ?" for _ in termos) + ")")
-        parametros.extend(f"%{termo}%" for termo in termos)
+        partes = []
+        for termo in termos:
+            padroes = _EXPANSOES_DO_OBJETO.get(termo, (termo,))
+            partes.append("(" + " OR ".join("objeto_normalizado LIKE ?" for _ in padroes) + ")")
+            parametros.extend(f"%{padrao}%" for padrao in padroes)
+        condicoes.append("(" + f" {juncao} ".join(partes) + ")")
     return (" WHERE " + " AND ".join(condicoes)) if condicoes else "", parametros
+
+
+# Termo da pergunta que, solto no objeto, pega assunto errado: "tecnologia"
+# casa com "transferência de tecnologia do medicamento", "cateteres de
+# tecnologia IVUS" e editais que só citam tecnologia de passagem. Na pergunta,
+# quer dizer TI; procura-se pelas expressões de TI.
+_EXPANSOES_DO_OBJETO: dict[str, tuple[str, ...]] = {
+    "tecnologia": (
+        "tecnologia da informacao", "tecnologia de informacao", "informatica", "software",
+        " tic ", "(tic)", "em tic", "(ti)", " ti ",
+    ),
+}
+
+
+# Quando a consulta mistura compras e contratos, a contratação que tem os dois
+# registros conta uma vez: fica o contrato (valor contratado e fornecedor), ou,
+# se a pergunta é de modalidade, a compra (o contrato do PNCP não traz modalidade).
+_SEM_DUPLICATA = (
+    "NOT (tipo_registro = 'publicacao_compra' AND numero_controle_pncp IN "
+    "(SELECT numero_controle_compra FROM contratacoes WHERE numero_controle_compra IS NOT NULL))"
+)
+_SEM_DUPLICATA_MODALIDADE = (
+    "NOT (tipo_registro = 'contrato_assinado' AND numero_controle_compra IN "
+    "(SELECT numero_controle_pncp FROM contratacoes))"
+)
+
+
+def _usa_modalidade(consulta: Consulta) -> bool:
+    return bool(consulta.modalidade_termos) or (
+        consulta.tipo == "agrupamento" and consulta.agrupar_por == "modalidade")
+
+
+def _descrever_termo(termo: str) -> str:
+    return f"{termo} (TI: tecnologia da informação, informática, software, TIC)" if termo == "tecnologia" else termo
 
 
 def _brl(valor: Optional[float]) -> str:
@@ -615,7 +658,13 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
         ]
         if not grupos and consulta.minimo_por_grupo is not None:
             grupos = [f"Nenhum {coluna} tem {consulta.minimo_por_grupo} ou mais registros com esses filtros."]
-        if sem_campo:
+        if sem_campo and not grupos:
+            # Sem nenhum grupo, a resposta é "não dá para saber", não um valor de
+            # outro trecho do contexto (P4.2: "pregão" tirado de um item do PCA).
+            motivo = " (os contratos assinados no PNCP não trazem modalidade)" if coluna == "modalidade" else ""
+            grupos = [f"Nenhum dos {sem_campo} registros que atendem aos filtros informa {coluna}{motivo}: "
+                      f"com estes dados não é possível dizer qual {coluna} é a mais frequente."]
+        elif sem_campo:
             grupos.append(f"({sem_campo} registros sem informação de {coluna} ficaram fora dos grupos.)")
         return sql, grupos
 
@@ -661,6 +710,9 @@ def _cabecalho(consulta: Consulta, total_tabela: int, termos: tuple[str, ...], j
             f"Consulta SQL na tabela contratacoes: {total_tabela} registros da amostra PNCP/RJ. "
             "Contratos: valorGlobal; compras: homologado ou estimado. Valores informados, não pagamentos."
         )
+        if consulta.deduplicar:
+            origem += (" Contratação com compra e contrato no corpus conta uma vez"
+                       + (" (pela compra, que traz a modalidade)." if _usa_modalidade(consulta) else " (pelo contrato)."))
     filtros = []
     if consulta.ano is not None:
         fim = consulta.ano_final or consulta.ano
@@ -690,7 +742,7 @@ def _cabecalho(consulta: Consulta, total_tabela: int, termos: tuple[str, ...], j
             else f"órgão {' '.join(consulta.orgao_termos)} (nenhum órgão do corpus casa com esse nome)"
         )
     if termos:
-        filtros.append(f"objeto contém {(' e ' if juncao == 'AND' else ' ou ').join(termos)}")
+        filtros.append(f"objeto contém {(' e ' if juncao == 'AND' else ' ou ').join(map(_descrever_termo, termos))}")
     return f"{origem} Filtros: {', '.join(filtros) or 'nenhum'}. Cálculo: {consulta.tipo}."
 
 
@@ -711,6 +763,12 @@ def _resolver_valores(consulta: Consulta, banco: Banco) -> Consulta:
     SQLite e no Postgres; o SQL recebe só ``coluna IN (...)``.
     """
     mudancas: dict[str, Any] = {}
+    if consulta.tabela == "contratacoes" and not (consulta.so_contratos or consulta.referencia_temporal == "assinatura"):
+        try:  # base montada antes da coluna (ex.: Neon só de leitura desatualizado): sem deduplicar
+            banco.consultar("SELECT numero_controle_compra FROM contratacoes LIMIT 1")
+            mudancas["deduplicar"] = True
+        except Exception:
+            pass
     if consulta.modalidade_termos and consulta.tabela == "contratacoes":
         valores = banco.consultar(
             "SELECT DISTINCT modalidade AS v FROM contratacoes WHERE modalidade IS NOT NULL"

@@ -109,6 +109,8 @@ def test_ranking_de_contratacoes_nao_vai_para_a_agregada():
     "Quanto o Comando da Aeronáutica contratou em 2025?",
     "Quanto a Prefeitura de Niterói comprou em 2025?",
     "Quais órgãos contrataram serviços de limpeza?",
+    "Quais compras de ambulância foram feitas em 2025?",
+    "Qual o valor total das compras de tecnologia em 2025?",
 ])
 def test_verbo_contratar_ou_comprar_vai_para_a_estruturada(pergunta):
     assert Natureza.ESTRUTURADA in rotear_pergunta(pergunta).bases_selecionadas

@@ -613,3 +613,77 @@ def test_orgao_nao_reconhecido_vira_filtro_de_orgao_pelos_termos(tmp_path):
                          {"banco": banco, "documents_file": documents}, ano=2025)
     assert "órgão em COMANDO DA AERONAUTICA" in chunk.content
     assert "Geral: 2 registros; total R$ 1.500,00" in chunk.content
+
+
+def _base_com_objetos(tmp_path, objetos):
+    registros = []
+    for numero, (objeto, valor) in enumerate(objetos, 1):
+        registro = _contratacao(f"T-{numero}", objeto=objeto, valor_estimado=valor, modalidade=None)
+        registros.append(registro)
+    documents = escrever_documents(tmp_path / "documents.jsonl", contratacoes=registros)
+    banco = Banco(sqlite_path=tmp_path / "base.sqlite")
+    structured_db.construir_banco(documents, banco)
+    return {"banco": banco, "documents_file": documents}
+
+
+def test_tecnologia_quer_dizer_ti_e_nao_transferencia_de_tecnologia(tmp_path):
+    base = _base_com_objetos(tmp_path, [
+        ("Transferência de tecnologia do medicamento Darunavir", 1_000_000.0),
+        ("Cateteres de tecnologia IVUS para hemodinâmica", 500.0),
+        ("Solução de Tecnologia da Informação e Comunicação (TIC)", 300.0),
+        ("Licença de uso de software de gestão", 100.0),
+    ])
+    [chunk] = _consultar("Qual o total das compras de tecnologia em 2025?", base, ano=2025)
+
+    assert "Geral: 2 registros; total R$ 400,00" in chunk.content
+    assert "tecnologia (TI:" in chunk.content
+
+
+def test_modalidade_mais_frequente_sem_nenhuma_modalidade_informada(tmp_path):
+    base = _base_com_objetos(tmp_path, [("Manutenção de computadores", 100.0), ("Manutenção de computadores", 200.0)])
+    [chunk] = _consultar("Quais modalidades apareceram com mais frequência nas contratações de manutenção de computadores?", base)
+
+    assert "Nenhum dos 2 registros que atendem aos filtros informa modalidade" in chunk.content
+    assert "não é possível dizer" in chunk.content
+
+
+def _base_compra_e_contrato(tmp_path):
+    compra = _contratacao("111-1-000001/2025", objeto="Locação de ambulâncias", valor_estimado=1000.0,
+                          modalidade="Pregão - Eletrônico")
+    contrato = _contratacao("111-2-000001/2025", objeto="Locação de ambulâncias", modalidade=None)
+    contrato.update(dataAssinatura="2025-03-01", valorGlobal=900.0, nomeRazaoSocialFornecedor="F",
+                    numeroControlePncpCompra="111-1-000001/2025")
+    outra = _contratacao("111-1-000002/2025", objeto="Ambulância de resgate", valor_estimado=50.0,
+                         modalidade="Dispensa")
+    documents = escrever_documents(tmp_path / "documents.jsonl", contratacoes=[compra, contrato, outra])
+    banco = Banco(sqlite_path=tmp_path / "base.sqlite")
+    structured_db.construir_banco(documents, banco)
+    return {"banco": banco, "documents_file": documents}
+
+
+def test_compra_e_contrato_da_mesma_contratacao_contam_uma_vez(tmp_path):
+    base = _base_compra_e_contrato(tmp_path)
+    [chunk] = _consultar("Qual o total das compras de ambulância em 2025?", base, ano=2025)
+
+    # Sem deduplicar seriam 3 registros (1.000 + 900 + 50); fica o contrato.
+    assert "Geral: 2 registros; total R$ 950,00" in chunk.content
+    assert "conta uma vez (pelo contrato)" in chunk.content
+
+
+def test_pergunta_de_modalidade_mantem_a_compra_e_tira_o_contrato(tmp_path):
+    base = _base_compra_e_contrato(tmp_path)
+    [chunk] = _consultar("Qual a modalidade mais usada nas compras de ambulância em 2025?", base, ano=2025)
+
+    assert "Pregão - Eletrônico: 1 registros" in chunk.content
+    assert "Dispensa: 1 registros" in chunk.content
+    assert "sem informação de modalidade" not in chunk.content  # o contrato duplicado saiu
+
+
+def test_base_sem_a_coluna_nova_roda_sem_deduplicar(tmp_path):
+    base = _base_compra_e_contrato(tmp_path)
+    import sqlite3
+    with sqlite3.connect(base["banco"].sqlite_path) as conexao:
+        conexao.execute("ALTER TABLE contratacoes DROP COLUMN numero_controle_compra")
+    consulta = sq.detectar_consulta("Qual o total das compras de ambulância em 2025?", QueryFilters(ano=2025), ESTRUTURADA)
+
+    assert sq._resolver_valores(consulta, base["banco"]).deduplicar is False

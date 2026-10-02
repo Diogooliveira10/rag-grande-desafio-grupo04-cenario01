@@ -57,6 +57,10 @@ _COLUNAS_CONTRATACOES = {
     "ano_assinatura": "INTEGER",
     "mes_assinatura": "TEXT",
     "tipo_registro": "TEXT",
+    # Contrato assinado: número de controle da compra que o originou. A mesma
+    # contratação aparece como compra publicada e como contrato; este campo
+    # permite contar uma vez só.
+    "numero_controle_compra": "TEXT",
     "fornecedor": "TEXT",
     "modalidade": "TEXT",
     "modo_disputa": "TEXT",
@@ -269,6 +273,7 @@ def _linha_contratacao(chunk: Mapping[str, Any], registro: dict[str, Any]) -> di
         "ano_assinatura": int(data_assinatura[:4]) if data_assinatura else None,
         "mes_assinatura": data_assinatura[:7] if data_assinatura else None,
         "tipo_registro": "contrato_assinado" if contrato_assinado else "publicacao_compra",
+        "numero_controle_compra": registro.get("numeroControlePncpCompra") if contrato_assinado else None,
         "fornecedor": registro.get("nomeRazaoSocialFornecedor"),
         "modalidade": registro.get("modalidadeNome") or (chunk.get("extras") or {}).get("modalidade"),
         "modo_disputa": registro.get("modoDisputaNome"),
@@ -363,7 +368,7 @@ def construir_banco(documents_file: Path = DOCUMENTS_FILE, banco: Optional[Banco
         "destino": banco.descricao(),
         "documents_file": str(documents_file),
         "source_sha256": _sha256(documents_file),
-        "schema_version": "2",
+        "schema_version": "3",
         "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "contratacoes": len(contratacoes),
         "pca_planos": len(planos),
@@ -425,7 +430,7 @@ def garantir_banco(
             versao = banco.consultar("SELECT valor FROM meta WHERE chave = ?", ["schema_version"])
         except Exception:
             versao = []
-    if registrado == _sha256(documents_file) and versao and versao[0]["valor"] == "2":
+    if registrado == _sha256(documents_file) and versao and versao[0]["valor"] == "3":
         return banco
     try:
         construir_banco(documents_file, banco)

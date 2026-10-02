@@ -402,12 +402,12 @@ py -m src.structured_db build
 py -m src.structured_db sql "SELECT modalidade, COUNT(*) AS n FROM contratacoes GROUP BY modalidade ORDER BY n DESC"
 ```
 
-Onde a base fica depende de `DATABASE_URL` no `.env`:
+Onde a base fica depende de `DATABASE_URL` no `.env` — o mesmo código e o mesmo SQL valem para os dois:
 
-- **Vazio:** SQLite local em `data/structured/base_estruturada.sqlite` (fora do Git). Não precisa de conta nem de internet.
-- **Preenchido:** Postgres, por exemplo no [Neon](https://neon.tech). Cole a connection string do painel do Neon (`postgresql://...?sslmode=require`). A connection string tem senha: fica só no `.env`, nunca no repositório nem no log (o log mostra só o host).
+- **Preenchido:** Postgres no [Neon](https://neon.tech) (`postgresql://...?sslmode=require`). É a base do projeto. A connection string tem senha: fica só no `.env`, nunca no repositório nem no log (o log mostra só o host). Com o usuário dono, a base se remonta sozinha quando o `documents.jsonl` ou o esquema mudam; com um usuário só de leitura (`rag_leitor`), ela é usada como está e o log da etapa `consulta_sql` marca `base_desatualizada` — quem tem o usuário dono roda `py -m src.structured_db build` uma vez.
+- **Vazio:** SQLite em `data/structured/base_estruturada.sqlite`, versionado no Git com o snapshot v6. Serve a quem não tem a connection string do Neon, aos testes (que sempre usam SQLite temporário, sem internet nem senha; ver `tests/conftest.py`) e às avaliações reproduzíveis. Quando o esquema muda, o arquivo remontado entra no commit, para ninguém ficar com ele alterado.
 
-Tabelas: `contratacoes` (uma linha por contratação do PNCP: órgão, esfera, município, modalidade, objeto, valor estimado e homologado; `valor` = homologado, ou estimado quando o homologado é zero ou ausente) e `pca_planos` (um plano de contratações anual por unidade, com valor total e quantidade de itens). A tabela de PCA tem só os planos presentes no corpus — o total oficial do PCA do Estado está nos indicadores da base agregada, e o resultado SQL avisa isso. A tabela `contratacoes` não tem dados de fornecedor.
+Tabelas: `contratacoes` e `pca_planos`. Em `contratacoes`, cada linha é uma compra publicada ou um contrato assinado do PNCP: órgão, esfera, município, objeto, modalidade (só as compras trazem), fornecedor (só os contratos trazem) e valor (`valorGlobal` no contrato; homologado, ou estimado, na compra). O contrato guarda o número da compra que o originou (`numero_controle_compra`), e as perguntas sobre "contratações" contam uma vez a contratação que tem os dois registros. Valores abaixo de R$ 1,00 (R$ 0,00 e R$ 0,01 simbólicos do PNCP) ficam fora de média, mediana e ranking. `pca_planos` tem um plano de contratações anual por unidade, com valor total e quantidade de itens; são só os planos presentes no corpus — o total oficial do PCA do Estado está nos indicadores da base agregada, e o resultado SQL avisa isso.
 
 **5. Testar o endpoint de LLM/embeddings compartilhado**
 
