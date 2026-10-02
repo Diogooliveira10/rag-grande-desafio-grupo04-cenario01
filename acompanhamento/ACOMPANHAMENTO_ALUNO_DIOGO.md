@@ -125,3 +125,31 @@ A execução integral do pipeline real foi concluída, com 14/22 acertos no Gold
 
 - Utilizei assistentes de IA como apoio na execução controlada do Golden Set, na correlação entre relatórios, logs e código do pipeline e na organização do diagnóstico por caso.
 - As conclusões foram conferidas com os artefatos locais da execução e com o comportamento observado no código. Não implementei correções durante esta atividade.
+
+## Encontro 9 - 2026-10-02
+
+### Relato individual - Diogo Oliveira
+
+**Tarefa do dia:**
+Validar documentalmente os casos `P3.1`, `P3.2` e `P6.1` diretamente contra o corpus real do projeto, sem alterar o Golden Set, a avaliação, o pipeline, o SQLite, o índice ou os dados do corpus.
+
+**O que fiz:**
+
+- Revisei a redação atual dos casos em `eval/golden_set.jsonl` e confirmei o que o projeto espera para `P3.1`, `P3.2` e `P6.1`.
+- Inspecionei o corpus normalizado em `data/normalized/documents.jsonl` e os documentos normativos em `data/normalized/editais_normativo/documents.jsonl`, procurando evidência direta sobre pesquisa de preços, vigência, modalidade e microempresa/pregão.
+- Consultei a base estruturada em `data/structured/base_estruturada.sqlite` para verificar se havia amostras de contratações em 2025 no Rio de Janeiro e se a modalidade aparecia com evidência rastreável.
+- Tatei a distinção entre `MENÇÃO A PREGÃO` e `REGRA SOBRE PARTICIPAÇÃO DE ME/EPP EM PREGÃO`, a regra principal exigida para validar `P6.1`.
+- Concluí que o corpus comprova o procedimento relacionado à pesquisa de preços, mas não comprova documentalmente a vigência em 2025 para a regra; a classificação correta foi `PARCIALMENTE VALIDADO`.
+- Mantive a conclusão de que `P3.2` possui amostra e normas relacionadas, mas não possui vínculo direto e explícito suficiente para uma relação unívoca entre contrato, modalidade e norma aplicável; a classificação foi `PARCIALMENTE VALIDADO`.
+- Confirmamos que `P6.1` não está sustentado pelo corpus de forma direta, porque microempresa e pregão aparecem separadamente, mas a regra de participação de ME/EPP em pregão eletrônico não está comprovada no corpus; a classificação foi `NÃO VALIDADO`.
+- Registrei a evidência em formato rastreável, com `document_id`, `chunk_id`, base, trecho mínimo e o que cada evidência comprova.
+- Mantive o relatório estritamente dentro do que o corpus consegue sustentar, sem preencher lacunas com conhecimento jurídico externo.
+- Não alterei nenhum arquivo do projeto, nenhum dado, nem a implementação. A atividade foi somente leitura e análise documental.
+
+**Resultado:**
+A validação factual do dia confirmou que o Golden Set atual reflete apenas parte do que o corpus sustenta e que, em pontos-chave, o corpus não comprova a vigência temporal nem a regra direta exigida para os casos `P3.1` e `P6.1`. O diagnóstico foi registrado e segue como evidência factual, sem alterações no benchmark nem no pipeline.
+
+### Uso de assistentes de IA:
+
+- Utilizei assistentes de IA como apoio na organização da evidência, na revisão dos trechos normativos, na separação entre menção e regra efetiva e na consolidação do relatório final da fase de validação factual.
+- As conclusões foram verificadas com o corpus, os documentos normativos e os dados estruturados disponíveis no projeto. Não houve alteração de código, dados ou avaliação durante a atividade.

@@ -325,3 +325,58 @@ O grupo também avançou na compreensão dos entregáveis iniciais, principalmen
 - Foram utilizados assistentes de IA como apoio ao diagnóstico e às correções de filtros e consultas, à elaboração de testes, à revisão das alterações, à análise do reranking e à avaliação do Golden Set.
 
 - Os resultados foram conferidos com testes, relatórios, logs e artefatos locais. A execução diagnóstica do Golden Set não levou a alterações no código, nos testes ou nos dados.
+
+## Encontro 9 - 2026-10-02
+
+### Relato individual - Diogo Oliveira
+
+- Validamos documentalmente os casos `P3.1`, `P3.2` e `P6.1` diretamente contra o corpus do projeto, sem alterar o Golden Set, a avaliação, o pipeline, o SQLite, o índice ou quaisquer dados do corpus.
+- Revisei a redação atual dos casos em `eval/golden_set.jsonl` e confirmei o que o projeto espera para cada caso, incluindo `bases_esperadas`, `is_refusal_esperado` e os termos esperados.
+- Inspecionei o corpus normalizado em `data/normalized/documents.jsonl` e os documentos normativos em `data/normalized/editais_normativo/documents.jsonl`, procurando evidência direta sobre pesquisa de preços, vigência, modalidade, pregão eletrônico e microempresa.
+- Consultei a base estruturada em `data/structured/base_estruturada.sqlite` para verificar se havia amostras de contratações em 2025 no Rio de Janeiro e se a modalidade aparecia com evidência rastreável.
+- Concluí que o corpus comprova o procedimento relacionado à pesquisa de preços, mas não comprova documentalmente a vigência em 2025 da regra; a classificação correta foi `PARCIALMENTE VALIDADO`.
+- Mantive a conclusão de que `P3.2` possui amostra e normas relacionadas, mas não possui vínculo direto e explícito suficiente para uma relação unívoca entre contrato, modalidade e norma aplicável; a classificação foi `PARCIALMENTE VALIDADO`.
+- Confirmei que `P6.1` não está sustentado pelo corpus de forma direta, porque microempresa e pregão aparecem separadamente, mas a regra de participação de ME/EPP em pregão eletrônico não está comprovada no corpus; a classificação foi `NÃO VALIDADO`.
+- Registrei a evidência rastreável em conjunto com `document_id`, `chunk_id`, base, trecho mínimo e o que cada evidência comprova.
+- Mantive o relatório estritamente dentro do que o corpus consegue sustentar, sem preencher lacunas com conhecimento jurídico externo.
+- A atividade foi apenas leitura e análise documental; não alterei nenhum arquivo do projeto, nenhum dado nem a implementação.
+
+### Relato individual - Renato Lemos
+
+- Como responsável pelos merges, integrei ao main a separação do front-end, as correções do `query_analysis`, a nova versão da `ARQUITETURA.md` e os relatos do dia.
+- Revisei o Golden Set contra a base SQL da v6, não apenas a rota e a recusa, e confirmei inconsistências reais: a P2.1 admitia que não havia ambulância tipo D, quando há registro; a P5.3 era um contrato de transferência de tecnologia de medicamento; a P4.2 respondia "pregão" mesmo sem modalidade correta; e a P4.3 apontava "não informado" como modalidade mais usada.
+- Constatei que o Golden Set não tinha gabarito de conteúdo e que havia perguntas dependentes da pergunta anterior; também identifiquei que a base de atas quase não era testada.
+- Distribuí as tarefas do ajuste do benchmark entre a equipe: Diogo ficou com o gabarito e revisão do Golden Set, Pâmela com o `query_analysis` e Marco com a `ARQUITETURA.md`.
+- Revisei a arquitetura do projeto e passei uma lista de ajustes para o Marco. Também validei a correção do `query_analysis` após os ajustes da Pâmela, incluindo melhorias em filtros por órgão, esfera e modalidade.
+- Corrigi o roteador e a consulta SQL, ajustando casos em que perguntas com termos como "comprou", "contratou" ou "compras" ficavam sem base, além de tratar corretamente valores simbólicos, contagens de contratações e a interseção com a categoria tecnologia.
+- Atualizei o ambiente de dados para a versão v6 no Neon e verifiquei que o SQLite e o Neon produzem os mesmos resultados nas mesmas perguntas. O SQLite foi mantido para quem não tem acesso ao Neon, para testes e avaliações.
+- Atualizei o README e o registro da execução v6 e finalizei a suíte com 886 testes aprovados.
+
+### Relato individual - Marco Araújo
+
+- Atualizei a `ARQUITETURA.md` para refletir o estado real do projeto: entrada de rerank e consulta SQL no pipeline, atualização do corpus e do índice para a v6, além de correção das pendências com números reais e detalhamento do estado do sistema.
+- Mantive a documentação alinhada com a base atual e com a execução do projeto em produção local.
+
+### Relato individual - Pâmela de Freitas
+
+- Trabalhei na extração de órgão, esfera e modalidade no `query_analysis`, a partir do que o Renato pediu.
+- Corrigi a forma de reconhecer nomes de órgão, removendo partículas como "no", "na" e "em" e normalizando maiúsculas/minúsculas para evitar falsos positivos.
+- Aumentei a cobertura de palavras-gatilho e siglas de órgãos, como Fundo, Comando, Banco, DPE, FIOCRUZ, SES, SEEDUC e outras siglas do sistema.
+- Ajustei a identificação de esfera federal e modalidades como pregão, dispensa, concorrência e inexigibilidade, sem transformar textos genéricos em filtros.
+- Corrigi casos de falso positivo em expressões como "no município do Rio", "legislação federal" e termos como "dispensa médica" ou "não foram por dispensa".
+
+## **Ficou pendente:**
+
+- Definir se o Golden Set deve ser ajustado após esta validação factual, considerando a diferença entre o que o corpus sustenta e as expectativas atuais.
+- Revisar a cobertura e os campos disponíveis nas bases, especialmente modalidades, especificações técnicas e informações necessárias para comparações entre contratações.
+- Continuar a validação das evidências e a preparação da documentação final para a decisão de benchmark.
+
+## **Bloqueios em aberto:**
+
+- O corpus continua limitando a comprovação temporal e a regra direta em alguns casos, especialmente `P3.1` e `P6.1`, mesmo com os dados disponíveis.
+- O benchmark ainda precisa ser revisado em pontos em que o corpus não sustenta a expectativa atual, mas a decisão final depende do fechamento do relatório factual.
+
+## **Uso de assistentes de IA:**
+
+- Utilizei assistentes de IA como apoio na organização da evidência, revisão dos trechos normativos, separação entre menção e regra efetiva e consolidação do relatório final da etapa de validação factual.
+- As conclusões foram verificadas com o corpus, os documentos normativos e os dados estruturados do projeto. Não houve alteração de código, dados ou avaliação durante a atividade.
