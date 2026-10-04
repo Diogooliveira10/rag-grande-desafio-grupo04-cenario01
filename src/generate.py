@@ -189,7 +189,7 @@ def _chunks_no_orcamento(chunks: list[Chunk]) -> list[Chunk]:
             conteudo = conteudo[: config.GENERATION_CHUNK_CHARS].rstrip() + " [...]"
         tamanho = len(_cabecalho(chunk.metadata)) + len(conteudo)
         if selecionados and usados + tamanho > config.GENERATION_CONTEXT_CHARS:
-            break
+            continue
         selecionados.append(chunk.model_copy(update={"content": conteudo}))
         usados += tamanho
     return selecionados
@@ -476,6 +476,11 @@ def gerar_resposta(
     chunks_prompt = _chunks_no_orcamento(chunks)
     sensibilidade["chunks_no_prompt"] = len(chunks_prompt)
     sensibilidade["chunks_fora_do_orcamento"] = len(chunks) - len(chunks_prompt)
+    sensibilidade["prompt_chunk_ids"] = [chunk.metadata.chunk_id for chunk in chunks_prompt]
+    selecionados_ids = {chunk.metadata.chunk_id for chunk in chunks_prompt}
+    sensibilidade["chunks_excluidos_orcamento"] = [
+        chunk.metadata.chunk_id for chunk in chunks if chunk.metadata.chunk_id not in selecionados_ids
+    ]
     chunks = chunks_prompt
     mensagens = _montar_prompt(query, chunks)
     cliente = cliente or _cliente_padrao()

@@ -9,8 +9,9 @@ GOLDEN_SET = Path(__file__).resolve().parents[1] / "eval" / "golden_set.jsonl"
 
 def test_load_golden_set_tem_18_referencias_a_de_falha_e_3_guardrails():
     cases = load_golden_set(GOLDEN_SET)
-    assert len(cases) == 22
-    assert len({case.id for case in cases}) == 22  # sem IDs duplicados
+    assert len(cases) == 26
+    assert len({case.id for case in cases}) == 26  # sem IDs duplicados
+    assert {case.id for case in cases[-4:]} == {"A1", "A2", "I1", "I2"}
     assert sum(case.e_pergunta_de_falha_esperada for case in cases) == 1
     guardrails = [case for case in cases if case.id.startswith("G")]
     assert {case.refusal_reason_esperado for case in guardrails} == {
@@ -49,6 +50,28 @@ def test_evaluate_case_acerta_quando_rota_e_recusa_batem():
     assert resultado["acertou"] is True
     assert resultado["rota_ok"] is True
     assert resultado["refusal_ok"] is True
+    assert resultado["escopo_avaliacao"] == "roteamento"
+    assert resultado["content_ok"] is None
+
+
+def test_resposta_factual_com_rota_correta_mas_conteudo_e_citacao_errados_falha():
+    caso = next(case for case in load_golden_set(GOLDEN_SET) if case.id == "I1")
+    resposta = {
+        "bases_consultadas": caso.bases_esperadas,
+        "is_refusal": False,
+        "answer": "Nenhum registro encontrado.",
+        "sources_used": [],
+        "confidence_level": "baixa",
+    }
+
+    resultado = evaluate_case(caso, resposta)
+
+    assert resultado["rota_ok"] is True
+    assert resultado["content_ok"] is False
+    assert resultado["citacao_ok"] is False
+    assert resultado["expected_source_ok"] is False
+    assert resultado["acertou"] is False
+    assert resultado["escopo_avaliacao"] == "resposta_completa"
 
 
 def test_evaluate_case_falha_quando_rota_diverge():

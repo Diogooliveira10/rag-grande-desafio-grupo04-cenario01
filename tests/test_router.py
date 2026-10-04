@@ -34,6 +34,28 @@ def test_rota_estruturada_e_conversacional():
     assert decisao.bases_selecionadas == [Natureza.ESTRUTURADA, Natureza.CONVERSACIONAL]
 
 
+@pytest.mark.parametrize(
+    "pergunta",
+    [
+        "Qual órgão, município/UF e data de assinatura da ata de registro de preços identificada?",
+        "Qual órgão e vigência da ata de registro de preços?",
+        "Qual órgão e objeto da ata de registro de preços?",
+    ],
+)
+def test_consulta_de_campo_de_ata_prioriza_base_conversacional(pergunta):
+    assert rotear_pergunta(pergunta).bases_selecionadas == [Natureza.CONVERSACIONAL]
+
+
+def test_consulta_analitica_de_contratos_com_ata_mantem_bases_estruturadas():
+    decisao = rotear_pergunta(
+        "Compare o valor total dos contratos do órgão com o valor das atas de registro de preços."
+    )
+
+    assert Natureza.ESTRUTURADA in decisao.bases_selecionadas
+    assert Natureza.CONVERSACIONAL in decisao.bases_selecionadas
+    assert Natureza.AGREGADA in decisao.bases_selecionadas
+
+
 def test_recusa_nao_seleciona_base():
     decisao = rotear_pergunta("Esses contratos comprovam que algum fornecedor fraudou licitacoes?")
 

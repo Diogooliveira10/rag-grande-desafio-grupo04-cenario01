@@ -277,6 +277,39 @@ def test_chunks_entram_ate_o_limite_do_orcamento(monkeypatch):
     assert selecionados[0].content == "x" * 50 + " [...]"
 
 
+@pytest.mark.parametrize("posicao", [6, 7])
+def test_chunk_relevante_em_posicao_tardia_entra_se_houver_orcamento(monkeypatch, posicao):
+    monkeypatch.setattr(gen.config, "GENERATION_CONTEXT_CHARS", 2400)
+    monkeypatch.setattr(gen.config, "GENERATION_CHUNK_CHARS", 100)
+    chunks = [
+        _chunk(chunk_id=f"c{i}", conteudo=f"evidência {i}" * 5)
+        for i in range(posicao)
+    ]
+
+    selecionados = gen._chunks_no_orcamento(chunks)
+
+    assert f"c{posicao - 1}" in [chunk.metadata.chunk_id for chunk in selecionados]
+
+
+def test_orcamento_pula_chunk_que_nao_cabe_e_tenta_os_seguinte(monkeypatch):
+    monkeypatch.setattr(gen.config, "GENERATION_CONTEXT_CHARS", 500)
+    monkeypatch.setattr(gen.config, "GENERATION_CHUNK_CHARS", 100)
+    cabecalho_extenso = _chunk(chunk_id="cabecalho_extenso", conteudo="curto")
+    cabecalho_extenso = cabecalho_extenso.model_copy(
+        update={
+            "metadata": cabecalho_extenso.metadata.model_copy(
+                update={"extras": {"titulo_documento": "fonte-" + ("x" * 1000)}}
+            )
+        }
+    )
+    chunks = [_chunk(chunk_id="cabivel", conteudo="curto"), cabecalho_extenso,
+              _chunk(chunk_id="relevante", conteudo="também curto")]
+
+    selecionados = gen._chunks_no_orcamento(chunks)
+
+    assert [chunk.metadata.chunk_id for chunk in selecionados] == ["cabivel", "relevante"]
+
+
 def test_primeiro_chunk_sempre_entra_mesmo_acima_do_orcamento(monkeypatch):
     monkeypatch.setattr(gen.config, "GENERATION_CONTEXT_CHARS", 10)
 
@@ -311,6 +344,8 @@ def test_geracao_loga_quantos_chunks_couberam_no_prompt(tmp_path, monkeypatch):
     )
     assert registro["extra"]["chunks_no_prompt"] == 1
     assert registro["extra"]["chunks_fora_do_orcamento"] == 2
+    assert registro["extra"]["prompt_chunk_ids"] == ["c0"]
+    assert registro["extra"]["chunks_excluidos_orcamento"] == ["c1", "c2"]
 
 
 def test_prompt_mostra_titulo_do_documento_e_vigencia():

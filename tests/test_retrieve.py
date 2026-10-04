@@ -525,6 +525,81 @@ def test_filters_read_values_from_extras_and_reject_invalid_operator():
     ) == []
 
 
+@pytest.mark.parametrize(
+    "identificador",
+    [
+        "28741080000155-1-000001/2023-000001",
+        "00394429000100-2-000183/2025",
+    ],
+)
+def test_retrieve_registra_posicao_dense_bm25_rrf_e_promove_match_exato(
+    identificador, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(default_logger, "logs_dir", tmp_path / "logs")
+    distractors = [
+        RetrievalResult(
+            chunk_id=f"d{i:02d}",
+            content=f"ata de registro de preços documento {i}",
+            metadata={"base_id": "atas_conversacional", "source_file": f"d{i}.json"},
+            score=1.0 - i / 100,
+        )
+        for i in range(8)
+    ]
+    alvo_id = "alvo-exato"
+    alvo = RetrievalResult(
+        chunk_id=alvo_id,
+        content=f"registro PNCP {identificador}",
+        metadata={
+            "base_id": "atas_conversacional",
+            "source_file": "ata.json",
+            "extras": {"numero_controle_pncp": identificador},
+        },
+        score=0.01,
+    )
+    record = {
+        "chunk_id": alvo_id,
+        "base_id": "atas_conversacional",
+        "text": alvo.content,
+        "metadata": alvo.metadata,
+    }
+    monkeypatch.setattr(retrieve_module, "_records_for", lambda *args, **kwargs: [record])
+    monkeypatch.setattr(retrieve_module, "dense_retrieve", lambda *args, **kwargs: [*distractors, alvo])
+    monkeypatch.setattr(retrieve_module, "bm25_retrieve", lambda *args, **kwargs: [*distractors, alvo])
+
+    resultados = retrieve(
+        f"Qual ata PNCP {identificador}?",
+        None,
+        top_k=10,
+        documents_file=tmp_path / "documents.jsonl",
+        index_dir=tmp_path / "index",
+        embed_fn=lambda texts: [[1.0, 0.0] for _ in texts],
+        run_id="identifier-run",
+        query_id="identifier-query",
+    )
+
+    assert resultados[0].chunk_id == alvo_id
+    assert resultados[0].metadata["extras"]["identificador_pncp_exato"] is True
+    assert resultados[0].metadata["source_file"] == "ata.json"
+    logs = [
+        json.loads(line)
+        for line in default_logger.log_path().read_text(encoding="utf-8").splitlines()
+    ]
+    for stage in ("retrieval_denso", "retrieval_bm25"):
+        diagnostico = next(
+            registro["extra"]["diagnostico_identificadores"]
+            for registro in logs
+            if registro["stage"] == stage and registro["query_id"] == "identifier-query"
+        )
+        assert diagnostico[0]["matches"][0]["rank"] == 9
+    fusao = next(
+        registro
+        for registro in logs
+        if registro["stage"] == "fusao_rrf" and registro["query_id"] == "identifier-query"
+    )
+    assert fusao["extra"]["diagnostico_identificadores"][0]["matches"][0]["rank"] == 1
+    assert fusao["extra"]["diagnostico_identificadores"][0]["matches"][0]["exact_lookup"] is True
+
+
 def test_filters_exclude_missing_empty_and_unexpected_metadata_values():
     records = [
         {"chunk_id": "missing", "text": "ambulancia", "metadata": {}},

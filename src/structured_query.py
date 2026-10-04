@@ -89,6 +89,9 @@ _RE_CONTAGEM_CONTRATOS = re.compile(
 _RE_AGENTE = re.compile(r"\b[a-z]+(?:ad|id|it)[oa]s? por (?:orgaos|municipios|esferas)\b")
 # Pergunta que pede os registros em si: "quais órgãos contrataram…", "existem contratações de…".
 _RE_LISTAGEM = re.compile(r"^(?:quais|qual|existem?|ha|houve|liste|listar|mostre|mostrar)\b")
+_RE_NUMERO_CONTROLE_PNCP = re.compile(
+    r"(?<!\d)\d{14}-\d-\d{6}/\d{4}(?:-\d{6})?(?!\d)"
+)
 
 
 def requer_calculo(query: str) -> bool:
@@ -187,6 +190,7 @@ class Consulta:
     # A pergunta cita lei/decreto ("contratos que seguem a Lei 14.133"): a norma
     # não é filtro, e o resultado avisa isso em vez de parecer uma contagem por lei.
     norma_citada: bool = False
+    numero_controle_pncp: Optional[str] = None
 
 
 # Contrato de compilação apenas: estas tabelas de fatos não são criadas aqui.
@@ -335,6 +339,15 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
     nem agregada: aí a busca normal responde sozinha.
     """
     bases = set(bases)
+    if Natureza.ESTRUTURADA in bases:
+        identificador = _RE_NUMERO_CONTROLE_PNCP.search(query)
+        if identificador:
+            return Consulta(
+                tabela="contratacoes",
+                tipo="identificador",
+                limite=1,
+                numero_controle_pncp=identificador.group(0),
+            )
     # Sem as expressões que já viraram filtro: em "média dos contratos com valor
     # maior que 2000", o "maior" não pede ranking, e "acima"/"milhão" não
     # descrevem o objeto contratado.
@@ -524,6 +537,9 @@ def _where(consulta: Consulta, termos: Iterable[str], juncao: str = "AND") -> tu
     if consulta.esfera:
         condicoes.append("esfera = ?")
         parametros.append(consulta.esfera)
+    if consulta.numero_controle_pncp:
+        condicoes.append("numero_controle_pncp = ?")
+        parametros.append(consulta.numero_controle_pncp)
     if consulta.mes is not None and consulta.ano is not None and consulta.tabela == "contratacoes":
         coluna_mes = "mes_assinatura" if consulta.referencia_temporal == "assinatura" else "mes_publicacao"
         condicoes.append(f"{coluna_mes} = ?")
@@ -620,6 +636,21 @@ def _estatisticas(valores: list[float]) -> str:
 def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao: str) -> tuple[str, list[str]]:
     where, parametros = _where(consulta, termos, juncao)
     coluna_valor = _coluna_valor(consulta)
+
+    if consulta.tipo == "identificador":
+        sql = (
+            "SELECT numero_controle_pncp, data_assinatura, orgao_nome, municipio, uf, "
+            f"fornecedor, objeto, valor_contratado FROM {consulta.tabela}{where} LIMIT 1"
+        )
+        linhas = banco.consultar(sql, parametros)
+        return sql, [
+            f"PNCP {linha['numero_controle_pncp']} | órgão: {linha['orgao_nome']} | "
+            f"fornecedor: {linha['fornecedor'] or 'não informado'} | "
+            f"valor contratado: {_brl(linha['valor_contratado'])} | "
+            f"assinatura: {linha['data_assinatura'] or 'não informada'} | "
+            f"{_resumir(linha['objeto'], 220)}"
+            for linha in linhas
+        ] or [f"Nenhum contrato encontrado para o controle PNCP {consulta.numero_controle_pncp}."]
 
     if consulta.tipo in ("ranking", "listagem"):
         # Listagem mostra também registros sem valor (depois dos com valor) e

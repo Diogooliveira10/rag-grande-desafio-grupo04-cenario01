@@ -21,6 +21,7 @@ DEFAULT_RRF_K = 60
 DEFAULT_TOP_K = 10
 DEFAULT_FETCH_K = 50
 _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
+_PNCP_CONTROL_RE = re.compile(r"(?<!\d)\d{14}-\d-\d{6}/\d{4}(?:-\d{6})?(?!\d)")
 MANIFEST_PATH = config.ROOT_DIR / "corpus_manifest.yaml"
 _NATUREZAS = frozenset(item.value for item in Natureza)
 
@@ -428,6 +429,114 @@ def _result(record: Mapping[str, Any], score: float, content: str = "") -> Retri
         source_path=record.get("source_path"),
         _record=dict(record),
     )
+
+
+def _identificadores_pncp(query: str) -> list[str]:
+    return list(dict.fromkeys(_PNCP_CONTROL_RE.findall(query)))
+
+
+def _identificador_em_resultado(identificador: str, item: RetrievalResult) -> bool:
+    metadata = item.metadata
+    extras = metadata.get("extras")
+    return identificador in item.content or (
+        isinstance(extras, Mapping)
+        and identificador in json.dumps(extras, ensure_ascii=False, default=str)
+    )
+
+
+def _diagnostico_identificadores(
+    query: str, resultados: Sequence[RetrievalResult]
+) -> list[dict[str, Any]]:
+    diagnosticos = []
+    for identificador in _identificadores_pncp(query):
+        matches = [
+            {
+                "rank": rank,
+                "chunk_id": item.chunk_id,
+                "score": item.score,
+                "dense_score": item.dense_score,
+                "sparse_score": item.sparse_score,
+                "rrf_score": item.rrf_score,
+                "exact_lookup": bool((item.metadata.get("extras") or {}).get("identificador_pncp_exato")),
+            }
+            for rank, item in enumerate(resultados, start=1)
+            if _identificador_em_resultado(identificador, item)
+        ]
+        diagnosticos.append({"identificador": identificador, "matches": matches})
+    return diagnosticos
+
+
+def _resultados_identificador_exato(
+    query: str,
+    records: Iterable[Mapping[str, Any]],
+) -> list[RetrievalResult]:
+    identificadores = _identificadores_pncp(query)
+    if not identificadores:
+        return []
+    resultados: list[RetrievalResult] = []
+    vistos: set[str] = set()
+    for record in records:
+        metadata = _metadata_of(record)
+        extras = metadata.get("extras")
+        texto_busca = str(record.get("text", ""))
+        if isinstance(extras, Mapping):
+            texto_busca += json.dumps(extras, ensure_ascii=False, default=str)
+        if not any(identificador in texto_busca for identificador in identificadores):
+            continue
+        item = _result(record, 0.0, str(record.get("text", "")))
+        if item.chunk_id in vistos:
+            continue
+        vistos.add(item.chunk_id)
+        item.metadata = {
+            **item.metadata,
+            "extras": {
+                **(item.metadata.get("extras") or {}),
+                "identificador_pncp_exato": True,
+            },
+        }
+        resultados.append(item)
+    return sorted(resultados, key=lambda item: item.chunk_id)
+
+
+def _promover_identificadores_exatos(
+    resultados: Sequence[RetrievalResult],
+    identificadores_exatos: Sequence[RetrievalResult],
+    limite: int,
+) -> list[RetrievalResult]:
+    por_id = {item.chunk_id: item for item in resultados}
+    exatos = []
+    for item in identificadores_exatos:
+        existente = por_id.get(item.chunk_id)
+        if existente is not None:
+            existente.metadata = item.metadata
+            exatos.append(existente)
+        else:
+            exatos.append(item)
+    ids_exatos = {item.chunk_id for item in exatos}
+    ordenados = sorted(exatos, key=lambda item: item.chunk_id) + [
+        item for item in resultados if item.chunk_id not in ids_exatos
+    ]
+    return ordenados[:limite]
+
+
+def _evidencias(resultados: Sequence[RetrievalResult], limite: int = 10) -> list[dict[str, Any]]:
+    return [
+        {
+            "rank": rank,
+            "chunk_id": item.chunk_id,
+            "base_id": item.metadata.get("base_id"),
+            "source_file": item.metadata.get("source_file"),
+            "score": item.score,
+            "dense_score": item.dense_score,
+            "sparse_score": item.sparse_score,
+            "rrf_score": item.rrf_score,
+            "rerank_score": item.rerank_score,
+            "identificador_pncp_exato": bool(
+                (item.metadata.get("extras") or {}).get("identificador_pncp_exato")
+            ),
+        }
+        for rank, item in enumerate(resultados[:limite], start=1)
+    ]
 
 
 def _cosine(left: Sequence[float], right: Sequence[float]) -> float:
@@ -843,6 +952,8 @@ def retrieve(
             query_id=query_id,
         )
         span.set_result(_resumo(dense))
+        span.extra["evidencias"] = _evidencias(dense)
+        span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(query, dense)
         span.extra.update({"query_embedding": estatisticas_embedding})
         if uso_embedding:
             span.modelo = config.EMBEDDING_MODEL
@@ -863,10 +974,31 @@ def retrieve(
             escopos=escopos,
         )
         span.set_result(_resumo(sparse))
+        span.extra["evidencias"] = _evidencias(sparse)
+        span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(query, sparse)
+
+    identificadores_exatos: list[RetrievalResult] = []
+    if _identificadores_pncp(query):
+        records_exatos = sparse_records
+        if records_exatos is None:
+            records_exatos = _records_for(
+                index_dir,
+                bases,
+                None,
+                _read_jsonl(documents_file),
+                escopos,
+            )
+        identificadores_exatos = _resultados_identificador_exato(query, records_exatos)
+
     if reranker is not None:
         rerank_k = max(top_k, rerank_k if rerank_k is not None else config.RERANK_CANDIDATES)
     with _span(Stage.FUSAO_RRF, rrf_k=DEFAULT_RRF_K) as span:
         fused = reciprocal_rank_fusion([dense, sparse], top_k=rerank_k if reranker is not None else top_k)
+        fused = _promover_identificadores_exatos(
+            fused,
+            identificadores_exatos,
+            rerank_k if reranker is not None else top_k,
+        )
         for item in fused:
             ignored = filtros_ignorados.get(str(item.metadata.get("base_id")), {})
             if ignored:
@@ -874,17 +1006,24 @@ def retrieve(
                     **item.metadata.get("extras", {}), "filtros_relaxados": ignored,
                 }}
         span.set_result(_resumo(fused))
-        span.extra["evidencias"] = [
-            {"chunk_id": item.chunk_id, "base_id": item.metadata.get("base_id"),
-             "source_file": item.metadata.get("source_file"), "score": item.score}
-            for item in fused
+        span.extra["evidencias"] = _evidencias(fused)
+        span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(query, fused)
+        span.extra["identificadores_exactos_adicionados"] = [
+            item.chunk_id for item in identificadores_exatos
         ]
     if reranker is not None and fused:
         try:
             with _span(Stage.RERANK, rerank_k=rerank_k) as span:
                 span.modelo = getattr(reranker, "modelo", None)
-                reranked = list(reranker(query, fused))[:top_k]
+                reranked = list(reranker(query, fused))
+                reranked = _promover_identificadores_exatos(
+                    reranked, identificadores_exatos, top_k
+                )
                 span.set_result(_resumo(reranked))
+                span.extra["evidencias"] = _evidencias(reranked)
+                span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(
+                    query, reranked
+                )
             return reranked
         except Exception:  # noqa: BLE001 - o span já registrou o erro; segue com o RRF
             return fused[:top_k]
