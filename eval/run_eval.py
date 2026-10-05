@@ -17,9 +17,10 @@ rápido e offline. ``src.pipeline:responder`` roda o pipeline completo
 ``eval.adapters:pipeline_completo`` faz o mesmo e ainda junta, a partir dos
 logs, os tokens e a latência de cada etapa. ``--ids`` roda só alguns casos.
 
-Além de rota e recusa (que definem ``acertou``), o relatório mede citação
-(resposta não recusada com ao menos uma fonte; recusa sem fonte), confiança,
-latência de ponta a ponta e tokens.
+O relatório separa rota, recusa, conteúdo, presença de citação e fonte esperada.
+Para uma resposta completa, ``acertou`` exige todos os critérios aplicáveis.
+Adaptadores de rota sem resposta continuam reportando somente o escopo de
+roteamento, sem serem apresentados como avaliação factual.
 
 O golden set (``eval/golden_set.jsonl``) é derivado das 18 perguntas de
 referência + a pergunta de falha esperada do ``PERSONAS.md``, mais os casos
@@ -115,7 +116,9 @@ def _normalizar_texto(valor: Any) -> str:
     return " ".join(texto.lower().split())
 
 
-def _content_ok(case: EvalCase, response: dict[str, Any]) -> bool:
+def _content_ok(case: EvalCase, response: dict[str, Any]) -> Optional[bool]:
+    if "answer" not in response:
+        return None
     answer = str(response.get("answer") or "")
     answer_norm = _normalizar_texto(answer)
 
@@ -127,7 +130,22 @@ def _content_ok(case: EvalCase, response: dict[str, Any]) -> bool:
         if _normalizar_texto(item) in answer_norm:
             return False
 
-    fontes = response.get("sources_used") or []
+    if case.confianca_maxima is not None:
+        ordem = {"baixa": 0, "media": 1, "alta": 2, "recusado": 0}
+        conf_obtida = _normalizar_texto(response.get("confidence_level") or "")
+        conf_esperada = _normalizar_texto(case.confianca_maxima)
+        if conf_obtida not in ordem or conf_esperada not in ordem:
+            return False
+        if ordem[conf_obtida] > ordem[conf_esperada]:
+            return False
+
+    return True
+
+
+def _expected_source_ok(case: EvalCase, response: dict[str, Any]) -> Optional[bool]:
+    if not case.fontes_esperadas_prefixo or "answer" not in response:
+        return None
+    fontes = response.get("sources_used")
     if case.fontes_esperadas_prefixo:
         if not isinstance(fontes, list) or not fontes:
             return False
@@ -149,16 +167,6 @@ def _content_ok(case: EvalCase, response: dict[str, Any]) -> bool:
                 break
         if not fonte_ok:
             return False
-
-    if case.confianca_maxima is not None:
-        ordem = {"baixa": 0, "media": 1, "alta": 2, "recusado": 0}
-        conf_obtida = _normalizar_texto(response.get("confidence_level") or "")
-        conf_esperada = _normalizar_texto(case.confianca_maxima)
-        if conf_obtida not in ordem or conf_esperada not in ordem:
-            return False
-        if ordem[conf_obtida] > ordem[conf_esperada]:
-            return False
-
     return True
 
 
@@ -175,15 +183,28 @@ def evaluate_case(case: EvalCase, response: dict[str, Any]) -> dict[str, Any]:
     # Quando a resposta correta é recusar, não cobramos rota: o sistema não deveria escolher base nenhuma.
     rota_ok = True if case.is_refusal_esperado else bases_obtidas == sorted(case.bases_esperadas)
 
-    # Resposta sem campo sources_used (ex.: rota_apenas) não é avaliada em citação.
     fontes = response.get("sources_used")
     n_fontes = len(fontes) if isinstance(fontes, list) else None
-    if n_fontes is None:
+    if "answer" not in response and "sources_used" not in response:
         citacao_ok = None
+    elif not isinstance(fontes, list):
+        citacao_ok = False
     else:
         citacao_ok = n_fontes == 0 if is_refusal_obtido else n_fontes > 0
 
     content_ok = _content_ok(case, response)
+    expected_source_ok = _expected_source_ok(case, response)
+    escopo_avaliacao = "resposta_completa" if "answer" in response else "roteamento"
+    if escopo_avaliacao == "roteamento":
+        acertou = rota_ok and refusal_ok
+    else:
+        acertou = (
+            rota_ok
+            and refusal_ok
+            and content_ok is True
+            and citacao_ok is True
+            and expected_source_ok is not False
+        )
 
     return {
         "id": case.id,
@@ -197,7 +218,9 @@ def evaluate_case(case: EvalCase, response: dict[str, Any]) -> dict[str, Any]:
         "rota_ok": rota_ok,
         "refusal_ok": refusal_ok,
         "content_ok": content_ok,
-        "acertou": rota_ok and refusal_ok,
+        "expected_source_ok": expected_source_ok,
+        "escopo_avaliacao": escopo_avaliacao,
+        "acertou": acertou,
         "n_fontes": n_fontes,
         "citacao_ok": citacao_ok,
         "confidence_level": response.get("confidence_level"),
@@ -221,18 +244,28 @@ def _executar_caso(case: EvalCase, pipeline_fn: PipelineFn) -> dict[str, Any]:
     resultado["latencia_ms"] = latencia_ms
     resultado["erro"] = erro
     if erro:
-        resultado.update(rota_ok=False, refusal_ok=False, acertou=False, citacao_ok=False)
+        resultado.update(
+            rota_ok=False,
+            refusal_ok=False,
+            content_ok=False,
+            expected_source_ok=False,
+            acertou=False,
+            citacao_ok=False,
+        )
     return resultado
 
 
 def _resumo_metricas(resultados: list[dict[str, Any]]) -> dict[str, Any]:
     latencias = [r["latencia_ms"] for r in resultados if r.get("latencia_ms") is not None]
     citacoes = [r["citacao_ok"] for r in resultados if r.get("citacao_ok") is not None]
+    fontes_esperadas = [r["expected_source_ok"] for r in resultados if r.get("expected_source_ok") is not None]
+    escopos: dict[str, int] = defaultdict(int)
     confianca: dict[str, int] = defaultdict(int)
     tokens_total = 0
     tokens_por_etapa: dict[str, int] = defaultdict(int)
     content_cases = [r for r in resultados if r.get("content_ok") is not None]
     for resultado in resultados:
+        escopos[str(resultado.get("escopo_avaliacao", "desconhecido"))] += 1
         if resultado.get("confidence_level"):
             confianca[str(resultado["confidence_level"])] += 1
         metricas = resultado.get("metricas") or {}
@@ -248,19 +281,22 @@ def _resumo_metricas(resultados: list[dict[str, Any]]) -> dict[str, Any]:
     )
     citation_presence = sum(1 for r in resultados if int(r.get("n_fontes") or 0) > 0) / total if total else 0.0
     expected_source_accuracy = (
-        sum(1 for r in resultados if r.get("content_ok") is not False) / total
-        if any(r.get("content_ok") is not None for r in resultados)
+        sum(1 for value in fontes_esperadas if value) / len(fontes_esperadas)
+        if fontes_esperadas
         else None
     )
     return {
         "erros": sum(1 for r in resultados if r.get("erro")),
         "citacao_avaliada": len(citacoes),
         "citacao_ok": sum(citacoes),
+        "citation_accuracy": round(sum(citacoes) / len(citacoes), 4) if citacoes else None,
         "routing_accuracy": round(routing_accuracy, 4),
         "refusal_accuracy": round(refusal_accuracy, 4),
         "content_accuracy": None if content_accuracy is None else round(content_accuracy, 4),
         "citation_presence": round(citation_presence, 4),
         "expected_source_accuracy": None if expected_source_accuracy is None else round(expected_source_accuracy, 4),
+        "expected_source_evaluated": len(fontes_esperadas),
+        "escopos_avaliados": dict(sorted(escopos.items())),
         "confianca": dict(sorted(confianca.items())),
         "latencia_ms": {
             "media": int(statistics.mean(latencias)) if latencias else 0,
@@ -332,8 +368,21 @@ def render_report_markdown(report: dict[str, Any], run_id: str, built_at: str) -
             lines.append(f"- content_accuracy: **{metricas['content_accuracy']:.4f}**")
         if metricas.get("citation_presence") is not None:
             lines.append(f"- citation_presence: **{metricas['citation_presence']:.4f}**")
+        if metricas.get("citation_accuracy") is not None:
+            lines.append(
+                f"- citation_accuracy: **{metricas['citation_accuracy']:.4f}** "
+                f"({metricas['citacao_ok']}/{metricas['citacao_avaliada']} respostas avaliadas)"
+            )
         if metricas.get("expected_source_accuracy") is not None:
-            lines.append(f"- expected_source_accuracy: **{metricas['expected_source_accuracy']:.4f}**")
+            lines.append(
+                f"- expected_source_accuracy: **{metricas['expected_source_accuracy']:.4f}** "
+                f"({metricas['expected_source_evaluated']} respostas avaliadas)"
+            )
+        if metricas.get("escopos_avaliados"):
+            linhas_escopo = ", ".join(
+                f"{escopo}={quantidade}" for escopo, quantidade in metricas["escopos_avaliados"].items()
+            )
+            lines.append(f"- Escopos: {linhas_escopo}")
         if metricas.get("citacao_avaliada"):
             lines.append(f"- Citação correta: **{metricas['citacao_ok']}/{metricas['citacao_avaliada']}**")
         if metricas.get("confianca"):

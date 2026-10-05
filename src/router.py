@@ -99,6 +99,12 @@ _CONVERSATIONAL_PATTERNS = (
     r"\bocorrencia[s]?\b",
 )
 
+# A palavra "órgão" pode pedir apenas um campo do registro de uma ata. Os
+# demais sinais estruturados continuam válidos para consultas que cruzem bases.
+_STRUCTURED_CORE_PATTERNS = tuple(
+    pattern for pattern in _STRUCTURED_PATTERNS if pattern != r"\borgaos?\b"
+)
+
 _AGGREGATED_PATTERNS = (
     r"\bmedia\b",
     r"\bmediana\b",
@@ -212,9 +218,12 @@ def _rotear(query: str) -> RouteDecision:
     bases: list[Natureza] = []
     if _contains_pattern(text, _NORMATIVE_PATTERNS):
         bases.append(Natureza.NORMATIVA)
-    if _contains_pattern(_DOMINIO_GENERICO.sub(" ", text), _STRUCTURED_PATTERNS):
+    conversational = _contains_pattern(text, _CONVERSATIONAL_PATTERNS)
+    ata_primary = conversational and _contains_pattern(text, (r"\batas?\b",))
+    structured_patterns = _STRUCTURED_CORE_PATTERNS if ata_primary else _STRUCTURED_PATTERNS
+    if _contains_pattern(_DOMINIO_GENERICO.sub(" ", text), structured_patterns):
         bases.append(Natureza.ESTRUTURADA)
-    if _contains_pattern(text, _CONVERSATIONAL_PATTERNS):
+    if conversational:
         bases.append(Natureza.CONVERSACIONAL)
     if _contains_pattern(text, _AGGREGATED_PATTERNS):
         bases.append(Natureza.AGREGADA)
