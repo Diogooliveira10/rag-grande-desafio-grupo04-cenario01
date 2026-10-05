@@ -40,7 +40,8 @@ def _schema_resposta(chunk_ids: Optional[list[str]] = None) -> dict:
             "properties": {
                 "answer": {"type": "string", "minLength": 1},
                 "is_refusal": {"type": "boolean"},
-                "refusal_reason": {"type": ["string", "null"], "enum": [None, *(r.value for r in RefusalReason)]},
+                "refusal_reason": {"type": ["string", "null"], "enum": [
+                    None, *(r.value for r in RefusalReason if r is not RefusalReason.ERRO_PROVEDOR)]},
                 "confidence_level": {"type": "string", "enum": [r.value for r in ConfidenceLevel]},
                 "sources_used": {"type": "array", "items": {"type": "string", **({"enum": chunk_ids} if chunk_ids else {})}},
             }}
@@ -340,6 +341,10 @@ def _recusa(
         RefusalReason.FORA_DE_ESCOPO: (
             "Essa pergunta está fora do escopo de contratações públicas do RJ."
         ),
+        RefusalReason.ERRO_PROVEDOR: (
+            "Não consegui gerar a resposta agora por uma falha no serviço de geração. "
+            "Tente novamente em instantes."
+        ),
     }
     return RAGResponse(
         query=query,
@@ -439,6 +444,9 @@ def _parsear_resposta_llm(
                 refusal_reason = RefusalReason(dados.get("refusal_reason"))
             except ValueError:
                 refusal_reason = RefusalReason.SEM_EVIDENCIA
+            if refusal_reason is RefusalReason.ERRO_PROVEDOR:
+                # Só o código marca falha de infraestrutura; o LLM não decide isso.
+                refusal_reason = RefusalReason.SEM_EVIDENCIA
             sources_used = []
             confidence_level = ConfidenceLevel.RECUSADO
             if not answer:
@@ -460,8 +468,9 @@ def _parsear_resposta_llm(
         return resposta, None, alternativas_usadas, citacoes_descartadas
     except Exception as exc:
         # Saída inválida do LLM vira recusa segura; o motivo vai para o log.
+        # É falha do serviço, não falta de evidência: o usuário vê "tente de novo".
         return (
-            _recusa(query, bases_consultadas, RefusalReason.SEM_EVIDENCIA),
+            _recusa(query, bases_consultadas, RefusalReason.ERRO_PROVEDOR),
             f"{type(exc).__name__}: {exc}",
             alternativas_usadas,
             citacoes_descartadas,
@@ -608,7 +617,7 @@ def gerar_resposta(
     except Exception as exc:
         llm_info = dict(getattr(cliente, "diagnosticos", {}))
         sensibilidade["llm"] = llm_info
-        resposta = _recusa(query, bases_consultadas, RefusalReason.SEM_EVIDENCIA)
+        resposta = _recusa(query, bases_consultadas, RefusalReason.ERRO_PROVEDOR)
         _logar_evento(
             run_id, query_id, "erro_llm", inicio, resposta,
             modelo=llm_info.get("model", GENERATION_MODEL), erro=f"{type(exc).__name__}: {exc}", **sensibilidade,

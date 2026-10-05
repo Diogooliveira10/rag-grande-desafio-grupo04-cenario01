@@ -305,7 +305,9 @@ def test_saida_nao_json_cai_em_recusa_segura_sem_excecao():
 
     resposta = gen.gerar_resposta("pergunta", [_chunk()], [Natureza.ESTRUTURADA], cliente=cliente_fake)
     assert resposta.is_refusal is True
-    assert resposta.refusal_reason == RefusalReason.SEM_EVIDENCIA
+    assert resposta.refusal_reason == RefusalReason.ERRO_PROVEDOR
+    assert "tente novamente" in resposta.answer.lower()
+    assert "evidência" not in resposta.answer.lower()
 
 
 def test_llm_diz_recusa_mas_inclui_fontes_e_corrigido():
@@ -349,7 +351,55 @@ def test_erro_do_cliente_llm_nao_propaga_excecao():
 
     resposta = gen.gerar_resposta("pergunta", [_chunk()], [Natureza.ESTRUTURADA], cliente=cliente_com_erro)
     assert resposta.is_refusal is True
+    assert resposta.refusal_reason == RefusalReason.ERRO_PROVEDOR
+    assert resposta.sources_used == []
+    assert "tente novamente" in resposta.answer.lower()
+    assert "evidência" not in resposta.answer.lower()
+
+
+def test_erro_do_provedor_fica_registrado_no_log_da_geracao():
+    def cliente_com_erro(mensagens):
+        raise ConnectionError("endpoint fora do ar")
+
+    gen.gerar_resposta(
+        "pergunta", [_chunk()], [Natureza.ESTRUTURADA], cliente=cliente_com_erro, run_id="r-erro"
+    )
+
+    arquivo = next(obs.default_logger.logs_dir.glob("pipeline-*.jsonl"))
+    geracao = [json.loads(l) for l in arquivo.read_text(encoding="utf-8").splitlines()
+               if json.loads(l)["stage"] == "geracao"][-1]
+    assert geracao["status"] == "erro_llm"
+    assert geracao["output"] == "recusa: erro_provedor"
+    assert "ConnectionError" in geracao["extra"]["erro"]
+
+
+def test_sem_chunks_continua_sem_evidencia_e_nao_erro_de_provedor():
+    resposta = gen.gerar_resposta("pergunta", [], [Natureza.ESTRUTURADA], cliente=lambda m: "{}")
     assert resposta.refusal_reason == RefusalReason.SEM_EVIDENCIA
+
+
+def test_llm_nao_consegue_marcar_erro_de_provedor():
+    """Só o código marca falha de infraestrutura: se o modelo devolver esse motivo,
+    ele vira sem_evidencia (e continua sujeito à conversão de recusa indevida)."""
+    cliente = _llm_devolve(
+        answer="Não há trecho sobre isso.", is_refusal=True,
+        refusal_reason="erro_provedor", confidence_level="recusado",
+    )
+    resposta, erro, _, _ = gen._parsear_resposta_llm(
+        cliente([]), "pergunta", [_chunk()], [Natureza.ESTRUTURADA]
+    )
+    assert erro is None
+    assert resposta.refusal_reason == RefusalReason.SEM_EVIDENCIA
+
+
+def test_erro_de_provedor_nunca_e_convertido_em_resposta():
+    assert RefusalReason.ERRO_PROVEDOR not in gen._RECUSAS_CONVERTIVEIS
+
+
+def test_schema_do_llm_nao_oferece_erro_de_provedor():
+    enum = gen._schema_resposta()["properties"]["refusal_reason"]["enum"]
+    assert "erro_provedor" not in enum
+    assert "sem_evidencia" in enum
 
 # --------------------------------------------------------------------------
 # Orçamento do contexto: a janela do endpoint da turma é de 2048 tokens e o

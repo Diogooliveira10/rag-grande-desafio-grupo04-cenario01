@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from eval.run_eval import evaluate_case, load_golden_set, render_report_markdown, run_eval, save_run
+from eval.run_eval import EvalCase, evaluate_case, load_golden_set, render_report_markdown, run_eval, save_run
 
 GOLDEN_SET = Path(__file__).resolve().parents[1] / "eval" / "golden_set.jsonl"
 
@@ -223,3 +223,55 @@ def test_run_eval_resume_latencia_confianca_e_tokens():
     markdown = render_report_markdown(report, "r", "t")
     assert "## Métricas" in markdown
     assert "## Respostas" in markdown
+
+
+def _caso_de_recusa_sem_motivo() -> EvalCase:
+    """Recusa esperada sem ``refusal_reason_esperado``: antes, qualquer recusa passava."""
+    return EvalCase(
+        id="T-ERRO",
+        persona="teste",
+        titulo="recusa sem motivo esperado",
+        pergunta="pergunta",
+        tipo="guardrail",
+        bases_esperadas=[],
+        is_refusal_esperado=True,
+        refusal_reason_esperado=None,
+        e_pergunta_de_falha_esperada=False,
+    )
+
+
+def test_erro_de_provedor_nao_conta_como_recusa_esperada():
+    caso = _caso_de_recusa_sem_motivo()
+
+    recusa_real = evaluate_case(
+        caso, {"answer": "Não posso.", "bases_consultadas": [], "sources_used": [],
+               "is_refusal": True, "refusal_reason": "fora_de_escopo"}
+    )
+    erro_provedor = evaluate_case(
+        caso, {"answer": "Tente novamente.", "bases_consultadas": [], "sources_used": [],
+               "is_refusal": True, "refusal_reason": "erro_provedor"}
+    )
+
+    assert recusa_real["acertou"] is True
+    assert recusa_real["erro_provedor"] is False
+    assert erro_provedor["acertou"] is False
+    assert erro_provedor["erro_provedor"] is True
+    assert erro_provedor["refusal_ok"] is False
+    assert erro_provedor["citacao_ok"] is None
+    assert erro_provedor["content_ok"] is None
+
+
+def test_erro_de_provedor_aparece_no_resumo_e_no_relatorio():
+    caso = _caso_de_recusa_sem_motivo()
+
+    def pipeline_fn(pergunta: str) -> dict:
+        return {"answer": "Tente novamente.", "bases_consultadas": [], "sources_used": [],
+                "is_refusal": True, "refusal_reason": "erro_provedor"}
+
+    report = run_eval([caso], pipeline_fn)
+
+    assert report["acertos"] == 0
+    assert report["metricas"]["erros_provedor"] == 1
+    assert report["metricas"]["erros"] == 0
+    assert report["metricas"]["citation_accuracy"] is None
+    assert "Falhas do provedor do LLM" in render_report_markdown(report, "r", "t")
