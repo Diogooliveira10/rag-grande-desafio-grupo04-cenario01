@@ -487,6 +487,10 @@ catálogos hardcoded ou armazenamento paralelo de histórico. O site publicado
 só responde de verdade quando houver um backend acessível por HTTPS público;
 para integração local, use o Vite apontando para `http://127.0.0.1:8080`.
 
+O passo a passo completo, desde o clone dos dois repositórios até os testes de
+pergunta, histórico e feedback, está em
+[docs/GUIA_INTEGRACAO_LOCAL_FRONTEND_BACKEND.md](docs/GUIA_INTEGRACAO_LOCAL_FRONTEND_BACKEND.md).
+
 ### Endpoint de modelos (compartilhado com toda a turma)
 
 ```python
