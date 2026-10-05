@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import PurePosixPath
 from typing import Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Query
@@ -27,6 +28,7 @@ from src.history_store import ConsultaNaoEncontrada, default_store as historico
 from src.obs import Stage, new_query_id, new_run_id
 from src.obs import registrar as obs_registrar
 from src.schema import RAGResponse
+from app import catalog
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +89,29 @@ class HistoricoItem(BaseModel):
     feedback: list[FeedbackEntry] = Field(default_factory=list)
 
 
+class HealthResponse(BaseModel):
+    status: Literal["ok"]
+
+
+class FeedbackResponse(BaseModel):
+    status: Literal["recebido"]
+
+
+def _public_rag_payload(payload: dict) -> dict:
+    """Remove diretórios internos das referências antes da fronteira HTTP."""
+    public = dict(payload)
+    public["sources_used"] = [
+        {
+            **source,
+            "source_file": PurePosixPath(
+                str(source.get("source_file") or "").replace("\\", "/")
+            ).name,
+        }
+        for source in payload.get("sources_used", [])
+    ]
+    return public
+
+
 app = FastAPI(title="Adaptive RAG API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
@@ -97,9 +122,9 @@ app.add_middleware(
 )
 
 
-@app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+@app.get("/health", response_model=HealthResponse)
+def health() -> HealthResponse:
+    return HealthResponse(status="ok")
 
 
 @app.post("/api/v1/query", response_model=QueryResponse)
@@ -117,7 +142,8 @@ def query_rag(request: QueryRequest) -> QueryResponse:
             detail="Nao foi possivel processar a consulta.",
         ) from exc
 
-    resposta = QueryResponse.model_validate({**result, "query_id": query_id})
+    public_result = _public_rag_payload(result)
+    resposta = QueryResponse.model_validate({**public_result, "query_id": query_id})
 
     try:
         historico.registrar_consulta(
@@ -125,7 +151,7 @@ def query_rag(request: QueryRequest) -> QueryResponse:
             run_id=run_id,
             query=request.query,
             top_k=request.top_k,
-            resposta=result,
+            resposta=public_result,
         )
     except Exception:
         # Historico e' um extra sobre a resposta ja calculada: uma falha ao
@@ -135,8 +161,8 @@ def query_rag(request: QueryRequest) -> QueryResponse:
     return resposta
 
 
-@app.post("/api/v1/feedback")
-def enviar_feedback(request: FeedbackRequest) -> dict[str, str]:
+@app.post("/api/v1/feedback", response_model=FeedbackResponse)
+def enviar_feedback(request: FeedbackRequest) -> FeedbackResponse:
     consulta = historico.obter_consulta(request.query_id)
     if consulta is None:
         raise HTTPException(status_code=404, detail="query_id desconhecido.")
@@ -161,12 +187,76 @@ def enviar_feedback(request: FeedbackRequest) -> dict[str, str]:
         input={"comentario": request.comentario},
         output=request.avaliacao,
     )
-    return {"status": "recebido"}
+    return FeedbackResponse(status="recebido")
 
 
 @app.get("/api/v1/history", response_model=list[HistoricoItem])
 def obter_historico(limit: int = Query(default=20, ge=1, le=100)) -> list[dict]:
-    return historico.obter_historico(limit=limit)
+    items = historico.obter_historico(limit=limit)
+    for item in items:
+        item["resposta"] = _public_rag_payload(item["resposta"])
+    return items
+
+
+def _catalog_error(exc: Exception) -> HTTPException:
+    logger.exception("Falha ao ler dados reais para a API de exploração")
+    if isinstance(exc, FileNotFoundError):
+        return HTTPException(status_code=503, detail="A base de dados solicitada não está disponível.")
+    return HTTPException(status_code=500, detail="Não foi possível consultar os dados do projeto.")
+
+
+@app.get("/api/v1/explore/contratacoes", response_model=list[catalog.ContratacaoRecord])
+def explorar_contratacoes(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    busca: Optional[str] = Query(default=None, max_length=200),
+    orgao: Optional[str] = Query(default=None, max_length=200),
+) -> list[catalog.ContratacaoRecord]:
+    try:
+        return catalog.listar_contratacoes(limit=limit, offset=offset, busca=busca, orgao=orgao)
+    except Exception as exc:
+        raise _catalog_error(exc) from exc
+
+
+@app.get("/api/v1/explore/documentos", response_model=list[catalog.DocumentoRecord])
+def explorar_documentos(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    busca: Optional[str] = Query(default=None, max_length=200),
+    tipo: Optional[str] = Query(default=None, max_length=80),
+) -> list[catalog.DocumentoRecord]:
+    try:
+        return catalog.listar_documentos(limit=limit, offset=offset, busca=busca, tipo=tipo)
+    except Exception as exc:
+        raise _catalog_error(exc) from exc
+
+
+@app.get("/api/v1/explore/orgaos", response_model=list[catalog.OrgaoRecord])
+def explorar_orgaos(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    busca: Optional[str] = Query(default=None, max_length=200),
+) -> list[catalog.OrgaoRecord]:
+    try:
+        return catalog.listar_orgaos(limit=limit, offset=offset, busca=busca)
+    except Exception as exc:
+        raise _catalog_error(exc) from exc
+
+
+@app.get("/api/v1/explore/fontes", response_model=list[catalog.OfficialSource])
+def explorar_fontes() -> list[catalog.OfficialSource]:
+    try:
+        return catalog.listar_fontes()
+    except Exception as exc:
+        raise _catalog_error(exc) from exc
+
+
+@app.get("/api/v1/project/summary", response_model=catalog.ProjectSummary)
+def resumo_projeto() -> catalog.ProjectSummary:
+    try:
+        return catalog.project_summary()
+    except Exception as exc:
+        raise _catalog_error(exc) from exc
 
 
 __all__ = ["app"]
