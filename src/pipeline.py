@@ -31,6 +31,46 @@ def _chunk_from_retrieval(result: RetrievalResult) -> Chunk:
     return Chunk(content=result.content, metadata=ChunkMetadata(**result.metadata))
 
 
+def _registrar_resumo(
+    *,
+    run_id: str,
+    query_id: str,
+    query: str,
+    caminho: str,
+    bases_roteadas: Sequence[Any],
+    chunks: Sequence[Chunk],
+    resposta: dict[str, Any],
+) -> None:
+    """Stage ``resumo_consulta``: fecha a pergunta no log dizendo se ela passou
+    pela base SQL e pela base vetorial, com as evidências de cada uma e as
+    fontes citadas. Os detalhes de cada etapa ficam nos stages anteriores."""
+    sql = [c for c in chunks if c.metadata.chunk_id.startswith("sql:")]
+    vetorial: dict[str, int] = {}
+    for chunk in chunks:
+        if not chunk.metadata.chunk_id.startswith("sql:"):
+            vetorial[chunk.metadata.base_id] = vetorial.get(chunk.metadata.base_id, 0) + 1
+    registrar(
+        run_id=run_id,
+        query_id=query_id,
+        stage=Stage.RESUMO_CONSULTA,
+        status="recusa" if resposta.get("is_refusal") else "ok",
+        latencia_ms=0,
+        input=query,
+        output={
+            "caminho": caminho,
+            "bases_roteadas": [str(getattr(base, "value", base)) for base in bases_roteadas],
+            "consultou_sql": bool(sql),
+            "consultou_vetorial": caminho in {"consulta", "consulta_por_intencoes"},
+            "evidencias_sql": len(sql),
+            "evidencias_vetorial": vetorial,
+            "fontes_citadas": [fonte.get("chunk_id") for fonte in resposta.get("sources_used", [])],
+            "is_refusal": bool(resposta.get("is_refusal")),
+            "refusal_reason": resposta.get("refusal_reason"),
+            "confidence_level": resposta.get("confidence_level"),
+        },
+    )
+
+
 def responder(
     query: str,
     *,
@@ -79,7 +119,10 @@ def responder(
         registrar(run_id=run_id, query_id=query_id, stage=Stage.GERACAO, status="conversa",
                   latencia_ms=0, input=query, output="resposta de cortesia; sem consulta ao acervo",
                   extra={"is_refusal": False, "num_sources": 0, "resposta_conversacional": True})
-        return conversa.model_dump(mode="json")
+        payload = conversa.model_dump(mode="json")
+        _registrar_resumo(run_id=run_id, query_id=query_id, query=query, caminho="conversa",
+                          bases_roteadas=[], chunks=[], resposta=payload)
+        return payload
 
     analise = analisar_query(query, run_id=run_id, query_id=query_id)
     decisao = (rotear_pergunta(query, run_id=run_id, query_id=query_id, analise=analise)
@@ -191,7 +234,14 @@ def responder(
                 why = "metadados ausentes" if reason == "sem_campo" else "nenhum resultado com o recorte solicitado"
                 notes.append(f"{bases.get(base, base)}: {fields} ({why})")
         resposta.answer += "\n\nBusca ampliada; filtros relaxados em " + "; ".join(notes) + "."
-    return resposta.model_dump(mode="json")
+    payload = resposta.model_dump(mode="json")
+    if not decisao.bases_selecionadas:
+        caminho = "recusa_sem_consulta"
+    else:
+        caminho = "consulta_por_intencoes" if analise.intencoes else "consulta"
+    _registrar_resumo(run_id=run_id, query_id=query_id, query=query, caminho=caminho,
+                      bases_roteadas=decisao.bases_selecionadas, chunks=chunks, resposta=payload)
+    return payload
 
 
 def responder_incluindo_experimentais(query: str) -> dict[str, Any]:

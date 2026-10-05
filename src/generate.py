@@ -508,9 +508,37 @@ def _logar_evento(
             "is_refusal": resposta.is_refusal,
             "bases_consultadas": [b.value for b in resposta.bases_consultadas],
             "num_sources": len(resposta.sources_used),
+            # A resposta como saiu da etapa, para acompanhar o dado até o usuário.
+            "resposta": {
+                "answer": _texto_para_log(resposta.answer),
+                "sources_used": [fonte.chunk_id for fonte in resposta.sources_used],
+                "refusal_reason": resposta.refusal_reason.value if resposta.refusal_reason else None,
+            },
             **extra,
         },
     )
+
+
+# Tamanho máximo de cada texto do prompt e da resposta gravado no log. O
+# prompt fica em torno de GENERATION_CONTEXT_CHARS; o limite só corta exceções.
+_LIMITE_DE_TEXTO_NO_LOG = 8000
+
+
+def _texto_para_log(texto: str) -> str:
+    """Texto mascarado (CPF, telefone, e-mail pessoal) e cortado no limite do log."""
+    mascarado = mascarar(texto or "")[0]
+    if len(mascarado) <= _LIMITE_DE_TEXTO_NO_LOG:
+        return mascarado
+    return mascarado[:_LIMITE_DE_TEXTO_NO_LOG] + "…"
+
+
+def _prompt_para_log(mensagens: list[dict]) -> list[dict[str, str]]:
+    """Mensagens enviadas ao LLM como vão para o log. Os chunks restritos já
+    ficaram de fora antes do prompt (``filtrar_chunks_permitidos``)."""
+    return [
+        {"role": str(mensagem.get("role", "")), "content": _texto_para_log(str(mensagem.get("content", "")))}
+        for mensagem in mensagens
+    ]
 
 
 def _logar_validacao(
@@ -610,6 +638,7 @@ def gerar_resposta(
     sensibilidade["chunks_excluidos_orcamento"] = sensibilidade["evidencias_fora_do_prompt"]
     chunks = chunks_prompt
     mensagens = _montar_prompt(query, chunks)
+    sensibilidade["prompt"] = _prompt_para_log(mensagens)
     cliente = cliente or _cliente_padrao(_schema_resposta([f"E{i}" for i in range(1, len(chunks) + 1)]))
 
     try:

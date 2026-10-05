@@ -17,9 +17,9 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import PurePosixPath
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Path, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
@@ -30,6 +30,7 @@ from src.history_store import ConsultaNaoEncontrada, default_store as historico
 from src.obs import Stage, new_query_id, new_run_id
 from src.obs import registrar as obs_registrar
 from src.schema import RAGResponse
+from src.trace import montar_trace
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +101,33 @@ class HistoricoItem(BaseModel):
     query: str
     resposta: RAGResponse
     feedback: list[FeedbackEntry] = Field(default_factory=list)
+
+
+class TraceEtapa(BaseModel):
+    ordem: int
+    stage: str
+    # "sql" ou "vetorial" nas etapas que consultam uma base; None nas demais.
+    base: Optional[Literal["sql", "vetorial"]] = None
+    status: str
+    ts: str
+    latencia_ms: int
+    input: Any = None
+    output: Any = None
+    tokens: Optional[dict[str, int]] = None
+    modelo: Optional[str] = None
+    detalhes: dict[str, Any] = Field(default_factory=dict)
+
+
+class TraceResponse(BaseModel):
+    query_id: str
+    run_ids: list[str]
+    pergunta: Optional[str] = None
+    inicio: str
+    fim: str
+    latencia_total_ms: int
+    # consultou_sql, consultou_vetorial, evidências de cada base e fontes citadas.
+    resumo: dict[str, Any]
+    etapas: list[TraceEtapa]
 
 
 app = FastAPI(title="Adaptive RAG API", version="1.0.0")
@@ -186,6 +214,15 @@ def obter_historico(limit: int = Query(default=20, ge=1, le=100)) -> list[dict]:
     for item in items:
         item["resposta"] = _public_rag_payload(item["resposta"])
     return items
+
+
+@app.get("/api/v1/trace/{query_id}", response_model=TraceResponse)
+def obter_trace(query_id: str = Path(min_length=1, max_length=64)) -> dict:
+    """Caminho da pergunta pelo pipeline, etapa por etapa, lido do log."""
+    trace = montar_trace(query_id)
+    if trace is None:
+        raise HTTPException(status_code=404, detail="query_id sem registro no log.")
+    return trace
 
 
 def _catalog_result(function, **kwargs):

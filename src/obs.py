@@ -43,6 +43,8 @@ class Stage(str, Enum):
     GERACAO = "geracao"
     VALIDACAO = "validacao"
     FEEDBACK = "feedback"
+    # Fecha cada pergunta: bases consultadas (SQL e vetorial), evidências e fontes citadas.
+    RESUMO_CONSULTA = "resumo_consulta"
 
 
 @dataclass(frozen=True)
@@ -126,18 +128,28 @@ class LogRecord:
     def to_dict(self) -> dict[str, Any]:
         """Converte o registro para um dicionário pronto para serialização.
 
-        ``input``/``output`` textuais passam pelo mascaramento de
-        ``src/sensitivity.py``: CPF, telefone e e-mail pessoal da pergunta
-        não ficam gravados no log.
+        Os textos de ``input``/``output``, inclusive dentro de dicionários e
+        listas, passam pelo mascaramento de ``src/sensitivity.py``: CPF,
+        telefone e e-mail pessoal da pergunta não ficam gravados no log.
         """
-        from src.sensitivity import mascarar
-
         data = asdict(self)
         data["stage"] = self.stage.value
         for campo in ("input", "output"):
-            if isinstance(data[campo], str):
-                data[campo] = mascarar(data[campo])[0]
+            data[campo] = _mascarar_textos(data[campo])
         return data
+
+
+def _mascarar_textos(valor: Any) -> Any:
+    """Mascara cada texto de ``valor``, percorrendo dicionários e listas."""
+    from src.sensitivity import mascarar
+
+    if isinstance(valor, str):
+        return mascarar(valor)[0]
+    if isinstance(valor, Mapping):
+        return {chave: _mascarar_textos(item) for chave, item in valor.items()}
+    if isinstance(valor, (list, tuple)):
+        return [_mascarar_textos(item) for item in valor]
+    return valor
 
 
 class PipelineLogger:

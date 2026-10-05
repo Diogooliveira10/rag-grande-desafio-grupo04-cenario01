@@ -43,9 +43,12 @@ def test_mensagem_de_conversa_e_registrada_como_interacao(monkeypatch):
     pipeline.responder(MENSAGEM_DE_CONVERSA)
 
     registros = _registros()
-    assert [r["stage"] for r in registros] == ["interacao", "geracao"]
+    assert [r["stage"] for r in registros] == ["interacao", "geracao", "resumo_consulta"]
     assert registros[0]["output"] == {"tipo_interacao": "conversa"}
     assert registros[1]["status"] == "conversa"
+    assert registros[2]["output"]["caminho"] == "conversa"
+    assert registros[2]["output"]["consultou_sql"] is False
+    assert registros[2]["output"]["consultou_vetorial"] is False
     assert len({r["run_id"] for r in registros}) == 1
 
 

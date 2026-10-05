@@ -382,6 +382,11 @@ def test_consulta_registra_stage_consulta_sql_com_o_sql(base):
     assert registro["status"] == "ok"
     assert "ORDER BY valor DESC" in registro["extra"]["sql"]
     assert registro["extra"]["linhas"] == 3
+    # O que a consulta devolveu também vai para o log (rastreabilidade).
+    assert len(registro["extra"]["resultado"]) == 3
+    assert registro["extra"]["linhas_fora_do_log"] == 0
+    assert registro["extra"]["cabecalho"]
+    assert all(chunk_id.startswith("sql:") for chunk_id in registro["extra"]["chunk_ids"])
 
 
 def test_falha_no_banco_nao_derruba_e_fica_no_log(base, monkeypatch):

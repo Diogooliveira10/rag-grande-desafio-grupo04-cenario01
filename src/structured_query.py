@@ -1109,6 +1109,10 @@ def _chunks(consulta: Consulta, sql: str, cabecalho: str, linhas: list[str], ban
     ]
 
 
+# Linhas do resultado SQL gravadas no log da etapa ``consulta_sql``.
+_LINHAS_NO_LOG = 20
+
+
 def consultar_estruturado(
     query: str,
     filtros: QueryFilters,
@@ -1143,7 +1147,14 @@ def consultar_estruturado(
             with banco.sessao():
                 sql, cabecalho, linhas = executar_consulta(consulta, banco)
             chunks = _chunks(consulta, sql, cabecalho, linhas, banco)
-            span.extra.update({"sql": sql, "linhas": len(linhas), "chunks": len(chunks)})
+            span.extra.update({
+                "sql": sql, "linhas": len(linhas), "chunks": len(chunks),
+                # O que a consulta devolveu, para acompanhar o dado até a resposta.
+                "cabecalho": cabecalho,
+                "resultado": linhas[:_LINHAS_NO_LOG],
+                "linhas_fora_do_log": max(0, len(linhas) - _LINHAS_NO_LOG),
+                "chunk_ids": [chunk.metadata.chunk_id for chunk in chunks],
+            })
             span.set_result(f"{len(linhas)} linha(s) em {len(chunks)} chunk(s)")
             return chunks
     except Exception:
