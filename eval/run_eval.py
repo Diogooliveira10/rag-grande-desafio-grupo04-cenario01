@@ -55,6 +55,10 @@ PipelineFn = Callable[[str], dict[str, Any]]
 DEFAULT_GOLDEN_SET = PROJECT_ROOT / "eval" / "golden_set.jsonl"
 DEFAULT_RUNS_DIR = PROJECT_ROOT / "eval" / "runs"
 
+_SOURCE_BASE_ALIASES = {
+    "normativa": "editais_normativo",
+}
+
 
 @dataclass(frozen=True)
 class EvalCase:
@@ -116,6 +120,16 @@ def _normalizar_texto(valor: Any) -> str:
     return " ".join(texto.lower().split())
 
 
+def source_base_matches(expected_prefix: str, actual_base_id: str) -> bool:
+    expected = _normalizar_texto(expected_prefix)
+    actual = _normalizar_texto(actual_base_id)
+    canonical_expected = _SOURCE_BASE_ALIASES.get(expected)
+    canonical_actual = _SOURCE_BASE_ALIASES.get(actual, actual)
+    if canonical_expected is not None:
+        return canonical_expected == canonical_actual
+    return actual.startswith(expected)
+
+
 def _content_ok(case: EvalCase, response: dict[str, Any]) -> Optional[bool]:
     if "answer" not in response:
         return None
@@ -153,9 +167,17 @@ def _expected_source_ok(case: EvalCase, response: dict[str, Any]) -> Optional[bo
         fonte_ok = False
         for fonte in fontes:
             if isinstance(fonte, dict):
-                nomes = [fonte.get("base_id"), fonte.get("source_file"), fonte.get("chunk_id")]
+                base_id = fonte.get("base_id")
+                nomes = [fonte.get("source_file"), fonte.get("chunk_id")]
             else:
+                base_id = None
                 nomes = [str(fonte)]
+            if base_id is not None and any(
+                source_base_matches(prefix, str(base_id))
+                for prefix in case.fontes_esperadas_prefixo
+            ):
+                fonte_ok = True
+                break
             for nome in nomes:
                 if nome is None:
                     continue

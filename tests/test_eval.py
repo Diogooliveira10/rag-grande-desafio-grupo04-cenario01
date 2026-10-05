@@ -2,7 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from eval.run_eval import evaluate_case, load_golden_set, render_report_markdown, run_eval, save_run
+from eval.run_eval import (
+    evaluate_case,
+    load_golden_set,
+    render_report_markdown,
+    run_eval,
+    save_run,
+    source_base_matches,
+)
 
 GOLDEN_SET = Path(__file__).resolve().parents[1] / "eval" / "golden_set.jsonl"
 
@@ -72,6 +79,34 @@ def test_resposta_factual_com_rota_correta_mas_conteudo_e_citacao_errados_falha(
     assert resultado["expected_source_ok"] is False
     assert resultado["acertou"] is False
     assert resultado["escopo_avaliacao"] == "resposta_completa"
+
+
+@pytest.mark.parametrize(
+    ("expected_prefix", "actual_base_id", "matches"),
+    [
+        ("normativa", "editais_normativo", True),
+        ("normativa", "conversacional", False),
+        ("normativa", "estruturada", False),
+        ("atas_conversacional", "atas_conversacional", True),
+        ("contratos", "contratos_estruturado", True),
+    ],
+)
+def test_source_base_matches_uses_exact_canonical_ids(expected_prefix, actual_base_id, matches):
+    assert source_base_matches(expected_prefix, actual_base_id) is matches
+
+
+def test_p31_expected_source_accepts_normativa_base_alias():
+    caso = next(case for case in load_golden_set(GOLDEN_SET) if case.id == "P3.1")
+    resposta = {
+        "answer": "A pesquisa de preços está descrita nos documentos.",
+        "bases_consultadas": caso.bases_esperadas,
+        "is_refusal": False,
+        "sources_used": [{"base_id": "editais_normativo"}],
+    }
+
+    resultado = evaluate_case(caso, resposta)
+
+    assert resultado["expected_source_ok"] is True
 
 
 def test_evaluate_case_falha_quando_rota_diverge():
