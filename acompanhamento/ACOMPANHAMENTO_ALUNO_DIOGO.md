@@ -153,3 +153,43 @@ A validação factual do dia confirmou que o Golden Set atual reflete apenas par
 
 - Utilizei assistentes de IA como apoio na organização da evidência, na revisão dos trechos normativos, na separação entre menção e regra efetiva e na consolidação do relatório final da fase de validação factual.
 - As conclusões foram verificadas com o corpus, os documentos normativos e os dados estruturados disponíveis no projeto. Não houve alteração de código, dados ou avaliação durante a atividade.
+
+## Encontro 10 — 05/10/2026
+
+### Relato individual — Diogo Oliveira
+
+**Tarefa do dia:**
+
+Concluir a investigação dos casos `A1`, `A2`, `I1` e `I2` do Golden Set e realizar a correção técnica identificada no caso `P3.1`, sem alterar o Golden Set, o corpus ou as etapas principais do pipeline.
+
+**O que fiz:**
+
+- Analisei o relatório `eval/runs/20261004T153157Z/report.json` e os logs disponíveis, relacionando os resultados às etapas de roteamento, análise de consulta, recuperação, consulta estruturada e geração.
+
+- Comparei os casos `A1`, `A2`, `I1` e `I2` com os registros das atas e os identificadores presentes nos dados. Confirmei que `A1`, `A2` e `I1` apresentavam rotas e evidências compatíveis com suas perguntas.
+
+- Reconstruí o caso `I2` pelo pipeline oficial e concluí que a resposta continha os dados da ata correta, mas não reproduzia literalmente o identificador PNCP exigido pelo critério `deve_conter`. Como não havia regra funcional explícita exigindo essa repetição literal, classifiquei o comportamento como válido diante de um critério literal do Golden Set, sem alterar esse critério.
+
+- Investiguei o falso negativo de `expected_source_ok` em `P3.1`. Identifiquei que o Golden Set utiliza o prefixo lógico `normativa`, enquanto a base documental utiliza o `base_id` `editais_normativo`.
+
+- Inspecionei `eval/run_eval.py` e `eval/golden_set.jsonl` e implementei no evaluator somente a equivalência explícita `normativa` → `editais_normativo`, preservando a comparação por prefixo já existente para os demais casos.
+
+- Adicionei testes de regressão para validar a equivalência, rejeitar as bases `conversacional` e `estruturada` e preservar as correspondências que já funcionavam.
+
+- Executei os testes focados, com **20 aprovados**, e posteriormente a suíte completa, com **1.074 aprovados**.
+
+- Executei o pipeline oficial com o Golden Set. A execução `20261005T202613Z` terminou com **13/26 acertos**. No `P3.1`, `route_ok=true`, `content_ok=true` e `refusal_ok=true`, porém não houve fonte retornada (`n_fontes=0`), mantendo `citacao_ok=false` e `expected_source_ok=false`. O teste isolado do evaluator confirmou que o novo mapeamento funciona quando uma fonte com `base_id=editais_normativo` é efetivamente citada.
+
+- Mantive o Golden Set inalterado e não alterei router, retrieval, geração ou corpus. A alteração incidental na base SQLite durante a avaliação foi restaurada.
+
+**Resultado:**
+
+A investigação permitiu separar problemas de conteúdo, literalidade e avaliação. No caso `I2`, não foi identificada justificativa técnica para alterar o pipeline, pois a falha estava relacionada à exigência literal do critério do Golden Set. No `P3.1`, foi corrigida a divergência entre os identificadores `normativa` e `editais_normativo` no evaluator, com cobertura de testes e sem alteração do benchmark.
+
+A execução oficial não permitiu observar o efeito da equivalência em uma resposta real do `P3.1`, pois aquela rodada não retornou nenhuma fonte. Portanto, a correção elimina a divergência de nomenclatura quando a fonte normativa é efetivamente citada, mas não resolve a ausência de citação nem outros critérios do caso.
+
+### Uso de assistentes de IA:
+
+- Utilizei assistentes de IA como apoio para percorrer o fluxo do evaluator e do pipeline, correlacionar logs com a implementação, analisar o contrato funcional de `I2` e localizar o ponto de comparação de fontes do evaluator.
+
+- Revisei as alterações, executei os testes e validei os resultados da avaliação oficial. As conclusões foram baseadas nos dados, código, logs e testes locais, mantendo o Golden Set inalterado.

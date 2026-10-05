@@ -380,3 +380,49 @@ O grupo também avançou na compreensão dos entregáveis iniciais, principalmen
 
 - Utilizei assistentes de IA como apoio na organização da evidência, revisão dos trechos normativos, separação entre menção e regra efetiva e consolidação do relatório final da etapa de validação factual.
 - As conclusões foram verificadas com o corpus, os documentos normativos e os dados estruturados do projeto. Não houve alteração de código, dados ou avaliação durante a atividade.
+
+## Encontro 10 - 2026-10-05
+
+### Relato individual - Diogo Oliveira
+
+- Concluí a investigação dos casos `A1`, `A2`, `I1` e `I2` do Golden Set, relacionando relatórios e logs às etapas de roteamento, análise de consulta, recuperação, consulta estruturada e geração. `A1`, `A2` e `I1` apresentaram rotas e evidências compatíveis; em `I2`, a resposta trazia os dados da ata correta, mas não repetia literalmente o identificador PNCP exigido pelo Golden Set. Como não foi encontrada uma regra funcional que obrigasse essa repetição, mantive o critério de `I2` e não alterei o pipeline.
+- Investiguei o falso negativo de `expected_source_ok` em `P3.1`: o Golden Set usa `normativa`, enquanto a base tem o `base_id` canônico `editais_normativo`. Acrescentei ao evaluator essa equivalência explícita, preservei a comparação por prefixo dos demais casos e adicionei testes de regressão.
+- Os testes focados passaram (**20 testes**) e a suíte completa passou (**1.074 testes**). Na avaliação oficial `20261005T202613Z`, o resultado foi **13/26**. `P3.1` teve rota, conteúdo e recusa corretos, mas não retornou fontes (`n_fontes=0`), portanto `citacao_ok` e `expected_source_ok` permaneceram falsos. O teste isolado confirmou que o mapeamento funciona quando uma fonte com `base_id=editais_normativo` é citada.
+- Mantive o Golden Set inalterado e não alterei router, retrieval, geração ou corpus. Restaurei a base SQLite após uma alteração incidental durante a avaliação.
+
+### Relato individual - Renato Lemos
+
+- Integrei ao `main` as contribuições que estavam fora dele: a API ampliada para o front-end, o evaluator atualizado pelo Diogo, as conversas sintéticas e melhorias de análise e atendimento conversacional do João, além das correções do Marco e da Pâmela.
+- No conflito do arquivo de acompanhamento da Eduarda, mantive a versão mais recente, escrita por ela após o último commit da branch. Após as integrações, a suíte offline foi reportada com **1.081 testes aprovados**.
+
+### Relato individual - Pâmela de Freitas
+
+- Implementei ajustes de rastreabilidade no `query_analysis`: a decisão de conversa ou consulta passou a ser registrada em uma nova etapa de log chamada `interacao`, separada da análise da pergunta. O status `geracao: conversa` foi preservado para manter compatibilidade com o evaluator.
+- Ajustei também o tratamento dos logs no modo IA para mascarar CPF, telefone e e-mail, não repetir a pergunta original e limitar textos registrados. Atualizei o README e a arquitetura e adicionei seis testes.
+
+### Relato individual - João Pedro Félix Reis
+
+- Consolidei melhorias no RAG e integrei as mudanças recentes da `main`, incluindo suporte ao OpenRouter com fallback, análise de consultas, filtros, tratamento de evidências e geração.
+- Integrei 25 conversas sintéticas ao corpus com controle de sensibilidade, mantendo-as identificadas como conteúdo fictício. O índice passou a conter **5.646 chunks**: 5.621 da v6 e 25 conversas sintéticas.
+- Avancei na API e no fluxo conversacional, com endpoints de catálogo, documentos, órgãos e fontes, além de tratamento de saudações, agradecimentos e pedidos de ajuda sem acionar o RAG desnecessariamente. Também revisei Git, hashes, índices, vetores e artefatos.
+- Reportei **1.074 testes aprovados** e `git diff --check` sem erros. Permaneceram pendentes ajustes locais, nova avaliação completa das respostas, correções de qualidade/metadados do corpus e validação integrada do front-end com o backend.
+
+### Relato individual - Marco Araújo
+
+- Criei o motivo `ERRO_PROVEDOR` em `src/schema.py` e ajustei os dois caminhos de `src/generate.py` para retorná-lo com uma mensagem de tentativa posterior. A etapa de geração registra o motivo e o erro original.
+- Mantive esse motivo sob controle exclusivo do código: ele não é oferecido ao LLM nem convertido em uma recusa comum, para que falhas de infraestrutura não sejam apresentadas como respostas de conteúdo.
+
+### Relato individual - Eduarda Silva Santos
+
+- Estruturei no front-end como apresentar a rastreabilidade de cada consulta, incluindo uso de SQL, busca vetorial e etapas relevantes do pipeline relacionadas ao `query_id`.
+- Preparei a interface para consumir o trace real do backend quando estiver disponível, sem preencher essa visualização com dados simulados.
+
+## **Ficou pendente:**
+
+- Publicar ajustes locais, refazer a avaliação completa das respostas, corrigir alguns problemas de qualidade/metadados do corpus e validar frontend + backend juntos.
+
+### Uso de assistentes de IA:
+
+- Utilizei assistentes de IA como apoio para percorrer o fluxo do evaluator e do pipeline, correlacionar logs com a implementação, analisar o contrato funcional de `I2` e localizar o ponto de comparação de fontes do evaluator.
+
+- Revisei as alterações, executei os testes e validei os resultados da avaliação oficial. As conclusões foram baseadas nos dados, código, logs e testes locais, mantendo o Golden Set inalterado.
