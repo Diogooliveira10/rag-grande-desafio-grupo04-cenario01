@@ -8,6 +8,10 @@ e respondida por uma consulta SQL **pré-escrita e parametrizada** (o LLM nunca
 escreve SQL). O resultado vira ``Chunk`` com ``doc_type="sql"``, que
 ``src/pipeline.py`` põe à frente dos chunks da busca para o LLM citar.
 
+Listagens explícitas de contratações também podem produzir uma evidência SQL
+limitada aos termos do objeto, inclusive quando a pergunta exige cruzá-la com
+evidência normativa.
+
 Filtros vêm de ``query_analysis`` (ano, valor) e da própria pergunta (esfera
 estadual/municipal, termos do objeto). O banco é o de ``src/structured_db.py``
 (Postgres/Neon com ``DATABASE_URL``, senão SQLite local).
@@ -84,11 +88,20 @@ _RE_AGRUPAMENTO = re.compile(
 _RE_COMPARACAO = re.compile(r"\bmais car[oa]s?\b|\bmais barat|\bpag(?:ou|aram|am|a) mais\b|\bcompar")
 _RE_ESTATISTICA = re.compile(r"\bmedia\b|\bmedio\b|\bmediana\b|\btotal\b|\bsoma\b|\bquant[oa]s?\b|\bquantidade\b")
 _RE_CONTAGEM_CONTRATOS = re.compile(
-    r"\b(?:\d+|um|dois|tres|quatro|cinco)\s+ou\s+mais\s+(?:contratos?|contratac(?:ao|oes))\b"
+    r"\b(?:(?P<numero>\d+|um|dois|tres|quatro|cinco)\s+ou\s+mais|"
+    r"(?:pelo\s+menos|no\s+minimo)\s+(?P<minimo>\d+|um|dois|tres|quatro|cinco))"
+    r"\s+(?:contratos?|contratac(?:ao|oes))\b"
 )
 _RE_AGENTE = re.compile(r"\b[a-z]+(?:ad|id|it)[oa]s? por (?:orgaos|municipios|esferas)\b")
 # Pergunta que pede os registros em si: "quais órgãos contrataram…", "existem contratações de…".
 _RE_LISTAGEM = re.compile(r"^(?:quais|qual|existem?|ha|houve|liste|listar|mostre|mostrar)\b")
+_RE_LISTAGEM_CONTRATACOES = re.compile(
+    r"\b(?:quais|qual|liste|listar|mostre|mostrar)\s+contrat(?:a(?:cao|coes)|os?)\b"
+)
+_RE_OBJETO_CONTRATACAO = re.compile(
+    r"\bcontrat(?:a(?:cao|coes)|os?)\s+de\s+(.+?)"
+    r"(?=\s+(?:do corpus|da base|que|usam|utilizam|foram|sao|existem|em)\b|[,;?.!]|$)"
+)
 _RE_NUMERO_CONTROLE_PNCP = re.compile(
     r"(?<!\d)\d{14}-\d-\d{6}/\d{4}(?:-\d{6})?(?!\d)"
 )
@@ -372,17 +385,28 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
         tipo = "evolucao"
     elif _RE_AGRUPAMENTO.search(texto_agrupamento):
         tipo = "agrupamento"
+    elif _RE_CONTAGEM_CONTRATOS.search(texto):
+        tipo = "agrupamento"
     elif _RE_COMPARACAO.search(texto):
         tipo = "estatistica"  # sai quebrada por esfera, que é a comparação pedida
     elif _RE_RANKING.search(texto):
         tipo = "ranking"
     elif _RE_ESTATISTICA.search(texto):
         tipo = "estatistica"
-    elif (tabela == "contratacoes" and bases <= {Natureza.ESTRUTURADA, Natureza.AGREGADA}
-          and _RE_LISTAGEM.search(texto)):
+    elif (
+        tabela == "contratacoes"
+        and _RE_LISTAGEM.search(texto)
+        and (
+            bases <= {Natureza.ESTRUTURADA, Natureza.AGREGADA}
+            or (
+                Natureza.ESTRUTURADA in bases
+                and _RE_LISTAGEM_CONTRATACOES.search(texto)
+            )
+        )
+    ):
         # "Quais órgãos contrataram manutenção de computadores em 2025?": filtro
-        # por metadado e objeto, que a busca por texto não garante. Só vira
-        # consulta se sobrar termo de objeto (verificado abaixo).
+        # por metadado e objeto, que a busca por texto não garante. Em perguntas
+        # multi-base, limita a listagem estruturada ao objeto da cláusula pedida.
         tipo = "listagem"
     else:
         return None
@@ -390,7 +414,7 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
     minimo_por_grupo = None
     if tabela == "contratacoes" and (contagem := _RE_CONTAGEM_CONTRATOS.search(texto)):
         # "fornecedores com três ou mais contratos": agrupa e exige o mínimo.
-        numero = contagem.group(0).split()[0]
+        numero = contagem.group("numero") or contagem.group("minimo")
         minimo_por_grupo = int(numero) if numero.isdigit() else _NUMEROS_POR_EXTENSO.get(numero, 1)
         tipo = "agrupamento"
 
@@ -440,6 +464,13 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
                 break
         for padrao, _ in _MODALIDADES:  # a modalidade não descreve o objeto
             texto_objeto = padrao.sub(" ", texto_objeto)
+        if (
+            (tipo == "listagem" and _RE_LISTAGEM_CONTRATACOES.search(texto))
+            or minimo_por_grupo is not None
+        ):
+            objeto_contratacao = _RE_OBJETO_CONTRATACAO.search(texto)
+            if objeto_contratacao:
+                texto_objeto = objeto_contratacao.group(1)
 
     # O mês vem da pergunta original: o query_analysis já tira "janeiro de 2025"
     # do texto quando vira filtro de ano.
@@ -492,6 +523,13 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
         orgao_termos=orgao_termos,
         so_contratos=so_contratos,
         norma_citada=bool(_RE_NORMA_NUMERADA.search(texto)),
+        valor_min_exclusivo=bool(
+            filtros.valor_min is not None
+            and re.search(
+                r"\b(?:acima\s+de|superior\s+a|maior\s+que|mais\s+de)\b",
+                structured_db.normalizar(query),
+            )
+        ),
     )
 
 
