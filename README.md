@@ -191,9 +191,11 @@ da CLI.
 ```bash
 python -m venv .venv
 .venv\Scripts\activate          # Windows
-pip install -r requirements.txt
+pip install -r requirements-lock.txt
 copy .env.example .env          # preencher se necessário; os defaults já apontam para o endpoint da turma
 ```
+
+O [requirements-lock.txt](requirements-lock.txt) fixa a versão exata de cada pacote, a mesma usada no CI, e instala o torch só de CPU. O [requirements.txt](requirements.txt) continua com as faixas de versão aceitas: ao mudá-lo, gere o lock de novo com o comando do cabeçalho do lock.
 
 Opcional: para ler as atas escaneadas, instale o Tesseract com o idioma português (passo a passo em [docs/CLI.md](docs/CLI.md#ocr-de-pdfs-escaneados-opcional)). Sem ele, tudo funciona, mas as páginas escaneadas ficam sem texto.
 
@@ -432,6 +434,8 @@ python llm_ecoa.py
 ```bash
 pytest tests/ -m "not llm"      # camadas unitária e de contrato, offline
 ```
+
+O GitHub Actions roda esse mesmo comando a cada push e pull request ([.github/workflows/tests.yml](.github/workflows/tests.yml)), com Python 3.14 e as dependências do lock.
 
 **7. Fazer perguntas ao sistema (app)**
 
