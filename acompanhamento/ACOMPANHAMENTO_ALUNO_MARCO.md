@@ -118,3 +118,19 @@ Rodei pytest -q pra confirmar o número real de testes: 793, que não batia nem 
 Fiz os commits e pushes de cada rodada de correção na branch marco/feedback-historico.
 
 Uso de IA: usei o Claude pra comparar o documento com o código a cada rodada, rodar os diffs de git e redigir o texto de cada seção reescrita. Rodei os comandos, confirmei os resultados e decidi quando um ponto ficava "aceito" ou "sinalizado sem fonte" fui eu; os commits e pushes também.
+
+
+## Encontro 9 — 05/10/2026
+
+Contexto: a apresentação de hoje foi pro Felipe Rafael e, depois do feedback dele, o grupo passou a trabalhar numa lista de 16 correções (P0, P1 e P2) feita em cima do main no commit 146ceea, que inclui a rastreabilidade do fluxo de dados (onde a pergunta consulta a base SQL e a vetorial, com input e output reais de cada etapa) como ponto mais urgente. Fiquei com o item 9: erro de provedor aparecendo como "sem evidência".
+
+O que fiz:
+
+
+Entendi o problema do item 9 lendo o código: em generate.py, tanto a falha da chamada ao LLM (ECOA e fallback do OpenRouter, via llm_ecoa.completar_chat) quanto um JSON inválido do modelo viravam recusa com motivo SEM_EVIDENCIA. O usuário lia "não encontrei evidência" com o serviço fora do ar, e o avaliador contava como acerto uma recusa esperada causada por falha de rede.
+
+A correção: criei o motivo ERRO_PROVEDOR em src/schema.py e fiz os dois caminhos de generate.py devolverem esse motivo, com a mensagem "tente novamente em instantes"; o log da etapa geracao registra "recusa: erro_provedor" junto com o erro original. Decidi que só o código pode marcar esse motivo: ele fica fora do schema JSON enviado ao LLM, se o modelo devolver esse valor em texto livre ele vira sem_evidencia, e ele fica fora das recusas convertíveis (_RECUSAS_CONVERTIVEIS), pra uma falha de infraestrutura nunca virar resposta.
+
+No avaliador (eval/run_eval.py), erro_provedor nunca conta como acerto, nem de uma recusa esperada sem motivo definido; conteúdo e citação ficam como não avaliados, e o relatório ganhou o contador de falhas do provedor e o status ERRO_PROVEDOR. Escrevi 5 testes novos em tests/test_generate.py e 2 em tests/test_eval.py, e corrigi os 2 testes antigos que esperavam sem_evidencia nesses casos. Mantive o HTTP 200 na API (is_refusal=true com o motivo novo) pra não quebrar histórico e feedback; trocar por 503 fica como decisão do time.
+
+Uso de IA: usei o Claude pra revisar o generate.py e o llm_ecoa.py atualizados.
