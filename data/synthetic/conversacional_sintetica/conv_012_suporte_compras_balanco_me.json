@@ -1,0 +1,49 @@
+{
+  "conversation_id": "conv_012_suporte_compras_balanco_me",
+  "title": "Dúvida sobre dispensa de apresentação de balanço patrimonial para MEI/ME em licitações de pronto pagamento",
+  "channel": "chamados_ouvidoria",
+  "organ": "Secretaria de Estado de Fazenda - SEFAZ-RJ / Subsecretaria de Logística",
+  "subject": "Exigência de Balanço Patrimonial - Art. 70 Lei 14.133/2021",
+  "creation_date": "2025-10-15T15:20:00-03:00",
+  "process_number": "SUP-COMPRAS-2025-441",
+  "arp_number": "N/A",
+  "supplier_name": "Distribuidora de Papéis Serrano EPP",
+  "supplier_cnpj": "88.112.334/0001-77",
+  "sensitivity_level": "publico",
+  "guardrail_type": null,
+  "participants": [
+    "Carlos Alberto (Sócio - Papéis Serrano EPP)",
+    "Consultoria Técnica de Cadastro de Fornecedores - SEFAZ-RJ"
+  ],
+  "messages": [
+    {
+      "id": "msg_012_1",
+      "sender_name": "Carlos Alberto",
+      "sender_role": "Empresário EPP",
+      "sender_email": "carlos@papeisserrano.com.br",
+      "recipient": "cadastro.fornecedores@fazenda.rj.gov.br",
+      "timestamp": "2025-10-15T15:20:00-03:00",
+      "content": "Boa tarde, para cadastramento no Siga-RJ / PNCP-RJ, uma Microempresa participante de dispensa eletrônica para fornecimento imediato de material de consumo precisa apresentar Balanço Patrimonial do último exercício social?",
+      "has_sensitive_data": false,
+      "sensitive_data_types": []
+    },
+    {
+      "id": "msg_012_2",
+      "sender_name": "Consultoria Técnica SEFAZ-RJ",
+      "sender_role": "Analista de Cadastro",
+      "sender_email": "cadastro.fornecedores@fazenda.rj.gov.br",
+      "recipient": "carlos@papeisserrano.com.br",
+      "timestamp": "2025-10-15T17:00:00-03:00",
+      "content": "Prezado Carlos Alberto, não. Conforme o Artigo 70, inciso III da Lei 14.133/2021 c/c o Decreto Estadual do RJ sobre habilitação simplificada, a documentação relativa à qualificação econômico-financeira (balanço e demonstrações) poderá ser dispensada, no todo ou em parte, nas contratações para entrega imediata e nas contratações de valores inferiores ao limite da dispensa de licitação.",
+      "has_sensitive_data": false,
+      "sensitive_data_types": []
+    }
+  ],
+  "tags": [
+    "balanco_patrimonial",
+    "dispensa_habilitacao",
+    "ME_EPP",
+    "art_70",
+    "SEFAZ-RJ"
+  ]
+}

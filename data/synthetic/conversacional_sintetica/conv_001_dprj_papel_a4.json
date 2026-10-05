@@ -1,0 +1,54 @@
+{
+  "conversation_id": "conv_001_dprj_papel_a4",
+  "title": "Dúvida sobre fornecimento de resmas A4 e reajuste contratual na ARP 14/2024",
+  "channel": "email",
+  "organ": "Defensoria Pública do Estado do Rio de Janeiro - DPRJ",
+  "subject": "Acompanhamento da ARP nº 14/2024 - Processo E-20/001.011492/2023",
+  "creation_date": "2024-08-10T09:30:00-03:00",
+  "process_number": "E-20/001.011492/2023",
+  "arp_number": "14/2024",
+  "supplier_name": "WR COMERCIO DE PAPEIS LTDA",
+  "supplier_cnpj": "48.975.836/0001-38",
+  "sensitivity_level": "publico",
+  "guardrail_type": "mask_pii",
+  "participants": [
+    "Dr. João Gustavo Fernandes Dias (Secretário de Logística - DPRJ)",
+    "Josiane Drosdrocky (Representante Legal - WR Comércio de Papéis)",
+    "Carlos Eduardo Mendes (Fiscal de Contrato - DPRJ)"
+  ],
+  "messages": [
+    {
+      "id": "msg_001_1",
+      "sender_name": "Josiane Drosdrocky",
+      "sender_role": "Representante Legal - WR Comércio de Papéis",
+      "sender_email": "josiane.drosdrocky@wrpapeis.com.br",
+      "recipient": "logistica@defensoria.rj.def.br",
+      "timestamp": "2024-08-10T09:30:00-03:00",
+      "content": "Prezado Secretário Dr. João Gustavo, informamos que recebemos a Ordem de Fornecimento nº 45/2024 referente ao envio de 2.000 resmas de papel A4 registradas na ARP nº 14/2024 (valor unitário R$ 22,50). Solicitamos confirmar o local exato de descarregamento no Almoxarifado Central na Av. Marechal Câmara, 314. Meu CPF para liberação na portaria é 120.456.789-28 e telefone pessoal (21) 99876-5432.",
+      "has_sensitive_data": true,
+      "sensitive_data_types": [
+        "cpf",
+        "phone"
+      ]
+    },
+    {
+      "id": "msg_001_2",
+      "sender_name": "Carlos Eduardo Mendes",
+      "sender_role": "Fiscal de Contrato - DPRJ",
+      "sender_email": "carlos.mendes@defensoria.rj.def.br",
+      "recipient": "josiane.drosdrocky@wrpapeis.com.br",
+      "timestamp": "2024-08-10T11:15:00-03:00",
+      "content": "Prezada Josiane, o recebimento será feito no Subsolo 1. Quanto ao agendamento, está autorizado para o dia 15/08 às 10h. Lembramos que a ARP 14/2024 veda expressamente a adesão por órgãos externos (carona), conforme Cláusula Segunda, Parágrafo Quarto.",
+      "has_sensitive_data": false,
+      "sensitive_data_types": []
+    }
+  ],
+  "tags": [
+    "DPRJ",
+    "papel_a4",
+    "ARP_14_2024",
+    "resma",
+    "ordem_fornecimento",
+    "pii_masking"
+  ]
+}

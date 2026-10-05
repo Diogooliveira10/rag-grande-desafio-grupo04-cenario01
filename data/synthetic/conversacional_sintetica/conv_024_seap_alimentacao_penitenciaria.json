@@ -1,0 +1,40 @@
+{
+  "conversation_id": "conv_024_seap_alimentacao_penitenciaria",
+  "title": "Relatório de Inspeção Nutricional e Qualidade das Refeições no Complexo de Gericinó",
+  "channel": "email",
+  "organ": "Secretaria de Estado de Administração Penitenciária - SEAP-RJ",
+  "subject": "Inspeção mensal de contrato - Contrato SEAP nº 019/2025",
+  "creation_date": "2025-12-05T15:30:00-03:00",
+  "process_number": "SEI-210001/008812/2025",
+  "arp_number": "012/2025-SEAP",
+  "supplier_name": "REFATORIA ALIMENTOS E SERVICOS DE NUTRICAO LTDA",
+  "supplier_cnpj": "44.111.222/0001-33",
+  "sensitivity_level": "publico",
+  "guardrail_type": "mask_pii",
+  "participants": [
+    "Nutricionista Clara Menezes (Fiscal SEAP)",
+    "Gerente de Operações Refatoria"
+  ],
+  "messages": [
+    {
+      "id": "msg_024_1",
+      "sender_name": "Nutricionista Clara Menezes",
+      "sender_role": "Fiscal Técnica",
+      "sender_email": "clara.menezes@seap.rj.gov.br",
+      "recipient": "operacoes@refatoria.com.br",
+      "timestamp": "2025-12-05T15:30:00-03:00",
+      "content": "Notificamos a contratada referente à aferição de temperatura das marmitas na entrega do almoço na SEAP-Bangu. O gramatura das porções de proteína atendeu ao edital. Fiscal de pátio: Jorge Amado, CPF 001.222.333-44, tel (21) 97111-2233.",
+      "has_sensitive_data": true,
+      "sensitive_data_types": [
+        "cpf",
+        "phone"
+      ]
+    }
+  ],
+  "tags": [
+    "SEAP-RJ",
+    "alimentacao_penitenciaria",
+    "gericino",
+    "pii_masking"
+  ]
+}

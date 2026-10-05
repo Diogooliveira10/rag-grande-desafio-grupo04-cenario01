@@ -144,7 +144,7 @@ As tarefas são distribuídas entre os integrantes a cada encontro conforme as n
 - Corrigir a geração: confiança alta junto de "nada encontrado" (P2.1) e resposta sem fonte (F1).
 - Fazer o frontend (repositório separado) consumir `query_id`/`feedback`/`history`, hoje sem cliente; falta também um backend público em HTTPS para o site apontar.
 - Decidir se o histórico de `src/history_store.py` precisa de um mecanismo de expurgo/anonimização (hoje ele não expira e guarda a pergunta em texto puro) e se `GET /api/v1/history` precisa de autenticação antes de qualquer deploy público (a API hoje não tem autenticação em nenhum endpoint).
-- Obter a base sintética de e-mails de compras fornecida pelo desafio.
+- Avaliar respostas e guardrails sobre o suplemento `emails_sinteticos`, recebido e integrado em 2026-10-05: 25 conversas, 20 públicas e 5 restritas ([proveniência e reconstrução](docs/emails_sinteticos.md)).
 - Revisar o casamento de CNPJ sem pontuação nos filtros/consultas.
 - Evitar vazamento de identificadores internos e da mensagem "Busca ampliada" nas respostas ao usuário final.
 - Decidir o tratamento definitivo para os diretórios ignorados pelo `.gitignore` mas versionados via `git add -f` (`index/`, `data/normalized/`, `data/structured/`, `data/embeddings/2026-09-30_12-08-51/`).

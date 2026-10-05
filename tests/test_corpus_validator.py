@@ -54,6 +54,22 @@ def test_manifesto_oficial_valido_passa_e_ignora_bases_experimentais():
     assert validate_manifest_contract(_manifesto_oficial()).ok
 
 
+def test_suplemento_sintetico_nao_altera_orcamento_v6_mas_exige_inventario():
+    manifesto = load_manifest(ROOT / "corpus_manifest.yaml")
+    assert validate_manifest_contract(manifesto).ok
+    inventario = _inventario_completo(manifesto)
+    assert validate_inventory_contract(manifesto, inventario).ok
+    inventario["por_base"] = [base for base in inventario["por_base"] if base["base_id"] != "emails_sinteticos"]
+    assert "inventário sem base(s): emails_sinteticos" in validate_inventory_contract(manifesto, inventario).errors
+
+
+def test_suplemento_oficial_exige_rotulo_sintetico_e_fonte_local():
+    manifesto = load_manifest(ROOT / "corpus_manifest.yaml")
+    suplemento = next(base for base in manifesto["bases"] if base["base_id"] == "emails_sinteticos")
+    suplemento["dados_sinteticos"] = False
+    assert "emails_sinteticos: suplemento sintético local inválido" in validate_manifest_contract(manifesto).errors
+
+
 def test_manifesto_sem_bases_e_rejeitado():
     resultado = validate_manifest_contract({"bases": []})
 
@@ -115,7 +131,8 @@ def test_inventario_aceita_itens_quando_nao_ha_volume_obtido():
 
 def test_manifesto_e_inventario_v5_do_repositorio_continuam_validos():
     manifesto = load_manifest(ROOT / "corpus_manifest.yaml")
-    # A v5 conserva seu contrato de volumes; o manifesto ativo descreve a v6.
+    # A v5 conserva seu contrato de volumes, sem suplementos posteriores.
+    manifesto["bases"] = [base for base in manifesto["bases"] if not base.get("dados_sinteticos")]
     manifesto.pop("curadoria_v6", None)
     for base in manifesto["bases"]:
         if base["base_id"] in OFFICIAL_BASE_TARGETS:

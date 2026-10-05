@@ -1,0 +1,49 @@
+{
+  "conversation_id": "conv_010_impugnacao_edital_uniformes",
+  "title": "Pedido de Esclarecimento e Impugnação do Edital de Aquisição de Fardamento Escolar e Policial",
+  "channel": "chamados_ouvidoria",
+  "organ": "Secretaria de Estado de Polícia Militar - SEPM-RJ",
+  "subject": "Impugnação ao Pregão Eletrônico PE-089/2025 - Fardamento",
+  "creation_date": "2025-09-18T16:30:00-03:00",
+  "process_number": "SEI-090010/004500/2025",
+  "arp_number": "N/A",
+  "supplier_name": "CONFECCCOES E UNIFORMES RIO LTDA",
+  "supplier_cnpj": "11.222.333/0001-99",
+  "sensitivity_level": "publico",
+  "guardrail_type": null,
+  "participants": [
+    "Advocacia da Empresa Confecções Rio LTDA",
+    "Pregoeiro e Comissão Especial de Licitação - SEPM-RJ"
+  ],
+  "messages": [
+    {
+      "id": "msg_010_1",
+      "sender_name": "Advocacia Confecções Rio",
+      "sender_role": "Advogado da Licitante",
+      "sender_email": "juridico@uniformesrio.com.br",
+      "recipient": "licitacao@pmerj.rj.gov.br",
+      "timestamp": "2025-09-18T16:30:00-03:00",
+      "content": "Vimos apresentar IMPUGNAÇÃO AO EDITAL do PE-089/2025, no tocante à exigência de laudo de ensaio têxtil emitido exclusivamente por laboratório localizado no Estado do Rio de Janeiro. Tal restrição viola o princípio da ampla competitividade positivado no artigo 5º da Lei 14.133/2021, pois laboratórios credenciados pelo INMETRO em outros estados possuem idêntica validade nacional.",
+      "has_sensitive_data": false,
+      "sensitive_data_types": []
+    },
+    {
+      "id": "msg_010_2",
+      "sender_name": "Comissão Especial SEPM-RJ",
+      "sender_role": "Pregoeiro Titular",
+      "sender_email": "licitacao@pmerj.rj.gov.br",
+      "recipient": "juridico@uniformesrio.com.br",
+      "timestamp": "2025-09-19T10:15:00-03:00",
+      "content": "DECISÃO DA IMPUGNAÇÃO: Conheço da impugnação por tempestiva e, no mérito, DOU-LHE PROVIMENTO. A redação do item 8.4 será retificada para aceitar laudos de qualquer laboratório acreditado pelo INMETRO no território nacional, com a consequente reabertura do prazo para envio de propostas conforme o § 1º do art. 55 da Lei 14.133/2021.",
+      "has_sensitive_data": false,
+      "sensitive_data_types": []
+    }
+  ],
+  "tags": [
+    "SEPM-RJ",
+    "impugnacao_edital",
+    "fardamento",
+    "inmetro",
+    "ampla_competitividade"
+  ]
+}

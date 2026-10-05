@@ -50,7 +50,8 @@ def test_manifest_declares_real_bases_and_official_pdf_target():
         "contratacao",
     ]
     assert structured["volume_alvo"] > 0
-    assert sum(base["volume_alvo"] for base in bases.values() if base.get("escopo") == "oficial") == manifest["curadoria_v6"]["alvo_arquivos_total"]
+    assert sum(base["volume_alvo"] for base in bases.values()
+               if base.get("escopo") == "oficial" and not base.get("dados_sinteticos")) == manifest["curadoria_v6"]["alvo_arquivos_total"]
     assert manifest["curadoria_v6"]["limite_por_orgao_por_base"] == 5
     assert structured["volume_regra"] == "minimo"
     assert structured["selecao"]["limite"] == 1200
@@ -83,7 +84,9 @@ def test_manifest_covers_four_official_base_types():
         "editais_normativo",
         "atas_conversacional",
         "pca_agregado",
+        "emails_sinteticos",
     }
+    assert {base["natureza"] for base in bases.values()} == {"estruturada", "normativa", "conversacional", "agregada"}
     assert bases["contratos_estruturado"]["acesso"]["tipo"] == "provider"
     assert bases["editais_normativo"]["acesso"]["tipo"] == "http_misto"
     assert bases["atas_conversacional"]["acesso"]["tipo"] == "provider"
@@ -702,6 +705,7 @@ def test_manifest_separates_official_bases_from_experimental_ones():
         "editais_normativo",
         "atas_conversacional",
         "pca_agregado",
+        "emails_sinteticos",
     }
     assert all(
         bases[base_id]["escopo"] == "experimental"

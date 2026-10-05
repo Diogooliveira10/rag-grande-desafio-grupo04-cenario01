@@ -1,0 +1,48 @@
+{
+  "conversation_id": "conv_020_sepm_blindagem_viaturas",
+  "title": "Chamado de Garantia Técnica para Viaturas Blindadas de Patrulhamento Urbano",
+  "channel": "chamados_ouvidoria",
+  "organ": "Secretaria de Estado de Polícia Militar - SEPM-RJ",
+  "subject": "Chamado Técnico #8821 - Contrato SEPM nº 077/2024",
+  "creation_date": "2025-10-10T08:30:00-03:00",
+  "process_number": "SEI-090001/007712/2024",
+  "arp_number": "N/A",
+  "supplier_name": "ARMOR RIO BLINDAGENS ESPECIAIS LTDA",
+  "supplier_cnpj": "88.999.000/0001-22",
+  "sensitivity_level": "publico",
+  "guardrail_type": null,
+  "participants": [
+    "Capitão Bruno Lima (Submando de Frota - PMERJ)",
+    "Suporte Técnico Armor Rio"
+  ],
+  "messages": [
+    {
+      "id": "msg_020_1",
+      "sender_name": "Capitão Bruno Lima",
+      "sender_role": "Submandante de Frota",
+      "sender_email": "frota@pmerj.rj.gov.br",
+      "recipient": "suporte@armorrio.com.br",
+      "timestamp": "2025-10-10T08:30:00-03:00",
+      "content": "Abrimos chamado para reparo sob garantia no vidro blindado Nível III-A da viatura regimento 15-4422 (prefixo Baixada). O contrato prevê atendimento no Batalhão em até 24 horas.",
+      "has_sensitive_data": false,
+      "sensitive_data_types": []
+    },
+    {
+      "id": "msg_020_2",
+      "sender_name": "Suporte Armor Rio",
+      "sender_role": "Gerente de Atendimento",
+      "sender_email": "suporte@armorrio.com.br",
+      "recipient": "frota@pmerj.rj.gov.br",
+      "timestamp": "2025-10-10T10:00:00-03:00",
+      "content": "Capitão Bruno, a equipe móvel de manutenção chegará ao 15º BPM (Duque de Caxias) hoje às 14h com o painel de reposição certificado.",
+      "has_sensitive_data": false,
+      "sensitive_data_types": []
+    }
+  ],
+  "tags": [
+    "SEPM-RJ",
+    "blindagem",
+    "viaturas",
+    "garantia_tecnica"
+  ]
+}

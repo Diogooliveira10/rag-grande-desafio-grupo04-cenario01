@@ -1,0 +1,41 @@
+{
+  "conversation_id": "conv_011_seeduc_notificacao_atraso",
+  "title": "Notificação Administrativa de Atraso na Entrega de Laptops Educacionais",
+  "channel": "email",
+  "organ": "Secretaria de Estado de Educação - SEEDUC-RJ",
+  "subject": "Notificação de Descumprimento Contratual - Contrato 023/2025",
+  "creation_date": "2025-10-02T11:00:00-03:00",
+  "process_number": "SEI-030001/008820/2025",
+  "arp_number": "004/2025-SEEDUC",
+  "supplier_name": "NEXUS TECNOLOGIA E INFORMÁTICA LTDA",
+  "supplier_cnpj": "66.554.433/0001-22",
+  "sensitivity_level": "publico",
+  "guardrail_type": "mask_pii",
+  "participants": [
+    "Dr. Almir Sampaio (Gestor de Contratos - SEEDUC-RJ)",
+    "Luciana Vasconcelos (Gerente de Operações - Nexus)"
+  ],
+  "messages": [
+    {
+      "id": "msg_011_1",
+      "sender_name": "Dr. Almir Sampaio",
+      "sender_role": "Gestor de Contratos",
+      "sender_email": "gestao.contratos@educacao.rj.gov.br",
+      "recipient": "luciana@nexustec.com.br",
+      "timestamp": "2025-10-02T11:00:00-03:00",
+      "content": "Prezada Luciana, notificamos formalmente a empresa Nexus pelo atraso injustificado de 15 dias na entrega do lote de 500 notebooks destinados às escolas estaduais da Região Serrana (Petrópolis e Teresópolis), objeto do Contrato 023/2025. Conforme Cláusula Décima Segunda, incide multa moratória de 0,5% ao dia sobre o valor da parcela não entregue (R$ 1.500.000,00). Fiscal responsável: Sérgio Diniz, CPF 331.889.001-12, cel (24) 99221-1010.",
+      "has_sensitive_data": true,
+      "sensitive_data_types": [
+        "cpf",
+        "phone"
+      ]
+    }
+  ],
+  "tags": [
+    "SEEDUC-RJ",
+    "notificacao_atraso",
+    "multa_contratual",
+    "notebooks",
+    "pii_masking"
+  ]
+}

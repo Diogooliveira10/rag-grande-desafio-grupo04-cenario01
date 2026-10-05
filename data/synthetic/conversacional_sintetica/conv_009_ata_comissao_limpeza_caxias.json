@@ -1,0 +1,42 @@
+{
+  "conversation_id": "conv_009_ata_comissao_limpeza_caxias",
+  "title": "Ata de Sessão Pública de Julgamento do Pregão nº 05/2025 - Serviços de Conservação e Limpeza",
+  "channel": "transcricao_sessao",
+  "organ": "Prefeitura Municipal de Duque de Caxias - Comissão de Licitações",
+  "subject": "Sessão de Análise de Amostras e Inabilitação Técnica",
+  "creation_date": "2025-09-05T14:00:00-03:00",
+  "process_number": "PMDC-2025-00412",
+  "arp_number": "015/2025-PMDC",
+  "supplier_name": "SERVCLEAN SERVICOS URBANOS LTDA",
+  "supplier_cnpj": "21.432.654/0001-88",
+  "sensitivity_level": "publico",
+  "guardrail_type": "mask_pii",
+  "participants": [
+    "Pregoeiro Oficial Renato Ribeiro",
+    "Membros da Comissão Permanente de Contratação",
+    "Representantes dos Licitantes"
+  ],
+  "messages": [
+    {
+      "id": "msg_009_1",
+      "sender_name": "Renato Ribeiro",
+      "sender_role": "Pregoeiro Oficial - PMDC",
+      "sender_email": "pregao@duquedecaxias.rj.gov.br",
+      "recipient": "publico",
+      "timestamp": "2025-09-05T14:00:00-03:00",
+      "content": "Aos cinco dias do mês de setembro de 2025, reuniu-se a Comissão de Licitação para prosseguimento do PE 05/2025. A licitante Servclean LTDA apresentou a proposta de menor valor no montante global de R$ 1.250.000,00 para o Lote 1. No entanto, após análise do atestado de capacidade técnica, a equipe verificou divergência na comprovação de quantitativo mínimo exigido na Cláusula 7.2 do Edital. Servidor responsável pela ata: Geraldo Bastos, CPF 089.321.654-00, tel (24) 98112-3344.",
+      "has_sensitive_data": true,
+      "sensitive_data_types": [
+        "cpf",
+        "phone"
+      ]
+    }
+  ],
+  "tags": [
+    "duque_de_caxias",
+    "limpeza_urbana",
+    "ata_sessao",
+    "inabilitacao_tecnica",
+    "pii_masking"
+  ]
+}

@@ -152,6 +152,13 @@ Comparação primeiro/último mês não prova crescimento monotônico. Não extr
 para todas as contratações do RJ. Ausência na amostra não prova inexistência no universo.
 Evidência com filtros relaxados é contextual: não comprova atendimento ao recorte original.
 Vigência histórica não verificada não prova que a norma estava vigente no ano solicitado.
+Trechos com sintetico=true são cenários fictícios: identifique-os como sintéticos na resposta.
+Não use conteúdo sintético para comprovar fatos reais, pagamentos ou ocorrências do PNCP.
+Em conversas, a data do e-mail, mensagem ou cabeçalho "Data da conversa" é a data
+DA COMUNICAÇÃO, não a data da entrega, pagamento ou execução mencionada no texto.
+Para local/data/horário de recebimento, priorize a mensagem que CONFIRMA o agendamento
+ou autoriza a operação, não o pedido inicial de confirmação. Preserve detalhes explícitos
+como subsolo, dia e horário. Agendamento autorizado não comprova entrega já realizada.
 Snapshot principalmente de 2025 não confirma oportunidades abertas hoje.
 Toda resposta, inclusive recusa, precisa de texto não vazio.
 """
@@ -169,6 +176,8 @@ def _cabecalho(metadata: ChunkMetadata) -> str:
         f"base={metadata.base_id}",
         f"natureza={_natureza_label(metadata)}",
     ]
+    if metadata.extras.get("sintetico"):
+        campos.append("sintetico=true; cenário fictício, não comprova fatos reais")
     # Distingue a ata em si de publicações anexadas (ex.: Diário Oficial).
     if metadata.extras.get("titulo_documento"):
         campos.append(f"documento={metadata.extras['titulo_documento']}")

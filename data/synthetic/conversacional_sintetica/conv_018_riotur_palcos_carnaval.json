@@ -1,0 +1,48 @@
+{
+  "conversation_id": "conv_018_riotur_palcos_carnaval",
+  "title": "Atestado de Medição de Serviços de Montagem de Palcos e Iluminação no Sambódromo",
+  "channel": "email",
+  "organ": "Empresa de Turismo do Município do Rio de Janeiro - RIOTUR",
+  "subject": "Medição Parcial #02 - Contrato RIOTUR nº 008/2026",
+  "creation_date": "2026-01-15T16:00:00-03:00",
+  "process_number": "PROC-RIOTUR-2026-0012",
+  "arp_number": "N/A",
+  "supplier_name": "ESTRUTURAS RIO PALCOS E EVENTOS EIRELI",
+  "supplier_cnpj": "55.666.777/0001-88",
+  "sensitivity_level": "publico",
+  "guardrail_type": null,
+  "participants": [
+    "Otavio Castro (Diretor Operacional - Estruturas Rio)",
+    "Eng. Fabiana Almeida (Supervisora - RIOTUR)"
+  ],
+  "messages": [
+    {
+      "id": "msg_018_1",
+      "sender_name": "Otavio Castro",
+      "sender_role": "Diretor Operacional",
+      "sender_email": "otavio@riopalcos.com.br",
+      "recipient": "engenharia@riotur.rio.br",
+      "timestamp": "2026-01-15T16:00:00-03:00",
+      "content": "Eng. Fabiana, enviamos a medição relativa à montagem das torres de sonorização dos setores 2 a 8 da Marquês de Sapucaí, no valor de R$ 420.000,00. Solicitamos a emissão do Atestado de Recebimento Provisório.",
+      "has_sensitive_data": false,
+      "sensitive_data_types": []
+    },
+    {
+      "id": "msg_018_2",
+      "sender_name": "Eng. Fabiana Almeida",
+      "sender_role": "Supervisora de Engenharia",
+      "sender_email": "engenharia@riotur.rio.br",
+      "recipient": "otavio@riopalcos.com.br",
+      "timestamp": "2026-01-16T10:00:00-03:00",
+      "content": "Prezado Otavio, a comissão realizou a vistoria técnica. Foi constatada a conformidade das Anotações de Responsabilidade Técnica (ART) do CREA-RJ e os laudos do Corpo de Bombeiros. Atestado aprovado.",
+      "has_sensitive_data": false,
+      "sensitive_data_types": []
+    }
+  ],
+  "tags": [
+    "RIOTUR",
+    "carnaval",
+    "medicao_contratual",
+    "art_crea"
+  ]
+}

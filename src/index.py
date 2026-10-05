@@ -193,8 +193,16 @@ def build_index(
     *,
     model: str,
     batch_size: int = DEFAULT_BATCH_SIZE,
+    merge_existing: bool = False,
 ) -> dict[str, Any]:
-    """Agrupa os chunks por base, gera embeddings e grava o índice em disco."""
+    """Agrupa os chunks por base; merge_existing preserva as demais bases."""
+    existing_bases: dict[str, dict[str, Any]] = {}
+    if merge_existing:
+        for path in sorted(output_dir.glob("*/manifest.json")):
+            existing = json.loads(path.read_text(encoding="utf-8"))
+            if existing.get("embedding_model") != model or existing.get("encoding_config") != getattr(embed_fn, "encoding_config", None):
+                raise ValueError("suplemento exige o mesmo modelo e configuração dos índices existentes")
+            existing_bases[str(existing["base_id"])] = existing
     by_base: dict[str, list[NormalizedChunk]] = defaultdict(list)
     skipped_sem_texto = 0
     for chunk in read_normalized_chunks(input_file):
@@ -234,6 +242,8 @@ def build_index(
                 for chunk, embedding in zip(batch, embeddings):
                     if dimension is None:
                         dimension = len(embedding)
+                        if any(base.get("dimension") != dimension for base in existing_bases.values()):
+                            raise ValueError("dimensão do suplemento difere dos índices existentes")
                     elif len(embedding) != dimension:
                         raise RuntimeError(
                             f"dimensão inconsistente no chunk {chunk.chunk_id}: "
@@ -272,6 +282,10 @@ def build_index(
         )
         bases_summary.append(manifest)
 
+    if merge_existing:
+        existing_bases.update({base["base_id"]: base for base in bases_summary})
+        bases_summary = [existing_bases[key] for key in sorted(existing_bases)]
+
     global_manifest = {
         "embedding_model": model,
         "source_file": _relative(input_file),
@@ -302,6 +316,10 @@ def main() -> int:
         type=Path,
         help="reaproveita os vetores deste JSONL (ex.: data/embeddings/embeddings.jsonl) em vez de chamar o modelo",
     )
+    parser.add_argument(
+        "--merge-existing", action="store_true",
+        help="adiciona/atualiza as bases de entrada sem remover as demais do manifesto do índice",
+    )
     args = parser.parse_args()
 
     if not args.input.exists():
@@ -330,7 +348,8 @@ def main() -> int:
         embed_fn, model = stored_embed_fn(args.embeddings)
     else:
         embed_fn, model = _default_embed_fn(args.model), args.model
-    manifest = build_index(args.input, args.output, embed_fn, model=model, batch_size=args.batch_size)
+    manifest = build_index(args.input, args.output, embed_fn, model=model, batch_size=args.batch_size,
+                           merge_existing=args.merge_existing)
     summary = {
         "bases": [
             {"base_id": base["base_id"], "total_chunks": base["total_chunks"], "dimension": base["dimension"]}

@@ -1,0 +1,50 @@
+{
+  "conversation_id": "conv_007_ambulancias_utimovil_niteroi",
+  "title": "Adesão e Valores de Referência para Ambulâncias de Suporte Avançado Tipo D",
+  "channel": "email",
+  "organ": "Secretaria Municipal de Saúde de Niterói / SES-RJ",
+  "subject": "Aquisição de Ambulâncias de UTI Móvel - Processo SES nº 044/2025",
+  "creation_date": "2025-07-11T10:15:00-03:00",
+  "process_number": "SEI-080005/012290/2025",
+  "arp_number": "088/2025-SES",
+  "supplier_name": "AUTO SOCORRO VEICULOS ESPECIALIZADOS S/A",
+  "supplier_cnpj": "33.111.222/0001-44",
+  "sensitivity_level": "publico",
+  "guardrail_type": null,
+  "participants": [
+    "Dr. Marcelo Bastos (Subsecretário de Saúde - Niterói)",
+    "Dra. Patricia Lima (Coordenadora do SAMU-RJ)"
+  ],
+  "messages": [
+    {
+      "id": "msg_007_1",
+      "sender_name": "Dr. Marcelo Bastos",
+      "sender_role": "Subsecretário de Saúde de Niterói",
+      "sender_email": "marcelo.bastos@saude.niteroi.rj.gov.br",
+      "recipient": "samu.coordenacao@saude.rj.gov.br",
+      "timestamp": "2025-07-11T10:15:00-03:00",
+      "content": "Dra. Patricia, o município de Niterói está renovando a frota de ambulâncias UTI Móvel (Tipo D). Verificamos que a SES-RJ homologou a ARP nº 088/2025 para 30 Unidades de Suporte Avançado montadas sobre furgão 16m³. O valor unitário registrado de R$ 385.000,00 inclui os equipamentos médicos (desfibrilador, respirador mecânico)?",
+      "has_sensitive_data": false,
+      "sensitive_data_types": []
+    },
+    {
+      "id": "msg_007_2",
+      "sender_name": "Dra. Patricia Lima",
+      "sender_role": "Coordenadora SAMU-RJ",
+      "sender_email": "samu.coordenacao@saude.rj.gov.br",
+      "recipient": "marcelo.bastos@saude.niteroi.rj.gov.br",
+      "timestamp": "2025-07-11T11:50:00-03:00",
+      "content": "Prezado Dr. Marcelo, sim. O lote 1 da ARP 088/2025 contempla o veículo adaptado completo com a transformação sanitária e a sinalização acústica/visual, além da bancada de suporte com cardioversor e bomba de infusão. O quantitativo do Estado é de 30 unidades e a ata permite adesão de municípios até o limite de 50% do quantitativo registrado.",
+      "has_sensitive_data": false,
+      "sensitive_data_types": []
+    }
+  ],
+  "tags": [
+    "ambulancia",
+    "uti_movil",
+    "SES-RJ",
+    "niteroi",
+    "suporte_avancado",
+    "ARP_088_2025"
+  ]
+}

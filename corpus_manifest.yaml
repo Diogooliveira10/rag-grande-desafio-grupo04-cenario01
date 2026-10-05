@@ -308,22 +308,24 @@ bases:
     chunking_sugerido: "Texto por seção, com overlap"
     metadados_extras: [nome_arquivo, fixture]
 
-  # Exemplo sintético local para validar emails em Markdown sem dados pessoais reais.
+  # Suplemento sintético do corpus: não representa fatos reais do PNCP.
   - base_id: emails_sinteticos
-    escopo: experimental
+    escopo: oficial
     natureza: conversacional
-    fonte: "Email sintético de fixture para testes locais"
+    fonte: "Conversações sintéticas de compras públicas do RJ fornecidas pelo grupo"
     acesso:
       tipo: arquivo_local
-      origem: "docs/email_sintetico_exemplo.md"
+      origem: "data/synthetic/conversacional_sintetica"
       rate_limit_seg: 0
     selecao_deterministica: true
-    volume_alvo: 1
-    formato: md
-    licenca: "Conteúdo sintético criado para testes"
-    sensitivity_default: publico
-    deduplicacao: "SHA-256"
-    chunking_sugerido: "Preservar cabeçalhos e blocos da conversa"
+    volume_alvo: 25
+    formato: json
+    licenca: "Conteúdo sintético fornecido pelo grupo; licença não informada"
+    dados_sinteticos: true
+    sensitivity_default: restrito
+    deduplicacao: "conversation_id + SHA-256; somente JSON individual, sem duplicar TXT/JSONL"
+    chunking_sugerido: "1 conversa = 1 chunk; preservar cabeçalhos e mensagens"
+    metadados_extras: [conversation_id, title, channel, organ, subject, creation_date, process_number, arp_number, supplier_name, supplier_cnpj, sensitivity_level, guardrail_type, tags]
 
   # Amostra real opcional em CSV, publicada pelo Portal de Dados Abertos do RJ.
   - base_id: licitacoes_siga_csv

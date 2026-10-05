@@ -1,0 +1,49 @@
+{
+  "conversation_id": "conv_005_marina_merenda_escolar",
+  "title": "Consulta Técnica - Valor médio do kg de arroz e feijão contratado por municípios do RJ em 2025",
+  "channel": "chamados_ouvidoria",
+  "organ": "Secretaria de Estado de Educação - SEEDUC-RJ / Central de Apoio a Licitações Municipal",
+  "subject": "Pesquisa de Preços Referencial para Merenda Escolar 2025",
+  "creation_date": "2025-04-18T08:45:00-03:00",
+  "process_number": "PROC-SEEDUC-2025-11204",
+  "arp_number": "012/2025-SEEDUC",
+  "supplier_name": "DISTRIBUIDORA DE ALIMENTOS FLUMINENSE LTDA",
+  "supplier_cnpj": "55.443.221/0001-00",
+  "sensitivity_level": "publico",
+  "guardrail_type": null,
+  "participants": [
+    "Marina (Analista de Licitações - Prefeitura do Interior Fluminense)",
+    "Equipe Técnica de Preços de Referência - SEEDUC-RJ"
+  ],
+  "messages": [
+    {
+      "id": "msg_005_1",
+      "sender_name": "Marina",
+      "sender_role": "Analista de Licitações Municipal",
+      "sender_email": "marina.licitacao@cordeiro.rj.gov.br",
+      "recipient": "suporte.licitacao@educacao.rj.gov.br",
+      "timestamp": "2025-04-18T08:45:00-03:00",
+      "content": "Olá equipe da SEEDUC, estamos montando o termo de referência para aquisição de gêneros alimentícios (merenda escolar) para as escolas do nosso município. Qual foi o valor médio por quilo de arroz tipo 1 e feijão preto contratado por órgãos e municípios do RJ em 2025, e em quais modalidades de licitação foram realizados?",
+      "has_sensitive_data": false,
+      "sensitive_data_types": []
+    },
+    {
+      "id": "msg_005_2",
+      "sender_name": "Equipe Técnica SEEDUC-RJ",
+      "sender_role": "Analista de Pesquisa de Mercado",
+      "sender_email": "suporte.licitacao@educacao.rj.gov.br",
+      "recipient": "marina.licitacao@cordeiro.rj.gov.br",
+      "timestamp": "2025-04-18T11:20:00-03:00",
+      "content": "Prezada Marina, conforme o painel de preços homologados no PNCP para o estado do Rio de Janeiro no 1º trimestre de 2025: 1) O valor médio do quilo de arroz agulhinha Tipo 1 ficou em R$ 5,85/kg na modalidade Pregão Eletrônico (Lei 14.133/2021) e R$ 6,10/kg nas dispensas presenciais; 2) O feijão preto tipo 1 teve média de R$ 7,40/kg na ARP nº 012/2025 da SEEDUC. Recomendamos utilizar a mediana dos preços do PNCP para evitar glosa pelo TCE-RJ.",
+      "has_sensitive_data": false,
+      "sensitive_data_types": []
+    }
+  ],
+  "tags": [
+    "persona_marina",
+    "merenda_escolar",
+    "arroz_kg",
+    "pesquisa_precos",
+    "SEEDUC-RJ"
+  ]
+}

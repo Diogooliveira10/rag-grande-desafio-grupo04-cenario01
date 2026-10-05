@@ -1,0 +1,48 @@
+{
+  "conversation_id": "conv_016_detran_placas_mercosul",
+  "title": "Credenciamento de Empresas Estampadoras de Placas de Identificação Veicular",
+  "channel": "chamados_ouvidoria",
+  "organ": "Departamento de Trânsito do Estado do Rio de Janeiro - DETRAN-RJ",
+  "subject": "Credenciamento Edital #002/2025 - Estampagem MERCOSUL",
+  "creation_date": "2025-11-20T11:00:00-03:00",
+  "process_number": "SEI-150001/003410/2025",
+  "arp_number": "N/A",
+  "supplier_name": "RIO PLACAS ESTAMPAGEM E SINALIZACAO LTDA",
+  "supplier_cnpj": "12.999.888/0001-44",
+  "sensitivity_level": "publico",
+  "guardrail_type": null,
+  "participants": [
+    "Marcio Vianna (Diretor da Rio Placas)",
+    "Coordenadoria de Credenciamento - DETRAN-RJ"
+  ],
+  "messages": [
+    {
+      "id": "msg_016_1",
+      "sender_name": "Marcio Vianna",
+      "sender_role": "Empresário",
+      "sender_email": "marcio@rioplacas.com.br",
+      "recipient": "credenciamento@detran.rj.gov.br",
+      "timestamp": "2025-11-20T11:00:00-03:00",
+      "content": "Prezados, submetemos a documentação de credenciamento para estampagem de placas MERCOSUL conforme o Edital 002/2025. Qual é o prazo médio de vistoria do galpão técnico pela equipe do DETRAN-RJ?",
+      "has_sensitive_data": false,
+      "sensitive_data_types": []
+    },
+    {
+      "id": "msg_016_2",
+      "sender_name": "Coordenadoria DETRAN-RJ",
+      "sender_role": "Analista de Vistoria",
+      "sender_email": "credenciamento@detran.rj.gov.br",
+      "recipient": "marcio@rioplacas.com.br",
+      "timestamp": "2025-11-20T14:20:00-03:00",
+      "content": "Prezado Marcio, a comissão realiza as vistorias em até 10 dias úteis após a conferência da CND e laudo de segurança do sistema. Agendamentos são enviados por este e-mail.",
+      "has_sensitive_data": false,
+      "sensitive_data_types": []
+    }
+  ],
+  "tags": [
+    "DETRAN-RJ",
+    "placas_mercosul",
+    "credenciamento",
+    "vistoria"
+  ]
+}

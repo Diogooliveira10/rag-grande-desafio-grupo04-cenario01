@@ -1,0 +1,49 @@
+{
+  "conversation_id": "conv_014_proderj_aditivo_nuvem",
+  "title": "Aditivo de acréscimo de 25% para contrato de serviços de nuvem e banco de dados",
+  "channel": "email",
+  "organ": "Centro de Tecnologia de Informação e Comunicação do Estado do RJ - PRODERJ",
+  "subject": "Análise de Limite de Acréscimo - Contrato 015/2024 - PRODERJ",
+  "creation_date": "2025-11-05T14:15:00-03:00",
+  "process_number": "E-01/008/0451/2025",
+  "arp_number": "N/A - Contrato Continuado",
+  "supplier_name": "CLOUD NETWORK SERVICOS DE NUVEM LTDA",
+  "supplier_cnpj": "77.111.000/0001-55",
+  "sensitivity_level": "publico",
+  "guardrail_type": null,
+  "participants": [
+    "Eng. Marcelo Villaça (Diretor de Operações - PRODERJ)",
+    "Dra. Renata Paes (Assessoria Jurídica - PRODERJ)"
+  ],
+  "messages": [
+    {
+      "id": "msg_014_1",
+      "sender_name": "Eng. Marcelo Villaça",
+      "sender_role": "Diretor de Operações",
+      "sender_email": "marcelo.villaca@proderj.rj.gov.br",
+      "recipient": "juridico@proderj.rj.gov.br",
+      "timestamp": "2025-11-05T14:15:00-03:00",
+      "content": "Dra. Renata, devido ao aumento de acessos ao Portal do Servidor e sistemas do Governo Digital do RJ, precisamos acrescer a capacidade de processamento em nuvem em 20% sobre o valor atual do contrato (R$ 2.400.000,00/ano). O acréscimo de R$ 480.000,00 atende ao limite legal do art. 125 da Lei 14.133/2021?",
+      "has_sensitive_data": false,
+      "sensitive_data_types": []
+    },
+    {
+      "id": "msg_014_2",
+      "sender_name": "Dra. Renata Paes",
+      "sender_role": "Assessora Jurídica",
+      "sender_email": "juridico@proderj.rj.gov.br",
+      "recipient": "marcelo.villaca@proderj.rj.gov.br",
+      "timestamp": "2025-11-05T16:00:00-03:00",
+      "content": "Prezado Eng. Marcelo, sim. O artigo 125 da Lei nº 14.133/2021 autoriza o contratado a aceitar, nas mesmas condições contratuais, os acréscimos ou supressões que se fizerem nas obras, serviços ou compras, até 25% do valor inicial atualizado do contrato. Como o percentual pleiteado é de 20%, está dentro do limite legal.",
+      "has_sensitive_data": false,
+      "sensitive_data_types": []
+    }
+  ],
+  "tags": [
+    "PRODERJ",
+    "aditivo_contratual",
+    "limite_25",
+    "nuvem",
+    "art_125"
+  ]
+}

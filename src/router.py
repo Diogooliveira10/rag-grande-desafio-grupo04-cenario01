@@ -93,7 +93,10 @@ _STRUCTURED_PATTERNS = (
 
 _CONVERSATIONAL_PATTERNS = (
     r"\bata[s]?\b",
-    r"\be-mails?\b",
+    r"\be-?mails?\b",
+    r"\barp\b",
+    r"\bconversas?\b",
+    r"\b(?:chamados?|ouvidoria|parecer(?:es)?|transcri(?:cao|coes))\b",
     r"\b(registro|registros)\b.*\b(menciona|mencionam)\b",
     r"\batraso[s]?\b",
     r"\bdescumprimento\b",

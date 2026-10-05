@@ -140,6 +140,7 @@ def _extraction_fingerprint(base: dict[str, Any], *, ocr_motor: str | None = Non
             "sensitivity_default": base.get("sensitivity_default"),
             "campo_vigencia": base.get("campo_vigencia"),
             "metadados_extras": base.get("metadados_extras"),
+            **({"synthetic_conversation_schema": 1} if base.get("dados_sinteticos") else {}),
             "chunking_sugerido": base.get("chunking_sugerido"),
             **({"json_resultado_records": True} if base.get("natureza") == "agregada" else {}),
             # Instalar ou trocar o OCR muda o texto extraído das páginas escaneadas.
@@ -744,7 +745,8 @@ def _refresh_unit_provenance(
         origem=origin,
         manifest_hash=manifest_hash,
         bytes=path.stat().st_size,
-        sensitivity=str(base.get("sensitivity_default") or unit.sensitivity),
+        sensitivity=(unit.sensitivity if base.get("dados_sinteticos")
+                     else str(base.get("sensitivity_default") or unit.sensitivity)),
         chunking_sugerido=str(base.get("chunking_sugerido") or unit.chunking_sugerido),
         extras=extras,
     )
@@ -804,6 +806,31 @@ def _file_units(
     )
     suffix = path.suffix.lower()
     base_document_id = f"{base['base_id']}:{digest[:16]}"
+
+    if base.get("dados_sinteticos"):
+        from src.synthetic_conversations import conversation_document
+
+        if suffix == ".json":
+            payloads = [json.loads(_read_text(path))]
+        elif suffix == ".jsonl":
+            payloads = [json.loads(line) for line in _read_text(path).splitlines() if line.strip()]
+        else:
+            raise ValueError("conversas sintéticas exigem JSON/JSONL canônico, sem cópias TXT")
+        seen_ids: set[str] = set()
+        for payload in payloads:
+            text, sensitivity, extras = conversation_document(payload)
+            conversation_id = str(payload["conversation_id"])
+            if conversation_id in seen_ids:
+                raise ValueError(f"conversation_id duplicado: {conversation_id}")
+            seen_ids.add(conversation_id)
+            logical_id = f"{base['base_id']}:{conversation_id}"
+            unit = _make_unit(
+                path, base, digest, text, f"{base_document_id}:{conversation_id}",
+                suffix.lstrip("."), "ok", manifest_hash, collected_at, origin,
+                {**extras, "logical_id": logical_id},
+            )
+            yield replace(unit, sensitivity=sensitivity)
+        return
 
     if suffix == ".pdf":
         yield from _pdf_units(path, base, digest, manifest_hash, collected_at, origin)

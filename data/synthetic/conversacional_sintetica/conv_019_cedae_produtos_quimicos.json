@@ -1,0 +1,48 @@
+{
+  "conversation_id": "conv_019_cedae_produtos_quimicos",
+  "title": "Aquisição Contínua de Sulfato de Alumínio e Cloro para a ETA Guandu",
+  "channel": "email",
+  "organ": "Companhia Estadual de Águas e Esgotos do Rio de Janeiro - CEDAE",
+  "subject": "Pregão Eletrônico PE-CEDAE-011/2025 - Registro de Preço de Insumos",
+  "creation_date": "2025-09-25T14:00:00-03:00",
+  "process_number": "E-12/800/0122/2025",
+  "arp_number": "033/2025-CEDAE",
+  "supplier_name": "QUIMICA FLUMINENSE DE INSUMOS S/A",
+  "supplier_cnpj": "10.222.333/0001-00",
+  "sensitivity_level": "publico",
+  "guardrail_type": null,
+  "participants": [
+    "Dr. Fernando Matos (Gerente de Operações - CEDAE)",
+    "Eduardo Lemos (Diretor Comercial - Química Fluminense)"
+  ],
+  "messages": [
+    {
+      "id": "msg_019_1",
+      "sender_name": "Dr. Fernando Matos",
+      "sender_role": "Gerente de Operações",
+      "sender_email": "fmatos@cedae.com.br",
+      "recipient": "comercial@quimicafluminense.com.br",
+      "timestamp": "2025-09-25T14:00:00-03:00",
+      "content": "Prezado Eduardo, confirmamos a demanda de 500 toneladas de sulfato de alumínio líquido registradas na ARP 033/2025 para a Estação de Tratamento do Guandu. O valor unitário contratado mantêm-se em R$ 1.150,00/tonelada?",
+      "has_sensitive_data": false,
+      "sensitive_data_types": []
+    },
+    {
+      "id": "msg_019_2",
+      "sender_name": "Eduardo Lemos",
+      "sender_role": "Diretor Comercial",
+      "sender_email": "comercial@quimicafluminense.com.br",
+      "recipient": "fmatos@cedae.com.br",
+      "timestamp": "2025-09-25T15:30:00-03:00",
+      "content": "Prezado Dr. Fernando, sim, o valor de R$ 1.150,00 por tonelada está garantido durante a vigência da ARP nº 033/2025 com entrega em carretas-tanque na ETA Guandu.",
+      "has_sensitive_data": false,
+      "sensitive_data_types": []
+    }
+  ],
+  "tags": [
+    "CEDAE",
+    "tratamento_agua",
+    "sulfato_aluminio",
+    "eta_guandu"
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "conversation_id": "conv_006_claudia_mei_pregao",
+  "title": "Dúvida de Microempreendedor Individual sobre participação em Pregão Eletrônico de Material de Escritório",
+  "channel": "chamados_ouvidoria",
+  "organ": "Subsecretaria de Compras Governamentais do Estado do RJ - SEFAZ-RJ",
+  "subject": "Participação de MEI em Licitação de Papelaria e Resmas A4",
+  "creation_date": "2025-06-02T13:10:00-03:00",
+  "process_number": "DUV-MEI-2025-091",
+  "arp_number": "N/A",
+  "supplier_name": "Cláudia Silva Papelaria MEI",
+  "supplier_cnpj": "40.123.987/0001-55",
+  "sensitivity_level": "publico",
+  "guardrail_type": null,
+  "participants": [
+    "Cláudia (Proprietária de MEI de Papelaria)",
+    "Central de Atendimento ao Licitante - SEFAZ-RJ"
+  ],
+  "messages": [
+    {
+      "id": "msg_006_1",
+      "sender_name": "Cláudia",
+      "sender_role": "Empresária MEI",
+      "sender_email": "claudia.papelaria.mei@gmail.com",
+      "recipient": "atendimento.compras@fazenda.rj.gov.br",
+      "timestamp": "2025-06-02T13:10:00-03:00",
+      "content": "Boa tarde! Sou MEI registrada no Rio de Janeiro, posso participar de pregão eletrônico do Estado? Tem algum pregão aberto atualmente para fornecimento de material de escritório como resmas de papel, canetas e pastas?",
+      "has_sensitive_data": false,
+      "sensitive_data_types": []
+    },
+    {
+      "id": "msg_006_2",
+      "sender_name": "Central de Atendimento SEFAZ-RJ",
+      "sender_role": "Pregoeiro / Apoio a Fornecedores",
+      "sender_email": "atendimento.compras@fazenda.rj.gov.br",
+      "recipient": "claudia.papelaria.mei@gmail.com",
+      "timestamp": "2025-06-02T15:40:00-03:00",
+      "content": "Prezada Cláudia: 1) Sim! O MEI tem direito ao tratamento diferenciado previsto na Lei Complementar 123/2006 e no Art. 4º da Lei 14.133/2021, incluindo preferência de empate e cota reservada em itens até R$ 80 mil; 2) Atualmente, no portal do PNCP-RJ, há o Pregão Eletrônico PE-014/2025 do Instituto de Segurança Pública (ISP-RJ) com lote exclusivo para ME/EPP para material de expediente.",
+      "has_sensitive_data": false,
+      "sensitive_data_types": []
+    }
+  ],
+  "tags": [
+    "persona_claudia",
+    "MEI",
+    "pregao_eletronico",
+    "material_escritorio",
+    "LC_123_2006"
+  ]
+}

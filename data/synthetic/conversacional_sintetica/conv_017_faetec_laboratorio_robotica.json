@@ -1,0 +1,51 @@
+{
+  "conversation_id": "conv_017_faetec_laboratorio_robotica",
+  "title": "Solicitação de Prorrogação de Entrega de Kits de Robótica Didática",
+  "channel": "email",
+  "organ": "Fundação de Apoio à Escola Técnica - FAETEC-RJ",
+  "subject": "Contrato FAETEC nº 045/2025 - Pedido de Dilação de Prazo",
+  "creation_date": "2025-12-01T09:40:00-03:00",
+  "process_number": "SEI-260005/001122/2025",
+  "arp_number": "010/2025-FAETEC",
+  "supplier_name": "ROBOTECH EDUCACIONAL BRASIL LTDA",
+  "supplier_cnpj": "33.444.555/0001-66",
+  "sensitivity_level": "publico",
+  "guardrail_type": "mask_pii",
+  "participants": [
+    "Juliana Paes (Gerente de Projetos - Robotech)",
+    "Prof. Ricardo Santos (Fiscal de Contrato - FAETEC)"
+  ],
+  "messages": [
+    {
+      "id": "msg_017_1",
+      "sender_name": "Juliana Paes",
+      "sender_role": "Gerente de Projetos",
+      "sender_email": "juliana@robotech.com.br",
+      "recipient": "compras@faetec.rj.gov.br",
+      "timestamp": "2025-12-01T09:40:00-03:00",
+      "content": "Prof. Ricardo, solicitamos a prorrogação por 20 dias do prazo de entrega de 150 kits de robótica devido ao atraso no desembaraço alfandegário dos microcontroladores. Minha identidade de contato: CPF 012.345.678-99, cel (21) 98888-7766.",
+      "has_sensitive_data": true,
+      "sensitive_data_types": [
+        "cpf",
+        "phone"
+      ]
+    },
+    {
+      "id": "msg_017_2",
+      "sender_name": "Prof. Ricardo Santos",
+      "sender_role": "Fiscal de Contrato",
+      "sender_email": "compras@faetec.rj.gov.br",
+      "recipient": "juliana@robotech.com.br",
+      "timestamp": "2025-12-01T11:15:00-03:00",
+      "content": "Prezada Juliana, o pedido deve ser formalizado instruindo com o comprovante de retenção na Receita Federal para análise da justificativa de força maior nos termos do art. 124 da Lei 14.133/2021.",
+      "has_sensitive_data": false,
+      "sensitive_data_types": []
+    }
+  ],
+  "tags": [
+    "FAETEC",
+    "robotica",
+    "prorrogacao_prazo",
+    "pii_masking"
+  ]
+}

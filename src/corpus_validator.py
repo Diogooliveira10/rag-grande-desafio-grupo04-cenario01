@@ -14,6 +14,10 @@ OFFICIAL_BASE_TARGETS = {
 }
 
 
+# Suplementos locais opcionais não alteram o orçamento do snapshot público v6.
+OFFICIAL_SUPPLEMENT_TARGETS = {"emails_sinteticos": 25}
+
+
 @dataclass(frozen=True)
 class ValidationResult:
     """Resultado pequeno e serializável de uma validação de contrato."""
@@ -47,7 +51,15 @@ def validate_manifest_contract(manifest: dict[str, Any], *, official: bool = Tru
 
     if official:
         actual = set(bases)
-        expected = set(OFFICIAL_BASE_TARGETS)
+        supplements = set(bases) & set(OFFICIAL_SUPPLEMENT_TARGETS)
+        expected = set(OFFICIAL_BASE_TARGETS) | supplements
+        for base_id in sorted(supplements):
+            base = bases[base_id]
+            if (base.get("dados_sinteticos") is not True
+                    or base.get("natureza") != "conversacional"
+                    or (base.get("acesso") or {}).get("tipo") != "arquivo_local"
+                    or base.get("volume_alvo") != OFFICIAL_SUPPLEMENT_TARGETS[base_id]):
+                errors.append(f"{base_id}: suplemento sintético local inválido")
         if actual != expected:
             errors.append(
                 f"bases oficiais divergentes: esperadas={sorted(expected)} obtidas={sorted(actual)}"
@@ -71,7 +83,8 @@ def validate_manifest_contract(manifest: dict[str, Any], *, official: bool = Tru
                 errors.append("curadoria_v6: alvo_arquivos_total deve ser inteiro positivo")
             else:
                 try:
-                    obtained = sum(int(base.get("volume_alvo")) for base in bases.values())
+                    obtained = sum(int(base.get("volume_alvo")) for base_id, base in bases.items()
+                                   if base_id in OFFICIAL_BASE_TARGETS)
                     if obtained != target:
                         errors.append(f"curadoria_v6: soma dos volumes esperada={target} obtida={obtained}")
                 except (TypeError, ValueError):

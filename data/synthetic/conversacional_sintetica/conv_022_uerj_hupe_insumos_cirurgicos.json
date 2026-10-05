@@ -1,0 +1,48 @@
+{
+  "conversation_id": "conv_022_uerj_hupe_insumos_cirurgicos",
+  "title": "Aquisição Emergencial de Fios de Satura e Próteses para o Hospital Pedro Ernesto",
+  "channel": "email",
+  "organ": "Universidade do Estado do Rio de Janeiro - UERJ / HUPE",
+  "subject": "Processo HUPE nº 0891/2025 - Insumos de Cirurgia Cardíaca",
+  "creation_date": "2025-11-02T10:10:00-03:00",
+  "process_number": "E-26/008/1120/2025",
+  "arp_number": "005/2025-HUPE",
+  "supplier_name": "CIRURGICA METROPOLITANA MATERIAIS MEDICOS LTDA",
+  "supplier_cnpj": "11.555.666/0001-77",
+  "sensitivity_level": "publico",
+  "guardrail_type": null,
+  "participants": [
+    "Dr. Paulo Roberto (Chefe da Cirurgia - HUPE/UERJ)",
+    "Fernanda Souza (Gerente Comercial - Cirúrgica Metropolitana)"
+  ],
+  "messages": [
+    {
+      "id": "msg_022_1",
+      "sender_name": "Dr. Paulo Roberto",
+      "sender_role": "Chefe de Cirurgia",
+      "sender_email": "paulo.roberto@hupe.uerj.br",
+      "recipient": "vendas@cirurgicametropolitana.com.br",
+      "timestamp": "2025-11-02T10:10:00-03:00",
+      "content": "Prezada Fernanda, solicitamos o envio imediato da Ordem de Entrega nº 88/2025 para 200 kits de sutura vascular registrados na ARP 005/2025. O hospital possui cirurgias eletivas agendadas para a próxima semana.",
+      "has_sensitive_data": false,
+      "sensitive_data_types": []
+    },
+    {
+      "id": "msg_022_2",
+      "sender_name": "Fernanda Souza",
+      "sender_role": "Gerente Comercial",
+      "sender_email": "vendas@cirurgicametropolitana.com.br",
+      "recipient": "paulo.roberto@hupe.uerj.br",
+      "timestamp": "2025-11-02T11:40:00-03:00",
+      "content": "Prezado Dr. Paulo, a entrega foi faturada e o transporte expresso fará o descarregamento no Almoxarifado Central do HUPE em até 48 horas.",
+      "has_sensitive_data": false,
+      "sensitive_data_types": []
+    }
+  ],
+  "tags": [
+    "UERJ",
+    "HUPE",
+    "hospitalar",
+    "insumos_cirurgicos"
+  ]
+}

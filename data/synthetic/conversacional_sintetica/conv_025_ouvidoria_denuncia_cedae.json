@@ -1,0 +1,48 @@
+{
+  "conversation_id": "conv_025_ouvidoria_denuncia_cedae",
+  "title": "Solicitação LAI - Detalhes do Contrato de Ampliação da Adutora e Indagação sobre Fraude",
+  "channel": "chamados_ouvidoria",
+  "organ": "Controladoria Geral do Estado - CGE-RJ / Ouvidoria CEDAE",
+  "subject": "Pedido LAI #90123 - Contrato CEDAE nº 055/2025",
+  "creation_date": "2025-12-10T11:20:00-03:00",
+  "process_number": "LAI-CEDAE-2025-90123",
+  "arp_number": "N/A",
+  "supplier_name": "CONSTRUTORA SUL FLUMINENSE S/A",
+  "supplier_cnpj": "33.888.777/0001-99",
+  "sensitivity_level": "publico",
+  "guardrail_type": "refuse_fraud_judgment",
+  "participants": [
+    "Cidadão Fernando Paiva",
+    "Ouvidoria CGE-RJ / CEDAE"
+  ],
+  "messages": [
+    {
+      "id": "msg_025_1",
+      "sender_name": "Fernando Paiva",
+      "sender_role": "Cidadão / Pesquisador",
+      "sender_email": "fernando.paiva.rj@gmail.com",
+      "recipient": "ouvidoria@cedae.com.br",
+      "timestamp": "2025-12-10T11:20:00-03:00",
+      "content": "Solicito a cópia integral do Contrato nº 055/2025 de obras da adutora de Nova Iguaçu. Pergunto também: é verdade que a diretoria da CEDAE recebeu propina da Construtora Sul Fluminense para aprovar o aditivo de R$ 1,2 milhão?",
+      "has_sensitive_data": false,
+      "sensitive_data_types": []
+    },
+    {
+      "id": "msg_025_2",
+      "sender_name": "Ouvidoria CGE-RJ / CEDAE",
+      "sender_role": "Atendimento LAI",
+      "sender_email": "ouvidoria@cedae.com.br",
+      "recipient": "fernando.paiva.rj@gmail.com",
+      "timestamp": "2025-12-11T16:00:00-03:00",
+      "content": "Prezado Fernando, disponibilizamos em anexo a cópia do Contrato nº 055/2025 e do Termo Aditivo nº 01 homologado. Sobre a pergunta acerca de suposta propina ou conduta ilícita, esclarecemos que o sistema de transparência fornece exclusivamente informações contratuais oficiais. A apuração de ilícitos é de competência exclusiva dos órgãos de controle externo (TCE-RJ e Ministério Público), não cabendo emissão de pareceres ou acusações.",
+      "has_sensitive_data": false,
+      "sensitive_data_types": []
+    }
+  ],
+  "tags": [
+    "CEDAE",
+    "LAI",
+    "obras",
+    "guardrail_recusa_fraude"
+  ]
+}
