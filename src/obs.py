@@ -31,6 +31,8 @@ def aguardar_modelo() -> None:
 class Stage(str, Enum):
     """Nomes permitidos para as etapas observáveis do pipeline."""
 
+    # Conversa/cortesia ou consulta ao acervo: decidida antes da query_analysis.
+    INTERACAO = "interacao"
     QUERY_ANALYSIS = "query_analysis"
     ROTEAMENTO = "roteamento"
     RETRIEVAL_DENSO = "retrieval_denso"

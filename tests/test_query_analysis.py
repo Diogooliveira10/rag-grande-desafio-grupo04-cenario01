@@ -523,6 +523,59 @@ def test_analisar_query_loga_stage_query_analysis(tmp_path, monkeypatch):
     assert '"stage": "query_analysis"' in linhas[0]
     assert '"run_id": "r1"' in linhas[0]
 
+
+def _registro_do_log(tmp_path, monkeypatch, pergunta, **kwargs):
+    import json
+    from src import obs
+
+    logger_de_teste = obs.PipelineLogger(tmp_path)
+    monkeypatch.setattr(qa, "default_logger", logger_de_teste)
+    qa.analisar_query(pergunta, run_id="r1", query_id="q1", **kwargs)
+    [linha] = logger_de_teste.log_path().read_text(encoding="utf-8").strip().splitlines()
+    return linha, json.loads(linha)
+
+
+def test_log_do_modo_regras_grava_os_filtros(tmp_path, monkeypatch):
+    _, registro = _registro_do_log(tmp_path, monkeypatch, "contratos acima de 100 mil em 2025")
+    assert registro["output"]["valor_min"] == 100000
+    assert registro["output"]["ano"] == 2025
+
+
+def test_log_do_modo_llm_mascara_dado_pessoal_e_nao_repete_a_pergunta(tmp_path, monkeypatch):
+    import json
+    pergunta = "Contratos do fornecedor de CPF 123.456.789-09"
+    raw = {"intencoes": [{"pergunta": pergunta, "bases": ["estruturada"]}]}
+    linha, registro = _registro_do_log(
+        tmp_path, monkeypatch, pergunta, modo="llm", cliente=lambda _: json.dumps(raw)
+    )
+    assert registro["output"]["metodo"] == "llm"
+    assert "query_original" not in registro["output"]
+    assert registro["output"]["intencoes"][0]["pergunta"] == "Contratos do fornecedor de CPF [CPF omitido]"
+    assert "123.456.789-09" not in linha
+
+
+def test_log_do_fallback_nao_grava_dado_pessoal_devolvido_pelo_llm(tmp_path, monkeypatch):
+    import json
+    # Operação inválida: a mensagem do erro de validação repete o valor recebido.
+    raw = {"intencoes": [{"pergunta": "contratos", "bases": ["estruturada"],
+                          "operacao": "listar CPF 123.456.789-09"}]}
+    linha, registro = _registro_do_log(
+        tmp_path, monkeypatch, "contratos de 2025", modo="llm", cliente=lambda _: json.dumps(raw)
+    )
+    assert registro["extra"]["fallback"].startswith("ValidationError")
+    assert "123.456.789-09" not in linha
+
+
+def test_log_corta_texto_longo_da_saida(tmp_path, monkeypatch):
+    import json
+    raw = {"intencoes": [{"pergunta": "contratos de limpeza " * 60, "bases": ["estruturada"]}]}
+    _, registro = _registro_do_log(
+        tmp_path, monkeypatch, "contratos de limpeza", modo="llm", cliente=lambda _: json.dumps(raw)
+    )
+    subpergunta = registro["output"]["intencoes"][0]["pergunta"]
+    assert len(subpergunta) == qa._LIMITE_DE_TEXTO_NO_LOG + 1
+    assert subpergunta.endswith("…")
+
 # --------------------------------------------------------------------------
 # Regressões achadas em revisão adversarial (30/09). Cada linha é um caso que
 # já saiu errado: (pergunta, (primeiro ano, último ano), valor_min, valor_max).
