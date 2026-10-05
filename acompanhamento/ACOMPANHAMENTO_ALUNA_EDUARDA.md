@@ -80,3 +80,11 @@
 - No backend, disponibilizei os endpoints necessários para o frontend sem alterar o pipeline RAG existente, utilizando o histórico e o feedback persistidos, a base estruturada, o inventário e o manifesto reais do projeto. Também documentei os schemas e o contrato HTTP em [`docs/FRONTEND_API_CONTRACT.md`](../docs/FRONTEND_API_CONTRACT.md).
 - Concluí e validei localmente a integração, com o React na porta 5173 e a API FastAPI na porta 8080. Realizei consultas reais ao pipeline RAG, validei CORS, histórico, feedback e telas de exploração, além dos testes automatizados e do build do frontend.
 - Registrei o passo a passo em [`docs/GUIA_INTEGRACAO_LOCAL_FRONTEND_BACKEND.md`](../docs/GUIA_INTEGRACAO_LOCAL_FRONTEND_BACKEND.md), incluindo o clone do repositório [`Etuarda/frontendRAG`](https://github.com/Etuarda/frontendRAG), a configuração dos arquivos `.env`, a inicialização dos dois projetos e os testes de conexão.
+
+## Encontro 10 - 2026-10-05
+
+### Relato individual - Eduarda
+
+- No repositório do frontend, planejei como a rastreabilidade das consultas deverá ser apresentada ao usuário.
+- Estruturei o fluxo para exibir de forma clara o caminho real de cada consulta, incluindo o uso de SQL, a busca vetorial e as principais etapas do pipeline, sempre vinculadas ao respectivo `query_id`.
+- Preparei essa estrutura para consumir o trace real do backend quando ele estiver disponível, sem utilizar dados mockados ou simular informações que ainda não são fornecidas pela API.
