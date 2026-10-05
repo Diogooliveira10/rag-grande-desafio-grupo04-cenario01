@@ -328,6 +328,8 @@ O grupo também avançou na compreensão dos entregáveis iniciais, principalmen
 
 ## Encontro 9 - 2026-10-02
 
+João Pedro Félix Reis e Eduarda não participaram deste encontro por questões médicas. Mesmo ausente, a Eduarda continuou a integração do front-end com os dados reais do backend, registrada no acompanhamento individual dela.
+
 ### Relato individual - Diogo Oliveira
 
 - Validamos documentalmente os casos `P3.1`, `P3.2` e `P6.1` diretamente contra o corpus do projeto, sem alterar o Golden Set, a avaliação, o pipeline, o SQLite, o índice ou quaisquer dados do corpus.
@@ -350,7 +352,7 @@ O grupo também avançou na compreensão dos entregáveis iniciais, principalmen
 - Revisei a arquitetura do projeto e passei uma lista de ajustes para o Marco. Também validei a correção do `query_analysis` após os ajustes da Pâmela, incluindo melhorias em filtros por órgão, esfera e modalidade.
 - Corrigi o roteador e a consulta SQL, ajustando casos em que perguntas com termos como "comprou", "contratou" ou "compras" ficavam sem base, além de tratar corretamente valores simbólicos, contagens de contratações e a interseção com a categoria tecnologia.
 - Atualizei o ambiente de dados para a versão v6 no Neon e verifiquei que o SQLite e o Neon produzem os mesmos resultados nas mesmas perguntas. O SQLite foi mantido para quem não tem acesso ao Neon, para testes e avaliações.
-- Atualizei o README e o registro da execução v6 e finalizei a suíte com 886 testes aprovados.
+- Atualizei o README e o registro da execução v6 e finalizei a suíte com 895 testes aprovados.
 
 ### Relato individual - Marco Araújo
 
@@ -394,6 +396,9 @@ O grupo também avançou na compreensão dos entregáveis iniciais, principalmen
 
 - Integrei ao `main` as contribuições que estavam fora dele: a API ampliada para o front-end, o evaluator atualizado pelo Diogo, as conversas sintéticas e melhorias de análise e atendimento conversacional do João, além das correções do Marco e da Pâmela.
 - No conflito do arquivo de acompanhamento da Eduarda, mantive a versão mais recente, escrita por ela após o último commit da branch. Após as integrações, a suíte offline foi reportada com **1.081 testes aprovados**.
+- O tutor apontou que não era possível acompanhar o caminho de uma pergunta dentro do sistema: quando ela consulta a base SQL e a base vetorial, e o que entra e sai de cada etapa. Conferi os logs e confirmei que cada etapa era registrada, mas com a pergunta original como entrada de todas e um resumo em texto como saída. Esse ponto virou o item 1, de prioridade máxima, de uma lista de 16 correções (P0, P1 e P2) que montei para a equipe a partir de uma auditoria geral do projeto, conferida contra o código.
+- Implementei a parte de backend da rastreabilidade. Ao fim de cada pergunta, o log ganhou a etapa `resumo_consulta`, que diz se ela consultou a base SQL e a base vetorial, quantas evidências vieram de cada uma e quais fontes foram citadas. A consulta SQL passou a registrar as linhas devolvidas, e a geração, o prompt enviado ao LLM e a resposta, ambos mascarados. O endpoint `GET /api/v1/trace/{query_id}` devolve o caminho da pergunta etapa por etapa, indicando em cada uma se ela usou a base SQL ou a vetorial, para o front-end da Eduarda exibir.
+- Resolvi também dois itens rápidos da lista: removi o arquivo vazio `$db` e criei o CI do backend no GitHub Actions, com um `requirements-lock.txt` de versões exatas e torch só de CPU. Resolvi ainda o conflito de merge entre o evaluator do Diogo e a correção de erro de provedor do Marco, mantendo as duas alterações. A suíte terminou com **1.104 testes aprovados**.
 
 ### Relato individual - Pâmela de Freitas
 
@@ -420,6 +425,8 @@ O grupo também avançou na compreensão dos entregáveis iniciais, principalmen
 ## **Ficou pendente:**
 
 - Publicar ajustes locais, refazer a avaliação completa das respostas, corrigir alguns problemas de qualidade/metadados do corpus e validar frontend + backend juntos.
+- Concluir a rastreabilidade pedida pelo tutor: `session_id` e a tela do front-end consumindo o `GET /api/v1/trace/{query_id}`.
+- Proteger os endpoints de histórico e de trace antes de qualquer demonstração pública: hoje não exigem autenticação nem mascaram o histórico.
 
 ### Uso de assistentes de IA:
 
