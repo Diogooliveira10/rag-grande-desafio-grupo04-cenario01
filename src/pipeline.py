@@ -88,6 +88,10 @@ def responder(
     chunks: list[Chunk] = []
     filtros_relaxados: dict[str, dict[str, list[str]]] = {}
     refusal_reason_hint = None
+    if decisao.bases_selecionadas and reranker is None:
+        # Compartilhado pelos caminhos convencional e de intenções; desligável
+        # com RERANK_ENABLED=false. Ablação em docs/ABLACAO_RERANK.md.
+        reranker = reranker_padrao()
     if decisao.bases_selecionadas and analise.intencoes:
         grupos: list[list[Chunk]] = []
         for numero, intent in enumerate(analise.intencoes):
@@ -123,9 +127,6 @@ def responder(
                     vistos.add(key)
     elif decisao.bases_selecionadas:
         filtros = filtros_para_retrieve(analise.filtros)
-        # Sem reranker explícito, usa o cross-encoder padrão (src/rerank.py;
-        # desligável com RERANK_ENABLED=false). Ablação em docs/ABLACAO_RERANK.md.
-        reranker = reranker if reranker is not None else reranker_padrao()
         resultados = retrieve(
             query,
             decisao,
