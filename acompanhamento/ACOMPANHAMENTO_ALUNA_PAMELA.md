@@ -229,3 +229,49 @@ Hoje trabalhei na extração de órgão, esfera e modalidade do query_analysis, 
 
 - Usei o Claude Code para eescrever os testes, rodar a revisão adversarial com um agente e conferir os resultados no SQL com a base local.
 - Eu trouxe os pedidos e os casos do Renato, decidi não mexer no módulo de SQL dele, e conferi os resultados com os testes e com o caso da prefeitura de Niterói.
+
+## Encontro 10 - 2026-10-05
+
+### Relato individual - Pâmela de Freitas
+
+Hoje analisei a base sintética de conversas e fiz os ajustes do query_analysis pedidos no documento de correções.
+
+#### Base sintética de conversas
+
+- Analisei o `conversacional_sintetica.zip` do tutor: 25 conversas (45 mensagens), em três formatos com o mesmo conteúdo. O campo `guardrail_type` funciona como gabarito: mascarar CPF e telefone, recusar dados bancários, credenciais e juízo de fraude.
+- Levantei o que precisava mudar para integrar a base:
+    - não indexar os campos de gabarito;
+    - sensibilidade por conversa (as 5 restritas entrariam como públicas);
+    - escopo oficial no manifesto;
+    - roteador reconhecendo perguntas sobre as conversas;
+    - perguntas novas no golden set.
+- A integração é parte do João, não mexi.
+- Encontrei uma data inconsistente na conv_013: a conversa é de 20/10/2025, mas as mensagens são de 20/01/2025.
+
+#### Correções do query_analysis (item 1 do documento de correções)
+
+- A mensagem de cortesia ganhou etapa própria no log, `interacao`. Antes, a decisão "conversa ou consulta" era gravada como `query_analysis` e se confundia com a análise da pergunta.
+- O log do query_analysis passou a:
+    - mascarar CPF, telefone e e-mail pessoal também no modo IA, nas subperguntas e na mensagem de erro do fallback;
+    - não repetir a pergunta original, que já está no input;
+    - limitar cada texto a 500 caracteres.
+- Mexi o mínimo nos arquivos dos colegas: uma linha no `obs.py` (a etapa nova) e o nome da etapa no `conversation.py`. Atualizei o README e o ARQUITETURA com a etapa nova.
+- 6 testes novos, que falham sem a correção. Suíte completa: **1.074 testes passando**.
+- Branch `pamela-rastreabilidade-query-analysis`.
+
+#### Comparação com o enunciado
+
+- Comparei o projeto com o que o enunciado do Notion pede e encontrei pontos que não estão no documento de correções:
+    - não há teste de integração marcado `@pytest.mark.llm`;
+    - faltam os DIFFs `v1_v2` e `v5_v6` do inventário;
+    - falta o diagnóstico da pergunta de falha (F1) para o relatório final.
+
+#### Pendências e avisos
+
+- Ficaram de fora o item 8 (rerank no modo IA), que depende de confirmação do Renato, e o item 11 (contexto entre perguntas), que depende de decisão da equipe.
+- O modo IA do query_analysis envia a pergunta para a IA sem mascarar.
+- O README ainda descreve o query_analysis como "sem LLM".
+
+### Uso de assistentes de IA:
+
+- Usei o Claude Code para analisar a base sintética, rodar a pergunta de ponta a ponta, depois que implementei as correções usei para os testes e comparar o projeto com o enunciado para dizer o que falta para critério de pronto
