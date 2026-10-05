@@ -7,19 +7,19 @@ do backend nem conhecer FAISS, BM25, RRF ou rerank.
 ## 1. URL base local
 
 ```text
-http://localhost:8000
+http://localhost:8080
 ```
 
 Inicie o backend na raiz do repositório:
 
 ```bash
-uvicorn app.api:app --reload --host 127.0.0.1 --port 8000
+uvicorn app.api:app --reload --host 127.0.0.1 --port 8080
 ```
 
 No frontend Vite:
 
 ```env
-VITE_API_BASE_URL=http://localhost:8000
+VITE_API_BASE_URL=http://localhost:8080
 VITE_USE_MOCKS=false
 ```
 
@@ -351,7 +351,7 @@ Fluxo recomendado:
 ```text
 React localhost:5173
         ↓ JSON/HTTP
-FastAPI localhost:8000
+FastAPI localhost:8080
         ↓
 dados reais + pipeline RAG + histórico + feedback
 ```

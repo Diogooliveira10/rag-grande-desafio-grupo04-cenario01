@@ -461,7 +461,7 @@ acervo e metadados de transparência. O contrato completo para o frontend está
 em [docs/FRONTEND_API_CONTRACT.md](docs/FRONTEND_API_CONTRACT.md).
 
 ```bash
-uvicorn app.api:app --reload --host 127.0.0.1 --port 8000
+uvicorn app.api:app --reload --host 127.0.0.1 --port 8080
 ```
 
 O frontend é mantido em um projeto separado e publicado em
@@ -485,7 +485,7 @@ VITE_USE_MOCKS=false
 O frontend deve consumir somente esses contratos HTTP e não manter mocks,
 catálogos hardcoded ou armazenamento paralelo de histórico. O site publicado
 só responde de verdade quando houver um backend acessível por HTTPS público;
-para integração local, use o Vite apontando para `http://127.0.0.1:8000`.
+para integração local, use o Vite apontando para `http://127.0.0.1:8080`.
 
 ### Endpoint de modelos (compartilhado com toda a turma)
 
