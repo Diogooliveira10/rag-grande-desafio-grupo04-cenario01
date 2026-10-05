@@ -366,3 +366,76 @@ Antes desta atualização, conferi o histórico e a única worktree: a branch `j
 
 Utilizei o Codex como apoio à investigação das fontes, implementação de correções modulares, configuração e comparação de embeddings locais, execução dos testes, revisão das respostas contra evidências, preparação dos ZIPs e organização dos commits. O ECOA foi usado explicitamente na avaliação de queries e respostas. As entregas foram verificadas por testes automatizados, auditorias de arquivos e vetores, conferência dos hashes e inspeção do histórico Git; as limitações observadas foram registradas, sem tratar acerto de rota como prova de correção factual.
 
+## Atualização — 05/10/2026
+
+### Atividades realizadas
+
+Nesta sessão, consolidei as melhorias locais do RAG na branch `joao-reis`, integrei as alterações disponíveis em `origin/main` e avancei na utilização do acervo pelo frontend. Também revisei o projeto com base no histórico Git, no código, nos acompanhamentos e nos artefatos, separando implementação publicada, trabalho local e limitações ainda abertas.
+
+### Provedores de LLM e tratamento das consultas
+
+- Adicionei ao cliente compartilhado o modo OpenRouter e o fallback de provedor, mantendo ECOA como principal no modo automático. O fallback usa `openrouter/free`, quando configurado, sem definir modelo pago como alternativa.
+- Disponibilizei o flag `--openrouter-only` na CLI e registrei provedor, modelo, uso do fallback e falhas na observabilidade. Os embeddings das perguntas continuam no ECOA ou no cache existente, sem misturar outro espaço vetorial com a v6.
+- Consolidei a análise opcional por LLM, com intenções e filtros estruturados, validação do plano, cache e fallback para as regras existentes. O modo por regras permanece como padrão da análise de consultas.
+- Ampliei o tratamento de evidências e das consultas analíticas: limites monetários exclusivos, distinção entre valor contratado, estimado, homologado e unitário, referências temporais, agrupamentos e indicação de cálculo indisponível. Evitei tratar valor global como preço por unidade.
+- Ajustei a preparação do contexto e a validação da geração para preservar evidências das diferentes bases/intenções, referências públicas e respostas de insuficiência de dados. Essas melhorias não constituem comprovação automática da correção factual.
+
+Os principais arquivos dessa frente são `llm_ecoa.py`, `config.py`, `app/cli.py`, `src/query_analysis.py`, `src/schema.py`, `src/structured_query.py`, `src/retrieve.py`, `src/pipeline.py` e `src/generate.py`.
+
+### Suplemento conversacional sintético
+
+Integrei o material fornecido ao projeto como `emails_sinteticos`, preservando a distinção entre cenário fictício e fatos do PNCP. Usei os **25 JSONs individuais** como fonte canônica, sem duplicar os TXT equivalentes nem o JSONL consolidado. O conjunto contém 25 conversas e 45 mensagens, incluindo e-mails, ouvidoria, pareceres e transcrição.
+
+Implementei `src/synthetic_conversations.py` e adaptei a preparação para manter uma conversa inteira por chunk, com cabeçalhos, identificadores, hashes e metadados. A classificação de sensibilidade é obrigatória: **20 conversas públicas e 5 restritas**. Dados bancários e credenciais forçam classificação restrita; a retomada por cache preserva essa classificação. Os trechos públicos utilizam o mascaramento já existente, e o contexto identifica expressamente o conteúdo como sintético.
+
+Ajustei manifesto, validadores e testes para admitir o suplemento sem substituir as quatro bases históricas da v6. Documentei a origem, a licença não informada, a reconstrução e as verificações em [`docs/emails_sinteticos.md`](../docs/emails_sinteticos.md).
+
+Preparei e disponibilizei o índice do suplemento com o mesmo modelo/configuração dos índices existentes: **Qwen3-Embedding-0.6B Q8, dimensão 1.024**. A indexação aditiva com `--merge-existing` preserva as outras bases. O arquivo ativo passou a ter **5.646 chunks: 5.621 da v6 e 25 sintéticos**, com IDs únicos; a comparação confirmou os documentos anteriores intactos. O suplemento não foi apresentado como uma nova coleta PNCP v7.
+
+O relatório local de validação registra a conversa sobre papel A4 da DPRJ em primeiro lugar no BM25 e na busca densa. Esse resultado verifica recuperação de um exemplo, não qualidade geral de respostas do LLM.
+
+### API e interação conversacional
+
+- Disponibilizei e ajustei os endpoints de exploração de contratações, documentos, órgãos e fontes, além do resumo do projeto, utilizando manifesto, inventários e documentos ativos, sem mocks nem novas coletas nessa camada.
+- Organizei `app/catalog.py`, `app/catalog_models.py` e os testes de catálogo. A API mantém leitura filtrada por publicidade, mascaramento e tratamento de indisponibilidade, sem expor texto bruto de registros restritos ou caminhos locais.
+- Atualizei o README e o contrato HTTP do frontend, preservando e reconciliando os contratos desenvolvidos pela equipe.
+- Implementei `src/conversation.py` para responder saudações, agradecimentos e pedidos de ajuda sem busca factual desnecessária. Para mensagens mais longas ou indiretas, acrescentei classificação de intenção com fallback para o pipeline RAG.
+- Mantive consultas factuais e pedidos sujeitos a guardrails no fluxo apropriado. Uma saudação junto de um pedido de senha ou dado bancário não deve desviar das recusas existentes. Esse tratamento de interação não equivale a memória persistente de conversa entre perguntas.
+
+### Revisão técnica e validação
+
+Revisei as contribuições do grupo com Git e blame e gerei um relatório externo ao repositório, `../RESUMO_AUDITORIA_GRUPO04_CENARIO01.md`. Conferi hashes dos 1.400 arquivos brutos da v6, textos e IDs dos 5.621 chunks originais, dimensão e integridade dos vetores, índices FAISS, ZIPs e SQLite. A revisão também identificou problemas de qualidade textual nas atas, ausência de vigência nos metadados normativos e classificação inadequada de recursos agregados como planos PCA.
+
+Os resultados intermediários foram tratados conforme a revisão testada: o snapshot inicial commitado passou com 895 testes, e uma cópia local da integração sintética apresentou falhas de contrato de manifesto e parser YAML. Essas falhas não foram tratadas como entrega concluída. Após os avanços e o merge, executei novamente `python -m pytest tests/ -m "not llm" -q --disable-warnings`: **1.074 testes passaram em 33,39 segundos**. `git diff --check` também terminou sem problemas.
+
+Essa última execução incluiu a correção local que resolve o reranker padrão antes dos caminhos convencional e por intenções, com testes para reranker padrão, explícito e desligado. Na conferência deste registro, `src/pipeline.py`, `tests/test_pipeline_query_analysis.py` e o SQLite derivado ainda tinham alterações locais, sem commit. Não apresentei o resultado do checkout como uma validação isolada do commit publicado.
+
+Não repeti uma rodada completa de geração das respostas com ECOA/OpenRouter nem a ablação real do cross-encoder nesta atualização. Os relatórios anteriores continuam ligados às suas respectivas configurações e gabaritos; acerto de rota/recusa não foi tratado como prova de correção factual.
+
+### Commits e estado da branch
+
+Os commits de minha autoria registrados em 05/10 foram:
+
+- `e557a1a` — `feat(llm): adicionar modo OpenRouter e fallback de provedor`;
+- `614a94e` — `fix(rag): melhorar análise de consultas e tratamento de evidências`;
+- `d31925f` — `feat(corpus): integrar conversas sintéticas com controle de sensibilidade`;
+- `4fd8a06` — `feat(api): disponibilizar endpoints de catálogo e resumo do projeto`;
+- `d4a14fb` — `fix(chat): aceitar saudações e mensagens conversacionais longas`;
+- `5c69b86` — `merge: integrar origin/main em joao-reis`;
+- `146ceea` — `data: versionar indice ativo de emails sinteticos`.
+
+Na conferência local, `HEAD` e `origin/joao-reis` estavam alinhados em `146ceea`. O merge trouxe as alterações integradas pelo coordenador, incluindo trabalho de API, avaliação, recuperação e geração dos colegas. Não atribuí essas implementações compartilhadas como autoria exclusiva minha. O presente acompanhamento e as correções locais posteriores ainda precisam ser versionados.
+
+### Pendências
+
+- Revisar e publicar as alterações locais restantes, mantendo consistência entre código, testes e SQLite derivado.
+- Reexecutar a avaliação completa na revisão integrada, separando rota, recusa, conteúdo, cálculo e citação; revisar as expectativas do gabarito contra o corpus.
+- Corrigir a materialização de `pca_planos`, que ainda inclui recursos sem ano e valor de PCA, e melhorar a qualidade dos chunks de atas e a comprovação de vigência normativa.
+- Validar frontend e backend juntos, incluindo histórico, feedback, catálogo, tempos de espera e comportamento de perguntas dependentes de contexto.
+- Documentar condições de uso/licença do suplemento sintético e manter a distinção entre conteúdo fictício e evidência de contratação real.
+- Tratar autenticação, privacidade e retenção do histórico antes de exposição pública; preparar os exemplos e o roteiro do Demo Day.
+
+### Uso de IA (inteligência artificial)
+
+Utilizei assistentes de IA como apoio à análise do histórico e do código, à consolidação das correções, à elaboração de testes e documentação, à revisão da integração e à preparação de explicações sobre as estratégias e os arquivos do projeto. As verificações foram feitas com comandos Git, testes offline, leitura dos artefatos, conferência de hashes e comparação com os contratos existentes. Solicitei a separação entre autoria individual e trabalho compartilhado e entre resultados históricos, alterações publicadas e pendências locais, sem registrar como concluída uma avaliação factual que não foi executada nesta atualização.
+
