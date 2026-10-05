@@ -22,6 +22,12 @@ def _env(name: str, default: str) -> str:
 OLLAMA_URL = _env("OLLAMA_URL", "http://ecoa-llm.duckdns.org:11434/v1")
 OLLAMA_API_KEY = _env("OLLAMA_API_KEY", "ollama")
 GENERATION_MODEL = _env("GENERATION_MODEL", "qcwind/qwen3-8b-instruct-Q4-K-M")
+MODEL_MIN_INTERVAL_SECONDS = float(_env("MODEL_MIN_INTERVAL_SECONDS", "10"))
+OPENROUTER_API_KEY = _env("OPENROUTER_API_KEY", "")
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+OPENROUTER_MODEL_FALLBACK = "openrouter/free"
+OPENROUTER_MAX_TOKENS = int(_env("OPENROUTER_MAX_TOKENS", "4096"))
+LLM_PROVIDER_MODE = _env("LLM_PROVIDER_MODE", "auto")
 EMBEDDING_MODEL = _env("EMBEDDING_MODEL", "xagi/qwen3-embedding:0.6b-q4_k_m")
 # Orçamento do contexto da geração (src/generate.py). O Ollama da turma usa
 # janela de 2048 tokens e corta o INÍCIO do prompt que passar disso, levando

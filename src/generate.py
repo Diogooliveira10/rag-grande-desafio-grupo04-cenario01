@@ -40,21 +40,15 @@ def _cliente_padrao() -> ClienteLLM:
     """
     import llm_ecoa
 
+    diagnosticos: dict = {}
+
     def _chamar(mensagens: list[dict]) -> Any:
-        # json_object faz o Ollama restringir a saída a JSON válido; só o
-        # prompt não bastava para o qwen3-8b. Sem timeout próprio, o SDK espera
-        # 600 s e tenta de novo duas vezes: uma chamada travada no servidor
-        # compartilhado segurava a pergunta por até 30 minutos.
-        cliente = llm_ecoa.client.with_options(
-            timeout=config.GENERATION_TIMEOUT, max_retries=config.GENERATION_MAX_RETRIES
-        )
-        return cliente.chat.completions.create(
-            model=GENERATION_MODEL,
-            messages=mensagens,
-            temperature=0.2,
+        return llm_ecoa.completar_chat(
+            mensagens, diagnosticos=diagnosticos,
             response_format={"type": "json_object"},
         )
 
+    _chamar.diagnosticos = diagnosticos
     return _chamar
 
 

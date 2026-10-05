@@ -10,6 +10,8 @@ def _logs_em_diretorio_temporario(tmp_path, monkeypatch):
     monkeypatch.setattr(obs.default_logger, "logs_dir", tmp_path / "logs")
     from src import retrieve
     monkeypatch.setattr(retrieve, "QUERY_CACHE_PATH", tmp_path / "query_cache.jsonl")
+    import config
+    monkeypatch.setattr(config, "MODEL_MIN_INTERVAL_SECONDS", 0)
 
 
 @pytest.fixture(autouse=True)

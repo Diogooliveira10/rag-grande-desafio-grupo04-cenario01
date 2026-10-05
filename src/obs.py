@@ -13,6 +13,20 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Mapping, ParamSpec, TypeVar
 
+_model_call_lock = threading.Lock()
+_last_model_call = 0.0
+
+
+def aguardar_modelo() -> None:
+    """Intervalo entre chamadas reais; cache e clientes de teste não esperam."""
+    import config
+    global _last_model_call
+    with _model_call_lock:
+        espera = config.MODEL_MIN_INTERVAL_SECONDS - (time.monotonic() - _last_model_call)
+        if espera > 0:
+            time.sleep(espera)
+        _last_model_call = time.monotonic()
+
 
 class Stage(str, Enum):
     """Nomes permitidos para as etapas observáveis do pipeline."""
