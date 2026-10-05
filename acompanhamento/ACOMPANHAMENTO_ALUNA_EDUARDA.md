@@ -70,3 +70,13 @@
 - Concluí a integração do frontend com a API do projeto, incluindo os fluxos de consulta, exibição das respostas, fontes consultadas e histórico.
 - Organizei e versionei o código do frontend exclusivamente na branch `developerEduarda`, mantendo a branch `main` sem essa implementação. 
 - Como próxima atividade, vou revisar e atualizar o arquivo `ARQUITETURA.md` para documentar a integração do frontend, o estado atual da solução e as próximas etapas do projeto.
+
+## Encontro 9 - 2026-10-02
+
+### Relato individual - Eduarda
+
+- Não pude participar do encontro por motivo de mal-estar.
+- Mesmo ausente, dei continuidade ao projeto e integrei o frontend NEXO aos dados reais do backend. No frontend, removi mocks, dados fixos e respostas simuladas, passando as telas de consulta, histórico, feedback, contratações, documentos, órgãos, fontes e transparência a consumir a API real, com estados de carregamento, vazio e erro.
+- No backend, disponibilizei os endpoints necessários para o frontend sem alterar o pipeline RAG existente, utilizando o histórico e o feedback persistidos, a base estruturada, o inventário e o manifesto reais do projeto. Também documentei os schemas e o contrato HTTP em [`docs/FRONTEND_API_CONTRACT.md`](../docs/FRONTEND_API_CONTRACT.md).
+- Concluí e validei localmente a integração, com o React na porta 5173 e a API FastAPI na porta 8080. Realizei consultas reais ao pipeline RAG, validei CORS, histórico, feedback e telas de exploração, além dos testes automatizados e do build do frontend.
+- Registrei o passo a passo em [`docs/GUIA_INTEGRACAO_LOCAL_FRONTEND_BACKEND.md`](../docs/GUIA_INTEGRACAO_LOCAL_FRONTEND_BACKEND.md), incluindo o clone do repositório [`Etuarda/frontendRAG`](https://github.com/Etuarda/frontendRAG), a configuração dos arquivos `.env`, a inicialização dos dois projetos e os testes de conexão.
