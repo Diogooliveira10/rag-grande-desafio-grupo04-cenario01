@@ -5,7 +5,7 @@ import math
 import re
 import unicodedata
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -465,8 +465,10 @@ def _embed_fn_com_uso(uso: list[TokenUsage], estatisticas: dict[str, int] | None
                     return vectors
         # Cliente criado só na chamada: sem candidatos, dense_retrieve nem embeda.
         from openai import OpenAI
+        from src.obs import aguardar_modelo
 
-        client = OpenAI(base_url=config.OLLAMA_URL, api_key=config.OLLAMA_API_KEY)
+        aguardar_modelo()
+        client = OpenAI(base_url=config.OLLAMA_URL, api_key=config.OLLAMA_API_KEY, timeout=60.0, max_retries=0)
         response = client.embeddings.create(model=config.EMBEDDING_MODEL, input=encoded)
         uso.append(token_usage_from_response(response))
         vectors = [item.embedding for item in sorted(response.data, key=lambda item: getattr(item, "index", 0))]
@@ -828,20 +830,30 @@ def retrieve(
     uso_embedding: list[TokenUsage] = []
     estatisticas_embedding = {"calls": 0, "cache_hits": 0}
     embed_da_consulta = embed_fn or _embed_fn_com_uso(uso_embedding, estatisticas_embedding)
+    recuperacao_degradada = False
     with _span(Stage.RETRIEVAL_DENSO) as span:
-        dense = dense_retrieve(
-            query,
-            index_dir=index_dir,
-            documents_file=documents_file,
-            top_k=fetch_k,
-            bases=bases,
-            filters=None if dense_records is not None else route_filters,
-            embed_fn=embed_da_consulta,
-            records=dense_records,
-            escopos=escopos,
-            run_id=run_id,
-            query_id=query_id,
-        )
+        try:
+            dense = dense_retrieve(
+                query,
+                index_dir=index_dir,
+                documents_file=documents_file,
+                top_k=fetch_k,
+                bases=bases,
+                filters=None if dense_records is not None else route_filters,
+                embed_fn=embed_da_consulta,
+                records=dense_records,
+                escopos=escopos,
+                run_id=run_id,
+                query_id=query_id,
+            )
+        except Exception as error:
+            from llm_ecoa import erro_de_disponibilidade
+            if not erro_de_disponibilidade(error):
+                raise
+            dense = []
+            recuperacao_degradada = True
+            span.extra.update({"degraded": True, "fallback": "bm25", "error_type": type(error).__name__,
+                               "status_code": getattr(error, "status_code", None)})
         span.set_result(_resumo(dense))
         span.extra.update({"query_embedding": estatisticas_embedding})
         if uso_embedding:
@@ -868,6 +880,10 @@ def retrieve(
     with _span(Stage.FUSAO_RRF, rrf_k=DEFAULT_RRF_K) as span:
         fused = reciprocal_rank_fusion([dense, sparse], top_k=rerank_k if reranker is not None else top_k)
         for item in fused:
+            if recuperacao_degradada:
+                item.metadata = {**item.metadata, "extras": {
+                    **item.metadata.get("extras", {}), "recuperacao_degradada": "bm25_sem_embedding",
+                }}
             ignored = filtros_ignorados.get(str(item.metadata.get("base_id")), {})
             if ignored:
                 item.metadata = {**item.metadata, "extras": {
@@ -883,10 +899,26 @@ def retrieve(
         try:
             with _span(Stage.RERANK, rerank_k=rerank_k) as span:
                 span.modelo = getattr(reranker, "modelo", None)
-                reranked = list(reranker(query, fused))[:top_k]
+                span.extra["candidatos"] = len(fused)
+                candidates = {item.chunk_id: item for item in fused}
+                ranked = list(reranker(query, fused))
+                if {item.chunk_id for item in ranked} - candidates.keys():
+                    raise ValueError("Reranker devolveu evidência fora dos candidatos")
+                reranked = []
+                seen = set()
+                for item in ranked:
+                    if item.chunk_id not in seen:
+                        original = candidates[item.chunk_id]
+                        reranked.append(replace(original,
+                            score=getattr(item, "score", original.score),
+                            rerank_score=getattr(item, "rerank_score", original.rerank_score)))
+                        seen.add(item.chunk_id)
+                if not reranked:
+                    raise ValueError("Reranker vazio")
+                reranked = reranked[:top_k]
                 span.set_result(_resumo(reranked))
             return reranked
-        except Exception:  # noqa: BLE001 - o span já registrou o erro; segue com o RRF
+        except Exception:  # o span registra o erro; segue com os candidatos originais
             return fused[:top_k]
     return fused
 

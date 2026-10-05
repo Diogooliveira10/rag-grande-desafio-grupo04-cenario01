@@ -146,15 +146,26 @@ def test_retrieve_registra_rerank_quando_ha_reranker(indice):
 
 def test_retrieve_registra_erro_e_propaga_excecao(indice):
     def embed_quebrado(textos):
-        raise ConnectionError("endpoint fora do ar")
+        raise ValueError("vetor incompatível")
 
-    with pytest.raises(ConnectionError):
+    with pytest.raises(ValueError):
         retrieve("contrato", None, **{**indice, "embed_fn": embed_quebrado})
 
     [registro] = _registros()
     assert registro["stage"] == "retrieval_denso"
     assert registro["status"] == "erro"
-    assert registro["extra"]["error_type"] == "ConnectionError"
+    assert registro["extra"]["error_type"] == "ValueError"
+
+
+def test_retrieve_indisponivel_continua_bm25_sem_trocar_embedding(indice):
+    def embed_quebrado(textos):
+        raise ConnectionError("endpoint fora do ar")
+    resultados = retrieve("contrato", None, **{**indice, "embed_fn": embed_quebrado})
+    assert resultados
+    assert all(item.metadata["extras"]["recuperacao_degradada"] == "bm25_sem_embedding" for item in resultados)
+    denso = next(r for r in _registros() if r["stage"] == "retrieval_denso")
+    assert denso["extra"]["degraded"] is True
+    assert denso["extra"]["fallback"] == "bm25"
 
 
 def test_geracao_registra_tokens_e_modelo():

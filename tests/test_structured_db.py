@@ -100,14 +100,30 @@ def test_contratacao_vira_linha_normalizada(documents, banco):
     assert linha["valor"] == 900.0  # homologado tem prioridade
 
 
-def test_valor_usa_estimado_quando_homologado_e_zero_ou_ausente(documents, banco):
+def test_valor_preserva_homologado_zero_e_nao_usa_estimado(documents, banco):
     structured_db.construir_banco(documents, banco)
 
     valores = {
         l["numero_controle_pncp"]: l["valor"]
         for l in banco.consultar("SELECT numero_controle_pncp, valor FROM contratacoes")
     }
-    assert valores == {"A-1": 900.0, "A-2": 2000.0, "A-3": None}
+    assert valores == {"A-1": 900.0, "A-2": 0.0, "A-3": None}
+
+
+def test_valor_estimado_so_e_usado_quando_homologado_ausente():
+    row = structured_db._linha_contratacao({}, _contratacao("111-1-000001/2025", valor_estimado=2000))
+    assert row["valor"] == 2000
+
+
+def test_cache_sqlite_anterior_e_remontado_para_preservar_zero(documents, banco):
+    structured_db.construir_banco(documents, banco)
+    with banco.conectar(somente_leitura=False) as conexao:
+        conexao.execute("UPDATE meta SET valor = '2' WHERE chave = 'schema_version'")
+        conexao.execute("UPDATE contratacoes SET valor = 2000 WHERE numero_controle_pncp = 'A-2'")
+    conexao.close()
+    structured_db.garantir_banco(documents, banco)
+    assert banco.consultar("SELECT valor FROM contratacoes WHERE numero_controle_pncp = 'A-2'")[0]["valor"] == 0
+    assert banco.consultar("SELECT valor FROM meta WHERE chave = 'schema_version'")[0]["valor"] == "3"
 
 
 def test_registro_repetido_e_deduplicado_pelo_numero_de_controle(tmp_path, banco):

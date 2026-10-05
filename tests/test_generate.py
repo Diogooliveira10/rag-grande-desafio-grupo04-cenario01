@@ -263,24 +263,27 @@ def test_registro_json_vai_compacto_e_sem_campos_vazios_para_o_prompt():
 
     [chunk] = gen._chunks_no_orcamento([_chunk(conteudo=registro)])
 
-    assert chunk.content == '{"objetoCompra":"Licença de software","valor":0}'
+    data = json.loads(chunk.content)
+    assert data["objetoCompra"] == "Licença de software" and data["valor"] == 0
+    assert "linkSistemaOrigem" not in data and "fontes" not in data
+    assert data["modalidade_licitacao"] == "não informada neste registro"
 
 
 def test_chunks_entram_ate_o_limite_do_orcamento(monkeypatch):
     monkeypatch.setattr(gen.config, "GENERATION_CONTEXT_CHARS", 250)
     monkeypatch.setattr(gen.config, "GENERATION_CHUNK_CHARS", 50)
-    chunks = [_chunk(chunk_id=f"c{i}", conteudo="x" * 200) for i in range(5)]
+    chunks = [_chunk(chunk_id=f"c{i}", conteudo="x" * 50) for i in range(5)]
 
     selecionados = gen._chunks_no_orcamento(chunks)
 
     assert [c.metadata.chunk_id for c in selecionados] == ["c0", "c1"]
-    assert selecionados[0].content == "x" * 50 + " [...]"
+    assert selecionados[0].content == "x" * 50
 
 
-def test_primeiro_chunk_sempre_entra_mesmo_acima_do_orcamento(monkeypatch):
+def test_primeiro_chunk_nao_fura_o_orcamento(monkeypatch):
     monkeypatch.setattr(gen.config, "GENERATION_CONTEXT_CHARS", 10)
 
-    assert len(gen._chunks_no_orcamento([_chunk(conteudo="y" * 300)])) == 1
+    assert gen._chunks_no_orcamento([_chunk(conteudo="y" * 300)]) == []
 
 
 def test_instrucao_de_formato_fica_no_fim_do_prompt():
@@ -292,7 +295,7 @@ def test_instrucao_de_formato_fica_no_fim_do_prompt():
 
 def test_geracao_loga_quantos_chunks_couberam_no_prompt(tmp_path, monkeypatch):
     monkeypatch.setattr(obs.default_logger, "logs_dir", tmp_path)
-    monkeypatch.setattr(gen.config, "GENERATION_CONTEXT_CHARS", 150)
+    monkeypatch.setattr(gen.config, "GENERATION_CONTEXT_CHARS", 200)
     monkeypatch.setattr(gen.config, "GENERATION_CHUNK_CHARS", 100)
     chunks = [_chunk(chunk_id=f"c{i}", conteudo="z" * 100) for i in range(3)]
     vistos = {}
@@ -402,3 +405,45 @@ def test_conversao_de_recusa_fica_registrada_na_validacao():
     validacao = [json.loads(l) for l in arquivo.read_text(encoding="utf-8").splitlines()
                  if json.loads(l)["stage"] == "validacao"][-1]
     assert validacao["extra"]["recusa_convertida"] == "fora_de_escopo"
+
+
+def test_recusa_vazia_recebe_texto_e_url_publica():
+    raw = json.dumps({'answer': '', 'is_refusal': True, 'refusal_reason': 'sem_evidencia', 'confidence_level': 'recusado', 'sources_used': []})
+    resposta, erro, _, _ = gen._parsear_resposta_llm(raw, 'pergunta', [], [Natureza.ESTRUTURADA])
+    assert resposta.answer.strip() and resposta.is_refusal and erro is None
+    chunk = _chunk()
+    chunk.metadata.origem = 'https://pncp.gov.br/api/consulta/v1/contratos'
+    raw = json.dumps({'answer': 'Registro público', 'is_refusal': False, 'confidence_level': 'media', 'sources_used': ['c1']})
+    resposta, erro, _, _ = gen._parsear_resposta_llm(raw, 'pergunta', [chunk], [Natureza.ESTRUTURADA])
+    assert resposta.sources_used[0].origem == chunk.metadata.origem
+
+
+def test_categoria_nao_vira_modalidade_e_json_nao_e_cortado(monkeypatch):
+    registro = {'categoriaProcesso': {'nome': 'Compras'}, 'objetoContrato': 'Material', 'valorGlobal': 1200, 'administrativo': 'x' * 8000}
+    chunk = _chunk(conteudo=json.dumps(registro))
+    monkeypatch.setattr(gen.config, 'GENERATION_CONTEXT_CHARS', 1800)
+    projected = gen._chunks_no_orcamento([chunk])[0]
+    data = json.loads(projected.content)
+    assert data['categoriaProcesso']['nome'] == 'Compras'
+    assert data['modalidade_licitacao'] == 'não informada neste registro'
+    assert data['valorGlobal'] == 1200 and 'administrativo' not in data
+    assert chunk.content == json.dumps(registro)
+
+
+def test_orcamento_reserva_evidencia_das_duas_intencoes(monkeypatch):
+    a = _chunk('a', conteudo='a' * 500)
+    a2 = _chunk('a2', conteudo='a' * 500)
+    b = _chunk('b', base_id='editais_normativo', conteudo='norma ' * 80)
+    a.metadata.extras['intencao'] = 0
+    a2.metadata.extras['intencao'] = 0
+    b.metadata.extras['intencao'] = 1
+    monkeypatch.setattr(gen.config, 'GENERATION_CONTEXT_CHARS', 1250)
+    chosen = gen._chunks_no_orcamento([a, a2, b])
+    assert {c.metadata.chunk_id for c in chosen} == {'a', 'b'}
+
+
+def test_schema_resposta_restringe_citacoes_ao_contexto():
+    schema = gen._schema_resposta(['chunk-a', 'chunk-b'])
+    assert schema['properties']['sources_used']['items']['enum'] == ['chunk-a', 'chunk-b']
+    assert schema['properties']['answer']['minLength'] == 1
+    assert schema['additionalProperties'] is False

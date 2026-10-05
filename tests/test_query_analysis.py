@@ -8,6 +8,19 @@ from src import query_analysis as qa
 from src.schema import QueryFilters
 
 
+@pytest.mark.parametrize("qualificador,tipo", [
+    ("contratado", "contratado"), ("estimado", "estimado"),
+    ("homologado", "homologado"),
+])
+def test_regras_distinguem_campo_de_valor_explicitamente_pedido(qualificador, tipo):
+    filtros = qa.analisar_query(
+        f"Maiores contratações por valor {qualificador} publicadas em 2025",
+        modo="regras",
+    ).filtros
+    assert filtros.tipo_valor == tipo
+    assert filtros.referencia_temporal == "publicacao"
+
+
 # --------------------------------------------------------------------------
 # Ano
 # --------------------------------------------------------------------------
@@ -836,3 +849,122 @@ def test_esfera_nao_vem_de_lugar_nem_de_norma(pergunta, esfera):
 ])
 def test_modalidade_nao_vira_filtro_em_comparacao_regra_ou_sentido_comum(pergunta):
     assert qa.analisar_query(pergunta).filtros.filtros_analiticos.get("modalidade") is None
+
+
+def test_plano_llm_duas_intencoes_sem_confundir_contagem_com_valor():
+    import json
+    from src.router import rotear_pergunta
+    raw = {'intencoes': [
+        {'pergunta': 'Quais requisitos para microempresa no pregão?', 'bases': ['normativa']},
+        {'pergunta': 'Há oportunidades abertas de material de escritório?', 'bases': ['estruturada'],
+         'filtros': {'referencia_temporal': 'propostas'}, 'termos_objeto': ['material', 'escritório']},
+    ]}
+    analise = qa.analisar_query('Sou MEI, posso participar e tem pregão aberto?', modo='llm', cliente=lambda _: json.dumps(raw))
+    assert len(analise.intencoes) == 2
+    route = rotear_pergunta(analise.query_original, analise=analise)
+    assert {b.value for b in route.bases_selecionadas} == {'normativa', 'estruturada'}
+    assert analise.intencoes[1].filtros.valor_min is None
+
+
+def test_publicacao_explicita_completa_referencia_omitida():
+    import json
+    raw = {'intencoes': [{'pergunta': 'contratos publicados em 2025', 'bases': ['estruturada'],
+                         'filtros': {'ano': 2025}}]}
+    result = qa.analisar_query('contratos publicados em 2025', modo='llm', cliente=lambda _: json.dumps(raw))
+    assert result.metodo == 'llm'
+    assert result.intencoes[0].filtros.referencia_temporal == 'publicacao'
+
+
+@pytest.mark.parametrize('question', [
+    'Compare a mediana do valor por veículo entre esferas.',
+    'Qual o valor médio por quilo de feijão?',
+    'Qual o preço por unidade do item?',
+])
+def test_preco_por_unidade_nao_e_valor_global(question):
+    filters = qa.analisar_query(question, modo='regras').filtros
+    assert filters.tipo_valor == 'unitario'
+
+
+def test_limites_monetarios_exclusivos_tambem_no_modo_regras():
+    lower = qa.analisar_query('contratos acima de R$ 500 mil', modo='regras').filtros
+    upper = qa.analisar_query('contratos abaixo de R$ 500 mil', modo='regras').filtros
+    assert lower.valor_min == 500000 and lower.valor_min_exclusivo
+    assert upper.valor_max == 500000 and upper.valor_max_exclusivo
+
+
+def test_operacao_analitica_inventada_usa_fallback():
+    import json
+    raw = {'intencoes': [{'pergunta': 'liste contratos', 'bases': ['estruturada'],
+                         'operacao': 'agrupamento', 'filtros': {'metrica': 'contagem', 'agrupamentos': ['orgao_nome']}}]}
+    result = qa.analisar_query('Liste contratos publicados por órgãos públicos em 2025', modo='llm', cliente=lambda _: json.dumps(raw))
+    assert result.metodo == 'regras'
+
+
+def test_cache_fallback_invalido_e_temporario(monkeypatch):
+    from src import generate
+    calls = []
+    def fake(messages):
+        calls.append(messages)
+        return '{"intencoes": [{"pergunta": "contratos", "bases": ["inexistente"]}]}'
+    monkeypatch.setattr(generate, '_cliente_padrao', lambda schema=None: fake)
+    now = qa.time.time()
+    monkeypatch.setattr(qa.time, 'time', lambda: now)
+    first = qa.analisar_query('contratos de 2025', modo='llm')
+    second = qa.analisar_query('contratos de 2025', modo='llm')
+    assert first.metodo == second.metodo == 'regras' and len(calls) == 1
+    monkeypatch.setattr(qa.time, 'time', lambda: now + 301)
+    qa.analisar_query('contratos de 2025', modo='llm')
+    assert len(calls) == 2
+
+
+def test_plano_analitico_sem_metrica_usa_fallback():
+    import json
+    raw = {'intencoes': [{'pergunta': 'maior total por fornecedor', 'bases': ['estruturada'],
+                         'operacao': 'agrupamento', 'filtros': {'agrupamentos': ['fornecedor']}}]}
+    result = qa.analisar_query('maior valor total por fornecedor', modo='llm', cliente=lambda _: json.dumps(raw))
+    assert result.metodo == 'regras'
+    assert result.filtros.metrica == 'soma'
+
+
+def test_filtro_modalidade_inventado_usa_fallback():
+    import json
+    raw = {'intencoes': [{'pergunta': 'contratos de tecnologia', 'bases': ['estruturada'],
+                         'filtros': {'filtros_analiticos': {'modalidade': 'concorrência'}}}]}
+    result = qa.analisar_query('contratos de tecnologia', modo='llm', cliente=lambda _: json.dumps(raw))
+    assert result.metodo == 'regras'
+    assert 'modalidade' not in result.filtros.filtros_analiticos
+
+
+def test_plano_llm_invalido_retorna_regras():
+    analise = qa.analisar_query('contratos acima de 500 mil em 2025', modo='llm', cliente=lambda _: '{"intencoes":[{"pergunta":"x","bases":["emails"],"operacao":"DROP"}]}')
+    assert analise.metodo == 'regras'
+    assert analise.filtros.valor_min == 500000
+
+
+def test_cache_analise_e_invalidacao_prompt(monkeypatch):
+    import json
+    from src import query_analysis, generate
+    chamadas = []
+    def fake(mensagens):
+        chamadas.append(mensagens)
+        return json.dumps({'intencoes': [{'pergunta': 'maiores contratos', 'bases': ['estruturada'], 'operacao': 'ranking'}]})
+    monkeypatch.setattr(generate, '_cliente_padrao', lambda schema=None: fake)
+    qa.analisar_query('maiores contratos', modo='llm')
+    qa.analisar_query('maiores contratos', modo='llm')
+    assert len(chamadas) == 1
+    monkeypatch.setattr(query_analysis, 'PROMPT_VERSION', 'teste-novo')
+    qa.analisar_query('maiores contratos', modo='llm')
+    assert len(chamadas) == 2
+
+
+
+def test_normaliza_campos_conhecidos_sem_aceitar_filtro_desconhecido():
+    import json
+    raw = {'intencoes': [{'pergunta': 'contratos', 'bases': ['estruturada'], 'filtros': {'uf': 'RJ', 'termos_objeto': ['software']}}]}
+    result = qa.analisar_query('contratos', modo='llm', cliente=lambda _: json.dumps(raw))
+    assert result.metodo == 'llm'
+    assert result.intencoes[0].filtros.filtros_analiticos == {'uf': 'RJ'}
+    assert result.intencoes[0].termos_objeto == ['software']
+    raw['intencoes'][0]['filtros']['senha'] = 'não permitido'
+    result = qa.analisar_query('contratos', modo='llm', cliente=lambda _: json.dumps(raw))
+    assert result.metodo == 'regras'

@@ -1097,3 +1097,22 @@ def test_lista_de_duas_condicoes_nao_e_confundida_com_tupla_operador_valor():
     )
 
     assert [item.chunk_id for item in results] == ["dentro"]
+
+
+def test_reranker_recebe_candidato_abaixo_do_corte_e_falha_volta_rrf(tmp_path):
+    records = [_record(f'c{i}', text='ambulancia', embedding=[1.0, 0.1 * i]) for i in range(3)]
+    base_dir = tmp_path / 'contratos_estruturado'
+    base_dir.mkdir()
+    (base_dir / 'vectors.jsonl').write_text('\n'.join(json.dumps(r) for r in records) + '\n', encoding='utf8')
+    documents = tmp_path / 'documents.jsonl'
+    documents.write_text('', encoding='utf8')
+    chamados = []
+    def reranker(query, candidatos):
+        chamados.append(len(candidatos))
+        return [next(c for c in candidatos if c.chunk_id == 'c2')]
+    resultado = retrieve('ambulancia', index_dir=tmp_path, documents_file=documents, top_k=1, embed_fn=lambda _: [[1.0, 0.0]], reranker=reranker)
+    assert chamados == [3] and resultado[0].chunk_id == 'c2'
+    def quebrado(query, candidatos):
+        raise RuntimeError('endpoint indisponível')
+    fallback = retrieve('ambulancia', index_dir=tmp_path, documents_file=documents, top_k=1, embed_fn=lambda _: [[1.0, 0.0]], reranker=quebrado)
+    assert len(fallback) == 1 and fallback[0].chunk_id == 'c0'

@@ -1,4 +1,4 @@
-"""Roteamento deterministico das perguntas para as bases do Adaptive RAG."""
+"""Roteamento por intenções analisadas, com regras existentes como fallback."""
 
 from __future__ import annotations
 
@@ -49,6 +49,8 @@ _OUT_OF_SCOPE_PATTERNS = (
 )
 
 _NORMATIVE_PATTERNS = (
+    r"\bedita(?:l|is)\b",
+    r"\bespecificac(?:ao|oes)\s+tecnic(?:a|as)\b",
     r"\blei\b",
     r"\bnorma[s]?\b",
     r"\bregra[s]?\b",
@@ -104,6 +106,8 @@ _AGGREGATED_PATTERNS = (
     r"\bmediana\b",
     r"\bmedia[s]?\b",
     r"\btotal\b",
+    r"\bmedio[s]?\b",
+    r"\bmaiores?\b.*\b(?:orgaos|municipios|fornecedores)\b",
     r"\bfrequencia\b",
     r"\bconcentra(c|ç)(ao|oes|ões)\b",
     r"\baumento\b",
@@ -163,6 +167,7 @@ def rotear_pergunta(
     *,
     run_id: str = "sem-run-id",
     query_id: str = "sem-query-id",
+    analise=None,
 ) -> RouteDecision:
     """Seleciona as naturezas de evidencia necessarias para ``query``.
 
@@ -174,6 +179,15 @@ def rotear_pergunta(
         run_id=run_id, query_id=query_id, stage=Stage.ROTEAMENTO, input=query
     ) as span:
         decisao = _rotear(query)
+        # Mantém as recusas originais antes de considerar o plano do LLM.
+        if analise is not None and analise.intencoes and not inferir_motivo_recusa(decisao.justificativa) in {
+            RefusalReason.DADOS_BANCARIOS, RefusalReason.CREDENCIAIS_VAZADAS,
+            RefusalReason.JUIZO_LEGALIDADE, RefusalReason.FORA_DE_ESCOPO,
+        }:
+            bases = list(dict.fromkeys(base for intent in analise.intencoes for base in intent.bases))
+            decisao = RouteDecision(bases_selecionadas=bases,
+                justificativa="Necessidades de evidência identificadas na análise compartilhada da pergunta.",
+                confidence=0.8)
         span.set_result(
             {
                 "bases": [base.value for base in decisao.bases_selecionadas],
@@ -218,6 +232,11 @@ def _rotear(query: str) -> RouteDecision:
         bases.append(Natureza.CONVERSACIONAL)
     if _contains_pattern(text, _AGGREGATED_PATTERNS):
         bases.append(Natureza.AGREGADA)
+
+    # Procedimento de pesquisa de preços pede normas, não uma lista de contratos.
+    if (Natureza.NORMATIVA in bases and re.search(r"\bpesquisa de precos\b", text)
+            and not re.search(r"\b(?:publicad|assinad|registrad|fornecedor|cnpj|medio|media|mediana|total|compar)\w*\b", text)):
+        bases = [base for base in bases if base != Natureza.ESTRUTURADA]
 
     if not bases:
         return RouteDecision(

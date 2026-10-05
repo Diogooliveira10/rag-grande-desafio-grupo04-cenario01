@@ -84,7 +84,7 @@ def pipeline_completo(pergunta: str) -> dict[str, Any]:
     return resposta
 
 
-def cli_resposta(pergunta: str) -> dict[str, Any]:
+def cli_resposta(pergunta: str, *, openrouter_only: bool = False) -> dict[str, Any]:
     """Integração explícita ECOA via os comandos existentes, sem mudar a CLI.
 
     Mantém PostgreSQL offline: a análise numérica legada usa somente SQLite.
@@ -98,7 +98,8 @@ def cli_resposta(pergunta: str) -> dict[str, Any]:
     for command in ("rota", "perguntar"):
         started = time.perf_counter()
         result = subprocess.run(
-            [sys.executable, str(root / "app" / "cli.py"), command, pergunta],
+            [sys.executable, str(root / "app" / "cli.py"), command,
+             *(["--openrouter-only"] if openrouter_only else []), pergunta],
             cwd=root, env=env, capture_output=True, text=True, encoding="utf-8", check=True,
         )
         latencies[command] = (time.perf_counter() - started) * 1000
@@ -111,7 +112,10 @@ def cli_resposta(pergunta: str) -> dict[str, Any]:
     response = payloads["perguntar"]
     response["rota_cli"] = payloads["rota"]
     response["latencias_cli_ms"] = latencies
-    response["eventos"] = events
+    run_ids = {event['run_id'] for event in events
+               if event.get('input') == pergunta and event['run_id'] != 'sem-run-id'
+               and event['stage'] in {'query_analysis', 'roteamento', 'geracao'}}
+    response["eventos"] = [event for event in events if event['run_id'] in run_ids]
     return response
 
 

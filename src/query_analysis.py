@@ -31,6 +31,9 @@ from __future__ import annotations
 import calendar
 import json
 import re
+import hashlib
+import os
+import time
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -38,8 +41,165 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
+import config
 from src.obs import Stage, default_logger
-from src.schema import QueryAnalysisResult, QueryFilters
+from src.schema import QueryAnalysisResult, QueryFilters, QueryIntent
+
+ANALYSIS_MODE = os.getenv("QUERY_ANALYSIS_MODE", "regras")
+ANALYSIS_CACHE = config.ROOT_DIR / "data" / "runs" / "query-analysis-cache.jsonl"
+PROMPT_VERSION = "intencoes-v6-explicit-value-kind"
+_PROMPT = """Analise necessidades de evidência de uma pergunta sobre contratações públicas do RJ.
+Não responda à pergunta e não escreva SQL. Retorne JSON {\"intencoes\":[...]} com até 4 intenções.
+Cada intenção: pergunta (subpergunta fiel), bases, filtros, operacao, termos_objeto, limite.
+bases permitidas: normativa, estruturada, agregada, conversacional. Escolha evidência necessária,
+não todas as bases sugeridas pelas palavras: norma/requisito -> normativa; registro/lista/ranking
+de contratos -> estruturada; preço por item/estatística por modalidade -> agregada e estruturada;
+relato/ata -> conversacional. Comparação técnica exige também normativa. Pergunta composta exige
+intenções separadas, por exemplo regras de participação e oportunidades abertas.
+operacao: buscar, ranking, estatistica, agrupamento, evolucao. termos_objeto: palavras do objeto,
+sem órgão, ano ou valor. Não invente sinônimos técnicos nem equivalência entre produtos.
+filtros opcionais: ano, ano_final, valor_min, valor_max, valor_min_exclusivo, valor_max_exclusivo,
+orgao (somente um nome específico, não 'órgãos estaduais'), filtros_analiticos,
+metrica (contagem,soma,media,mediana,minimo,maximo), agrupamentos, referencia_temporal,
+tipo_valor (contratado,estimado,homologado,unitario), minimo_por_grupo.
+Campos analíticos: esfera,municipio,uf,modalidade,fornecedor,orgao_nome,unidade_nome,categoria,
+classe,mes_assinatura,mes_publicacao. esfera use estadual,municipal,federal; uf use RJ.
+referencia_temporal: assinatura para contrato firmado/assinado ou valor contratado;
+publicacao para compra publicada; resultado para homologação; pca para plano;
+vigencia para normas; propostas para oportunidades abertas. Ano de número de lei não é filtro.
+Use limites numéricos explícitos: acima de é exclusivo, a partir de é inclusivo.
+Maior total por fornecedor é agrupamento com soma, não ranking de contratos individuais.
+Uma média/mediana por unidade exige tipo_valor unitario. Não use valor global como unitário.
+Exemplo de formato: {"intencoes":[{"pergunta":"Liste contratos", "bases":["estruturada"],
+"filtros":{"ano":2025,"filtros_analiticos":{"uf":"RJ","esfera":"estadual"}},
+"operacao":"buscar","termos_objeto":[],"limite":10}]}.
+uf, esfera, município e modalidade ficam SOMENTE em filtros.filtros_analiticos.
+termos_objeto fica na intenção, FORA de filtros. limite é entre 1 e 50, nunca 100.
+Não inclua agrupamento quando a pergunta apenas pede um campo junto de uma lista.
+Estar no RJ não implica esfera estadual: não filtre esfera se a pergunta não a especificou.
+Toda operação de total/média/mediana/contagem exige operacao analítica, não buscar.
+Frequência/mais usada exige agrupamento e contagem, com recorte comprovável.
+Referências como 'nessas contratações' sem contexto anterior não identificam um conjunto:
+não invente objeto, órgão ou ano para completar a referência.
+Não filtre esfera ao comparar estadual com municipal. Não transforme contagem mínima de contratos
+em valor monetário. Campos ausentes ficam ausentes. Não acrescente campos fora deste contrato."""
+
+
+def _analysis_key(query: str) -> str:
+    inventory = config.ROOT_DIR / "data" / "inventory" / "v6.json"
+    version = hashlib.sha256(inventory.read_bytes()).hexdigest() if inventory.exists() else "sem-inventario"
+    return hashlib.sha256(json.dumps([query, config.GENERATION_MODEL, PROMPT_VERSION, _PROMPT, version,
+        date.today().isoformat(), config.OPENROUTER_MODEL_FALLBACK, bool(config.OPENROUTER_API_KEY),
+        config.LLM_PROVIDER_MODE, config.OLLAMA_URL, config.OPENROUTER_BASE_URL,
+        config.OPENROUTER_MAX_TOKENS], ensure_ascii=False).encode()).hexdigest()
+
+
+def _gravar_cache(query: str, result: QueryAnalysisResult, llm: dict, fallback: Optional[str] = None) -> None:
+    from src.sensitivity import mascarar
+    entry = {"key": _analysis_key(query), "analysis": result.model_dump(mode="json"), "llm": llm}
+    if fallback is not None:
+        entry.update({"fallback": fallback, "expires_at": time.time() + 300})
+    masked, _ = mascarar(json.dumps(entry, ensure_ascii=False))
+    ANALYSIS_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    with ANALYSIS_CACHE.open("a", encoding="utf8") as handle:
+        handle.write(masked + "\n")
+
+
+def _analisar_llm(query: str, cliente: Any, span: Any) -> QueryAnalysisResult:
+    from src.generate import _cliente_padrao, _texto_e_tokens
+    key = _analysis_key(query)
+    span.extra["prompt_version"] = PROMPT_VERSION
+    # Clientes injetados não consultam cache de produção.
+    cacheable = cliente is None
+    if cacheable and ANALYSIS_CACHE.exists():
+        for line in reversed(ANALYSIS_CACHE.read_text(encoding="utf8").splitlines()):
+            try:
+                cached = json.loads(line)
+                if cached.get("key") == key:
+                    if cached.get("expires_at", float("inf")) <= time.time():
+                        continue
+                    result = QueryAnalysisResult.model_validate(cached["analysis"])
+                    span.extra["cache_hit"] = True
+                    span.extra["llm"] = cached.get("llm", {})
+                    span.modelo = cached.get("llm", {}).get("model", config.GENERATION_MODEL)
+                    if cached.get("fallback"):
+                        span.extra["fallback"] = cached["fallback"]
+                    return result.model_copy(update={"query_original": query})
+            except (ValueError, KeyError):
+                continue
+    span.modelo = config.GENERATION_MODEL
+    span.extra["cache_hit"] = False
+    chamada = cliente or _cliente_padrao(_schema_analise())
+    try:
+        raw, usage = _texto_e_tokens(chamada([
+            {"role": "system", "content": _PROMPT},
+            {"role": "user", "content": f"Data da consulta: {date.today().isoformat()}. Corpus: v6, amostra principalmente de 2025.\nPergunta: {query}"},
+        ]))
+    finally:
+        span.extra["llm"] = dict(getattr(chamada, "diagnosticos", {}))
+        span.modelo = span.extra["llm"].get("model", config.GENERATION_MODEL)
+    span.tokens = usage
+    data = json.loads(raw)
+    intents = []
+    normalized = []
+    for original in data["intencoes"]:
+        row = dict(original)
+        filtros = dict(row.get("filtros") or {})
+        analiticos = dict(filtros.get("filtros_analiticos") or {})
+        for campo in ("uf", "esfera", "municipio", "modalidade", "fornecedor", "orgao_nome", "unidade_nome", "categoria", "classe"):
+            if campo in filtros:
+                value = filtros.pop(campo)
+                if campo in analiticos and analiticos[campo] != value:
+                    raise ValueError("Filtros contraditórios")
+                analiticos[campo] = value
+                normalized.append("filtros." + campo)
+        if "termos_objeto" in filtros:
+            value = filtros.pop("termos_objeto")
+            if "termos_objeto" in row and row["termos_objeto"] != value:
+                raise ValueError("Termos contraditórios")
+            row["termos_objeto"] = value
+            normalized.append("filtros.termos_objeto")
+        filtros["filtros_analiticos"] = analiticos
+        explicit = _analisar(row.get("pergunta", query))
+        if ("estruturada" in row.get("bases", []) and filtros.get("referencia_temporal") is None
+                and explicit.referencia_temporal is not None):
+            filtros["referencia_temporal"] = explicit.referencia_temporal
+            normalized.append("referencia_temporal_explicita")
+        row["filtros"] = filtros
+        intent = QueryIntent.model_validate(row)
+        from src.structured_query import requer_calculo
+        if intent.operacao != "buscar" and not requer_calculo(query):
+            raise ValueError("Operação analítica não solicitada na pergunta")
+        original = _normalize(query)
+        for campo in ("modalidade", "categoria", "classe", "fornecedor", "orgao_nome", "unidade_nome"):
+            valor = intent.filtros.filtros_analiticos.get(campo)
+            if valor and _normalize(str(valor)) not in original:
+                raise ValueError(f"Filtro {campo} não explícito na pergunta")
+        if intent.filtros.ano is not None and str(intent.filtros.ano) not in query:
+            raise ValueError("Ano não explícito na pergunta")
+        intents.append(intent)
+    span.extra["campos_normalizados"] = normalized
+    if not 1 <= len(intents) <= 4:
+        raise ValueError("Análise deve produzir entre uma e quatro intenções")
+    result = QueryAnalysisResult(query_original=query, filtros=intents[0].filtros, intencoes=intents, metodo="llm")
+    if cacheable:
+        _gravar_cache(query, result, span.extra["llm"])
+    return result
+
+
+def _schema_analise() -> dict:
+    intent = QueryIntent.model_json_schema()
+    defs = intent.pop("$defs", {})
+    groups = ["esfera", "municipio", "uf", "modalidade", "fornecedor", "orgao_nome", "unidade_nome", "categoria", "classe", "mes_assinatura", "mes_publicacao"]
+    filters = defs["QueryFilters"]["properties"]
+    filters["filtros_analiticos"] = {"type": "object", "additionalProperties": False,
+        "properties": {field: {"type": "string"} for field in groups}}
+    filters["metrica"] = {"anyOf": [{"enum": ["contagem", "soma", "media", "mediana", "minimo", "maximo"]}, {"type": "null"}]}
+    filters["referencia_temporal"] = {"anyOf": [{"enum": ["assinatura", "publicacao", "resultado", "pca", "vigencia", "propostas"]}, {"type": "null"}]}
+    filters["agrupamentos"] = {"type": "array", "items": {"enum": groups}}
+    return {"type": "object", "additionalProperties": False, "required": ["intencoes"],
+        "properties": {"intencoes": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"$ref": "#/$defs/QueryIntent"}}},
+        "$defs": {**defs, "QueryIntent": intent}}
 
 # --------------------------------------------------------------------------
 # Normalização (mesma lógica de router.py — casefold + remoção de acentos)
@@ -438,6 +598,8 @@ class _Valores:
     valor_max: Optional[float] = None
     numeros: list[Span] = field(default_factory=list)  # não podem virar ano
     expressoes: list[Span] = field(default_factory=list)  # saem do texto_sem_filtros
+    valor_min_exclusivo: bool = False
+    valor_max_exclusivo: bool = False
 
 
 _PERIODO_DE_DOIS_ANOS_RE = re.compile(rf"\bentre\s+{_ANO}\s+(?:e|a)\s+{_ANO}\b")
@@ -468,6 +630,10 @@ def _extrair_valores(texto: str, bloqueados: Sequence[Span]) -> _Valores:
         maximo.valor if maximo else None,
         numeros,
         [e for e in (expr_min, expr_max) if e],
+        valor_min_exclusivo=bool(expr_min and not re.search(
+            r"igual|minimo|pelo menos|ao menos|a partir", texto[expr_min[0]:expr_min[1]])),
+        valor_max_exclusivo=bool(expr_max and not re.search(
+            r"igual|maximo|ate", texto[expr_max[0]:expr_max[1]])),
     )
 
 
@@ -1300,8 +1466,8 @@ def _analisar_com_trechos(query: str) -> tuple[QueryFilters, str, list[Span]]:
     ) if re.search(r"\bpor " + termo, resto)]
     referencia = next((nome for termo, nome in (
         ("assinatura", "assinatura"), ("assinad", "assinatura"),
-        ("resultado", "resultado"), ("homolog", "resultado"),
         ("pca", "pca"), ("publicac", "publicacao"), ("publicad", "publicacao"),
+        ("resultado", "resultado"), ("homolog", "resultado"),
     ) if termo in resto), None)
     analiticos: dict[str, str] = {}
     # Esfera e modalidade saem do texto sem filtros e sem citações de norma
@@ -1341,6 +1507,15 @@ def _analisar_com_trechos(query: str) -> tuple[QueryFilters, str, list[Span]]:
         agrupamentos=agrupamentos,
         referencia_temporal=referencia,
         filtros_analiticos=analiticos,
+        valor_min_exclusivo=valores.valor_min_exclusivo,
+        valor_max_exclusivo=valores.valor_max_exclusivo,
+        tipo_valor=("unitario" if re.search(
+            r"\b(?:valor|preco|media|medio|mediana)\b.*\bpor\s+(?:veiculo|ambulancia|quilo|quilograma|kg|unidade)s?\b", texto
+        ) else next((tipo for padrao, tipo in (
+            (r"\bvalor(?:es)?\s+contratad[oa]s?\b", "contratado"),
+            (r"\bvalor(?:es)?\s+estimad[oa]s?\b", "estimado"),
+            (r"\bvalor(?:es)?\s+homologad[oa]s?\b", "homologado"),
+        ) if re.search(padrao, texto)), None)),
     )
     return filtros, texto, trechos
 
@@ -1372,6 +1547,8 @@ def analisar_query(
     *,
     run_id: str = "sem-run-id",
     query_id: str = "sem-query-id",
+    cliente: Any = None,
+    modo: Optional[str] = None,
 ) -> QueryAnalysisResult:
     """Etapa query_analysis: extrai ano/valor/órgão mencionados na pergunta.
 
@@ -1381,6 +1558,16 @@ def analisar_query(
     with default_logger.span(
         run_id=run_id, query_id=query_id, stage=Stage.QUERY_ANALYSIS, input=query
     ) as span:
+        if (modo or ANALYSIS_MODE) == "llm" and isinstance(query, str) and query.strip():
+            try:
+                result = _analisar_llm(query, cliente, span)
+                span.set_result(result.model_dump(mode="json"))
+                return result
+            except Exception as error:
+                span.extra["fallback"] = f"{type(error).__name__}: {error}"
+                if cliente is None and isinstance(error, (ValueError, KeyError)):
+                    result = QueryAnalysisResult(query_original=query, filtros=_analisar(query))
+                    _gravar_cache(query, result, span.extra.get("llm", {}), span.extra["fallback"])
         filtros = _analisar(query)
         span.set_result(filtros.model_dump(exclude_none=True))
         return QueryAnalysisResult(query_original=query, filtros=filtros)
@@ -1400,13 +1587,13 @@ def filtros_para_retrieve(filtros: QueryFilters) -> dict[str, Any]:
         resultado["orgao"] = {"operator": "contains", "value": filtros.orgao}
     if filtros.valor_min is not None and filtros.valor_max is not None:
         resultado["valor"] = [
-            {"operator": ">=", "value": filtros.valor_min},
-            {"operator": "<=", "value": filtros.valor_max},
+            {"operator": ">" if filtros.valor_min_exclusivo else ">=", "value": filtros.valor_min},
+            {"operator": "<" if filtros.valor_max_exclusivo else "<=", "value": filtros.valor_max},
         ]
     elif filtros.valor_min is not None:
-        resultado["valor"] = {"operator": ">=", "value": filtros.valor_min}
+        resultado["valor"] = {"operator": ">" if filtros.valor_min_exclusivo else ">=", "value": filtros.valor_min}
     elif filtros.valor_max is not None:
-        resultado["valor"] = {"operator": "<=", "value": filtros.valor_max}
+        resultado["valor"] = {"operator": "<" if filtros.valor_max_exclusivo else "<=", "value": filtros.valor_max}
     # O ano filtra a data que a pergunta cita (assinatura, resultado,
     # publicação, PCA); sem referência, a vigência. None = sem limite daquele
     # lado ("a partir de 2024", "até 2025").
@@ -1432,6 +1619,7 @@ def filtros_para_retrieve(filtros: QueryFilters) -> dict[str, Any]:
         if datas:
             resultado[campo] = datas
     for campo in ("esfera", "municipio", "uf", "fornecedor"):
+
         if filtros.filtros_analiticos.get(campo) is not None:
             resultado[campo] = {"operator": "==", "value": filtros.filtros_analiticos[campo]}
     if filtros.filtros_analiticos.get("modalidade"):

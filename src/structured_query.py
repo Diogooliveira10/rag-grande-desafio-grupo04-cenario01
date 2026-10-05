@@ -26,7 +26,7 @@ import config
 from src import structured_db
 from src.obs import Stage, default_logger
 from src.query_analysis import texto_sem_filtros
-from src.schema import Chunk, ChunkMetadata, Natureza, QueryFilters
+from src.schema import Chunk, ChunkMetadata, Natureza, QueryFilters, QueryIntent
 from src.structured_db import Banco
 
 DOCUMENTS_FILE = structured_db.DOCUMENTS_FILE
@@ -79,7 +79,7 @@ _RE_RANKING = re.compile(r"\b(?:maior(?:es)?|menor(?:es)?|top|ranking)\b")
 _RE_N_RANKING = re.compile(r"\b(\d{1,2}|" + "|".join(_NUMEROS_POR_EXTENSO) + r")\s+(?:maiores|menores)\b")
 _RE_EVOLUCAO = re.compile(r"\bao longo\b|\bevolu|\baument|\bcresc|\bqueda\b|\bpor mes\b|\bmensa")
 _RE_AGRUPAMENTO = re.compile(
-    r"\bmais frequen|\bmais usad|\bmais comu|\bpor modalidade|\bpor orgao|\bpor municipio|\bpor esfera"
+    r"\bmais frequen|\bmais usad|\bmais comu|\bpor modalidades?\b|\bpor orgaos?\b|\bpor municipios?\b|\bpor esferas?\b"
 )
 _RE_COMPARACAO = re.compile(r"\bmais car[oa]s?\b|\bmais barat|\bpag(?:ou|aram|am|a) mais\b|\bcompar")
 _RE_ESTATISTICA = re.compile(r"\bmedia\b|\bmedio\b|\bmediana\b|\btotal\b|\bsoma\b|\bquant[oa]s?\b|\bquantidade\b")
@@ -187,6 +187,8 @@ class Consulta:
     # A pergunta cita lei/decreto ("contratos que seguem a Lei 14.133"): a norma
     # não é filtro, e o resultado avisa isso em vez de parecer uma contagem por lei.
     norma_citada: bool = False
+    valor_max_exclusivo: bool = False
+    plano_tipado: bool = False
 
 
 # Contrato de compilação apenas: estas tabelas de fatos não são criadas aqui.
@@ -194,9 +196,10 @@ class Consulta:
 _DATASETS_SQL = {
     "contratos_estruturado": {
         "tabela": "contratos_fatos", "valor": "valor",
-        "campos": frozenset({"valor", "valor_estimado", "valor_homologado"}),
-        "grupos": frozenset({"orgao_nome", "municipio", "modalidade", "esfera", "fornecedor", "numero_controle_pncp", "mes_assinatura"}),
-        "expressoes_grupo": {"mes_assinatura": "EXTRACT(MONTH FROM data_assinatura)"},
+        "campos": frozenset({"valor", "valor_contratado", "valor_estimado", "valor_homologado"}),
+        "grupos": frozenset({"orgao_nome", "municipio", "modalidade", "esfera", "fornecedor", "numero_controle_pncp", "mes_assinatura", "mes_publicacao"}),
+        "expressoes_grupo": {"mes_assinatura": "EXTRACT(MONTH FROM data_assinatura)",
+                             "mes_publicacao": "EXTRACT(MONTH FROM data_publicacao)"},
         "datas": {"assinatura": "data_assinatura", "resultado": "data_resultado", "publicacao": "data_publicacao"},
     },
     "pca_agregado": {
@@ -261,7 +264,7 @@ def compilar_consulta_postgres(consulta: Consulta) -> tuple[str, tuple[Any, ...]
                     raise ValueError("período inválido")
                 condicoes.append(f"{expressao} {operador} %s")
                 parametros.append(ano)
-    for operador, valor in ((">" if consulta.valor_min_exclusivo else ">=", consulta.valor_min), ("<=", consulta.valor_max)):
+    for operador, valor in ((">" if consulta.valor_min_exclusivo else ">=", consulta.valor_min), ("<" if consulta.valor_max_exclusivo else "<=", consulta.valor_max)):
         if valor is not None:
             condicoes.append(f"{campo} {operador} %s")
             parametros.append(valor)
@@ -334,6 +337,8 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
     evolução/agrupamento, ou quando o roteador não escolheu base estruturada
     nem agregada: aí a busca normal responde sozinha.
     """
+    if filtros.tipo_valor == "unitario" or filtros.referencia_temporal in {"resultado", "vigencia", "propostas"}:
+        return None
     bases = set(bases)
     # Sem as expressões que já viraram filtro: em "média dos contratos com valor
     # maior que 2000", o "maior" não pede ranking, e "acima"/"milhão" não
@@ -449,10 +454,7 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
     so_contratos = bool(tabela == "contratacoes" and not modalidade_termos and
                         re.search(r"\bcontratos?\b|\bcontratad|\bcontrat(?:ou|aram)\b", texto))
     # Contrato conta pela assinatura, salvo quando a pergunta pede a publicação.
-    referencia_temporal = (
-        ("publicacao" if filtros.referencia_temporal == "publicacao" else "assinatura")
-        if so_contratos else None
-    )
+    referencia_temporal = filtros.referencia_temporal or ("assinatura" if so_contratos else None)
     termos_objeto = _termos_do_objeto(texto_objeto) if tabela == "contratacoes" else ()
     if tipo == "listagem" and not termos_objeto and not modalidade_termos:
         return None  # "Quais contratos existem?" sem assunto: a busca normal responde
@@ -463,6 +465,11 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
         limite=max(1, min(limite, 50)),
         agrupar_por=agrupar_por,
         metrica=metrica,
+        campo={"contratado": "valor_contratado", "estimado": "valor_estimado",
+               "homologado": "valor_homologado"}.get(filtros.tipo_valor),
+        filtros_analiticos=tuple((k, v) for k, v in analiticos.items() if k not in {"esfera", "modalidade", "orgao_nome"}),
+        valor_min_exclusivo=filtros.valor_min_exclusivo,
+        valor_max_exclusivo=filtros.valor_max_exclusivo,
         # Período fechado em ano/ano_final; aberto em ano_desde/ano_ate.
         ano=primeiro_ano if primeiro_ano is not None and ultimo_ano is not None else None,
         ano_final=ultimo_ano if primeiro_ano is not None and ultimo_ano is not None else None,
@@ -479,7 +486,55 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
         orgao_termos=orgao_termos,
         so_contratos=so_contratos,
         norma_citada=bool(_RE_NORMA_NUMERADA.search(texto)),
+
     )
+
+
+def consulta_da_intencao(intent: QueryIntent) -> Optional[Consulta]:
+    """Compila o plano tipado para operações disponíveis no SQLite existente."""
+    f = intent.filtros
+    if intent.operacao == "buscar" or f.tipo_valor == "unitario" or f.referencia_temporal in {"resultado", "vigencia", "propostas"}:
+        return None
+    tabela = "pca_planos" if f.referencia_temporal == "pca" else "contratacoes"
+    if not set(intent.bases) & {Natureza.ESTRUTURADA, Natureza.AGREGADA}:
+        return None
+    fields = structured_db._TABELAS[tabela]
+    groups = f.agrupamentos or (["unidade_nome"] if tabela == "pca_planos" else ["modalidade"])
+    if any(g not in fields for g in groups):
+        return None
+    filters = dict(f.filtros_analiticos)
+    if f.orgao:
+        filters["orgao_nome"] = f.orgao
+    if any(k not in fields for k in filters):
+        return None
+    # Usa a mesma resolução de nomes/modalidades do caminho por regras.
+    modalidade = structured_db.normalizar(filters.pop("modalidade", ""))
+    modalidade_termos = next((termos for padrao, termos in _MODALIDADES if padrao.search(modalidade)), ())
+    if modalidade and not modalidade_termos:
+        return None
+    orgao = filters.pop("orgao_nome", "")
+    orgao_termos = tuple(p for p in re.findall(r"[a-z]+", structured_db.normalizar(orgao))
+                        if p not in _PALAVRAS_ORGAO_VAZIAS and len(p) > 2)
+    texto = structured_db.normalizar(intent.pergunta)
+    so_contratos = bool(tabela == "contratacoes" and not modalidade_termos and
+                        re.search(r"\bcontratos?\b|\bcontratad|\bcontrat(?:ou|aram)\b", texto))
+    referencia = f.referencia_temporal or ("assinatura" if so_contratos else None)
+    primeiro_ano, ultimo_ano = f.intervalo_de_anos()
+    return Consulta(tabela=tabela, tipo=intent.operacao, limite=intent.limite,
+        plano_tipado=True,
+        so_contratos=so_contratos, modalidade_termos=modalidade_termos, orgao_termos=orgao_termos,
+        ordem="ASC" if f.metrica == "minimo" else "DESC",
+        ano=primeiro_ano if primeiro_ano is not None and ultimo_ano is not None else None,
+        ano_final=ultimo_ano if primeiro_ano is not None and ultimo_ano is not None else None,
+        ano_desde=primeiro_ano if ultimo_ano is None else None,
+        ano_ate=ultimo_ano if primeiro_ano is None else None,
+        valor_min=f.valor_min, valor_max=f.valor_max,
+        valor_min_exclusivo=f.valor_min_exclusivo, valor_max_exclusivo=f.valor_max_exclusivo,
+        filtros_analiticos=tuple(filters.items()), agrupar_por=groups[0], agrupamentos=tuple(groups),
+        metrica=f.metrica or "contagem", minimo_por_grupo=f.minimo_por_grupo,
+        campo={"contratado": "valor_contratado", "estimado": "valor_estimado", "homologado": "valor_homologado"}.get(f.tipo_valor),
+        referencia_temporal=referencia,
+        termos_objeto=tuple(structured_db.normalizar(t) for t in intent.termos_objeto) if tabela == "contratacoes" else ())
 
 
 # --------------------------------------------------------------------------
@@ -490,7 +545,7 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
 def _coluna_valor(consulta: Consulta) -> str:
     if consulta.tabela == "pca_planos":
         return "valor_total"
-    return "valor_contratado" if consulta.so_contratos or consulta.referencia_temporal == "assinatura" else "valor"
+    return consulta.campo or ("valor_contratado" if consulta.so_contratos or consulta.referencia_temporal == "assinatura" else "valor")
 
 
 def _where(consulta: Consulta, termos: Iterable[str], juncao: str = "AND") -> tuple[str, list[Any]]:
@@ -498,7 +553,9 @@ def _where(consulta: Consulta, termos: Iterable[str], juncao: str = "AND") -> tu
     parametros: list[Any] = []
     coluna_ano = "ano_pca" if consulta.tabela == "pca_planos" else (
         "ano_assinatura" if consulta.referencia_temporal == "assinatura" else "ano_publicacao")
-    if consulta.tabela == "contratacoes" and (consulta.so_contratos or consulta.referencia_temporal == "assinatura"):
+    if consulta.tabela == "contratacoes" and (
+        consulta.so_contratos or consulta.referencia_temporal == "assinatura" or consulta.campo == "valor_contratado"
+    ):
         condicoes.append("tipo_registro = ?")
         parametros.append("contrato_assinado")
     if consulta.ano is not None:
@@ -515,11 +572,12 @@ def _where(consulta: Consulta, termos: Iterable[str], juncao: str = "AND") -> tu
     if consulta.ano_ate is not None:
         condicoes.append(f"{coluna_ano} <= ?")
         parametros.append(consulta.ano_ate)
+
     if consulta.valor_min is not None:
         condicoes.append(f"{_coluna_valor(consulta)} {'>' if consulta.valor_min_exclusivo else '>='} ?")
         parametros.append(consulta.valor_min)
     if consulta.valor_max is not None:
-        condicoes.append(f"{_coluna_valor(consulta)} <= ?")
+        condicoes.append(f"{_coluna_valor(consulta)} {'<' if consulta.valor_max_exclusivo else '<='} ?")
         parametros.append(consulta.valor_max)
     if consulta.esfera:
         condicoes.append("esfera = ?")
@@ -543,6 +601,15 @@ def _where(consulta: Consulta, termos: Iterable[str], juncao: str = "AND") -> tu
             parametros.extend(valores)
     if consulta.deduplicar and consulta.tabela == "contratacoes":
         condicoes.append(_SEM_DUPLICATA_MODALIDADE if _usa_modalidade(consulta) else _SEM_DUPLICATA)
+    for campo, valor in consulta.filtros_analiticos:
+        if campo not in structured_db._TABELAS[consulta.tabela]:
+            raise ValueError("Campo SQL não permitido")
+        if campo in {"orgao_nome", "fornecedor"}:
+            condicoes.append(f"LOWER({campo}) LIKE LOWER(?)")
+            parametros.append(f"%{valor}%")
+        else:
+            condicoes.append(f"{campo} = ?")
+            parametros.append(valor)
     termos = list(termos)
     if termos:
         partes = []
@@ -581,7 +648,7 @@ _SEM_DUPLICATA_MODALIDADE = (
 
 def _usa_modalidade(consulta: Consulta) -> bool:
     return bool(consulta.modalidade_termos) or (
-        consulta.tipo == "agrupamento" and consulta.agrupar_por == "modalidade")
+        consulta.tipo == "agrupamento" and "modalidade" in (consulta.agrupamentos or (consulta.agrupar_por,)))
 
 
 def _descrever_termo(termo: str) -> str:
@@ -629,7 +696,8 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
         if consulta.tabela == "pca_planos":
             colunas = "ano_pca, unidade_nome, quantidade_itens, valor_total AS valor"
         else:
-            colunas = "data_publicacao, orgao_nome, esfera, municipio, modalidade, fornecedor, objeto, valor"
+            coluna_data = "data_assinatura" if consulta.referencia_temporal == "assinatura" else "data_publicacao"
+            colunas = f"{coluna_data} AS data_referencia, orgao_nome, esfera, municipio, modalidade, fornecedor, objeto, {coluna_valor} AS valor"
         ordem = (f"CASE WHEN {coluna_valor} IS NULL THEN 1 ELSE 0 END, {coluna_valor} {consulta.ordem}"
                  if consulta.tipo == "listagem" else f"{coluna_valor} {consulta.ordem}")
         sql = (
@@ -640,7 +708,7 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
         if consulta.tipo == "listagem" and consulta.tabela == "contratacoes":
             total = banco.consultar(f"SELECT COUNT(*) AS n FROM {consulta.tabela}{where}", parametros)[0]["n"]
             return sql, [f"{total} registros atendem aos filtros; os {len(linhas)} de maior valor:"] + [
-                f"{i}. {_brl(l['valor'])} | {l['data_publicacao']} | {l['orgao_nome']} ({l['esfera']}, {l['municipio']}) | "
+                f"{i}. {_brl(l['valor'])} | {l['data_referencia']} | {l['orgao_nome']} ({l['esfera']}, {l['municipio']}) | "
                 f"modalidade: {l['modalidade'] or 'não informada'} | fornecedor: {l['fornecedor'] or 'não informado'} | "
                 f"{_resumir(l['objeto'], 70)}"
                 for i, l in enumerate(linhas, 1)
@@ -651,39 +719,60 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
                 for i, l in enumerate(linhas, 1)
             ]
         return sql, [
-            f"{i}. {_brl(l['valor'])} | {l['data_publicacao']} | {l['orgao_nome']} ({l['esfera']}, {l['municipio']}) | "
+            f"{i}. {_brl(l['valor'])} | {l['data_referencia']} | {l['orgao_nome']} ({l['esfera']}, {l['municipio']}) | "
             f"{l['modalidade']} | {_resumir(l['objeto'], 60)}"
             for i, l in enumerate(linhas, 1)
         ]
 
     if consulta.tipo == "agrupamento":
-        coluna = consulta.agrupar_por
-        # O grupo "não informado" vai para o fim: em "modalidade mais usada", os
-        # contratos sem modalidade não são uma modalidade.
-        ordem = f"CASE WHEN {coluna} IS NULL THEN 1 ELSE 0 END, " + (
-            f"COALESCE(SUM({coluna_valor}), 0) {consulta.ordem}, n DESC"
-            if consulta.metrica == "soma" else f"n DESC, COALESCE(SUM({coluna_valor}), 0) DESC")
-        # Registro sem fornecedor não é um fornecedor, e sem modalidade não é uma
-        # modalidade (os contratos assinados do PNCP não trazem modalidade): ficam
-        # fora dos grupos e são contados à parte, para "a mais usada" não ser "nenhuma".
+        campos = consulta.agrupamentos or (consulta.agrupar_por,)
+        if any(c not in structured_db._TABELAS[consulta.tabela] for c in campos):
+            raise ValueError("Agrupamento SQL não permitido")
+        coluna = ", ".join(campos)
+        # Fornecedor/modalidade ausente não é um grupo; conta-se à parte.
         sem_campo = 0
-        if coluna in ("fornecedor", "modalidade"):
-            where_nulo = where + (" AND " if where else " WHERE ") + f"{coluna} IS NULL"
+        obrigatorios = [c for c in campos if c in {"fornecedor", "modalidade"}]
+        if obrigatorios:
+            nulos = " OR ".join(f"{c} IS NULL" for c in obrigatorios)
+            where_nulo = where + (" AND " if where else " WHERE ") + f"({nulos})"
             sem_campo = banco.consultar(f"SELECT COUNT(*) AS n FROM {consulta.tabela}{where_nulo}", parametros)[0]["n"]
-            where = where + (" AND " if where else " WHERE ") + f"{coluna} IS NOT NULL"
-        sql = (
-            f"SELECT {coluna} AS grupo, COUNT(*) AS n, SUM({coluna_valor}) AS total "
-            f"FROM {consulta.tabela}{where} GROUP BY {coluna}"
-        )
-        if consulta.minimo_por_grupo is not None:
-            sql += f" HAVING COUNT(*) >= {int(consulta.minimo_por_grupo)}"
-        sql += f" ORDER BY {ordem}"
-        if consulta.metrica == "soma":
-            sql += f" LIMIT {consulta.limite}"
-        grupos = [
-            f"{'Fornecedor ' if coluna == 'fornecedor' else ''}{l['grupo'] or 'não informado'}: {l['n']} registros, total {_brl(l['total'])}"
-            for l in banco.consultar(sql, parametros)
-        ]
+            where += (" AND " if where else " WHERE ") + " AND ".join(f"{c} IS NOT NULL" for c in obrigatorios)
+        if consulta.metrica == "mediana":
+            sql = f"SELECT {coluna}, {coluna_valor} AS valor FROM {consulta.tabela}{where}"
+            valores_por_grupo: dict[tuple, list[float]] = {}
+            contagens: dict[tuple, int] = {}
+            for row in banco.consultar(sql, parametros):
+                key = tuple(row[c] for c in campos)
+                contagens[key] = contagens.get(key, 0) + 1
+                if _tem_valor(row["valor"]):
+                    valores_por_grupo.setdefault(key, []).append(float(row["valor"]))
+            items = [(k, v) for k, v in valores_por_grupo.items()
+                     if contagens[k] >= (consulta.minimo_por_grupo or 1)]
+            items.sort(key=lambda kv: statistics.median(kv[1]), reverse=consulta.ordem == "DESC")
+            grupos = [f"{' / '.join(str(k or 'não informado') for k in key)}: {_estatisticas(values)}"
+                      for key, values in items[:consulta.limite]]
+        else:
+            valor_informado = f"CASE WHEN {coluna_valor} >= {_VALOR_MINIMO_INFORMADO} THEN {coluna_valor} END"
+            funcao = {"soma": "SUM", "media": "AVG", "minimo": "MIN", "maximo": "MAX"}.get(consulta.metrica)
+            ordem = (f"{funcao}({valor_informado}) {consulta.ordem}, n DESC"
+                     if funcao else f"n DESC, COALESCE(SUM({valor_informado}), 0) DESC")
+            sql = (
+                f"SELECT {coluna}, COUNT(*) AS n, SUM({valor_informado}) AS total, "
+                f"AVG({valor_informado}) AS media, MIN({valor_informado}) AS minimo, MAX({valor_informado}) AS maximo "
+                f"FROM {consulta.tabela}{where} GROUP BY {coluna}"
+            )
+            if consulta.minimo_por_grupo is not None:
+                sql += " HAVING COUNT(*) >= ?"
+                parametros.append(consulta.minimo_por_grupo)
+            sql += f" ORDER BY {ordem}"
+            if consulta.plano_tipado or consulta.metrica != "contagem":
+                sql += f" LIMIT {consulta.limite}"
+            grupos = [
+                f"{'Fornecedor ' if coluna == 'fornecedor' else ''}{' / '.join(str(l[c] or 'não informado') for c in campos)}: "
+                f"{l['n']} registros, total {_brl(l['total'])}, média {_brl(l['media'])}, "
+                f"mínimo {_brl(l['minimo'])}, máximo {_brl(l['maximo'])}"
+                for l in banco.consultar(sql, parametros)
+            ]
         if not grupos and consulta.minimo_por_grupo is not None:
             grupos = [f"Nenhum {coluna} tem {consulta.minimo_por_grupo} ou mais registros com esses filtros."]
         if sem_campo and not grupos:
@@ -704,7 +793,27 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
         for l in banco.consultar(sql, parametros):
             if _tem_valor(l["valor"]):
                 por_periodo.setdefault(l["periodo"], []).append(float(l["valor"]))
-        return sql, [f"{periodo}: {_estatisticas(valores)}" for periodo, valores in sorted(por_periodo.items())]
+        conhecidos = sorted((p, v) for p, v in por_periodo.items() if p is not None)
+        linhas = [f"{p}: {_estatisticas(v)}" for p, v in conhecidos]
+        todos = [v for _, valores in conhecidos for v in valores]
+        if todos:
+            linhas.insert(0, f"Período observado (média ponderada por registro): {_estatisticas(todos)}")
+        if len(conhecidos) >= 2:
+            inicio, fim = conhecidos[0], conhecidos[-1]
+            a, b = statistics.fmean(inicio[1]), statistics.fmean(fim[1])
+            delta = b - a
+            percentual = f"{100 * delta / a:.2f}%" if a else "percentual indefinido (base zero)"
+            linhas.insert(1, f"Comparação primeiro/último mês disponível ({inicio[0]} / {fim[0]}): variação {_brl(delta)}; {percentual}. Não prova tendência monotônica.")
+        if consulta.tabela == "contratacoes" and consulta.ano is not None:
+            expected = {f"{y}-{m:02d}" for y in range(consulta.ano, (consulta.ano_final or consulta.ano) + 1) for m in range(1, 13)}
+            missing = sorted(expected - set(p for p, _ in conhecidos))
+            if missing:
+                linhas.append("Meses sem registros com valor: " + ", ".join(missing) + "; não são valores zero.")
+        return sql, linhas
+
+    if consulta.plano_tipado and consulta.metrica == "contagem":
+        sql = f"SELECT COUNT(*) AS n FROM {consulta.tabela}{where}"
+        return sql, [f"Contagem no recorte solicitado: {banco.consultar(sql, parametros)[0]['n']} registros (inclui registros sem valor)."]
 
     # estatistica: geral e, nas contratações, quebrada por esfera. Mediana em
     # Python porque SQLite não tem função de mediana.
@@ -753,10 +862,11 @@ def _cabecalho(consulta: Consulta, total_tabela: int, termos: tuple[str, ...], j
         filtros.append(f"ano>={consulta.ano_desde}")
     if consulta.ano_ate is not None:
         filtros.append(f"ano<={consulta.ano_ate}")
+
     if consulta.valor_min is not None:
-        filtros.append(f"valor>={_brl(consulta.valor_min)}")
+        filtros.append(f"valor{'>' if consulta.valor_min_exclusivo else '>='}{_brl(consulta.valor_min)}")
     if consulta.valor_max is not None:
-        filtros.append(f"valor<={_brl(consulta.valor_max)}")
+        filtros.append(f"valor{'<' if consulta.valor_max_exclusivo else '<='}{_brl(consulta.valor_max)}")
     if consulta.esfera:
         filtros.append(f"esfera={consulta.esfera}")
     if consulta.mes is not None and consulta.ano is not None:
@@ -773,6 +883,15 @@ def _cabecalho(consulta: Consulta, total_tabela: int, termos: tuple[str, ...], j
             f"órgão em {', '.join(consulta.orgaos[:5])}{'…' if len(consulta.orgaos) > 5 else ''}" if consulta.orgaos
             else f"órgão {' '.join(consulta.orgao_termos)} (nenhum órgão do corpus casa com esse nome)"
         )
+    filtros.extend(f"{k}={v}" for k, v in consulta.filtros_analiticos)
+    if consulta.referencia_temporal:
+        filtros.append(f"referência={consulta.referencia_temporal}")
+    if consulta.campo:
+        filtros.append(f"campo_valor={consulta.campo}")
+    if consulta.tabela == "contratacoes" and (
+        consulta.so_contratos or consulta.referencia_temporal == "assinatura" or consulta.campo == "valor_contratado"
+    ):
+        filtros.append("tipo_registro=contrato_assinado")
     if termos:
         filtros.append(f"objeto contém {(' e ' if juncao == 'AND' else ' ou ').join(map(_descrever_termo, termos))}")
     return f"{origem} Filtros: {', '.join(filtros) or 'nenhum'}. Cálculo: {consulta.tipo}."
@@ -807,7 +926,9 @@ def _resolver_valores(consulta: Consulta, banco: Banco) -> Consulta:
     SQLite e no Postgres; o SQL recebe só ``coluna IN (...)``.
     """
     mudancas: dict[str, Any] = {}
-    if consulta.tabela == "contratacoes" and not (consulta.so_contratos or consulta.referencia_temporal == "assinatura"):
+    if consulta.tabela == "contratacoes" and not (
+        consulta.so_contratos or consulta.referencia_temporal == "assinatura" or consulta.campo == "valor_contratado"
+    ):
         try:  # base montada antes da coluna (ex.: Neon só de leitura desatualizado): sem deduplicar
             banco.consultar("SELECT numero_controle_compra FROM contratacoes LIMIT 1")
             mudancas["deduplicar"] = True
@@ -877,7 +998,7 @@ def executar_consulta(consulta: Consulta, banco: Banco) -> tuple[str, str, list[
     return (
         f"SELECT 1 FROM {consulta.tabela}{where}",
         _cabecalho(consulta, total, consulta.termos_objeto, "OR"),
-        [f"Nenhuma contratação do corpus tem no objeto: {', '.join(consulta.termos_objeto)}."],
+        [f"Nenhum registro encontrado com os filtros aplicados e os termos de objeto: {', '.join(consulta.termos_objeto)}."],
     )
 
 
@@ -889,9 +1010,9 @@ def _chunks(consulta: Consulta, sql: str, cabecalho: str, linhas: list[str], ban
     for linha in linhas or ["(nenhum registro)"]:
         cabeca = len(cabecalho) if len(partes) == 1 else 70
         tamanho = cabeca + sum(len(l) + 1 for l in partes[-1]) + len(linha) + 1
-        if partes[-1] and tamanho > limite:
+        if tamanho > limite and (partes[-1] or len(partes) == 1):
             partes.append([])
-        partes[-1].append(linha[: max(80, limite - len(cabecalho) - 2)])
+        partes[-1].append(linha)
     assinatura = hashlib.sha256(f"{sql}|{consulta}".encode("utf-8")).hexdigest()[:12]
     base_id = structured_db.BASE_PCA if consulta.tabela == "pca_planos" else structured_db.BASE_CONTRATACOES
     natureza = Natureza.AGREGADA if consulta.tabela == "pca_planos" else Natureza.ESTRUTURADA
@@ -923,6 +1044,7 @@ def consultar_estruturado(
     query_id: str = "sem-query-id",
     banco: Optional[Banco] = None,
     documents_file: Optional[Path] = None,
+    intencao: Optional[QueryIntent] = None,
 ) -> list[Chunk]:
     """Etapa ``consulta_sql``: devolve chunks com o resultado, ou ``[]``.
 
@@ -930,7 +1052,7 @@ def consultar_estruturado(
     registra nada. Erro na consulta (ex.: Neon fora do ar) é registrado no log
     e não derruba o pipeline: a resposta segue só com a busca normal.
     """
-    consulta = detectar_consulta(query, filtros, bases)
+    consulta = consulta_da_intencao(intencao) if intencao is not None else detectar_consulta(query, filtros, bases)
     documents_file = Path(documents_file or DOCUMENTS_FILE)
     if consulta is None or not documents_file.exists():
         return []

@@ -15,6 +15,52 @@ ESTRUTURADA = [Natureza.ESTRUTURADA]
 AGREGADA = [Natureza.ESTRUTURADA, Natureza.AGREGADA]
 
 
+def test_valor_contratado_publicado_nao_mistura_estimativas_nem_ano_assinatura(tmp_path):
+    from src.query_analysis import analisar_query
+
+    compra = _contratacao("111-1-000001/2025", valor_estimado=1_000_000)
+    contrato = _contratacao("111-2-000001/2025")
+    contrato.update(valorGlobal=100, dataAssinatura="2024-12-20")
+    zero = _contratacao("111-2-000002/2025")
+    zero.update(valorGlobal=0, dataAssinatura="2024-12-20")
+    documents = escrever_documents(tmp_path / "documents.jsonl", contratacoes=[compra, contrato, zero])
+    banco = Banco(sqlite_path=tmp_path / "base.sqlite")
+    structured_db.construir_banco(documents, banco)
+    query = "Maiores contratações por valor contratado publicadas em 2025"
+    consulta = sq.detectar_consulta(query, analisar_query(query, modo="regras").filtros, ESTRUTURADA)
+    sql, cabecalho, linhas = sq.executar_consulta(consulta, banco)
+    assert "tipo_registro = ?" in sql
+    assert "ano_publicacao = ?" in sql
+    assert "tipo_registro=contrato_assinado" in cabecalho
+    assert len(linhas) == 1  # zero permanece no banco, mas não entra no ranking monetário
+    assert "1.000.000" not in " ".join(linhas)
+
+
+def test_contagem_tipificada_de_valor_contratado_exclui_publicacoes():
+    from src.schema import QueryIntent
+
+    intent = QueryIntent(
+        pergunta="Quantos contratos por valor contratado foram publicados em 2025?",
+        bases=ESTRUTURADA, operacao="estatistica",
+        filtros=QueryFilters(tipo_valor="contratado", metrica="contagem", referencia_temporal="publicacao", ano=2025),
+    )
+    consulta = sq.consulta_da_intencao(intent)
+    sql, parametros = sq._where(consulta, ())
+    assert "tipo_registro = ?" in sql
+    assert parametros == ["contrato_assinado", 2025]
+
+
+def test_compilador_offline_valor_contratado_por_mes_publicacao():
+    sql, parametros = sq.compilar_consulta_postgres(sq.Consulta(
+        tabela="contratos_fatos", tipo="estatistica", dataset="contratos_estruturado",
+        campo="valor_contratado", metrica="soma", referencia_temporal="publicacao",
+        ano=2025, agrupamentos=("mes_publicacao",),
+    ))
+    assert "SUM(valor_contratado)" in sql
+    assert "EXTRACT(MONTH FROM data_publicacao)" in sql
+    assert parametros[:2] == (2025, 2025)
+
+
 def test_compilador_postgres_parametriza_filtros_e_mediana():
     consulta = sq.Consulta(
         tabela="pca_fatos", tipo="estatistica", dataset="pca_agregado", versao="v5",
@@ -194,7 +240,7 @@ def test_estatistica_calcula_mediana_e_quebra_por_esfera(base):
 def test_objeto_inexistente_nao_calcula_sobre_outro_assunto(base):
     [chunk] = _consultar("Qual o valor médio de helicópteros blindados?", base)
 
-    assert "Nenhuma contratação do corpus tem no objeto" in chunk.content
+    assert "Nenhum registro encontrado com os filtros aplicados" in chunk.content
     assert "média" not in chunk.content
 
 
@@ -213,9 +259,12 @@ def test_agrupamento_conta_por_modalidade(base):
 
 
 def test_evolucao_agrupa_por_mes(base):
-    [chunk] = _consultar("Houve aumento no valor ao longo de 2025?", base, ano=2025)
+    chunks = _consultar("Houve aumento no valor ao longo de 2025?", base, ano=2025)
+    texto = "\n".join(chunk.content for chunk in chunks)
 
-    assert chunk.content.index("2025-01:") < chunk.content.index("2025-02:")
+    assert texto.index("2025-01:") < texto.index("2025-02:")
+    assert "média ponderada por registro" in texto
+    assert "Meses sem registros com valor" in texto
 
 
 def test_pca_avisa_que_nao_e_o_total_do_estado(base):
@@ -744,3 +793,76 @@ def test_citacao_de_norma_nao_vira_objeto_e_o_resultado_avisa(pergunta):
     assert consulta.esfera is None
     assert consulta.norma_citada
     assert "NÃO é filtro" in sq._cabecalho(consulta, 10, (), "AND")
+
+
+def test_plano_typed_aplica_orgao_periodo_e_limite_exclusivo(tmp_path):
+    from src.schema import QueryIntent
+    registros = []
+    for numero, ano, valor in [(1, 2024, 500), (2, 2025, 600), (3, 2026, 900)]:
+        r = _contratacao(f'111-2-{numero:06d}/{ano}')
+        r.update(dataAssinatura=f'{ano}-02-01', valorGlobal=valor, nomeRazaoSocialFornecedor='Fornecedor X')
+        r['orgaoEntidade']['razaoSocial'] = 'SECRETARIA ALFA'
+        registros.append(r)
+    docs = escrever_documents(tmp_path / 'documents.jsonl', contratacoes=registros)
+    banco = Banco(sqlite_path=tmp_path / 'base.sqlite')
+    structured_db.construir_banco(docs, banco)
+    intent = QueryIntent(pergunta='liste contratos', bases=ESTRUTURADA, operacao='ranking', filtros=QueryFilters(
+        ano=2024, ano_final=2025, orgao='ALFA', valor_min=500, valor_min_exclusivo=True, referencia_temporal='assinatura'))
+    resultado = sq.consultar_estruturado(intent.pergunta, intent.filtros, intent.bases, intencao=intent, banco=banco, documents_file=docs)
+    texto = ' '.join(c.content for c in resultado)
+    assert 'R$ 600,00' in texto
+    assert '1. R$ 500,00' not in texto and 'R$ 900,00' not in texto
+
+
+def test_media_periodo_ponderada_exclui_valor_simbolico(tmp_path):
+    registros = []
+    for n, mes, valor in [(1, '01', 0), (2, '02', 100), (3, '02', 200)]:
+        r = _contratacao(f'111-2-{n:06d}/2025')
+        r.update(dataAssinatura=f'2025-{mes}-01', valorGlobal=valor)
+        registros.append(r)
+    docs = escrever_documents(tmp_path / 'documents.jsonl', contratacoes=registros)
+    banco = Banco(sqlite_path=tmp_path / 'base.sqlite')
+    structured_db.construir_banco(docs, banco)
+    _, _, linhas = sq.executar_consulta(sq.Consulta(tabela='contratacoes', tipo='evolucao', referencia_temporal='assinatura', ano=2025), banco)
+    texto = ' '.join(linhas)
+    assert 'média R$ 150,00' in linhas[0]
+    assert 'percentual indefinido (base zero)' not in texto
+    assert '2025-01' in texto
+    assert '2025-03' in texto and 'não são valores zero' in texto
+
+
+def test_plano_unitario_nao_calcula_com_valores_globais():
+    from src.schema import QueryIntent
+    intent = QueryIntent(pergunta='média por ambulância', bases=AGREGADA, operacao='estatistica', filtros=QueryFilters(tipo_valor='unitario', metrica='media'))
+    assert sq.consulta_da_intencao(intent) is None
+
+
+def test_contagem_tipado_inclui_registro_sem_valor(base):
+    from src.schema import QueryIntent
+    intent = QueryIntent(pergunta='quantas publicações em 2025?', bases=ESTRUTURADA, operacao='estatistica', filtros=QueryFilters(ano=2025, referencia_temporal='publicacao', metrica='contagem'))
+    result = sq.consultar_estruturado(intent.pergunta, intent.filtros, intent.bases, intencao=intent, **base)
+    assert 'Contagem no recorte solicitado: 3 registros' in ' '.join(c.content for c in result)
+
+
+def test_mediana_agrupada_por_esfera(base):
+    consulta = sq.Consulta(tabela='contratacoes', tipo='agrupamento', agrupar_por='esfera', metrica='mediana', ano=2025)
+    _, _, rows = sq.executar_consulta(consulta, base['banco'])
+    text = ' '.join(rows)
+    assert 'mediana R$ 200,00' in text and 'mediana R$ 500,00' in text
+
+
+def test_lista_publicada_por_orgaos_nao_dispara_agrupamento():
+    from src.query_analysis import analisar_query
+    question = 'Quais contratações de ambulâncias tipo D foram publicadas por órgãos públicos do Rio de Janeiro em 2025?'
+    filters = analisar_query(question, modo='regras').filtros
+    consulta = sq.detectar_consulta(question, filters, ESTRUTURADA)
+    assert consulta.tipo == 'listagem'
+    assert consulta.agrupar_por == 'modalidade'
+
+
+def test_mediana_por_veiculo_nao_compila_calculo_sobre_global():
+    from src.query_analysis import analisar_query
+    question = 'Compare a mediana do valor por veículo em 2025.'
+    filters = analisar_query(question, modo='regras').filtros
+    assert filters.tipo_valor == 'unitario'
+    assert sq.detectar_consulta(question, filters, ESTRUTURADA + AGREGADA) is None

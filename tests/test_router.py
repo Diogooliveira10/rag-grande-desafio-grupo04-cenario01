@@ -10,6 +10,17 @@ def test_rota_estruturada():
     assert decisao.bases_selecionadas == [Natureza.ESTRUTURADA]
 
 
+@pytest.mark.parametrize('question,expected', [
+    ('Quais editais e especificações técnicas acompanham os contratos de cadeiras?', {Natureza.NORMATIVA, Natureza.ESTRUTURADA}),
+    ('Qual foi o valor médio por metro de cabo nas contratações municipais?', {Natureza.ESTRUTURADA, Natureza.AGREGADA}),
+    ('Liste os cinco maiores contratos por valor contratado.', {Natureza.ESTRUTURADA}),
+    ('Quais normas regem a pesquisa de preços nas contratações?', {Natureza.NORMATIVA}),
+    ('Quais contratos publicados apoiam a pesquisa de preços segundo as normas?', {Natureza.NORMATIVA, Natureza.ESTRUTURADA}),
+])
+def test_rota_distingue_formato_metrica_e_procedimento(question, expected):
+    assert set(rotear_pergunta(question).bases_selecionadas) == expected
+
+
 def test_rota_agregada_e_estruturada():
     decisao = rotear_pergunta(
         "Qual foi a mediana do valor por ambulancia nas contratacoes do RJ?"

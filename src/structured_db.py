@@ -294,7 +294,8 @@ def _linha_contratacao(chunk: Mapping[str, Any], registro: dict[str, Any]) -> di
         "valor_homologado": homologado,
         "valor_contratado": contratado,
         # Contratos usam valorGlobal; compras conservam a distinção dos campos.
-        "valor": contratado if contrato_assinado else homologado or estimado or None,
+        "valor": contratado if contrato_assinado else (
+            homologado if homologado is not None else estimado),
     }
 
 

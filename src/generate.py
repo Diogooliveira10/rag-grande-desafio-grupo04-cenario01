@@ -33,7 +33,20 @@ class ClienteLLM(Protocol):
     def __call__(self, mensagens: list[dict]) -> Any: ...
 
 
-def _cliente_padrao() -> ClienteLLM:
+def _schema_resposta(chunk_ids: Optional[list[str]] = None) -> dict:
+    """Contrato de saída do modelo; fontes são IDs das evidências fornecidas."""
+    return {"type": "object", "additionalProperties": False,
+            "required": ["answer", "is_refusal", "refusal_reason", "confidence_level", "sources_used"],
+            "properties": {
+                "answer": {"type": "string", "minLength": 1},
+                "is_refusal": {"type": "boolean"},
+                "refusal_reason": {"type": ["string", "null"], "enum": [None, *(r.value for r in RefusalReason)]},
+                "confidence_level": {"type": "string", "enum": [r.value for r in ConfidenceLevel]},
+                "sources_used": {"type": "array", "items": {"type": "string", **({"enum": chunk_ids} if chunk_ids else {})}},
+            }}
+
+
+def _cliente_padrao(schema: Optional[dict] = None) -> ClienteLLM:
     """Wrapper fino sobre o cliente OpenAI compartilhado de ``llm_ecoa.py``.
 
     Devolve a resposta completa do SDK para que ``usage`` chegue ao log.
@@ -45,7 +58,8 @@ def _cliente_padrao() -> ClienteLLM:
     def _chamar(mensagens: list[dict]) -> Any:
         return llm_ecoa.completar_chat(
             mensagens, diagnosticos=diagnosticos,
-            response_format={"type": "json_object"},
+            response_format=({"type": "json_schema", "json_schema": {"name": "query_plan", "schema": schema}}
+                             if schema is not None else {"type": "json_object"}),
         )
 
     _chamar.diagnosticos = diagnosticos
@@ -112,6 +126,36 @@ Responda SEMPRE e SOMENTE com um objeto JSON, sem nenhum texto antes ou depois, 
 sources_used deve conter apenas os chunk_id que você realmente usou, exatamente como \
 aparecem no contexto. Se is_refusal for true, sources_used deve ser uma lista vazia."""
 
+_SYSTEM_PROMPT += """
+Responda separadamente a cada intenção da pergunta. Uma parte respondível não desaparece
+porque outra parte carece de evidência: explique a lacuna nessa parte, mantendo as fontes
+da parte sustentada. Cite o identificador junto da afirmação que ele sustenta.
+Categoria do processo (ex.: Compras, Informática) NÃO é modalidade de licitação.
+Quando modalidade não estiver no registro, diga que não está informada. amparoLegal.nome
+é uma referência legal explícita; não declare inexistência de norma se ela está citada.
+Não associe regras de dispensa a um pregão ou de outro processo ao registro em análise.
+Relacione cada norma à modalidade explicitamente identificada pela fonte.
+Cláusula que prevê atraso, penalidade ou cancelamento não comprova ocorrência desses
+eventos. Para afirmar ocorrência, cite relato, decisão ou registro do fato.
+Valor global/estimado/contratado não é preço unitário nem pagamento realizado.
+Zero registrado é zero, não ausência de informação. Quando houver valorGlobal=0
+e valorInicial positivo, informe os dois campos com seus nomes e significados distintos.
+Tipo, variante e unidade pedidos precisam constar na fonte: uma ambulância genérica
+não comprova tipo D, nem manutenção de sistemas comprova manutenção de computadores.
+Responda cada parte de uma pergunta composta em frase completa, explicando o que
+é comprovado e o que falta. Não termine apenas com uma introdução seguida de dois-pontos.
+Se calculo_disponivel=false, nenhum cálculo analítico foi executado para essa intenção:
+os registros servem como exemplos, não como estatística. Não faça a conta pelo LLM.
+Use cálculos fornecidos pelo SQL, com período, filtros e tamanho da amostra. Não faça
+média de médias mensais, nem conclua tendência crescente por um pico ou média anual.
+Comparação primeiro/último mês não prova crescimento monotônico. Não extrapole a amostra
+para todas as contratações do RJ. Ausência na amostra não prova inexistência no universo.
+Evidência com filtros relaxados é contextual: não comprova atendimento ao recorte original.
+Vigência histórica não verificada não prova que a norma estava vigente no ano solicitado.
+Snapshot principalmente de 2025 não confirma oportunidades abertas hoje.
+Toda resposta, inclusive recusa, precisa de texto não vazio.
+"""
+
 
 def _natureza_label(metadata: ChunkMetadata) -> str:
     """``natureza`` é a classificação Adaptive RAG; ``doc_type`` é o formato do
@@ -130,6 +174,15 @@ def _cabecalho(metadata: ChunkMetadata) -> str:
         campos.append(f"documento={metadata.extras['titulo_documento']}")
     if metadata.data_vigencia is not None:
         campos.append(f"vigencia_ate={metadata.data_vigencia.isoformat()}")
+    if metadata.extras.get("subpergunta"):
+        campos.append(f"intencao={metadata.extras['intencao']}: {metadata.extras['subpergunta']}")
+    if metadata.extras.get("filtros_relaxados"):
+        campos.append("recorte_nao_comprovado=" + json.dumps(metadata.extras["filtros_relaxados"], ensure_ascii=False))
+    if metadata.extras.get("calculo_disponivel") is False:
+        campos.append("calculo_disponivel=false")
+    if metadata.extras.get("vigencia_historica_verificada") is False or (
+        metadata.natureza == Natureza.NORMATIVA and metadata.data_vigencia is None):
+        campos.append("vigencia_historica=não verificada")
     return f"[{' | '.join(campos)}]"
 
 
@@ -161,11 +214,32 @@ def _compactar(conteudo: str) -> str:
             "valorTotalEstimado", "valorUnitarioHomologado", "valorTotal", "unidadeMedida",
             "quantidadeHomologada", "nomeRazaoSocialFornecedor", "dataAssinatura", "anoPca",
             "descricao", "descricaoResumida", "objetoContrato", "objetoCompra", "objeto",
-            "orgaoEntidade", "unidadeOrgao",
+            "modalidadeNome", "amparoLegal", "categoriaProcesso", "orgaoEntidade", "unidadeOrgao",
         )
         dados = {**{campo: dados[campo] for campo in prioridade if campo in dados},
                  **{campo: valor for campo, valor in dados.items() if campo not in prioridade}}
     return json.dumps(dados, ensure_ascii=False, separators=(",", ":"))
+
+
+def _representar_registro(conteudo: str) -> str:
+    """Visão de evidência com campos completos, sem alterar o documento original."""
+    try:
+        registro = json.loads(conteudo)
+    except (ValueError, TypeError):
+        return conteudo
+    if not isinstance(registro, dict):
+        return conteudo
+    campos = ("numeroControlePNCP", "numeroControlePNCPAta", "objetoContrato", "objetoCompra",
+        "objetoContratacao", "descricao", "descricaoResumida", "nomeRazaoSocialFornecedor",
+        "dataAssinatura", "dataPublicacaoPncp", "dataAberturaProposta", "dataEncerramentoProposta",
+        "dataVigenciaInicio", "dataVigenciaFim", "anoPca", "valorGlobal", "valorInicial",
+        "valorTotalHomologado", "valorTotalEstimado", "valorUnitarioHomologado", "valorUnitarioEstimado",
+        "valorTotal", "valor", "quantidade", "quantidadeHomologada", "unidadeMedida", "amparoLegal",
+        "orgaoEntidade", "unidadeOrgao", "categoriaProcesso", "tipoContrato", "modalidadeNome")
+    view = {k: registro[k] for k in campos if k in registro and registro[k] is not None}
+    if "categoriaProcesso" in registro or "objetoContrato" in registro or "objetoCompra" in registro:
+        view["modalidade_licitacao"] = registro.get("modalidadeNome") or "não informada neste registro"
+    return json.dumps(view, ensure_ascii=False, separators=(",", ":")) if view else conteudo
 
 
 def _chunks_no_orcamento(chunks: list[Chunk]) -> list[Chunk]:
@@ -177,13 +251,22 @@ def _chunks_no_orcamento(chunks: list[Chunk]) -> list[Chunk]:
     """
     selecionados: list[Chunk] = []
     usados = 0
+    # Reserva o melhor candidato de cada base/intenção antes dos demais.
+    primeiros, restantes, grupos = [], [], set()
     for chunk in chunks:
-        conteudo = _compactar(chunk.content)
-        if len(conteudo) > config.GENERATION_CHUNK_CHARS:
-            conteudo = conteudo[: config.GENERATION_CHUNK_CHARS].rstrip() + " [...]"
+        grupo = (chunk.metadata.extras.get("intencao", 0), chunk.metadata.base_id)
+        if grupo not in grupos:
+            primeiros.append(chunk)
+            grupos.add(grupo)
+        else:
+            restantes.append(chunk)
+    for chunk in primeiros + restantes:
+        conteudo = _representar_registro(_compactar(chunk.content))
         tamanho = len(_cabecalho(chunk.metadata)) + len(conteudo)
         if selecionados and usados + tamanho > config.GENERATION_CONTEXT_CHARS:
-            break
+            continue
+        if tamanho > config.GENERATION_CONTEXT_CHARS:
+            continue
         selecionados.append(chunk.model_copy(update={"content": conteudo}))
         usados += tamanho
     return selecionados
@@ -316,6 +399,7 @@ def _parsear_resposta_llm(
                     chunk_id=chunk.metadata.chunk_id,
                     base_id=chunk.metadata.base_id,
                     source_file=chunk.metadata.source_file,
+                    origem=chunk.metadata.origem if (chunk.metadata.origem or "").startswith(("https://", "http://")) else None,
                 )
             )
 
@@ -327,8 +411,12 @@ def _parsear_resposta_llm(
                 refusal_reason = RefusalReason.SEM_EVIDENCIA
             sources_used = []
             confidence_level = ConfidenceLevel.RECUSADO
+            if not answer:
+                answer = _recusa(query, bases_consultadas, refusal_reason).answer
         elif confidence_level == ConfidenceLevel.RECUSADO:
             confidence_level = ConfidenceLevel.BAIXA
+        if not answer:
+            raise ValueError("Resposta sem texto")
 
         resposta = RAGResponse(
             query=query,
@@ -470,20 +558,26 @@ def gerar_resposta(
     chunks_prompt = _chunks_no_orcamento(chunks)
     sensibilidade["chunks_no_prompt"] = len(chunks_prompt)
     sensibilidade["chunks_fora_do_orcamento"] = len(chunks) - len(chunks_prompt)
+    sensibilidade["evidencias_no_prompt"] = [c.metadata.chunk_id for c in chunks_prompt]
+    sensibilidade["evidencias_fora_do_prompt"] = [c.metadata.chunk_id for c in chunks if c.metadata.chunk_id not in {p.metadata.chunk_id for p in chunks_prompt}]
     chunks = chunks_prompt
     mensagens = _montar_prompt(query, chunks)
-    cliente = cliente or _cliente_padrao()
+    cliente = cliente or _cliente_padrao(_schema_resposta([c.metadata.chunk_id for c in chunks]))
 
     try:
         bruto, tokens = _texto_e_tokens(cliente(mensagens))
     except Exception as exc:
+        llm_info = dict(getattr(cliente, "diagnosticos", {}))
+        sensibilidade["llm"] = llm_info
         resposta = _recusa(query, bases_consultadas, RefusalReason.SEM_EVIDENCIA)
         _logar_evento(
             run_id, query_id, "erro_llm", inicio, resposta,
-            modelo=GENERATION_MODEL, erro=f"{type(exc).__name__}: {exc}", **sensibilidade,
+            modelo=llm_info.get("model", GENERATION_MODEL), erro=f"{type(exc).__name__}: {exc}", **sensibilidade,
         )
         return resposta
 
+    llm_info = dict(getattr(cliente, "diagnosticos", {}))
+    sensibilidade["llm"] = llm_info
     inicio_validacao = time.monotonic()
     resposta, erro_parsing, chaves_alias, citacoes_descartadas = _parsear_resposta_llm(
         bruto, query, chunks, bases_consultadas
@@ -502,7 +596,7 @@ def gerar_resposta(
         sensibilidade["mascaramentos_resposta"] = mascaramentos_resposta
     _logar_evento(
         run_id, query_id, "saida_invalida" if erro_parsing else "ok", inicio, resposta,
-        tokens=tokens, modelo=GENERATION_MODEL, **sensibilidade,
+        tokens=tokens, modelo=llm_info.get("model", GENERATION_MODEL), **sensibilidade,
     )
     _logar_validacao(
         run_id, query_id, inicio_validacao, resposta,
@@ -537,6 +631,7 @@ def _converter_recusa_indevida(
         or not bases_consultadas
         or resposta.refusal_reason not in _RECUSAS_CONVERTIVEIS
         or not resposta.answer.strip()
+        or resposta.answer == _recusa(resposta.query, bases_consultadas, resposta.refusal_reason).answer
     ):
         return resposta, None
     motivo = resposta.refusal_reason.value

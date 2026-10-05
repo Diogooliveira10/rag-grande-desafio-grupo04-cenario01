@@ -13,6 +13,7 @@ import config
 from src.obs import new_query_id, new_run_id
 from src.pipeline import ESCOPOS_CONSULTADOS, responder
 from src.router import rotear_pergunta
+from src.query_analysis import analisar_query
 
 
 def _imprimir_json(payload: dict) -> None:
@@ -30,7 +31,9 @@ def _parsear_perguntas(perguntas_raw: list[str]) -> list[str]:
 
 def cmd_rota(perguntas: list[str]) -> int:
     for pergunta in _parsear_perguntas(perguntas):
-        decisao = rotear_pergunta(pergunta, run_id=new_run_id(), query_id=new_query_id())
+        run_id, query_id = new_run_id(), new_query_id()
+        analise = analisar_query(pergunta, run_id=run_id, query_id=query_id)
+        decisao = rotear_pergunta(pergunta, run_id=run_id, query_id=query_id, analise=analise)
         print(f"Pergunta: {pergunta}")
         _imprimir_json(decisao.model_dump(mode="json"))
         print()

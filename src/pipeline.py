@@ -74,12 +74,46 @@ def responder(
     query_id = query_id or new_query_id()
 
     analise = analisar_query(query, run_id=run_id, query_id=query_id)
-    decisao = rotear_pergunta(query, run_id=run_id, query_id=query_id)
+    decisao = (rotear_pergunta(query, run_id=run_id, query_id=query_id, analise=analise)
+               if analise.intencoes else rotear_pergunta(query, run_id=run_id, query_id=query_id))
 
     chunks: list[Chunk] = []
     filtros_relaxados: dict[str, dict[str, list[str]]] = {}
     refusal_reason_hint = None
-    if decisao.bases_selecionadas:
+    if decisao.bases_selecionadas and analise.intencoes:
+        grupos: list[list[Chunk]] = []
+        for numero, intent in enumerate(analise.intencoes):
+            route = {"bases": [b for b in intent.bases if b in decisao.bases_selecionadas]}
+            resultados = retrieve(intent.pergunta, route, top_k=top_k,
+                filters=filtros_para_retrieve(intent.filtros), reranker=reranker,
+                escopos=escopos, run_id=run_id, query_id=query_id)
+            grupo = consultar_estruturado(intent.pergunta, intent.filtros, route["bases"],
+                intencao=intent, run_id=run_id, query_id=query_id)
+            calculo_disponivel = bool(grupo)
+            grupo += [_chunk_from_retrieval(item) for item in resultados]
+            for chunk in grupo:
+                chunk.metadata.extras = {**chunk.metadata.extras, "intencao": numero,
+                    "subpergunta": intent.pergunta, "operacao": intent.operacao,
+                    "tipo_valor_solicitado": intent.filtros.tipo_valor,
+                    "calculo_disponivel": calculo_disponivel if intent.operacao != "buscar" else None}
+                relaxed = chunk.metadata.extras.get("filtros_relaxados")
+                if relaxed:
+                    filtros_relaxados[chunk.metadata.base_id] = relaxed
+            grupos.append(grupo)
+        # Intercala intenções e bases: nenhum pacote SQL elimina a outra intenção.
+        for grupo in grupos:
+            grupo.sort(key=lambda c: not c.metadata.chunk_id.startswith("sql:"))
+        vistos = set()
+        while any(grupos):
+            for grupo in grupos:
+                if not grupo:
+                    continue
+                chunk = grupo.pop(0)
+                key = chunk.metadata.chunk_content_sha256 or chunk.metadata.chunk_id
+                if key not in vistos:
+                    chunks.append(chunk)
+                    vistos.add(key)
+    elif decisao.bases_selecionadas:
         filtros = filtros_para_retrieve(analise.filtros)
         # Sem reranker explícito, usa o cross-encoder padrão (src/rerank.py;
         # desligável com RERANK_ENABLED=false). Ablação em docs/ABLACAO_RERANK.md.
@@ -114,9 +148,15 @@ def responder(
         }
         # Ranking/estatística/comparação: o resultado SQL vai à frente, para
         # caber no orçamento do prompt antes dos trechos da busca.
-        chunks = consultar_estruturado(
+        sql_chunks = consultar_estruturado(
             query, analise.filtros, decisao.bases_selecionadas, run_id=run_id, query_id=query_id
-        ) + chunks
+        )
+        from src.structured_query import requer_calculo
+        for chunk in sql_chunks + chunks:
+            chunk.metadata.extras = {**chunk.metadata.extras,
+                "calculo_disponivel": bool(sql_chunks) if requer_calculo(query) else None,
+                "tipo_valor_solicitado": analise.filtros.tipo_valor}
+        chunks = sql_chunks + chunks
     else:
         refusal_reason_hint = inferir_motivo_recusa(decisao.justificativa)
 
