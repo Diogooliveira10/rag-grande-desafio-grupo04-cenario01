@@ -44,6 +44,7 @@ from typing import Any, Optional, Sequence
 import config
 from src.obs import Stage, default_logger
 from src.schema import QueryAnalysisResult, QueryFilters, QueryIntent
+from src.sensitivity import mascarar
 
 ANALYSIS_MODE = os.getenv("QUERY_ANALYSIS_MODE", "regras")
 ANALYSIS_CACHE = config.ROOT_DIR / "data" / "runs" / "query-analysis-cache.jsonl"
@@ -1542,6 +1543,28 @@ def texto_sem_filtros(query: str) -> str:
     return _sem_trechos(texto, trechos)
 
 
+# Tamanho máximo de cada texto da saída gravada no log: no modo llm, as
+# subperguntas repetem trechos da pergunta.
+_LIMITE_DE_TEXTO_NO_LOG = 500
+
+
+def _para_o_log(valor: Any) -> Any:
+    """Saída da etapa como vai para o log: sem ``query_original`` (já é o input),
+    com CPF, telefone e e-mail pessoal mascarados e textos longos cortados.
+
+    ``obs.py`` só mascara input/output que são texto, e a saída desta etapa é
+    um dicionário (no modo llm, com a pergunta repetida nas subperguntas).
+    """
+    if isinstance(valor, dict):
+        return {chave: _para_o_log(item) for chave, item in valor.items() if chave != "query_original"}
+    if isinstance(valor, list):
+        return [_para_o_log(item) for item in valor]
+    if isinstance(valor, str):
+        texto = mascarar(valor)[0]
+        return texto if len(texto) <= _LIMITE_DE_TEXTO_NO_LOG else texto[:_LIMITE_DE_TEXTO_NO_LOG] + "…"
+    return valor
+
+
 def analisar_query(
     query: str,
     *,
@@ -1561,15 +1584,16 @@ def analisar_query(
         if (modo or ANALYSIS_MODE) == "llm" and isinstance(query, str) and query.strip():
             try:
                 result = _analisar_llm(query, cliente, span)
-                span.set_result(result.model_dump(mode="json"))
+                span.set_result(_para_o_log(result.model_dump(mode="json")))
                 return result
             except Exception as error:
-                span.extra["fallback"] = f"{type(error).__name__}: {error}"
+                # A mensagem de erro de validação repete o texto que o LLM devolveu.
+                span.extra["fallback"] = _para_o_log(f"{type(error).__name__}: {error}")
                 if cliente is None and isinstance(error, (ValueError, KeyError)):
                     result = QueryAnalysisResult(query_original=query, filtros=_analisar(query))
                     _gravar_cache(query, result, span.extra.get("llm", {}), span.extra["fallback"])
         filtros = _analisar(query)
-        span.set_result(filtros.model_dump(exclude_none=True))
+        span.set_result(_para_o_log(filtros.model_dump(exclude_none=True)))
         return QueryAnalysisResult(query_original=query, filtros=filtros)
 
 

@@ -49,7 +49,7 @@ def _interpret_interaction(query: str, *, run_id: str, query_id: str) -> Interac
     from llm_ecoa import completar_chat
 
     diagnostics: dict = {}
-    with default_logger.span(run_id=run_id, query_id=query_id, stage=Stage.QUERY_ANALYSIS,
+    with default_logger.span(run_id=run_id, query_id=query_id, stage=Stage.INTERACAO,
                              input=query) as span:
         try:
             masked, _ = mascarar(query)
