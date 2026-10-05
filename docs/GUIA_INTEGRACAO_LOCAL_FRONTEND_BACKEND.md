@@ -320,7 +320,7 @@ Qual é a capital da França?
 
 A primeira consulta após instalar o projeto pode demorar enquanto o modelo de
 rerank é baixado e carregado. As seguintes tendem a ser mais rápidas. O frontend
-atual espera até 120 segundos por uma consulta; se a primeira tentativa exceder
+atual espera até 240 segundos por uma consulta; se a primeira tentativa exceder
 esse tempo durante o download do modelo, aguarde o backend terminar a preparação
 e envie a pergunta novamente.
 
