@@ -33,6 +33,9 @@ class RefusalReason(str, Enum):
     JUIZO_LEGALIDADE = "juizo_legalidade_contrato"
     FORA_DE_ESCOPO = "fora_de_escopo"
     SEM_EVIDENCIA = "sem_evidencia"
+    # Falha de infraestrutura (provedor do LLM fora do ar, saída que não é JSON
+    # válido): não é uma resposta sobre os dados, e o LLM nunca a escolhe.
+    ERRO_PROVEDOR = "erro_provedor"
 
 
 class ChunkMetadata(BaseModel):

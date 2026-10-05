@@ -55,6 +55,10 @@ PipelineFn = Callable[[str], dict[str, Any]]
 DEFAULT_GOLDEN_SET = PROJECT_ROOT / "eval" / "golden_set.jsonl"
 DEFAULT_RUNS_DIR = PROJECT_ROOT / "eval" / "runs"
 
+# Valor de ``refusal_reason`` que ``src/generate.py`` devolve quando o provedor do
+# LLM falha; a avaliação o trata como erro de infraestrutura, não como recusa.
+ERRO_PROVEDOR = "erro_provedor"
+
 
 @dataclass(frozen=True)
 class EvalCase:
@@ -206,6 +210,17 @@ def evaluate_case(case: EvalCase, response: dict[str, Any]) -> dict[str, Any]:
             and expected_source_ok is not False
         )
 
+    # Falha do provedor (LLM fora do ar, JSON inválido) não é uma recusa: o
+    # sistema não respondeu. Nunca conta como acerto, nem de recusa esperada, e
+    # não entra nas métricas de conteúdo e citação, que não foram avaliadas.
+    erro_provedor = refusal_reason_obtido == ERRO_PROVEDOR
+    if erro_provedor:
+        refusal_ok = False
+        content_ok = None
+        expected_source_ok = None
+        citacao_ok = None
+        acertou = False
+
     return {
         "id": case.id,
         "tipo": case.tipo,
@@ -217,6 +232,7 @@ def evaluate_case(case: EvalCase, response: dict[str, Any]) -> dict[str, Any]:
         "refusal_reason_obtido": refusal_reason_obtido,
         "rota_ok": rota_ok,
         "refusal_ok": refusal_ok,
+        "erro_provedor": erro_provedor,
         "content_ok": content_ok,
         "expected_source_ok": expected_source_ok,
         "escopo_avaliacao": escopo_avaliacao,
@@ -287,6 +303,7 @@ def _resumo_metricas(resultados: list[dict[str, Any]]) -> dict[str, Any]:
     )
     return {
         "erros": sum(1 for r in resultados if r.get("erro")),
+        "erros_provedor": sum(1 for r in resultados if r.get("erro_provedor")),
         "citacao_avaliada": len(citacoes),
         "citacao_ok": sum(citacoes),
         "citation_accuracy": round(sum(citacoes) / len(citacoes), 4) if citacoes else None,
@@ -315,7 +332,12 @@ def run_eval(cases: list[EvalCase], pipeline_fn: PipelineFn) -> dict[str, Any]:
     for indice, case in enumerate(cases, start=1):
         resultado = _executar_caso(case, pipeline_fn)
         resultados.append(resultado)
-        status = "ERRO" if resultado["erro"] else ("OK" if resultado["acertou"] else "FALHOU")
+        if resultado["erro"]:
+            status = "ERRO"
+        elif resultado.get("erro_provedor"):
+            status = "ERRO_PROVEDOR"
+        else:
+            status = "OK" if resultado["acertou"] else "FALHOU"
         print(
             f"[{indice}/{len(cases)}] {case.id} {status} ({resultado['latencia_ms']} ms)",
             file=sys.stderr,
@@ -397,6 +419,7 @@ def render_report_markdown(report: dict[str, Any], run_id: str, built_at: str) -
             for etapa, tokens in metricas.get("tokens_por_etapa", {}).items():
                 lines.append(f"  - {etapa}: {tokens}")
         lines.append(f"- Erros de execução: {metricas.get('erros', 0)}")
+        lines.append(f"- Falhas do provedor do LLM (não contam como recusa): {metricas.get('erros_provedor', 0)}")
 
     lines.extend(
         [
