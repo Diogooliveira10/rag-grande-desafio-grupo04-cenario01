@@ -23,6 +23,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
 from src import pipeline
+from app import catalog
+from app.catalog_models import ContratacaoRecord, DocumentoRecord, OfficialSource, OrgaoRecord, ProjectSummary
 from src.history_store import ConsultaNaoEncontrada, default_store as historico
 from src.obs import Stage, new_query_id, new_run_id
 from src.obs import registrar as obs_registrar
@@ -167,6 +169,53 @@ def enviar_feedback(request: FeedbackRequest) -> dict[str, str]:
 @app.get("/api/v1/history", response_model=list[HistoricoItem])
 def obter_historico(limit: int = Query(default=20, ge=1, le=100)) -> list[dict]:
     return historico.obter_historico(limit=limit)
+
+
+def _catalog_result(function, **kwargs):
+    try:
+        return function(**kwargs)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        logger.exception("Falha ao ler o catálogo local")
+        raise HTTPException(status_code=503, detail="O acervo está temporariamente indisponível.") from exc
+
+
+@app.get("/api/v1/explore/contratacoes", response_model=list[ContratacaoRecord])
+def explorar_contratacoes(
+    busca: str | None = Query(default=None, max_length=500),
+    orgao: str | None = Query(default=None, max_length=500),
+    limit: int = Query(default=24, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+):
+    return _catalog_result(catalog.contracts, busca=busca, orgao=orgao, limit=limit, offset=offset)
+
+
+@app.get("/api/v1/explore/documentos", response_model=list[DocumentoRecord])
+def explorar_documentos(
+    busca: str | None = Query(default=None, max_length=500),
+    tipo: Literal["Normativo", "Contrato", "Ata de Registro", "PCA", "Conversa sintética"] | None = None,
+    limit: int = Query(default=24, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+):
+    return _catalog_result(catalog.documents, busca=busca, tipo=tipo, limit=limit, offset=offset)
+
+
+@app.get("/api/v1/explore/orgaos", response_model=list[OrgaoRecord])
+def explorar_orgaos(
+    busca: str | None = Query(default=None, max_length=500),
+    limit: int = Query(default=24, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+):
+    return _catalog_result(catalog.organizations, busca=busca, limit=limit, offset=offset)
+
+
+@app.get("/api/v1/explore/fontes", response_model=list[OfficialSource])
+def explorar_fontes():
+    return _catalog_result(catalog.sources)
+
+
+@app.get("/api/v1/project/summary", response_model=ProjectSummary)
+def resumo_projeto():
+    return _catalog_result(catalog.summary)
 
 
 __all__ = ["app"]

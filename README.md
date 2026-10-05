@@ -468,11 +468,13 @@ O relatório (`eval/runs/<run_id>/REPORT.md`) traz rota e recusa (o que define o
 
 **9. Subir a API HTTP (backend do frontend)**
 
-O backend FastAPI expõe `GET /health`, `POST /api/v1/query`, `POST /api/v1/feedback`
-e `GET /api/v1/history`:
+O backend FastAPI expõe Consulta, Histórico, Feedback, as quatro rotas
+`/api/v1/explore/{contratacoes,documentos,orgaos,fontes}` e
+`/api/v1/project/summary`, além de `GET /health`. Contrato e modo OpenRouter em
+[docs/FRONTEND_API_CONTRACT.md](docs/FRONTEND_API_CONTRACT.md).
 
 ```bash
-uvicorn app.api:app --reload --host 127.0.0.1 --port 8000
+uvicorn app.api:app --reload --host 127.0.0.1 --port 8080
 ```
 
 O frontend é mantido em um projeto separado e publicado em
@@ -486,17 +488,16 @@ com origem, a configuração usa `https://etuarda.github.io`, sem o caminho
 `/frontendRAG/`.
 
 No projeto do frontend, configure `VITE_API_BASE_URL` com a URL pública HTTPS
-deste backend, sem `/api/v1/query` no final, e mantenha `VITE_USE_MOCKS=false`:
+deste backend, sem `/api/v1/query` no final:
 
 ```env
 VITE_API_BASE_URL=https://rag-api.exemplo.com
-VITE_USE_MOCKS=false
 ```
 
-Hoje o frontend chama `GET /health` e `POST /api/v1/query`; `POST /api/v1/feedback`
-e `GET /api/v1/history` ainda não têm tela. O site publicado só responde de
-verdade quando houver um backend acessível por HTTPS público; sem isso, use o
-frontend local (Vite) apontando para `http://127.0.0.1:8000`.
+O frontend atual tem telas de Consulta, Histórico, Feedback, Explorar e
+Transparência, sem mocks. Localmente, seu `.env.development` aponta para
+`http://localhost:8080`. O site publicado exige um backend acessível por HTTPS
+público. Pedidos factuais seguem pelo RAG com fontes; os guardrails continuam ativos.
 
 ### Endpoint de modelos (compartilhado com toda a turma)
 
