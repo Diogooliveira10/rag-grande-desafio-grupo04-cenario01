@@ -32,6 +32,26 @@ apresentados como valores globais; data de assinatura não vira homologação.
 Órgãos e totais são derivados somente dos registros reais, sem somar conversas
 sintéticas. Totais incompletos são `null`, não zero.
 
+## Chat e conversas comuns
+
+`QueryResponse` mantém: `query_id`, `query`, `answer`, `bases_consultadas`,
+`sources_used`, `confidence_level`, `is_refusal` e `refusal_reason`.
+
+- Saudações, agradecimentos, despedidas e ajuda de uso recebem resposta normal,
+  sem acervo/LLM quando reconhecidos diretamente.
+- Mensagens longas e mensagens sem rota reconhecida passam pela identificação
+  de intenção (`CONVERSATION_MODE=llm`). Apresentações, contextos e elaboração
+  de texto podem ser conversa. Pedidos de fatos existentes continuam pelo RAG.
+- Conversa não é recusa: `is_refusal=false`, `refusal_reason=null`,
+  `bases_consultadas=[]`, `sources_used=[]`, `confidence_level="baixa"`.
+  O frontend apresenta essas respostas como **Conversa — sem consulta ao acervo**,
+  não como evidência factual. Toda interação continua no Histórico/Feedback.
+- Pedidos sensíveis, inclusive precedidos de saudação ou texto longo, não
+  passam pelo atalho de conversa. Erro/saída inválida da identificação de
+  intenção volta ao pipeline RAG, sem inventar resposta factual.
+- CPF, telefone e e-mail pessoal são mascarados antes da interpretação por
+  modelo e na resposta conversacional.
+
 ## Suplemento sintético e segurança
 
 O resumo identifica `v6 + suplemento sintético`, 1.425 arquivos de origem,
@@ -52,17 +72,20 @@ PowerShell, com `OPENROUTER_API_KEY` já configurada no `.env`:
 
 ```powershell
 $env:LLM_PROVIDER_MODE = "openrouter"
+$env:CONVERSATION_MODE = "llm"
 # Opcional para execução sem sentence-transformers instalado:
 $env:RERANK_ENABLED = "false"
 python -m uvicorn app.api:app --host 127.0.0.1 --port 8080
 ```
 
 Equivale ao `--openrouter-only` da CLI para as chamadas de chat. Os embeddings
-continuam no ECOA.
+continuam no ECOA. `CONVERSATION_MODE=regras` desliga a identificação por modelo,
+mas mantém respostas diretas de cortesia.
 
 ## Testes
 
-Backend: `tests/test_catalog_api.py`, `tests/test_app_api.py` e suíte geral.
+Backend: `tests/test_catalog_api.py`, `tests/test_conversation.py`,
+`tests/test_conversation_intent.py`, `tests/test_app_api.py` e suíte geral.
 Frontend: testes de services, paginação, Documentos e integração de Consulta.
 Validação em navegador real (Edge/Playwright) salva localmente em
 `data/runs/frontend-local/browser-validation.json` e screenshots `browser-*.png`.

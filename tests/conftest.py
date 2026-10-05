@@ -14,6 +14,8 @@ def _logs_em_diretorio_temporario(tmp_path, monkeypatch):
     monkeypatch.setattr(query_analysis, "ANALYSIS_MODE", "regras")
     monkeypatch.setattr(query_analysis, "ANALYSIS_CACHE", tmp_path / "analysis-cache.jsonl")
     monkeypatch.setattr(query_analysis.config, "MODEL_MIN_INTERVAL_SECONDS", 0)
+    from src import conversation
+    monkeypatch.setattr(conversation, "CONVERSATION_MODE", "regras")
 
 
 @pytest.fixture(autouse=True)

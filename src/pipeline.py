@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from typing import Any, Optional, Sequence
 
-from src.obs import new_query_id, new_run_id
+from src.obs import Stage, new_query_id, new_run_id, registrar
+from src.conversation import resposta_conversacional
 from src.generate import ClienteLLM, gerar_resposta
 from src.query_analysis import analisar_query, filtros_para_retrieve
 from src.rerank import reranker_padrao
@@ -72,6 +73,13 @@ def responder(
     """
     run_id = run_id or new_run_id()
     query_id = query_id or new_query_id()
+
+    conversa = resposta_conversacional(query, run_id=run_id, query_id=query_id)
+    if conversa is not None:
+        registrar(run_id=run_id, query_id=query_id, stage=Stage.GERACAO, status="conversa",
+                  latencia_ms=0, input=query, output="resposta de cortesia; sem consulta ao acervo",
+                  extra={"is_refusal": False, "num_sources": 0, "resposta_conversacional": True})
+        return conversa.model_dump(mode="json")
 
     analise = analisar_query(query, run_id=run_id, query_id=query_id)
     decisao = (rotear_pergunta(query, run_id=run_id, query_id=query_id, analise=analise)

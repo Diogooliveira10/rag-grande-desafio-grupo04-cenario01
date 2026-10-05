@@ -497,7 +497,9 @@ VITE_API_BASE_URL=https://rag-api.exemplo.com
 O frontend atual tem telas de Consulta, Histórico, Feedback, Explorar e
 Transparência, sem mocks. Localmente, seu `.env.development` aponta para
 `http://localhost:8080`. O site publicado exige um backend acessível por HTTPS
-público. Pedidos factuais seguem pelo RAG com fontes; os guardrails continuam ativos.
+público. Saudações e mensagens comuns recebem respostas de conversa, não recusas
+por falta de evidência; mensagens longas são diferenciadas de consultas ao acervo.
+Pedidos factuais seguem pelo RAG com fontes; os guardrails continuam ativos.
 
 ### Endpoint de modelos (compartilhado com toda a turma)
 
