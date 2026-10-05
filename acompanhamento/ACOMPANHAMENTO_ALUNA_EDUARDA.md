@@ -77,4 +77,5 @@
 
 - Não pude participar do encontro por motivo de mal-estar.
 - Mesmo ausente, dei continuidade ao projeto, realizando melhorias no frontend e substituindo dados simulados pela comunicação com os dados reais da aplicação.
-- Também avancei na integração com o backend, conectando os fluxos de consulta, histórico, feedback e exploração do acervo à API do projeto.
+- Concluí e validei localmente a integração do frontend com o backend, executando o React na porta 5173 e a API FastAPI na porta 8080, com consultas reais ao pipeline RAG.
+- Documentei o processo em [`docs/GUIA_INTEGRACAO_LOCAL_FRONTEND_BACKEND.md`](../docs/GUIA_INTEGRACAO_LOCAL_FRONTEND_BACKEND.md), incluindo o clone do repositório [`Etuarda/frontendRAG`](https://github.com/Etuarda/frontendRAG), a configuração dos ambientes e os testes de conexão.

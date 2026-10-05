@@ -216,7 +216,15 @@ inacessível, sem a tabela carregada ou com usuário/senha incorretos.
 
 ## 8. Clonar o frontend
 
-Abra outro PowerShell:
+O frontend é mantido em um repositório separado:
+
+<https://github.com/Etuarda/frontendRAG>
+
+Para testar a integração local, é necessário clonar esse repositório e executar
+o Vite no computador. O site publicado no GitHub Pages não substitui essa etapa,
+pois este guia conecta o React local ao FastAPI local.
+
+Abra outro PowerShell e execute:
 
 ```powershell
 Set-Location C:\projetos\nexo
@@ -224,6 +232,11 @@ git clone https://github.com/Etuarda/frontendRAG.git
 Set-Location .\frontendRAG
 npm.cmd install
 ```
+
+Depois do clone, consulte também o `README.md` e o guia de integração existentes
+no próprio repositório do frontend. Eles descrevem a estrutura e os comandos
+específicos da interface; em caso de divergência, mantenha neste teste a URL do
+backend definida neste documento: `http://localhost:8080`.
 
 ## 9. Configurar a conexão do frontend
 
@@ -306,7 +319,10 @@ Qual é a capital da França?
 ```
 
 A primeira consulta após instalar o projeto pode demorar enquanto o modelo de
-rerank é baixado e carregado. As seguintes tendem a ser mais rápidas.
+rerank é baixado e carregado. As seguintes tendem a ser mais rápidas. O frontend
+atual espera até 120 segundos por uma consulta; se a primeira tentativa exceder
+esse tempo durante o download do modelo, aguarde o backend terminar a preparação
+e envie a pergunta novamente.
 
 ## 13. Validar histórico e feedback
 
