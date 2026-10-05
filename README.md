@@ -456,11 +456,12 @@ O relatório (`eval/runs/<run_id>/REPORT.md`) traz rota e recusa (o que define o
 
 **9. Subir a API HTTP (backend do frontend)**
 
-O backend FastAPI expõe `GET /health`, `POST /api/v1/query`, `POST /api/v1/feedback`
-e `GET /api/v1/history`:
+O backend FastAPI expõe saúde, consulta RAG, histórico, feedback, exploração do
+acervo e metadados de transparência. O contrato completo para o frontend está
+em [docs/FRONTEND_API_CONTRACT.md](docs/FRONTEND_API_CONTRACT.md).
 
 ```bash
-uvicorn app.api:app --reload --host 127.0.0.1 --port 8000
+uvicorn app.api:app --reload --host 127.0.0.1 --port 8080
 ```
 
 O frontend é mantido em um projeto separado e publicado em
@@ -481,10 +482,14 @@ VITE_API_BASE_URL=https://rag-api.exemplo.com
 VITE_USE_MOCKS=false
 ```
 
-Hoje o frontend chama `GET /health` e `POST /api/v1/query`; `POST /api/v1/feedback`
-e `GET /api/v1/history` ainda não têm tela. O site publicado só responde de
-verdade quando houver um backend acessível por HTTPS público; sem isso, use o
-frontend local (Vite) apontando para `http://127.0.0.1:8000`.
+O frontend deve consumir somente esses contratos HTTP e não manter mocks,
+catálogos hardcoded ou armazenamento paralelo de histórico. O site publicado
+só responde de verdade quando houver um backend acessível por HTTPS público;
+para integração local, use o Vite apontando para `http://127.0.0.1:8080`.
+
+O passo a passo completo, desde o clone dos dois repositórios até os testes de
+pergunta, histórico e feedback, está em
+[docs/GUIA_INTEGRACAO_LOCAL_FRONTEND_BACKEND.md](docs/GUIA_INTEGRACAO_LOCAL_FRONTEND_BACKEND.md).
 
 ### Endpoint de modelos (compartilhado com toda a turma)
 
