@@ -70,3 +70,11 @@
 - Concluí a integração do frontend com a API do projeto, incluindo os fluxos de consulta, exibição das respostas, fontes consultadas e histórico.
 - Organizei e versionei o código do frontend exclusivamente na branch `developerEduarda`, mantendo a branch `main` sem essa implementação. 
 - Como próxima atividade, vou revisar e atualizar o arquivo `ARQUITETURA.md` para documentar a integração do frontend, o estado atual da solução e as próximas etapas do projeto.
+
+## Encontro 9 - 2026-10-02
+
+### Relato individual - Eduarda
+
+- Não pude participar do encontro por motivo de mal-estar.
+- Mesmo ausente, dei continuidade ao projeto, realizando melhorias no frontend e substituindo dados simulados pela comunicação com os dados reais da aplicação.
+- Também avancei na integração com o backend, conectando os fluxos de consulta, histórico, feedback e exploração do acervo à API do projeto.
