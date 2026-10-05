@@ -126,6 +126,107 @@ def test_resposta_valida_com_fontes_reais():
     assert resposta.sources_used[0].source_file == "arquivo.json"
 
 
+def test_alias_de_evidencia_vira_chunk_id_real():
+    chunk = _chunk(chunk_id="base:documento:chunk-197-ab12cd")
+    prompt = {}
+
+    def cliente_fake(mensagens):
+        prompt["content"] = mensagens[1]["content"]
+        return json.dumps({
+            "answer": "resposta",
+            "is_refusal": False,
+            "confidence_level": "alta",
+            "sources_used": ["E1"],
+        })
+
+    resposta = gen.gerar_resposta(
+        "pergunta", [chunk], [Natureza.ESTRUTURADA], cliente=cliente_fake,
+    )
+
+    assert "evidence_id=E1" in prompt["content"]
+    assert chunk.metadata.chunk_id not in prompt["content"]
+    assert [source.chunk_id for source in resposta.sources_used] == [chunk.metadata.chunk_id]
+
+
+def test_citacoes_aliasadas_exatas_nao_colidem_e_removem_repeticoes():
+    chunks = [
+        _chunk(chunk_id="base:chunk-1-abc"),
+        _chunk(chunk_id="base:chunk-10-def"),
+    ]
+
+    def cliente_fake(mensagens):
+        return json.dumps({
+            "answer": "resposta",
+            "is_refusal": False,
+            "confidence_level": "alta",
+            "sources_used": ["E1", "E2", "E1", "E99"],
+        })
+
+    resposta = gen.gerar_resposta(
+        "pergunta", chunks, [Natureza.ESTRUTURADA], cliente=cliente_fake,
+    )
+
+    assert [source.chunk_id for source in resposta.sources_used] == [
+        "base:chunk-1-abc", "base:chunk-10-def",
+    ]
+
+
+@pytest.mark.parametrize(
+    "referencia",
+    ["chunk-197", "base:documento:chunk-197-inexistente", "E2"],
+)
+def test_citacao_parcial_ou_fora_do_contexto_e_descartada(referencia):
+    chunk = _chunk(chunk_id="base:documento:chunk-197-ab12cd")
+
+    def cliente_fake(mensagens):
+        return json.dumps({
+            "answer": "resposta",
+            "is_refusal": False,
+            "confidence_level": "baixa",
+            "sources_used": [referencia],
+        })
+
+    resposta = gen.gerar_resposta(
+        "pergunta", [chunk], [Natureza.ESTRUTURADA], cliente=cliente_fake,
+    )
+
+    assert resposta.sources_used == []
+
+
+def test_citacao_repetida_por_id_real_e_alias_emite_uma_unica_fonte():
+    chunk = _chunk(chunk_id="base:documento:chunk-197-ab12cd")
+
+    def cliente_fake(mensagens):
+        return json.dumps({
+            "answer": "resposta",
+            "is_refusal": False,
+            "confidence_level": "alta",
+            "sources_used": ["E1", chunk.metadata.chunk_id, "E1"],
+        })
+
+    resposta = gen.gerar_resposta(
+        "pergunta", [chunk], [Natureza.ESTRUTURADA], cliente=cliente_fake,
+    )
+
+    assert [source.chunk_id for source in resposta.sources_used] == [chunk.metadata.chunk_id]
+
+
+def test_lista_de_citacoes_vazia_nao_cria_fontes():
+    resposta = gen.gerar_resposta(
+        "pergunta",
+        [_chunk(chunk_id="base:documento:chunk-197-ab12cd")],
+        [Natureza.ESTRUTURADA],
+        cliente=lambda mensagens: json.dumps({
+            "answer": "resposta",
+            "is_refusal": False,
+            "confidence_level": "baixa",
+            "sources_used": [],
+        }),
+    )
+
+    assert resposta.sources_used == []
+
+
 def test_json_com_cercas_markdown_e_parseado():
     chunk = _chunk()
 
@@ -286,10 +387,29 @@ def test_primeiro_chunk_nao_fura_o_orcamento(monkeypatch):
     assert gen._chunks_no_orcamento([_chunk(conteudo="y" * 300)]) == []
 
 
+@pytest.mark.parametrize("posicao", [6, 7])
+def test_chunk_relevante_em_posicao_tardia_entra_se_houver_orcamento(monkeypatch, posicao):
+    monkeypatch.setattr(gen.config, "GENERATION_CONTEXT_CHARS", 2400)
+    monkeypatch.setattr(gen.config, "GENERATION_CHUNK_CHARS", 100)
+    chunks = [_chunk(chunk_id=f"c{i}", conteudo=f"evidência {i}" * 5) for i in range(posicao)]
+    selecionados = gen._chunks_no_orcamento(chunks)
+    assert f"c{posicao - 1}" in [chunk.metadata.chunk_id for chunk in selecionados]
+
+
+def test_orcamento_pula_cabecalho_longo_e_tenta_proxima_evidencia(monkeypatch):
+    monkeypatch.setattr(gen.config, "GENERATION_CONTEXT_CHARS", 500)
+    monkeypatch.setattr(gen.config, "GENERATION_CHUNK_CHARS", 100)
+    primeiro = _chunk(chunk_id="cabivel", conteudo="curto")
+    extenso = _chunk(chunk_id="cabecalho_extenso", conteudo="curto")
+    extenso.metadata.extras["titulo_documento"] = "fonte-" + "x" * 1000
+    ultimo = _chunk(chunk_id="relevante", conteudo="também curto")
+    assert [c.metadata.chunk_id for c in gen._chunks_no_orcamento([primeiro, extenso, ultimo])] == ["cabivel", "relevante"]
+
+
 def test_instrucao_de_formato_fica_no_fim_do_prompt():
     [_, usuario] = gen._montar_prompt("pergunta", [_chunk()])
 
-    assert usuario["content"].rstrip().endswith("os chunk_id usados.")
+    assert usuario["content"].rstrip().endswith("os evidence_id usados.")
     assert "Responda somente com o objeto JSON" in usuario["content"]
 
 
@@ -306,7 +426,7 @@ def test_geracao_loga_quantos_chunks_couberam_no_prompt(tmp_path, monkeypatch):
 
     gen.gerar_resposta("pergunta", chunks, [Natureza.ESTRUTURADA], cliente=cliente)
 
-    assert "chunk_id=c0" in vistos["prompt"] and "chunk_id=c2" not in vistos["prompt"]
+    assert "evidence_id=E1" in vistos["prompt"] and "evidence_id=E3" not in vistos["prompt"]
     registro = next(
         r
         for r in map(json.loads, obs.default_logger.log_path().read_text(encoding="utf-8").splitlines())
@@ -314,6 +434,41 @@ def test_geracao_loga_quantos_chunks_couberam_no_prompt(tmp_path, monkeypatch):
     )
     assert registro["extra"]["chunks_no_prompt"] == 1
     assert registro["extra"]["chunks_fora_do_orcamento"] == 2
+    assert registro["extra"]["prompt_chunk_ids"] == ["c0"]
+    assert registro["extra"]["chunks_excluidos_orcamento"] == ["c1", "c2"]
+
+
+def test_contexto_preserva_evidencia_multi_base_sem_exceder_orcamento(monkeypatch):
+    monkeypatch.setattr(gen.config, "GENERATION_CONTEXT_CHARS", 400)
+    monkeypatch.setattr(gen.config, "GENERATION_CHUNK_CHARS", 100)
+    sql = _chunk("sql:contratacoes:listagem:hash:1", "contratos_estruturado", "s" * 90)
+    sql.metadata.natureza = Natureza.ESTRUTURADA
+    normativa = _chunk("norma:1", "editais_normativo", "n" * 90)
+    normativa.metadata.natureza = Natureza.NORMATIVA
+    extra_normativa = _chunk("norma:2", "editais_normativo", "x" * 90)
+    extra_normativa.metadata.natureza = Natureza.NORMATIVA
+
+    selecionados = gen._chunks_no_orcamento(
+        [sql, normativa, extra_normativa],
+        bases_requeridas=[Natureza.ESTRUTURADA, Natureza.NORMATIVA],
+    )
+
+    assert [chunk.metadata.base_id for chunk in selecionados] == [
+        "contratos_estruturado", "editais_normativo",
+    ]
+    assert all(len(chunk.content) <= gen.config.GENERATION_CHUNK_CHARS + 6 for chunk in selecionados)
+
+
+def test_cobertura_multi_base_nao_inventa_chunk_ausente():
+    normativa = _chunk("norma:1", "editais_normativo", "evidência normativa")
+    normativa.metadata.natureza = Natureza.NORMATIVA
+
+    selecionados = gen._chunks_no_orcamento(
+        [normativa],
+        bases_requeridas=[Natureza.ESTRUTURADA, Natureza.NORMATIVA],
+    )
+
+    assert [chunk.metadata.base_id for chunk in selecionados] == ["editais_normativo"]
 
 
 def test_prompt_mostra_titulo_do_documento_e_vigencia():
@@ -324,7 +479,7 @@ def test_prompt_mostra_titulo_do_documento_e_vigencia():
     [_, usuario] = gen._montar_prompt("pergunta", [chunk])
 
     assert (
-        "[chunk_id=c1 | base=contratos_estruturado | natureza=estruturada | "
+        "[evidence_id=E1 | base=contratos_estruturado | natureza=estruturada | "
         "documento=Ata de Registro de Preços nº 00178 | vigencia_ate=2026-10-22]"
     ) in usuario["content"]
 

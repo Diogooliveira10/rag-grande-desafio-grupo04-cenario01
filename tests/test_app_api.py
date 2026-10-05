@@ -80,6 +80,19 @@ def test_query_grava_no_historico(monkeypatch, historico) -> None:
     assert consulta["feedback"] == []
 
 
+def test_query_nao_expoe_caminho_interno_da_fonte(monkeypatch, historico) -> None:
+    result = _response("Pergunta")
+    result["sources_used"][0]["source_file"] = "data/raw/v6/segredo/documento.pdf"
+    monkeypatch.setattr(api_module.pipeline, "responder", lambda *args, **kwargs: result)
+
+    response = client.post("/api/v1/query", json={"query": "Pergunta"})
+
+    assert response.status_code == 200
+    assert response.json()["sources_used"][0]["source_file"] == "documento.pdf"
+    query_id = response.json()["query_id"]
+    assert historico.obter_consulta(query_id)["resposta"]["sources_used"][0]["source_file"] == "documento.pdf"
+
+
 def test_query_rejeita_texto_vazio() -> None:
     response = client.post("/api/v1/query", json={"query": "   "})
 
@@ -174,3 +187,157 @@ def test_history_respeita_o_parametro_limit(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert len(response.json()) == 1
+
+
+def test_history_sanitiza_registro_legado_com_caminho_interno(monkeypatch, historico) -> None:
+    result = _response("Pergunta antiga")
+    result["sources_used"][0]["source_file"] = "C:\\dados\\privados\\documento.pdf"
+    historico.registrar_consulta(
+        query_id="q_legado", run_id="run1", query="Pergunta antiga", top_k=5, resposta=result
+    )
+
+    response = client.get("/api/v1/history")
+
+    assert response.status_code == 200
+    assert response.json()[0]["resposta"]["sources_used"][0]["source_file"] == "documento.pdf"
+
+
+def test_explore_contratacoes_retorna_dados_reais_tipados(monkeypatch) -> None:
+    calls = []
+
+    def fake(**kwargs):
+        calls.append(kwargs)
+        return [{
+            "id": "123-2-000001/2025",
+            "numero_contrato": "123-2-000001/2025",
+            "orgao": "Órgão público",
+            "valor_global": 1250.5,
+            "fonte_oficial": "PNCP",
+        }]
+
+    monkeypatch.setattr(api_module.catalog, "listar_contratacoes", fake)
+    response = client.get(
+        "/api/v1/explore/contratacoes",
+        params={"limit": 10, "offset": 2, "busca": "software", "orgao": "órgão"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()[0]["numero_contrato"] == "123-2-000001/2025"
+    assert response.json()[0]["data_homologacao"] is None
+    assert calls == [{"limit": 10, "offset": 2, "busca": "software", "orgao": "órgão"}]
+
+
+def test_explore_documentos_retorna_inventario_sem_caminho_interno(monkeypatch) -> None:
+    monkeypatch.setattr(
+        api_module.catalog,
+        "listar_documentos",
+        lambda **kwargs: [{
+            "id": "pncp:documento:1",
+            "titulo": "Lei nº 14.133/2021",
+            "tipo": "Normativo",
+            "fonte": "Planalto",
+            "link": "https://www.planalto.gov.br/",
+            "base_id": "editais_normativo",
+            "natureza": "normativa",
+        }],
+    )
+
+    response = client.get("/api/v1/explore/documentos")
+
+    assert response.status_code == 200
+    body = response.json()[0]
+    assert body["base_id"] == "editais_normativo"
+    assert "source_file" not in body
+    assert "path" not in body
+
+
+def test_explore_orgaos_nao_inventa_sigla_ou_categoria(monkeypatch) -> None:
+    monkeypatch.setattr(
+        api_module.catalog,
+        "listar_orgaos",
+        lambda **kwargs: [{
+            "cnpj": "12345678000100",
+            "sigla": None,
+            "nome": "Município de Exemplo",
+            "esfera": "municipal",
+            "total_contratacoes": 3,
+            "valor_total": 9000,
+            "principais_categorias": [],
+            "principais_fornecedores": ["Fornecedor real"],
+        }],
+    )
+
+    response = client.get("/api/v1/explore/orgaos")
+
+    assert response.status_code == 200
+    assert response.json()[0]["sigla"] is None
+    assert response.json()[0]["principais_categorias"] == []
+
+
+def test_explore_fontes_retorna_manifesto(monkeypatch) -> None:
+    monkeypatch.setattr(
+        api_module.catalog,
+        "listar_fontes",
+        lambda: [{
+            "id": "contratos_estruturado",
+            "nome": "PNCP - contratos",
+            "sigla": "PNCP",
+            "instituicao": "Portal Nacional de Contratações Públicas",
+            "url": "https://pncp.gov.br",
+            "natureza": "estruturada",
+            "escopo": "oficial",
+            "formatos": ["json"],
+        }],
+    )
+
+    response = client.get("/api/v1/explore/fontes")
+
+    assert response.status_code == 200
+    assert response.json()[0]["id"] == "contratos_estruturado"
+
+
+def test_project_summary_retorna_metricas_do_inventario(monkeypatch) -> None:
+    monkeypatch.setattr(
+        api_module.catalog,
+        "project_summary",
+        lambda: {
+            "projeto": "NEXO RJ",
+            "scenario_id": "contratacoes-rj",
+            "versao_corpus": "v6",
+            "inventario_completo": True,
+            "total_documentos": 1400,
+            "total_itens": 1400,
+            "total_falhas": 0,
+            "bases": [{
+                "base_id": "contratos_estruturado",
+                "natureza": "estruturada",
+                "escopo": "oficial",
+                "status": "complete",
+                "documentos": 625,
+                "formatos": {"json": 625},
+            }],
+        },
+    )
+
+    response = client.get("/api/v1/project/summary")
+
+    assert response.status_code == 200
+    assert response.json()["versao_corpus"] == "v6"
+    assert response.json()["total_documentos"] == 1400
+
+
+def test_explore_valida_paginacao() -> None:
+    response = client.get("/api/v1/explore/contratacoes", params={"limit": 0})
+
+    assert response.status_code == 422
+
+
+def test_explore_nao_expoe_erro_interno(monkeypatch) -> None:
+    monkeypatch.setattr(
+        api_module.catalog, "listar_documentos", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("C:/segredo"))
+    )
+
+    response = client.get("/api/v1/explore/documentos")
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Não foi possível consultar os dados do projeto."}

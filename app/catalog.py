@@ -282,3 +282,11 @@ def summary() -> dict:
         "total_documentos": sum(base["documentos"] for base in summaries),
         "total_itens": int(totals.get("itens", 0)) + supplemental_items,
         "total_falhas": int(totals.get("falhas", 0)), "bases": summaries}
+
+
+# Nomes compatíveis com a interface da API introduzida na main.
+listar_contratacoes = contracts
+listar_documentos = documents
+listar_orgaos = organizations
+listar_fontes = sources
+project_summary = summary

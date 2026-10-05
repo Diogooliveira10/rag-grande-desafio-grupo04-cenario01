@@ -121,10 +121,12 @@ atende, responda isso citando-o.
 
 Responda SEMPRE e SOMENTE com um objeto JSON, sem nenhum texto antes ou depois, no formato:
 {"answer": "...", "is_refusal": false, "refusal_reason": null, \
-"confidence_level": "alta|media|baixa|recusado", "sources_used": ["chunk_id", ...]}
+"confidence_level": "alta|media|baixa|recusado", "sources_used": ["evidence_id", ...]}
 
-sources_used deve conter apenas os chunk_id que você realmente usou, exatamente como \
-aparecem no contexto. Se is_refusal for true, sources_used deve ser uma lista vazia."""
+sources_used deve conter apenas os evidence_id que você realmente usou, exatamente como \
+aparecem no contexto. Resposta factual baseada no contexto deve citar pelo menos uma \
+evidência relevante. Não invente evidence_id; se não houver evidência relevante, recuse. \
+Se is_refusal for true, sources_used deve ser uma lista vazia."""
 
 _SYSTEM_PROMPT += """
 Responda separadamente a cada intenção da pergunta. Uma parte respondível não desaparece
@@ -170,9 +172,10 @@ def _natureza_label(metadata: ChunkMetadata) -> str:
     return metadata.natureza.value if metadata.natureza is not None else metadata.doc_type
 
 
-def _cabecalho(metadata: ChunkMetadata) -> str:
+def _cabecalho(metadata: ChunkMetadata, evidence_id: str | None = None) -> str:
+    evidence_id = evidence_id or metadata.chunk_id
     campos = [
-        f"chunk_id={metadata.chunk_id}",
+        f"evidence_id={evidence_id}",
         f"base={metadata.base_id}",
         f"natureza={_natureza_label(metadata)}",
     ]
@@ -231,7 +234,7 @@ def _compactar(conteudo: str) -> str:
 
 
 def _representar_registro(conteudo: str) -> str:
-    """Visão de evidência com campos completos, sem alterar o documento original."""
+    """Visão compacta dos campos relevantes, sem alterar o documento original."""
     try:
         registro = json.loads(conteudo)
     except (ValueError, TypeError):
@@ -251,44 +254,54 @@ def _representar_registro(conteudo: str) -> str:
     return json.dumps(view, ensure_ascii=False, separators=(",", ":")) if view else conteudo
 
 
-def _chunks_no_orcamento(chunks: list[Chunk]) -> list[Chunk]:
-    """Chunks, na ordem da recuperação, que cabem na janela do modelo.
-
-    Cada conteúdo é compactado e cortado em ``GENERATION_CHUNK_CHARS``; os
-    chunks entram até somar ``GENERATION_CONTEXT_CHARS`` (o primeiro sempre
-    entra). Sem isso, o Ollama descarta o começo do prompt.
-    """
-    selecionados: list[Chunk] = []
-    usados = 0
-    # Reserva o melhor candidato de cada base/intenção antes dos demais.
-    primeiros, restantes, grupos = [], [], set()
+def _chunks_no_orcamento(
+    chunks: list[Chunk], bases_requeridas: list[Natureza] | None = None,
+) -> list[Chunk]:
+    """Limita contexto preservando candidatos por intenção, base e natureza."""
+    preparados = []
     for chunk in chunks:
+        conteudo = _representar_registro(_compactar(chunk.content))
+        if len(conteudo) > config.GENERATION_CHUNK_CHARS:
+            conteudo = conteudo[:config.GENERATION_CHUNK_CHARS].rstrip() + " [...]"
+        preparados.append(chunk.model_copy(update={"content": conteudo}))
+    primeiros, restantes, grupos = [], [], set()
+    for chunk in preparados:
         grupo = (chunk.metadata.extras.get("intencao", 0), chunk.metadata.base_id)
         if grupo not in grupos:
             primeiros.append(chunk)
             grupos.add(grupo)
         else:
             restantes.append(chunk)
-    for chunk in primeiros + restantes:
-        conteudo = _representar_registro(_compactar(chunk.content))
-        tamanho = len(_cabecalho(chunk.metadata)) + len(conteudo)
-        if selecionados and usados + tamanho > config.GENERATION_CONTEXT_CHARS:
+    ordem = primeiros + restantes
+    reservas = []
+    naturezas = list(dict.fromkeys(bases_requeridas or []))
+    if len(naturezas) > 1:
+        reservas = [next(i for i, chunk in enumerate(ordem) if chunk.metadata.natureza == natureza)
+                    for natureza in naturezas if any(chunk.metadata.natureza == natureza for chunk in ordem)]
+    indices = reservas + [i for i in range(len(ordem)) if i not in reservas]
+    escolhidos, usados = [], 0
+    for i in indices:
+        chunk = ordem[i]
+        tamanho = len(_cabecalho(chunk.metadata, f"E{len(escolhidos)+1}")) + len(chunk.content)
+        if tamanho > config.GENERATION_CONTEXT_CHARS - usados:
             continue
-        if tamanho > config.GENERATION_CONTEXT_CHARS:
-            continue
-        selecionados.append(chunk.model_copy(update={"content": conteudo}))
+        escolhidos.append(i)
         usados += tamanho
-    return selecionados
+    escolhidos.sort()
+    return [ordem[i] for i in escolhidos]
 
 
 def _montar_prompt(query: str, chunks: list[Chunk]) -> list[dict]:
-    contexto = "\n\n".join(f"{_cabecalho(c.metadata)}\n{c.content}" for c in chunks)
+    contexto = "\n\n".join(
+        f"{_cabecalho(chunk.metadata, f'E{index}')}\n{chunk.content}"
+        for index, chunk in enumerate(chunks, start=1)
+    )
     # A instrução de formato se repete no fim: se o prompt passar da janela,
     # o Ollama corta o começo, e o fim é o que o modelo ainda vê.
     mensagem_usuario = (
         f"Contexto:\n{contexto}\n\nPergunta: {query}\n\n"
         "Responda somente com o objeto JSON no formato pedido, citando em "
-        "sources_used os chunk_id usados."
+        "sources_used os evidence_id usados."
     )
     return [
         {"role": "system", "content": _SYSTEM_PROMPT},
@@ -388,6 +401,9 @@ def _parsear_resposta_llm(
     fora do contrato que foram aceitas como alias e os chunk_ids citados pelo
     LLM que não estavam entre os chunks recuperados (descartados)."""
     chunks_por_id = {c.metadata.chunk_id: c for c in chunks}
+    chunks_por_evidence_id = {
+        f"E{index}": chunk for index, chunk in enumerate(chunks, start=1)
+    }
     alternativas_usadas: list[str] = []
     citacoes_descartadas: list[str] = []
     try:
@@ -398,11 +414,16 @@ def _parsear_resposta_llm(
         confidence_level = _nivel_de_confianca(_campo(dados, "confidence_level", alternativas_usadas))
 
         sources_used: list[SourceRef] = []
-        for chunk_id in _campo(dados, "sources_used", alternativas_usadas) or []:
-            chunk = chunks_por_id.get(chunk_id)
+        fontes_adicionadas: set[str] = set()
+        for referencia in _campo(dados, "sources_used", alternativas_usadas) or []:
+            referencia = referencia if isinstance(referencia, str) else str(referencia)
+            chunk = chunks_por_evidence_id.get(referencia) or chunks_por_id.get(referencia)
             if chunk is None:
-                citacoes_descartadas.append(str(chunk_id))
+                citacoes_descartadas.append(referencia)
                 continue
+            if chunk.metadata.chunk_id in fontes_adicionadas:
+                continue
+            fontes_adicionadas.add(chunk.metadata.chunk_id)
             sources_used.append(
                 SourceRef(
                     chunk_id=chunk.metadata.chunk_id,
@@ -511,6 +532,7 @@ def _logar_validacao(
         output=f"{len(resposta.sources_used)} fontes válidas; {len(citacoes_descartadas)} descartadas",
         extra={
             "json_valido": erro_parsing is None,
+            "citacoes_aceitas": [source.chunk_id for source in resposta.sources_used],
             "citacoes_descartadas": citacoes_descartadas,
             "chaves_fora_do_contrato": chaves_alias,
             "mascaramentos_resposta": mascaramentos_resposta,
@@ -564,14 +586,22 @@ def gerar_resposta(
         _logar_evento(run_id, query_id, "sem_chunks", inicio, resposta, **sensibilidade)
         return resposta
 
-    chunks_prompt = _chunks_no_orcamento(chunks)
+    chunks_prompt = _chunks_no_orcamento(chunks, bases_requeridas=bases_consultadas)
     sensibilidade["chunks_no_prompt"] = len(chunks_prompt)
     sensibilidade["chunks_fora_do_orcamento"] = len(chunks) - len(chunks_prompt)
-    sensibilidade["evidencias_no_prompt"] = [c.metadata.chunk_id for c in chunks_prompt]
-    sensibilidade["evidencias_fora_do_prompt"] = [c.metadata.chunk_id for c in chunks if c.metadata.chunk_id not in {p.metadata.chunk_id for p in chunks_prompt}]
+    sensibilidade["evidencias_no_prompt"] = [chunk.metadata.chunk_id for chunk in chunks_prompt]
+    sensibilidade["prompt_chunk_ids"] = [chunk.metadata.chunk_id for chunk in chunks_prompt]
+    sensibilidade["prompt_evidence_ids"] = {
+        f"E{index}": chunk.metadata.chunk_id for index, chunk in enumerate(chunks_prompt, start=1)
+    }
+    selecionados_ids = {chunk.metadata.chunk_id for chunk in chunks_prompt}
+    sensibilidade["evidencias_fora_do_prompt"] = [
+        chunk.metadata.chunk_id for chunk in chunks if chunk.metadata.chunk_id not in selecionados_ids
+    ]
+    sensibilidade["chunks_excluidos_orcamento"] = sensibilidade["evidencias_fora_do_prompt"]
     chunks = chunks_prompt
     mensagens = _montar_prompt(query, chunks)
-    cliente = cliente or _cliente_padrao(_schema_resposta([c.metadata.chunk_id for c in chunks]))
+    cliente = cliente or _cliente_padrao(_schema_resposta([f"E{i}" for i in range(1, len(chunks) + 1)]))
 
     try:
         bruto, tokens = _texto_e_tokens(cliente(mensagens))

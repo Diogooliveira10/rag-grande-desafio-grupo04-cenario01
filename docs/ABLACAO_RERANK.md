@@ -12,6 +12,7 @@ py .\eval\ablacao_rerank.py --candidatos 10 30
 - **Busca:** cada pergunta é buscada só nas bases esperadas (o roteamento não entra na conta), escopo oficial. Denso e BM25 devolvem 50 candidatos cada, como no `retrieve`, e o RRF (k=60) funde as duas listas. "X+rerank@N" reordena os N primeiros da lista X.
 - **Métricas:** hit@k é a fração das perguntas com algum chunk relevante entre os k primeiros; MRR@10 é a média de 1/posição do primeiro relevante. **hit@3 é a métrica que mais pesa:** com `GENERATION_CONTEXT_CHARS=3500` e `GENERATION_CHUNK_CHARS=900`, só uns 3–4 chunks cabem no prompt da geração.
 - **Reranker:** `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`, multilíngue e treinado no mMARCO (que inclui português), rodando em CPU (notebook sem GPU, 12 núcleos) com `max_length=512`. O servidor da turma ainda não tem modelo de rerank.
+- **Dependência e fallback:** `sentence-transformers` é dependência declarada em `requirements.txt`. Se não estiver instalada ou o modelo não puder ser carregado, `retrieve` registra o estágio `rerank` como erro e devolve a ordem RRF; o relatório de avaliação continua registrando o resultado real, sem tratar o fallback como rerank bem-sucedido. Para executar deliberadamente sem rerank, use `RERANK_ENABLED=false`.
 
 ## Resultado no corpus v6 (30/09/2026, run `ablacao-20260930T185340Z`)
 

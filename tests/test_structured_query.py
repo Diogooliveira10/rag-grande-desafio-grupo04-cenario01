@@ -174,6 +174,57 @@ def test_periodo_filtra_as_linhas_do_sql(base):
     assert "Geral: 4 registros" in chunk.content
 
 
+def test_consulta_exata_por_identificador_pncp_e_parametrizada(tmp_path):
+    identificador = "00394429000100-2-000183/2025"
+    documents = escrever_documents(
+        tmp_path / "documents.jsonl",
+        contratacoes=[
+            _contratacao(
+                identificador,
+                esfera="F",
+                objeto="Transferência de tecnologia do medicamento Darunavir",
+                municipio="Rio de Janeiro",
+            ),
+            _contratacao(
+                "00394429000100-2-000184/2025",
+                esfera="F",
+                objeto="Outro contrato",
+                municipio="Rio de Janeiro",
+            ),
+        ],
+    )
+    banco = Banco(sqlite_path=tmp_path / "base-exata.sqlite")
+    structured_db.construir_banco(documents, banco)
+    pergunta = f"Qual órgão, fornecedor e valor do contrato com número de controle PNCP {identificador}?"
+
+    [chunk] = sq.consultar_estruturado(
+        pergunta,
+        QueryFilters(),
+        ESTRUTURADA,
+        banco=banco,
+        documents_file=documents,
+    )
+
+    assert identificador in chunk.content
+    assert "ORGAO " + identificador in chunk.content
+    assert chunk.content.count("PNCP ") == 1
+    sql = chunk.metadata.extras["sql"]
+    assert "numero_controle_pncp = ?" in sql
+    assert identificador not in sql
+
+
+def test_consulta_exata_pncp_retorna_sem_resultado_quando_nao_existe(base):
+    identificador = "00394429000100-2-000183/2025"
+    [chunk] = sq.consultar_estruturado(
+        f"Qual órgão do contrato PNCP {identificador}?",
+        QueryFilters(),
+        ESTRUTURADA,
+        **base,
+    )
+
+    assert "Nenhum contrato encontrado" in chunk.content
+
+
 # --------------------------------------------------------------------------
 # Detecção
 # --------------------------------------------------------------------------
@@ -196,6 +247,32 @@ def test_detecta_tipo_de_conta(pergunta, tipo):
 def test_pergunta_sem_conta_ou_sem_base_estruturada_nao_vira_sql():
     assert sq.detectar_consulta("Quais contratos existem?", QueryFilters(), ESTRUTURADA) is None
     assert sq.detectar_consulta("Qual o valor médio?", QueryFilters(), [Natureza.NORMATIVA]) is None
+
+
+def test_detecta_identificador_pncp_completo_para_consulta_estruturada():
+    identificador = "00394429000100-2-000183/2025"
+    consulta = sq.detectar_consulta(
+        f"Qual órgão, fornecedor e valor do contrato com número de controle PNCP {identificador}?",
+        QueryFilters(),
+        ESTRUTURADA,
+    )
+
+    assert consulta is not None
+    assert consulta.tipo == "identificador"
+    assert consulta.numero_controle_pncp == identificador
+    sql, parametros = sq._where(consulta, ())
+    assert "numero_controle_pncp = ?" in sql
+    assert parametros == [identificador]
+
+
+def test_identificador_pncp_parcial_nao_vira_busca_exata():
+    consulta = sq.detectar_consulta(
+        "Qual órgão do contrato PNCP 00394429000100-2-000183?",
+        QueryFilters(),
+        ESTRUTURADA,
+    )
+
+    assert consulta is None or consulta.tipo != "identificador"
 
 
 def test_extrai_termos_do_objeto_esfera_e_limite():
@@ -549,9 +626,88 @@ def test_listagem_devolve_registros_com_orgao_fornecedor_e_modalidade(base):
     assert "fornecedor:" in chunk.content and "modalidade: Concorrência - Eletrônica" in chunk.content
 
 
-def test_listagem_nao_roda_com_base_normativa_nem_sem_assunto():
-    assert _detectar("Quais contratações de ambulâncias existem?", bases=[Natureza.NORMATIVA, Natureza.ESTRUTURADA]) is None
+def test_listagem_multi_base_isola_objeto_da_clausula_de_contratacoes():
+    pergunta = (
+        "Quais regras se aplicam à participação de microempresas e quais contratações "
+        "de material de escritório do corpus usam modalidades compatíveis com essas regras?"
+    )
+
+    consulta = _detectar(pergunta, bases=[Natureza.NORMATIVA, Natureza.ESTRUTURADA])
+
+    assert consulta.tipo == "listagem"
+    assert consulta.termos_objeto == ("material", "escritorio")
+
+
+def test_listagem_multi_base_retira_so_os_registros_do_objeto_relevante(tmp_path):
+    documents = escrever_documents(
+        tmp_path / "documents.jsonl",
+        contratacoes=[
+            _contratacao("OFF-1", objeto="Material de escritório", modalidade="Pregão - Eletrônico"),
+            _contratacao("OFF-2", objeto="Material de escritório e papelaria", modalidade="Dispensa"),
+            _contratacao("OTHER", objeto="Material de construção", modalidade="Concorrência"),
+        ],
+    )
+    banco = Banco(sqlite_path=tmp_path / "base-listagem-multibase.sqlite")
+    structured_db.construir_banco(documents, banco)
+    pergunta = (
+        "Quais regras se aplicam à participação de microempresas e quais contratações "
+        "de material de escritório do corpus usam modalidades compatíveis com essas regras?"
+    )
+
+    [chunk] = sq.consultar_estruturado(
+        pergunta,
+        QueryFilters(),
+        [Natureza.NORMATIVA, Natureza.ESTRUTURADA],
+        banco=banco,
+        documents_file=documents,
+    )
+
+    assert chunk.metadata.base_id == "contratos_estruturado"
+    assert chunk.metadata.natureza == Natureza.ESTRUTURADA
+    assert "2 registros atendem aos filtros" in chunk.content
+    assert "Pregão - Eletrônico" in chunk.content
+    assert "Dispensa" in chunk.content
+    assert "Material de construção" not in chunk.content
+
+
+def test_listagem_so_roda_com_base_estruturada_e_assunto():
+    pergunta = "Quais contratações de ambulâncias existem?"
+    assert _detectar(pergunta, bases=[Natureza.NORMATIVA, Natureza.ESTRUTURADA]).tipo == "listagem"
+    assert _detectar(pergunta, bases=[Natureza.NORMATIVA]) is None
+    assert _detectar(
+        "Quais regras se aplicam às microempresas?",
+        bases=[Natureza.NORMATIVA, Natureza.ESTRUTURADA],
+    ) is None
     assert _detectar("Quais contratos existem em 2025?", ano=2025) is None
+
+
+def test_contagem_pelo_menos_n_contratos_cria_agregacao_por_fornecedor():
+    from src.query_analysis import analisar_query
+
+    pergunta = (
+        "Considerando os fornecedores que apareceram em pelo menos três contratos de "
+        "tecnologia de órgãos estaduais do Rio de Janeiro em 2025, com valor acima de "
+        "R$ 500 mil, há atas ou registros no corpus que mencionem atraso de entrega?"
+    )
+    filtros = analisar_query(pergunta).filtros
+
+    consulta = sq.detectar_consulta(
+        pergunta,
+        filtros,
+        [Natureza.ESTRUTURADA, Natureza.CONVERSACIONAL],
+    )
+
+    assert consulta.tipo == "agrupamento"
+    assert consulta.agrupar_por == "fornecedor"
+    assert consulta.minimo_por_grupo == 3
+    assert consulta.termos_objeto == ("tecnologia",)
+    assert consulta.ano == 2025
+    assert consulta.esfera == "estadual"
+    assert consulta.valor_min == 500000
+    assert consulta.valor_min_exclusivo is True
+    where, params = sq._where(consulta, consulta.termos_objeto)
+    assert "valor_contratado > ?" in where
+    assert 500000 in params
 
 
 def test_palavra_solta_da_pergunta_nao_entra_no_ou(base):

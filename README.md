@@ -468,10 +468,7 @@ O relatório (`eval/runs/<run_id>/REPORT.md`) traz rota e recusa (o que define o
 
 **9. Subir a API HTTP (backend do frontend)**
 
-O backend FastAPI expõe Consulta, Histórico, Feedback, as quatro rotas
-`/api/v1/explore/{contratacoes,documentos,orgaos,fontes}` e
-`/api/v1/project/summary`, além de `GET /health`. Contrato e modo OpenRouter em
-[docs/FRONTEND_API_CONTRACT.md](docs/FRONTEND_API_CONTRACT.md).
+O backend FastAPI expõe saúde, consulta RAG, histórico, feedback, as rotas de exploração do acervo e metadados de transparência. O contrato completo está em [docs/FRONTEND_API_CONTRACT.md](docs/FRONTEND_API_CONTRACT.md).
 
 ```bash
 uvicorn app.api:app --reload --host 127.0.0.1 --port 8080
@@ -494,12 +491,7 @@ deste backend, sem `/api/v1/query` no final:
 VITE_API_BASE_URL=https://rag-api.exemplo.com
 ```
 
-O frontend atual tem telas de Consulta, Histórico, Feedback, Explorar e
-Transparência, sem mocks. Localmente, seu `.env.development` aponta para
-`http://localhost:8080`. O site publicado exige um backend acessível por HTTPS
-público. Saudações e mensagens comuns recebem respostas de conversa, não recusas
-por falta de evidência; mensagens longas são diferenciadas de consultas ao acervo.
-Pedidos factuais seguem pelo RAG com fontes; os guardrails continuam ativos.
+O frontend atual tem telas de Consulta, Histórico, Feedback, Explorar e Transparência, sem mocks. Localmente, `.env.development` aponta para `http://localhost:8080`; o site publicado exige backend HTTPS público. Saudações e conversas recebem respostas sem consulta ao acervo; pedidos factuais seguem pelo RAG com fontes e guardrails ativos. O frontend deve consumir apenas os contratos HTTP, sem catálogos mockados nem armazenamento paralelo. O passo a passo da integração local está em [docs/GUIA_INTEGRACAO_LOCAL_FRONTEND_BACKEND.md](docs/GUIA_INTEGRACAO_LOCAL_FRONTEND_BACKEND.md).
 
 ### Endpoint de modelos (compartilhado com toda a turma)
 

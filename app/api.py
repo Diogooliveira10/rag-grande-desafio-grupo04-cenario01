@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import PurePosixPath
 from typing import Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Query
@@ -31,6 +32,18 @@ from src.obs import registrar as obs_registrar
 from src.schema import RAGResponse
 
 logger = logging.getLogger(__name__)
+
+
+def _public_rag_payload(payload: dict) -> dict:
+    """Remove caminhos locais das fontes antes de persistir ou expor via HTTP."""
+    public = dict(payload)
+    public["sources_used"] = [
+        {**source, "source_file": PurePosixPath(
+            str(source.get("source_file") or "").replace("\\", "/")
+        ).name}
+        for source in payload.get("sources_used", [])
+    ]
+    return public
 
 DEFAULT_CORS_ORIGINS = (
     "https://etuarda.github.io",
@@ -119,7 +132,8 @@ def query_rag(request: QueryRequest) -> QueryResponse:
             detail="Nao foi possivel processar a consulta.",
         ) from exc
 
-    resposta = QueryResponse.model_validate({**result, "query_id": query_id})
+    public_result = _public_rag_payload(result)
+    resposta = QueryResponse.model_validate({**public_result, "query_id": query_id})
 
     try:
         historico.registrar_consulta(
@@ -127,7 +141,7 @@ def query_rag(request: QueryRequest) -> QueryResponse:
             run_id=run_id,
             query=request.query,
             top_k=request.top_k,
-            resposta=result,
+            resposta=public_result,
         )
     except Exception:
         # Historico e' um extra sobre a resposta ja calculada: uma falha ao
@@ -168,15 +182,21 @@ def enviar_feedback(request: FeedbackRequest) -> dict[str, str]:
 
 @app.get("/api/v1/history", response_model=list[HistoricoItem])
 def obter_historico(limit: int = Query(default=20, ge=1, le=100)) -> list[dict]:
-    return historico.obter_historico(limit=limit)
+    items = historico.obter_historico(limit=limit)
+    for item in items:
+        item["resposta"] = _public_rag_payload(item["resposta"])
+    return items
 
 
 def _catalog_result(function, **kwargs):
     try:
         return function(**kwargs)
-    except (OSError, ValueError, KeyError, TypeError) as exc:
+    except FileNotFoundError as exc:
         logger.exception("Falha ao ler o catálogo local")
         raise HTTPException(status_code=503, detail="O acervo está temporariamente indisponível.") from exc
+    except Exception as exc:
+        logger.exception("Falha ao ler o catálogo local")
+        raise HTTPException(status_code=500, detail="Não foi possível consultar os dados do projeto.") from exc
 
 
 @app.get("/api/v1/explore/contratacoes", response_model=list[ContratacaoRecord])
@@ -186,7 +206,7 @@ def explorar_contratacoes(
     limit: int = Query(default=24, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
-    return _catalog_result(catalog.contracts, busca=busca, orgao=orgao, limit=limit, offset=offset)
+    return _catalog_result(catalog.listar_contratacoes, busca=busca, orgao=orgao, limit=limit, offset=offset)
 
 
 @app.get("/api/v1/explore/documentos", response_model=list[DocumentoRecord])
@@ -196,7 +216,7 @@ def explorar_documentos(
     limit: int = Query(default=24, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
-    return _catalog_result(catalog.documents, busca=busca, tipo=tipo, limit=limit, offset=offset)
+    return _catalog_result(catalog.listar_documentos, busca=busca, tipo=tipo, limit=limit, offset=offset)
 
 
 @app.get("/api/v1/explore/orgaos", response_model=list[OrgaoRecord])
@@ -205,17 +225,17 @@ def explorar_orgaos(
     limit: int = Query(default=24, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
-    return _catalog_result(catalog.organizations, busca=busca, limit=limit, offset=offset)
+    return _catalog_result(catalog.listar_orgaos, busca=busca, limit=limit, offset=offset)
 
 
 @app.get("/api/v1/explore/fontes", response_model=list[OfficialSource])
 def explorar_fontes():
-    return _catalog_result(catalog.sources)
+    return _catalog_result(catalog.listar_fontes)
 
 
 @app.get("/api/v1/project/summary", response_model=ProjectSummary)
 def resumo_projeto():
-    return _catalog_result(catalog.summary)
+    return _catalog_result(catalog.project_summary)
 
 
 __all__ = ["app"]
