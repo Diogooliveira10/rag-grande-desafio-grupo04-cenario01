@@ -75,7 +75,7 @@
 - As alterações foram verificadas em conjunto com a implementação existente e validadas por meio da execução dos testes específicos, da suíte completa e do `git diff --check`.
 - As decisões finais sobre as correções, o comportamento esperado e os critérios de validação foram baseadas no comportamento real do código e nos requisitos definidos para o projeto.
 
-### Encontro 7 — 28/09/2026
+### Encontro 7 — 2026-09-28
 
 **Tarefa do dia:**
 Validar as pré-condições para execução do Golden Set completo com o pipeline real, verificando a disponibilidade e integridade do índice/base fornecido pela equipe, o ambiente Python e a execução da suíte de testes.
@@ -101,7 +101,7 @@ Validar as pré-condições para execução do Golden Set completo com o pipelin
 **Resultado:**
 A validação mostrou que o pacote do índice está internamente consistente, mas o ambiente local ainda precisa ser ajustado antes da execução oficial do Golden Set. O próximo passo é instalar as dependências no `.venv`, posicionar corretamente `documents.jsonl` e `index/`, validar o checksum e executar novamente a suíte de testes. Após essas verificações, será possível executar os **19 casos do Golden Set pelo pipeline real**.
 
-## Encontro 8 — 30/09/2026
+## Encontro 8 — 2026-09-30
 
 ### Relato individual - Diogo Oliveira
 
@@ -154,7 +154,7 @@ A validação factual do dia confirmou que o Golden Set atual reflete apenas par
 - Utilizei assistentes de IA como apoio na organização da evidência, na revisão dos trechos normativos, na separação entre menção e regra efetiva e na consolidação do relatório final da fase de validação factual.
 - As conclusões foram verificadas com o corpus, os documentos normativos e os dados estruturados disponíveis no projeto. Não houve alteração de código, dados ou avaliação durante a atividade.
 
-## Encontro 10 — 05/10/2026
+## Encontro 10 — 2026-10-05
 
 ### Relato individual — Diogo Oliveira
 
