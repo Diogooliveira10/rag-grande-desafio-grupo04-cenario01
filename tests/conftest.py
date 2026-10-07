@@ -19,6 +19,12 @@ def _logs_em_diretorio_temporario(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _chave_da_api_de_teste(monkeypatch):
+    """Histórico e trace exigem X-API-Key; os testes usam esta chave, nunca a do .env."""
+    monkeypatch.setattr(config, "RAG_API_KEY", "chave-de-teste")
+
+
+@pytest.fixture(autouse=True)
 def _sem_modelo_de_rerank(monkeypatch):
     """Nenhum teste baixa ou carrega o cross-encoder; quem testa rerank passa o seu."""
     monkeypatch.setattr(config, "RERANK_ENABLED", False)

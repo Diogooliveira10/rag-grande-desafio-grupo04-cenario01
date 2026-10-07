@@ -6,12 +6,14 @@ import json
 import threading
 import time
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime
 from enum import Enum
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, Mapping, ParamSpec, TypeVar
+from typing import Any, Callable, Iterator, Mapping, ParamSpec, TypeVar
 
 _model_call_lock = threading.Lock()
 _last_model_call = 0.0
@@ -71,6 +73,32 @@ def new_query_id() -> str:
     return f"q_{uuid.uuid4().hex[:8]}"
 
 
+def new_session_id() -> str:
+    """Cria um identificador de sessão (conversa) no formato ``s_<id>``."""
+    return f"s_{uuid.uuid4().hex[:12]}"
+
+
+# Sessão da pergunta em andamento. ``pipeline.responder`` abre a sessão e todo
+# registro gravado dentro dela herda o id, sem passar ``session_id`` por cada
+# módulo. ContextVar: requisições simultâneas da API não se misturam.
+_sessao_atual: ContextVar[str | None] = ContextVar("sessao_atual", default=None)
+
+
+@contextmanager
+def sessao(session_id: str | None) -> Iterator[None]:
+    """Marca com ``session_id`` os registros gravados dentro do bloco."""
+    token = _sessao_atual.set(session_id)
+    try:
+        yield
+    finally:
+        _sessao_atual.reset(token)
+
+
+def sessao_atual() -> str | None:
+    """``session_id`` da pergunta em andamento, ou ``None`` fora de uma sessão."""
+    return _sessao_atual.get()
+
+
 def token_usage_from_response(response: Any) -> TokenUsage:
     """Extrai tokens de ``response.usage`` ou retorna uma contagem zerada."""
     usage = getattr(response, "usage", None)
@@ -124,6 +152,8 @@ class LogRecord:
     tokens: TokenUsage = field(default_factory=TokenUsage)
     modelo: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
+    # Liga as perguntas da mesma conversa; vem de ``sessao()`` quando omitido.
+    session_id: str | None = field(default_factory=sessao_atual)
 
     def to_dict(self) -> dict[str, Any]:
         """Converte o registro para um dicionário pronto para serialização.
@@ -141,15 +171,9 @@ class LogRecord:
 
 def _mascarar_textos(valor: Any) -> Any:
     """Mascara cada texto de ``valor``, percorrendo dicionários e listas."""
-    from src.sensitivity import mascarar
+    from src.sensitivity import mascarar_valores
 
-    if isinstance(valor, str):
-        return mascarar(valor)[0]
-    if isinstance(valor, Mapping):
-        return {chave: _mascarar_textos(item) for chave, item in valor.items()}
-    if isinstance(valor, (list, tuple)):
-        return [_mascarar_textos(item) for item in valor]
-    return valor
+    return mascarar_valores(valor)
 
 
 class PipelineLogger:
@@ -328,10 +352,12 @@ def registrar(
     modelo: str | None = None,
     extra: dict[str, Any] | None = None,
     logger: PipelineLogger | None = None,
+    session_id: str | None = None,
 ) -> Path:
     """Grava um evento com ``status`` livre (ex.: ``bloqueado_guardrail_previo``).
 
     Use quando o status não é só ok/erro — caso em que ``span`` não serve.
+    ``session_id`` omitido vem da sessão aberta com ``sessao()``.
     """
     return (logger or default_logger).write(
         LogRecord(
@@ -346,6 +372,7 @@ def registrar(
             tokens=tokens or TokenUsage(),
             modelo=modelo,
             extra=dict(extra or {}),
+            session_id=session_id or sessao_atual(),
         )
     )
 

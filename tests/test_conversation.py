@@ -46,7 +46,7 @@ def test_sensitive_requests_prefixed_with_greeting_remain_blocked(query, reason,
 def test_api_greeting_has_normal_response_query_id_and_history(tmp_path, monkeypatch):
     store = HistoricoStore(tmp_path / "history.sqlite")
     monkeypatch.setattr(api, "historico", store)
-    client = TestClient(api.app)
+    client = TestClient(api.app, headers={"X-API-Key": "chave-de-teste"})
     response = client.post("/api/v1/query", json={"query": "Olá"})
     assert response.status_code == 200
     body = response.json()

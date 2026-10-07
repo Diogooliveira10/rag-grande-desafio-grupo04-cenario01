@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Optional, Sequence
 
-from src.obs import Stage, new_query_id, new_run_id, registrar
+from src.obs import Stage, new_query_id, new_run_id, registrar, sessao
 from src.conversation import resposta_conversacional
 from src.generate import ClienteLLM, gerar_resposta
 from src.query_analysis import analisar_query, filtros_para_retrieve
@@ -80,6 +80,7 @@ def responder(
     run_id: Optional[str] = None,
     query_id: Optional[str] = None,
     escopos: Optional[Sequence[str]] = ESCOPOS_CONSULTADOS,
+    session_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """Roda query_analysis + roteamento + recuperação híbrida + geração para uma pergunta.
 
@@ -110,9 +111,28 @@ def responder(
     Passe ``query_id`` quando o chamador (ex.: ``app/api.py``, para o
     histórico em ``src/history_store.py``) precisa saber o id *antes* da
     resposta pronta; por padrão um novo id é gerado aqui.
+
+    ``session_id`` liga as perguntas da mesma conversa: todo registro desta
+    pergunta no log leva o id (``obs.sessao``), e ``src/trace.py`` monta com
+    ele o caminho da conversa inteira. Sem ``session_id`` os registros ficam
+    com ``session_id: null``.
     """
-    run_id = run_id or new_run_id()
-    query_id = query_id or new_query_id()
+    with sessao(session_id):
+        return _responder(query, top_k=top_k, reranker=reranker, cliente=cliente,
+                          run_id=run_id or new_run_id(), query_id=query_id or new_query_id(),
+                          escopos=escopos)
+
+
+def _responder(
+    query: str,
+    *,
+    top_k: int,
+    reranker: Optional[RerankFn],
+    cliente: Optional[ClienteLLM],
+    run_id: str,
+    query_id: str,
+    escopos: Optional[Sequence[str]],
+) -> dict[str, Any]:
 
     conversa = resposta_conversacional(query, run_id=run_id, query_id=query_id)
     if conversa is not None:

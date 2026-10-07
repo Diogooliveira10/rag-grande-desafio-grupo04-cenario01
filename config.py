@@ -74,3 +74,9 @@ INDEX_DIR = ROOT_DIR / "index"
 # data/structured/; preenchido = Postgres (ex.: Neon). Nunca versionar o valor.
 DATABASE_URL = _env("DATABASE_URL", "")
 LOGS_DIR = ROOT_DIR / "logs"
+# API HTTP (app/api.py): chave exigida no header X-API-Key pelos endpoints que
+# expõem perguntas de outros usuários (histórico e trace). Vazia = esses
+# endpoints ficam fechados. Nunca versionar o valor.
+RAG_API_KEY = _env("RAG_API_KEY", "")
+# Dias que o histórico (src/history_store.py) guarda cada consulta; 0 = sem expurgo.
+HISTORY_RETENTION_DAYS = int(_env("HISTORY_RETENTION_DAYS", "30"))

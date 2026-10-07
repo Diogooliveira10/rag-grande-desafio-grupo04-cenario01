@@ -12,8 +12,10 @@ Os tipos correspondentes do frontend ficam em `src/types/api.ts` no repositório
 | Método | Endpoint | Entrada | Resposta |
 |---|---|---|---|
 | GET | `/health` | — | `{ "status": "ok" }` |
-| POST | `/api/v1/query` | `{ "query": "...", "top_k": 5 }` | `QueryResponse` |
-| GET | `/api/v1/history` | `limit` (1–100) | `HistoricoItem[]` |
+| POST | `/api/v1/query` | `{ "query": "...", "top_k": 5, "session_id": "s_..." }` | `QueryResponse` |
+| GET | `/api/v1/history` (chave) | `limit` (1–100), `session_id` | `HistoricoItem[]` |
+| GET | `/api/v1/trace/{query_id}` (chave) | — | `TraceResponse` |
+| GET | `/api/v1/sessions/{session_id}/trace` (chave) | — | `SessaoTraceResponse` |
 | POST | `/api/v1/feedback` | `query_id`, `avaliacao`, `comentario` | `{ "status": "recebido" }` |
 | GET | `/api/v1/explore/contratacoes` | `busca`, `orgao`, `limit`, `offset` | `ContratacaoRecord[]` |
 | GET | `/api/v1/explore/documentos` | `busca`, `tipo`, `limit`, `offset` | `DocumentoRecord[]` |
@@ -34,8 +36,9 @@ sintéticas. Totais incompletos são `null`, não zero.
 
 ## Chat e conversas comuns
 
-`QueryResponse` mantém: `query_id`, `query`, `answer`, `bases_consultadas`,
-`sources_used`, `confidence_level`, `is_refusal` e `refusal_reason`.
+`QueryResponse` mantém: `query_id`, `session_id`, `query`, `answer`,
+`bases_consultadas`, `sources_used`, `confidence_level`, `is_refusal` e
+`refusal_reason`.
 
 - Saudações, agradecimentos, despedidas e ajuda de uso recebem resposta normal,
   sem acervo/LLM quando reconhecidos diretamente.
@@ -51,6 +54,42 @@ sintéticas. Totais incompletos são `null`, não zero.
   intenção volta ao pipeline RAG, sem inventar resposta factual.
 - CPF, telefone e e-mail pessoal são mascarados antes da interpretação por
   modelo e na resposta conversacional.
+
+## Rastreabilidade (sessão e trace)
+
+- `session_id` liga as perguntas de uma mesma conversa. Na primeira pergunta o
+  frontend não envia o campo; a API cria um (`s_` + 12 caracteres) e o devolve
+  no `QueryResponse`. Nas perguntas seguintes o frontend reenvia esse valor.
+  Aceita só letras, dígitos, `_` e `-` (até 64); outro formato recebe `422`.
+- `GET /api/v1/trace/{query_id}`: o caminho de uma pergunta, etapa por etapa
+  (`etapas[]` com `stage`, `base` = `"sql"`, `"vetorial"` ou `null`, `input`,
+  `output`, `latencia_ms`, `tokens` e `detalhes`: trechos com score, SQL e
+  linhas devolvidas, prompt e resposta do LLM). `resumo` diz se a pergunta
+  consultou a base SQL (`consultou_sql`) e a vetorial (`consultou_vetorial`),
+  quantas evidências vieram de cada uma e quais fontes foram citadas.
+- `GET /api/v1/sessions/{session_id}/trace`: a conversa inteira, com as
+  perguntas em ordem (`perguntas[]` com `query_id`, `pergunta`, `resumo` e os
+  nomes das etapas) e quantas delas usaram SQL e busca vetorial. O detalhe de
+  cada pergunta vem do trace por `query_id`.
+- Os dois respondem `404` quando o id não está no log. Dados pessoais (CPF,
+  telefone, e-mail) chegam mascarados, como no log.
+
+## Proteção do histórico e do trace
+
+As rotas marcadas com (chave) mostram perguntas de todos os usuários e exigem o
+header `X-API-Key` igual à variável `RAG_API_KEY` do `.env` do servidor.
+
+- Sem o header ou com valor errado: `401`.
+- Servidor sem `RAG_API_KEY` configurada: `403` (as rotas ficam fechadas).
+- `POST /api/v1/query` e `POST /api/v1/feedback` não pedem chave.
+- O CORS libera o header `X-API-Key` para as origens permitidas.
+- A chave é de quem opera a demo, não do usuário final: um site público que
+  embute a chave no JavaScript a entrega a qualquer visitante. Na demo, a tela
+  de trace pede a chave a quem opera ou roda só no ambiente local.
+
+O histórico grava pergunta, resposta e comentário do feedback já mascarados
+(CPF, telefone, e-mail pessoal) e apaga consultas com mais de
+`HISTORY_RETENTION_DAYS` dias (padrão 30; `0` desliga o expurgo).
 
 ## Suplemento sintético e segurança
 

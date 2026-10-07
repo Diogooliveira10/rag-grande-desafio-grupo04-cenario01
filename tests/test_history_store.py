@@ -90,3 +90,91 @@ def test_registrar_consulta_e_idempotente_para_o_mesmo_query_id(store):
 
     assert store.obter_historico() == [store.obter_consulta("q_1")]
     assert store.obter_consulta("q_1")["resposta"]["answer"] == "Atualizada"
+
+
+def test_historico_filtra_por_sessao(store):
+    for query_id, sessao in [("q_1", "s_a"), ("q_2", "s_b"), ("q_3", "s_a")]:
+        store.registrar_consulta(query_id=query_id, run_id="r", query="p", top_k=5,
+                                 resposta=_resposta(), session_id=sessao)
+
+    assert [c["query_id"] for c in store.obter_historico(session_id="s_a")] == ["q_3", "q_1"]
+    assert store.obter_consulta("q_2")["session_id"] == "s_b"
+    assert len(store.obter_historico()) == 3
+
+
+def test_historico_antigo_sem_coluna_session_id_e_migrado(tmp_path):
+    import json
+    import sqlite3
+
+    db = tmp_path / "historico.sqlite"
+    with sqlite3.connect(db) as conexao:
+        conexao.execute(
+            "CREATE TABLE consultas (query_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, ts TEXT NOT NULL, "
+            "query TEXT NOT NULL, top_k INTEGER NOT NULL, resposta_json TEXT NOT NULL, "
+            "confidence_level TEXT, is_refusal INTEGER NOT NULL)"
+        )
+        conexao.execute("INSERT INTO consultas VALUES ('q_velha', 'r', '2026-10-01T00:00:00+00:00', 'p', 5, ?, "
+                        "'alta', 0)", (json.dumps(_resposta()),))
+    conexao.close()
+    store = HistoricoStore(db_path=db, retencao_dias=0)
+
+    store.registrar_consulta(query_id="q_nova", run_id="r", query="p", top_k=5,
+                             resposta=_resposta(), session_id="s_a")
+
+    assert store.obter_consulta("q_velha")["session_id"] is None
+    assert store.obter_consulta("q_nova")["session_id"] == "s_a"
+
+
+def test_historico_grava_pergunta_resposta_e_comentario_mascarados(store):
+    store.registrar_consulta(
+        query_id="q_1", run_id="r", query="Meu CPF é 123.456.789-09, tel (21) 99999-8888", top_k=5,
+        resposta=_resposta(query="Meu CPF é 123.456.789-09", answer="Contato: joao@gmail.com"),
+    )
+    store.registrar_feedback(query_id="q_1", avaliacao="negativo", comentario="CPF 123.456.789-09")
+
+    consulta = store.obter_consulta("q_1")
+
+    assert consulta["query"] == "Meu CPF é [CPF omitido], tel [telefone omitido]"
+    assert consulta["resposta"]["query"] == "Meu CPF é [CPF omitido]"
+    assert consulta["resposta"]["answer"] == "Contato: [e-mail omitido]"
+    assert consulta["resposta"]["sources_used"] == _resposta()["sources_used"]
+    assert consulta["feedback"][0]["comentario"] == "CPF [CPF omitido]"
+
+
+def _consulta_com_data(db, query_id, ts):
+    import json
+    import sqlite3
+
+    with sqlite3.connect(db) as conexao:
+        conexao.execute("INSERT INTO consultas (query_id, run_id, ts, query, top_k, resposta_json, is_refusal) "
+                        "VALUES (?, 'r', ?, 'p', 5, ?, 0)", (query_id, ts, json.dumps(_resposta())))
+        conexao.execute("INSERT INTO feedback (query_id, ts, avaliacao) VALUES (?, ?, 'positivo')", (query_id, ts))
+    conexao.close()
+
+
+def test_nova_consulta_expurga_as_que_passaram_da_retencao(tmp_path):
+    from datetime import datetime, timedelta, timezone
+
+    store = HistoricoStore(db_path=tmp_path / "historico.sqlite", retencao_dias=30)
+    store.obter_historico()  # cria o schema
+    agora = datetime.now(timezone.utc)
+    _consulta_com_data(store.db_path, "q_velha", (agora - timedelta(days=31)).isoformat(timespec="seconds"))
+    _consulta_com_data(store.db_path, "q_recente", (agora - timedelta(days=29)).isoformat(timespec="seconds"))
+
+    store.registrar_consulta(query_id="q_nova", run_id="r", query="p", top_k=5, resposta=_resposta())
+
+    assert {c["query_id"] for c in store.obter_historico()} == {"q_recente", "q_nova"}
+    import sqlite3
+    with sqlite3.connect(store.db_path) as conexao:
+        assert conexao.execute("SELECT COUNT(*) FROM feedback WHERE query_id = 'q_velha'").fetchone()[0] == 0
+    conexao.close()
+
+
+def test_retencao_zero_nao_expurga(tmp_path):
+    store = HistoricoStore(db_path=tmp_path / "historico.sqlite", retencao_dias=0)
+    store.obter_historico()
+    _consulta_com_data(store.db_path, "q_antiga", "2020-01-01T00:00:00+00:00")
+
+    store.registrar_consulta(query_id="q_nova", run_id="r", query="p", top_k=5, resposta=_resposta())
+
+    assert {c["query_id"] for c in store.obter_historico()} == {"q_antiga", "q_nova"}

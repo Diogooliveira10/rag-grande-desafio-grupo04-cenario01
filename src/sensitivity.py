@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from collections.abc import Mapping
 
 from src.schema import Chunk, Sensibilidade
 
@@ -97,6 +98,21 @@ def mascarar(texto: str) -> tuple[str, dict[str, int]]:
     return texto, dict(contagem)
 
 
+def mascarar_valores(valor):
+    """Aplica ``mascarar`` a cada texto de ``valor``, percorrendo dicionários e listas.
+
+    Usado no que fica gravado (log de ``src/obs.py`` e histórico de
+    ``src/history_store.py``); números e outros tipos passam intactos.
+    """
+    if isinstance(valor, str):
+        return mascarar(valor)[0]
+    if isinstance(valor, Mapping):
+        return {chave: mascarar_valores(item) for chave, item in valor.items()}
+    if isinstance(valor, (list, tuple)):
+        return [mascarar_valores(item) for item in valor]
+    return valor
+
+
 def filtrar_chunks_permitidos(chunks: list[Chunk]) -> tuple[list[Chunk], int]:
     """Descarta chunks ``restrito``; devolve (permitidos, quantidade descartada)."""
     permitidos = [c for c in chunks if c.metadata.sensitivity != Sensibilidade.RESTRITO]
@@ -122,4 +138,5 @@ __all__ = [
     "filtrar_chunks_permitidos",
     "mascarar",
     "mascarar_chunks",
+    "mascarar_valores",
 ]

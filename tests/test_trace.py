@@ -19,7 +19,7 @@ from src.schema import Chunk, ChunkMetadata, Natureza
 from src.trace import montar_trace
 
 
-client = TestClient(app)
+client = TestClient(app, headers={"X-API-Key": "chave-de-teste"})
 
 
 def _registros():
@@ -231,3 +231,114 @@ def test_endpoint_trace_de_query_id_desconhecido_e_404():
     response = client.get("/api/v1/trace/q_inexistente")
 
     assert response.status_code == 404
+
+
+# --------------------------------------------------------------------------
+# session_id: o caminho da conversa inteira
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def api_com_pipeline(pipeline_com_indice, monkeypatch, tmp_path):
+    """API com o pipeline de verdade (índice mínimo, LLM falso) e histórico temporário."""
+    from functools import partial
+
+    from app import api as api_module
+    from src.history_store import HistoricoStore
+
+    monkeypatch.setattr(api_module.pipeline, "responder",
+                        partial(pipeline.responder, cliente=lambda m: _resposta_sdk()))
+    monkeypatch.setattr(api_module, "historico", HistoricoStore(db_path=tmp_path / "historico.sqlite"))
+
+
+def test_responder_grava_session_id_em_todas_as_etapas(pipeline_com_indice):
+    pipeline.responder("Quais contratos de ambulancias foram publicados?",
+                       cliente=lambda m: _resposta_sdk(), session_id="s_conversa")
+
+    registros = _registros()
+    assert len(registros) == 8
+    assert {r["session_id"] for r in registros} == {"s_conversa"}
+
+
+def test_responder_sem_sessao_grava_session_id_nulo_e_nao_vaza_para_a_proxima(pipeline_com_indice):
+    pipeline.responder("Quais contratos de ambulancias foram publicados?",
+                       cliente=lambda m: _resposta_sdk(), session_id="s_a")
+    pipeline.responder("Quais contratos de ambulancias foram publicados?",
+                       cliente=lambda m: _resposta_sdk(), query_id="q_sem_sessao")
+
+    sem_sessao = [r for r in _registros() if r["query_id"] == "q_sem_sessao"]
+    assert sem_sessao and {r["session_id"] for r in sem_sessao} == {None}
+    assert obs.sessao_atual() is None
+
+
+def test_trace_da_pergunta_traz_o_session_id(pipeline_com_indice):
+    pipeline.responder("Quais contratos de ambulancias foram publicados?",
+                       cliente=lambda m: _resposta_sdk(), query_id="q_1", session_id="s_conversa")
+
+    assert montar_trace("q_1")["session_id"] == "s_conversa"
+
+
+def test_trace_da_sessao_lista_as_perguntas_em_ordem(pipeline_com_indice, monkeypatch):
+    from src.trace import montar_trace_sessao
+
+    responder = lambda pergunta, query_id, sessao: pipeline.responder(  # noqa: E731
+        pergunta, cliente=lambda m: _resposta_sdk(), query_id=query_id, session_id=sessao)
+    responder("Quais contratos de ambulancias foram publicados?", "q_1", "s_conversa")
+    responder("Esse contrato de ambulâncias foi fraude?", "q_outra", "s_outra")
+    monkeypatch.setattr(pipeline, "consultar_estruturado", lambda *a, **kw: [_chunk_sql()])
+    responder("Quantos contratos de ambulancias foram publicados?", "q_2", "s_conversa")
+
+    trace = montar_trace_sessao("s_conversa")
+
+    assert trace["total_perguntas"] == 2
+    assert [p["query_id"] for p in trace["perguntas"]] == ["q_1", "q_2"]
+    assert [p["ordem"] for p in trace["perguntas"]] == [1, 2]
+    assert trace["perguntas"][0]["pergunta"] == "Quais contratos de ambulancias foram publicados?"
+    assert trace["perguntas"][0]["etapas"][-1] == "resumo_consulta"
+    assert [p["resumo"]["consultou_sql"] for p in trace["perguntas"]] == [False, True]
+    assert trace["consultou_sql"] == 1
+    assert trace["consultou_vetorial"] == 2
+    assert montar_trace_sessao("s_inexistente") is None
+
+
+def test_api_devolve_session_id_e_reaproveita_o_enviado(api_com_pipeline):
+    primeira = client.post("/api/v1/query", json={"query": "Quais contratos de ambulancias foram publicados?"})
+    session_id = primeira.json()["session_id"]
+    segunda = client.post("/api/v1/query", json={
+        "query": "Quantos contratos de ambulancias foram publicados?", "session_id": session_id,
+    })
+
+    assert session_id.startswith("s_")
+    assert segunda.json()["session_id"] == session_id
+
+    trace = client.get(f"/api/v1/sessions/{session_id}/trace")
+    assert trace.status_code == 200
+    assert [p["query_id"] for p in trace.json()["perguntas"]] == [
+        primeira.json()["query_id"], segunda.json()["query_id"],
+    ]
+    assert client.get(f"/api/v1/trace/{segunda.json()['query_id']}").json()["session_id"] == session_id
+
+    historico = client.get("/api/v1/history", params={"session_id": session_id}).json()
+    assert [item["session_id"] for item in historico] == [session_id, session_id]
+
+
+def test_feedback_entra_no_log_com_a_sessao_da_pergunta(api_com_pipeline):
+    resposta = client.post("/api/v1/query", json={
+        "query": "Quais contratos de ambulancias foram publicados?", "session_id": "s_feedback",
+    }).json()
+
+    client.post("/api/v1/feedback", json={"query_id": resposta["query_id"], "avaliacao": "positivo"})
+
+    feedback = next(r for r in _registros() if r["stage"] == "feedback")
+    assert feedback["session_id"] == "s_feedback"
+
+
+def test_endpoint_trace_da_sessao_desconhecida_e_404():
+    assert client.get("/api/v1/sessions/s_inexistente/trace").status_code == 404
+
+
+@pytest.mark.parametrize("session_id", ["com espaco", "a/b", "x" * 65])
+def test_session_id_invalido_e_recusado(session_id):
+    response = client.post("/api/v1/query", json={"query": "pergunta", "session_id": session_id})
+
+    assert response.status_code == 422

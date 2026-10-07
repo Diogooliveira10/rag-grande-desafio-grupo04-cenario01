@@ -6,7 +6,11 @@ linhas em ordem e diz, em cada etapa, se ela usou a base SQL ou a base
 vetorial, com input, output e os detalhes que a etapa registrou (trechos com
 score, SQL executado e linhas devolvidas, prompt e resposta do LLM).
 
-Serve o ``GET /api/v1/trace/{query_id}`` de ``app/api.py``.
+Os registros também levam o ``session_id`` da conversa: ``montar_trace_sessao``
+lista, em ordem, as perguntas de uma sessão com o resumo de cada uma.
+
+Serve o ``GET /api/v1/trace/{query_id}`` e o
+``GET /api/v1/sessions/{session_id}/trace`` de ``app/api.py``.
 """
 
 from __future__ import annotations
@@ -30,19 +34,20 @@ _BASE_DA_ETAPA = {
 _ETAPAS_VETORIAIS = {stage for stage, base in _BASE_DA_ETAPA.items() if base == "vetorial"}
 
 
-def _registros_da_consulta(query_id: str, logs_dir: Path) -> list[dict[str, Any]]:
+def _registros(campo: str, valor: str, logs_dir: Path) -> list[dict[str, Any]]:
+    """Linhas do log com ``registro[campo] == valor``, em ordem de horário."""
     registros: list[dict[str, Any]] = []
     for arquivo in sorted(logs_dir.glob("pipeline-*.jsonl")):
         with arquivo.open(encoding="utf-8") as linhas:
             for linha in linhas:
                 # Filtro barato antes do json.loads: o log cresce a cada pergunta.
-                if query_id not in linha:
+                if valor not in linha:
                     continue
                 try:
                     registro = json.loads(linha)
                 except json.JSONDecodeError:
                     continue
-                if registro.get("query_id") == query_id:
+                if registro.get(campo) == valor:
                     registros.append(registro)
     # Ordem estável por horário; empates mantêm a ordem de gravação.
     return sorted(registros, key=lambda registro: str(registro.get("ts", "")))
@@ -60,9 +65,13 @@ def _resumo_derivado(etapas: list[dict[str, Any]]) -> dict[str, Any]:
 
 def montar_trace(query_id: str, logs_dir: Optional[Path] = None) -> Optional[dict[str, Any]]:
     """Caminho da pergunta ``query_id``, ou ``None`` se ela não está no log."""
-    registros = _registros_da_consulta(query_id, Path(logs_dir or default_logger.logs_dir))
+    registros = _registros("query_id", query_id, Path(logs_dir or default_logger.logs_dir))
     if not registros:
         return None
+    return _trace_dos_registros(query_id, registros)
+
+
+def _trace_dos_registros(query_id: str, registros: list[dict[str, Any]]) -> dict[str, Any]:
 
     etapas = [
         {
@@ -88,6 +97,7 @@ def montar_trace(query_id: str, logs_dir: Optional[Path] = None) -> Optional[dic
     pergunta = next((etapa["input"] for etapa in etapas if isinstance(etapa["input"], str)), None)
     return {
         "query_id": query_id,
+        "session_id": next((r["session_id"] for r in registros if r.get("session_id")), None),
         "run_ids": list(dict.fromkeys(str(registro.get("run_id")) for registro in registros)),
         "pergunta": pergunta,
         "inicio": etapas[0]["ts"],
@@ -98,4 +108,38 @@ def montar_trace(query_id: str, logs_dir: Optional[Path] = None) -> Optional[dic
     }
 
 
-__all__ = ["montar_trace"]
+def montar_trace_sessao(session_id: str, logs_dir: Optional[Path] = None) -> Optional[dict[str, Any]]:
+    """Perguntas da sessão em ordem, com o resumo de cada uma, ou ``None``.
+
+    Os detalhes de cada etapa ficam no trace da pergunta (``montar_trace``);
+    aqui vai só o caminho da conversa: o que foi perguntado, em que ordem, e
+    se cada pergunta consultou a base SQL e a vetorial. O feedback dado
+    depois da resposta (outro ``run``) fica junto da pergunta a que se refere.
+    """
+    registros = _registros("session_id", session_id, Path(logs_dir or default_logger.logs_dir))
+    if not registros:
+        return None
+    por_pergunta: dict[str, list[dict[str, Any]]] = {}
+    for registro in registros:
+        por_pergunta.setdefault(str(registro.get("query_id")), []).append(registro)
+    perguntas = []
+    for query_id, da_pergunta in por_pergunta.items():
+        trace = _trace_dos_registros(query_id, da_pergunta)
+        perguntas.append({
+            "ordem": len(perguntas) + 1,
+            **{chave: trace[chave] for chave in
+               ("query_id", "pergunta", "inicio", "fim", "latencia_total_ms", "resumo")},
+            "etapas": [etapa["stage"] for etapa in trace["etapas"]],
+        })
+    return {
+        "session_id": session_id,
+        "inicio": perguntas[0]["inicio"],
+        "fim": perguntas[-1]["fim"],
+        "total_perguntas": len(perguntas),
+        "consultou_sql": sum(1 for p in perguntas if p["resumo"].get("consultou_sql")),
+        "consultou_vetorial": sum(1 for p in perguntas if p["resumo"].get("consultou_vetorial")),
+        "perguntas": perguntas,
+    }
+
+
+__all__ = ["montar_trace", "montar_trace_sessao"]

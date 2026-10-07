@@ -77,10 +77,10 @@ Já estão implementados:
 - guardrails para perguntas fora do escopo e ausência de evidência, com motivo de recusa inferido;
 - política de sensibilidade e mascaramento de dados pessoais;
 - validação da resposta gerada;
-- observabilidade estruturada por `run_id`, `query_id`, stage, latência e uso de tokens;
+- observabilidade estruturada por `run_id`, `query_id`, `session_id`, stage, latência e uso de tokens, com o resumo SQL/vetorial de cada pergunta (`resumo_consulta`);
 - coleta e versionamento do corpus por manifesto (atualmente na versão v6);
 - preparação de documentos, OCR, embeddings e indexação;
-- API FastAPI com `GET /health`, `POST /api/v1/query`, `POST /api/v1/feedback` e `GET /api/v1/history`;
+- API FastAPI com `GET /health`, `POST /api/v1/query`, `POST /api/v1/feedback`, `GET /api/v1/history`, `GET /api/v1/trace/{query_id}` e `GET /api/v1/sessions/{session_id}/trace` (caminho da pergunta e da conversa, [src/trace.py](src/trace.py));
 - feedback do usuário e histórico de consultas persistidos em SQLite local ([src/history_store.py](src/history_store.py));
 - CORS configurado para desenvolvimento local e para a origem `https://etuarda.github.io`;
 - demonstração do frontend publicada em [https://etuarda.github.io/frontendRAG/](https://etuarda.github.io/frontendRAG/), em repositório separado, hoje consumindo só `GET /health` e `POST /api/v1/query`, ainda sem telas para `feedback`/`history` e sem um backend público em HTTPS para o site apontar;
@@ -134,7 +134,7 @@ As tarefas são distribuídas entre os integrantes a cada encontro conforme as n
 
 - Qualidade do corpus v6 (OCR das atas, indicadores do PCA, contratos sem modalidade).
 - Gabarito de conteúdo do golden set.
-- Integração do frontend com `feedback`/`history` da API.
+- Integração do frontend com `feedback`/`history` e com a tela de rastreabilidade (`session_id` e trace).
 - Preparação para o Demo Day.
 
 ### Pendências em aberto
@@ -144,8 +144,8 @@ As tarefas são distribuídas entre os integrantes a cada encontro conforme as n
 - Reescrever as perguntas do golden set que dependem da anterior ("nesses contratos") e incluir casos da base de atas e de identificador (CNPJ, número de controle).
 - Rodar o golden set completo de novo com o pipeline atual e registrar o resultado final.
 - Corrigir a geração: confiança alta junto de "nada encontrado" (P2.1) e resposta sem fonte (F1).
-- Fazer o frontend (repositório separado) consumir `query_id`/`feedback`/`history`, hoje sem cliente; falta também um backend público em HTTPS para o site apontar.
-- Decidir se o histórico de `src/history_store.py` precisa de um mecanismo de expurgo/anonimização (hoje ele não expira e guarda a pergunta em texto puro) e se `GET /api/v1/history` precisa de autenticação antes de qualquer deploy público (a API hoje não tem autenticação em nenhum endpoint).
+- Fazer o frontend (repositório separado) consumir `query_id`/`session_id`/`feedback`/`history` e mostrar o trace ao lado da resposta, hoje sem cliente; falta também um backend público em HTTPS para o site apontar.
+- Histórico e trace já exigem `X-API-Key` (`RAG_API_KEY`), e o histórico grava textos mascarados com expurgo após `HISTORY_RETENTION_DAYS` dias. Falta decidir, antes de um deploy público, como a tela de trace obtém a chave sem embuti-la no site, e se o log em `logs/` (também mascarado) precisa de expurgo.
 - Avaliar respostas e guardrails sobre o suplemento `emails_sinteticos`, recebido e integrado em 2026-10-05: 25 conversas, 20 públicas e 5 restritas ([proveniência e reconstrução](docs/emails_sinteticos.md)).
 - Revisar o casamento de CNPJ sem pontuação nos filtros/consultas.
 - Evitar vazamento de identificadores internos e da mensagem "Busca ampliada" nas respostas ao usuário final.

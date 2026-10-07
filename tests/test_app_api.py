@@ -6,7 +6,7 @@ from app.api import app
 from src.history_store import HistoricoStore
 
 
-client = TestClient(app)
+client = TestClient(app, headers={"X-API-Key": "chave-de-teste"})
 
 
 @pytest.fixture(autouse=True)
@@ -35,7 +35,7 @@ def _response(query: str) -> dict:
     }
 
 
-def _fake_responder(query: str, *, top_k: int, run_id=None, query_id=None):
+def _fake_responder(query: str, *, top_k: int, run_id=None, query_id=None, session_id=None):
     return _response(query)
 
 
@@ -49,8 +49,8 @@ def test_health() -> None:
 def test_query_delega_ao_pipeline(monkeypatch) -> None:
     calls = []
 
-    def fake_responder(query: str, *, top_k: int, run_id=None, query_id=None):
-        calls.append((query, top_k))
+    def fake_responder(query: str, *, top_k: int, run_id=None, query_id=None, session_id=None):
+        calls.append((query, top_k, session_id))
         return _response(query)
 
     monkeypatch.setattr(api_module.pipeline, "responder", fake_responder)
@@ -62,9 +62,11 @@ def test_query_delega_ao_pipeline(monkeypatch) -> None:
     assert response.status_code == 200
     body = response.json()
     query_id = body.pop("query_id")
+    session_id = body.pop("session_id")
     assert query_id.startswith("q_")
+    assert session_id.startswith("s_")
     assert body == _response("Qual e a norma?")
-    assert calls == [("Qual e a norma?", 8)]
+    assert calls == [("Qual e a norma?", 8, session_id)]
 
 
 def test_query_grava_no_historico(monkeypatch, historico) -> None:
@@ -341,3 +343,51 @@ def test_explore_nao_expoe_erro_interno(monkeypatch) -> None:
 
     assert response.status_code == 500
     assert response.json() == {"detail": "Não foi possível consultar os dados do projeto."}
+
+
+# --------------------------------------------------------------------------
+# Proteção: histórico e trace só com X-API-Key
+# --------------------------------------------------------------------------
+
+_PROTEGIDOS = ["/api/v1/history", "/api/v1/trace/q_1", "/api/v1/sessions/s_1/trace"]
+
+
+@pytest.mark.parametrize("url", _PROTEGIDOS)
+def test_endpoint_protegido_sem_chave_e_401(url):
+    assert TestClient(app).get(url).status_code == 401
+
+
+@pytest.mark.parametrize("url", _PROTEGIDOS)
+def test_endpoint_protegido_com_chave_errada_e_401(url):
+    assert TestClient(app, headers={"X-API-Key": "chave-errada"}).get(url).status_code == 401
+
+
+@pytest.mark.parametrize("url", _PROTEGIDOS)
+def test_endpoint_protegido_fica_fechado_sem_rag_api_key_no_servidor(url, monkeypatch):
+    monkeypatch.setattr(api_module.config, "RAG_API_KEY", "")
+
+    response = client.get(url)
+
+    assert response.status_code == 403
+    assert "RAG_API_KEY" in response.json()["detail"]
+
+
+def test_query_e_feedback_continuam_abertos_sem_chave(monkeypatch):
+    monkeypatch.setattr(api_module.pipeline, "responder", _fake_responder)
+    sem_chave = TestClient(app)
+
+    query_id = sem_chave.post("/api/v1/query", json={"query": "Qual e a norma?"}).json()["query_id"]
+    feedback = sem_chave.post("/api/v1/feedback", json={"query_id": query_id, "avaliacao": "positivo"})
+
+    assert feedback.status_code == 200
+
+
+def test_cors_libera_o_header_da_chave():
+    response = TestClient(app).options("/api/v1/history", headers={
+        "Origin": "http://localhost:5173",
+        "Access-Control-Request-Method": "GET",
+        "Access-Control-Request-Headers": "X-API-Key",
+    })
+
+    assert response.status_code == 200
+    assert "x-api-key" in response.headers["access-control-allow-headers"].lower()

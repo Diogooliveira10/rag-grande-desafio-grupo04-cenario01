@@ -102,7 +102,7 @@ flowchart TD
     S --> G
 ```
 
-Estágios (mesmos nomes usados no campo `stage` do log estruturado): `interacao`, `query_analysis`, `roteamento`, `retrieval_denso`, `retrieval_bm25`, `fusao_rrf`, `rerank`, `consulta_sql`, `geracao`, `validacao`, `feedback`. Detalhes de decisão e divisão de responsabilidades em [ARQUITETURA.md](ARQUITETURA.md).
+Estágios (mesmos nomes usados no campo `stage` do log estruturado): `interacao`, `query_analysis`, `roteamento`, `retrieval_denso`, `retrieval_bm25`, `fusao_rrf`, `rerank`, `consulta_sql`, `geracao`, `validacao`, `feedback` e `resumo_consulta`. Detalhes de decisão e divisão de responsabilidades em [ARQUITETURA.md](ARQUITETURA.md).
 
 **Implementado:**
 
@@ -116,11 +116,11 @@ Estágios (mesmos nomes usados no campo `stage` do log estruturado): `interacao`
 
 [src/pipeline.py](src/pipeline.py) une as etapas numa única função (`responder`).
 
-`feedback` ([src/history_store.py](src/history_store.py)): toda chamada a `POST /api/v1/query` recebe um `query_id` e é salva (pergunta + resposta completa) num SQLite local (`data/app_state/historico.sqlite`, fora do Git — diferente da base derivada de `structured_db.py`, este é estado da aplicação e não é remontado). `POST /api/v1/feedback` associa uma avaliação (`positivo`/`negativo` + comentário opcional) a um `query_id` já registrado (404 se não existir) e grava o evento no log estruturado com `stage="feedback"`. `GET /api/v1/history?limit=N` devolve as consultas mais recentes com o feedback recebido. Testes em [tests/test_history_store.py](tests/test_history_store.py) e [tests/test_app_api.py](tests/test_app_api.py).
+`feedback` ([src/history_store.py](src/history_store.py)): toda chamada a `POST /api/v1/query` recebe um `query_id` e é salva (pergunta + resposta completa) num SQLite local (`data/app_state/historico.sqlite`, fora do Git — diferente da base derivada de `structured_db.py`, este é estado da aplicação e não é remontado). `POST /api/v1/feedback` associa uma avaliação (`positivo`/`negativo` + comentário opcional) a um `query_id` já registrado (404 se não existir) e grava o evento no log estruturado com `stage="feedback"`. `GET /api/v1/history?limit=N` devolve as consultas mais recentes com o feedback recebido (`&session_id=...` restringe a uma conversa). Histórico e trace exigem o header `X-API-Key` igual a `RAG_API_KEY` do `.env` (sem a variável, ficam fechados); o histórico grava os textos mascarados e apaga consultas com mais de `HISTORY_RETENTION_DAYS` dias (padrão 30). Testes em [tests/test_history_store.py](tests/test_history_store.py) e [tests/test_app_api.py](tests/test_app_api.py).
 
 O parsing da geração aceita as variações de chave que o modelo da turma produz na prática (`sources` em vez de `sources_used`, `confidence` numérico em vez de `confidence_level`) e registra no log, em `extra.chaves_fora_do_contrato`, quando isso acontece. Toda etapa registra log estruturado via [src/obs.py](src/obs.py) (JSONL em `logs/pipeline-AAAA-MM-DD.jsonl`, com `run_id`, `stage`, latência e tokens).
 
-Uma pergunta via `responder` gera, no log, uma linha por stage — `interacao` (só quando o modelo decide se a mensagem é conversa ou consulta ao acervo; saudação e agradecimento simples são reconhecidos sem o modelo), `query_analysis`, `roteamento`, `retrieval_denso`, `retrieval_bm25`, `fusao_rrf`, `rerank` (só com reranker; traz `modelo`), `consulta_sql` (só em pergunta de conta), `geracao` e `validacao` (só quando o LLM foi chamado) — todas com o mesmo `run_id` e `query_id`. `geracao` traz `tokens` e `modelo` a partir de `response.usage` do SDK OpenAI; `retrieval_denso` traz os tokens do embedding da pergunta quando usa o embedding padrão do servidor. Etapa que falha grava `status: "erro"` com `extra.error_type`. Dados pessoais da pergunta são mascarados antes de ir para o log. Testes em [tests/test_pipeline_logs.py](tests/test_pipeline_logs.py); os testes gravam log num diretório temporário ([tests/conftest.py](tests/conftest.py)), nunca em `logs/`.
+Uma pergunta via `responder` gera, no log, uma linha por stage — `interacao` (só quando o modelo decide se a mensagem é conversa ou consulta ao acervo; saudação e agradecimento simples são reconhecidos sem o modelo), `query_analysis`, `roteamento`, `retrieval_denso`, `retrieval_bm25`, `fusao_rrf`, `rerank` (só com reranker; traz `modelo`), `consulta_sql` (só em pergunta de conta), `geracao` e `validacao` (só quando o LLM foi chamado) e, fechando a pergunta, `resumo_consulta` (se ela consultou a base SQL e a vetorial, as evidências de cada uma e as fontes citadas) — todas com o mesmo `run_id` e `query_id`, e com o `session_id` da conversa quando a pergunta chega pela API. `GET /api/v1/trace/{query_id}` devolve o caminho de uma pergunta etapa por etapa, e `GET /api/v1/sessions/{session_id}/trace`, as perguntas da conversa em ordem ([src/trace.py](src/trace.py), contrato em [docs/FRONTEND_API_CONTRACT.md](docs/FRONTEND_API_CONTRACT.md)). `geracao` traz `tokens` e `modelo` a partir de `response.usage` do SDK OpenAI; `retrieval_denso` traz os tokens do embedding da pergunta quando usa o embedding padrão do servidor. Etapa que falha grava `status: "erro"` com `extra.error_type`. Dados pessoais da pergunta são mascarados antes de ir para o log. Testes em [tests/test_pipeline_logs.py](tests/test_pipeline_logs.py); os testes gravam log num diretório temporário ([tests/conftest.py](tests/conftest.py)), nunca em `logs/`.
 
 ## Estrutura do repositório
 
@@ -142,7 +142,7 @@ Uma pergunta via `responder` gera, no log, uma linha por stage — `interacao` (
 ├── tests/                       ← testes de contrato (pytest), offline
 ├── app/
 │   ├── cli.py                   ← interface de linha de comando: rota e resposta completa do pipeline
-│   └── api.py                   ← API HTTP (FastAPI): /health, /api/v1/query, /api/v1/feedback, /api/v1/history
+│   └── api.py                   ← API HTTP (FastAPI): /health, /api/v1/query, /api/v1/feedback, /api/v1/history, /api/v1/trace
 ├── src/
 │   ├── fetch_corpus.py          ← coleta determinística e versionada do corpus
 │   ├── providers/               ← provedores declarativos de fontes (pncp.py: contratações, atas + PDFs, PCA)
@@ -172,6 +172,7 @@ Uma pergunta via `responder` gera, no log, uma linha por stage — `interacao` (
 │   ├── pipeline.py              ← une query_analysis + roteamento + recuperação + geração numa função (responder)
 │   ├── history_store.py         ← histórico de consultas e feedback do usuário (SQLite local, data/app_state/)
 │   ├── obs.py                   ← logging estruturado (JSONL) e contagem de tokens
+│   ├── trace.py                 ← caminho de uma pergunta ou de uma sessão, montado a partir do log
 │   └── schema.py                ← modelos Pydantic (chunk, roteamento, resposta, recusa)
 ├── llm_ecoa.py                  ← exemplo mínimo de geração e embedding via endpoint compartilhado
 ├── corpus_manifest.yaml         ← o que entra no corpus (fonte única de verdade)

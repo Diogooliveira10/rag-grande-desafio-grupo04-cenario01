@@ -10,29 +10,52 @@ e e' salva em ``src/history_store.py``; ``POST /api/v1/feedback`` associa uma
 avaliacao a essa consulta e ``GET /api/v1/history`` devolve o historico
 salvo. O estagio ``feedback`` ja existia reservado em ``src/obs.py``
 (Stage.FEEDBACK) mas nao estava integrado a nenhum fluxo ate agora.
+
+Protecao: historico e trace mostram perguntas de todos os usuarios, entao
+exigem o header ``X-API-Key`` igual a ``RAG_API_KEY`` do ``.env``
+(``exigir_chave``). Sem a variavel configurada, esses endpoints ficam
+fechados. ``/query`` e ``/feedback`` continuam abertos: sao o uso normal do chat.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import secrets
 from pathlib import PurePosixPath
 from typing import Any, Literal, Optional
 
-from fastapi import FastAPI, HTTPException, Path, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
+import config
 from src import pipeline
 from app import catalog
 from app.catalog_models import ContratacaoRecord, DocumentoRecord, OfficialSource, OrgaoRecord, ProjectSummary
 from src.history_store import ConsultaNaoEncontrada, default_store as historico
-from src.obs import Stage, new_query_id, new_run_id
+from src.obs import Stage, new_query_id, new_run_id, new_session_id
 from src.obs import registrar as obs_registrar
 from src.schema import RAGResponse
-from src.trace import montar_trace
+from src.trace import montar_trace, montar_trace_sessao
 
 logger = logging.getLogger(__name__)
+
+# Ids que chegam do front-end vão para o log e para a URL do trace: só letras,
+# dígitos, "_" e "-".
+_ID_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
+
+
+def exigir_chave(x_api_key: Optional[str] = Header(default=None)) -> None:
+    """Libera o endpoint só para quem envia ``X-API-Key`` igual a ``RAG_API_KEY``."""
+    chave = config.RAG_API_KEY
+    if not chave:
+        raise HTTPException(
+            status_code=403,
+            detail="Endpoint desabilitado: defina RAG_API_KEY no .env do servidor.",
+        )
+    if not x_api_key or not secrets.compare_digest(x_api_key.encode(), chave.encode()):
+        raise HTTPException(status_code=401, detail="X-API-Key ausente ou invalida.")
 
 
 def _public_rag_payload(payload: dict) -> dict:
@@ -62,6 +85,9 @@ def _cors_origins() -> list[str]:
 class QueryRequest(BaseModel):
     query: str = Field(min_length=1, max_length=4000)
     top_k: int = Field(default=5, ge=1, le=50)
+    # Conversa a que a pergunta pertence. O front-end reenvia o session_id da
+    # primeira resposta; sem ele, a API abre uma sessão nova.
+    session_id: Optional[str] = Field(default=None, pattern=_ID_PATTERN)
 
     @field_validator("query")
     @classmethod
@@ -76,10 +102,12 @@ class QueryResponse(RAGResponse):
     """``RAGResponse`` + o id que identifica esta consulta no historico.
 
     O front usa ``query_id`` para depois mandar o feedback dessa resposta
-    especifica em ``POST /api/v1/feedback``.
+    especifica em ``POST /api/v1/feedback``, e ``session_id`` para mandar as
+    próximas perguntas na mesma conversa.
     """
 
     query_id: str
+    session_id: str
 
 
 class FeedbackRequest(BaseModel):
@@ -97,6 +125,7 @@ class FeedbackEntry(BaseModel):
 class HistoricoItem(BaseModel):
     query_id: str
     run_id: str
+    session_id: Optional[str] = None
     ts: str
     query: str
     resposta: RAGResponse
@@ -120,6 +149,7 @@ class TraceEtapa(BaseModel):
 
 class TraceResponse(BaseModel):
     query_id: str
+    session_id: Optional[str] = None
     run_ids: list[str]
     pergunta: Optional[str] = None
     inicio: str
@@ -130,13 +160,36 @@ class TraceResponse(BaseModel):
     etapas: list[TraceEtapa]
 
 
+class SessaoPergunta(BaseModel):
+    ordem: int
+    query_id: str
+    pergunta: Optional[str] = None
+    inicio: str
+    fim: str
+    latencia_total_ms: int
+    resumo: dict[str, Any]
+    # Nomes das etapas, em ordem; o detalhe de cada uma está em /trace/{query_id}.
+    etapas: list[str]
+
+
+class SessaoTraceResponse(BaseModel):
+    session_id: str
+    inicio: str
+    fim: str
+    total_perguntas: int
+    # Quantas perguntas da sessão passaram pela base SQL e pela vetorial.
+    consultou_sql: int
+    consultou_vetorial: int
+    perguntas: list[SessaoPergunta]
+
+
 app = FastAPI(title="Adaptive RAG API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "X-API-Key"],
 )
 
 
@@ -149,9 +202,11 @@ def health() -> dict[str, str]:
 def query_rag(request: QueryRequest) -> QueryResponse:
     run_id = new_run_id()
     query_id = new_query_id()
+    session_id = request.session_id or new_session_id()
     try:
         result = pipeline.responder(
-            request.query, top_k=request.top_k, run_id=run_id, query_id=query_id
+            request.query, top_k=request.top_k, run_id=run_id, query_id=query_id,
+            session_id=session_id,
         )
     except Exception as exc:
         logger.exception("Falha ao executar o pipeline RAG")
@@ -161,7 +216,9 @@ def query_rag(request: QueryRequest) -> QueryResponse:
         ) from exc
 
     public_result = _public_rag_payload(result)
-    resposta = QueryResponse.model_validate({**public_result, "query_id": query_id})
+    resposta = QueryResponse.model_validate(
+        {**public_result, "query_id": query_id, "session_id": session_id}
+    )
 
     try:
         historico.registrar_consulta(
@@ -170,6 +227,7 @@ def query_rag(request: QueryRequest) -> QueryResponse:
             query=request.query,
             top_k=request.top_k,
             resposta=public_result,
+            session_id=session_id,
         )
     except Exception:
         # Historico e' um extra sobre a resposta ja calculada: uma falha ao
@@ -204,24 +262,40 @@ def enviar_feedback(request: FeedbackRequest) -> dict[str, str]:
         latencia_ms=0,
         input={"comentario": request.comentario},
         output=request.avaliacao,
+        session_id=consulta.get("session_id"),
     )
     return {"status": "recebido"}
 
 
-@app.get("/api/v1/history", response_model=list[HistoricoItem])
-def obter_historico(limit: int = Query(default=20, ge=1, le=100)) -> list[dict]:
-    items = historico.obter_historico(limit=limit)
+@app.get("/api/v1/history", response_model=list[HistoricoItem],
+         dependencies=[Depends(exigir_chave)])
+def obter_historico(
+    limit: int = Query(default=20, ge=1, le=100),
+    session_id: Optional[str] = Query(default=None, pattern=_ID_PATTERN),
+) -> list[dict]:
+    items = historico.obter_historico(limit=limit, session_id=session_id)
     for item in items:
         item["resposta"] = _public_rag_payload(item["resposta"])
     return items
 
 
-@app.get("/api/v1/trace/{query_id}", response_model=TraceResponse)
+@app.get("/api/v1/trace/{query_id}", response_model=TraceResponse,
+         dependencies=[Depends(exigir_chave)])
 def obter_trace(query_id: str = Path(min_length=1, max_length=64)) -> dict:
     """Caminho da pergunta pelo pipeline, etapa por etapa, lido do log."""
     trace = montar_trace(query_id)
     if trace is None:
         raise HTTPException(status_code=404, detail="query_id sem registro no log.")
+    return trace
+
+
+@app.get("/api/v1/sessions/{session_id}/trace", response_model=SessaoTraceResponse,
+         dependencies=[Depends(exigir_chave)])
+def obter_trace_sessao(session_id: str = Path(pattern=_ID_PATTERN)) -> dict:
+    """Caminho da conversa: as perguntas da sessão em ordem, com o resumo de cada uma."""
+    trace = montar_trace_sessao(session_id)
+    if trace is None:
+        raise HTTPException(status_code=404, detail="session_id sem registro no log.")
     return trace
 
 
