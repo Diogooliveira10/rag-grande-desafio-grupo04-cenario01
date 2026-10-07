@@ -12,7 +12,7 @@ Os tipos correspondentes do frontend ficam em `src/types/api.ts` no repositório
 | Método | Endpoint | Entrada | Resposta |
 |---|---|---|---|
 | GET | `/health` | — | `{ "status": "ok" }` |
-| POST | `/api/v1/query` | `{ "query": "...", "top_k": 5, "session_id": "s_..." }` | `QueryResponse` |
+| POST | `/api/v1/query` | `{ "query": "...", "top_k": 5, "session_id": "s_...", "historico": [{ "pergunta": "...", "resposta": "..." }] }` | `QueryResponse` |
 | GET | `/api/v1/history` (chave) | `limit` (1–100), `session_id` | `HistoricoItem[]` |
 | GET | `/api/v1/trace/{query_id}` (sessão ou chave) | — | `TraceResponse` |
 | GET | `/api/v1/sessions/{session_id}/trace` (sessão ou chave) | — | `SessaoTraceResponse` |
@@ -37,8 +37,18 @@ sintéticas. Totais incompletos são `null`, não zero.
 ## Chat e conversas comuns
 
 `QueryResponse` mantém: `query_id`, `session_id`, `query`, `answer`,
-`bases_consultadas`, `sources_used`, `confidence_level`, `is_refusal` e
-`refusal_reason`.
+`bases_consultadas`, `sources_used`, `confidence_level`, `is_refusal`,
+`refusal_reason`, `pergunta_reformulada` (`null` na maioria das respostas) e
+`avisos` (lista, quase sempre vazia).
+
+- `answer` não traz identificadores internos. Quando o modelo liga uma
+  afirmação à sua fonte, o texto mostra `[1]`, `[2]`...: o número é a posição
+  da fonte em `sources_used`, começando em 1. O frontend pode transformar cada
+  `[n]` em link para a fonte correspondente.
+- `avisos` traz notas sobre como a resposta foi obtida, separadas do texto. Hoje
+  o único aviso é a busca ampliada: "Nenhum resultado atendeu a todos os filtros
+  da pergunta; a busca foi ampliada em …". Mostrar como nota discreta abaixo da
+  resposta.
 
 - Saudações, agradecimentos, despedidas e ajuda de uso recebem resposta normal,
   sem acervo/LLM quando reconhecidos diretamente.
@@ -54,6 +64,34 @@ sintéticas. Totais incompletos são `null`, não zero.
   intenção volta ao pipeline RAG, sem inventar resposta factual.
 - CPF, telefone e e-mail pessoal são mascarados antes da interpretação por
   modelo e na resposta conversacional.
+
+## Contexto entre perguntas
+
+O backend não guarda memória entre as perguntas: quem dá contexto é o frontend,
+reenviando as últimas trocas no campo opcional `historico` de
+`POST /api/v1/query`.
+
+- `historico`: lista de `{ "pergunta": "...", "resposta": "..." }`, da mais
+  antiga para a mais recente, com no máximo 10 itens (a API usa só as 3 mais
+  recentes). `resposta` é opcional; mande o texto da resposta anterior
+  (`answer`). `pergunta` vazia, mais de 2.000 caracteres ou mais de 10 itens
+  recebem `422`. Sem `historico` (ou lista vazia) nada muda.
+- Quando a pergunta parece continuação ("considerando os mesmos contratos…",
+  "E em 2024?", "desses, qual…"), a API a reescreve para se sustentar sozinha e
+  consulta o acervo com a versão reescrita. Perguntas que já se sustentam
+  sozinhas não são reescritas nem chamam o modelo.
+- `query` na resposta continua sendo o texto digitado pelo usuário. Quando
+  houve reescrita, `pergunta_reformulada` traz a pergunta de fato consultada;
+  o frontend pode mostrá-la como "Entendi como: …". Sem reescrita é `null`.
+- Se o modelo falhar ou devolver algo fora do formato, a pergunta original é
+  consultada normalmente: a reescrita nunca derruba a consulta.
+- CPF, telefone e e-mail pessoal do histórico são mascarados antes de irem ao
+  modelo, e o histórico é tratado como dado: ordens escritas dentro dele são
+  ignoradas. Os guardrails (dados bancários, credenciais, juízo de legalidade)
+  valem sobre a pergunta reescrita.
+- O trace mostra a etapa `reformulacao` (pergunta original, pergunta reescrita
+  e tokens) antes das demais, só nas perguntas em que o modelo foi chamado.
+- `REFORMULACAO_MODE=regras` desliga a reescrita (o `historico` é ignorado).
 
 ## Rastreabilidade (sessão e trace)
 

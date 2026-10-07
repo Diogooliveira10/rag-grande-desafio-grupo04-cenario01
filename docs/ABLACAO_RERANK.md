@@ -11,8 +11,24 @@ py .\eval\ablacao_rerank.py --candidatos 10 30
 - **Conjunto:** [eval/retrieval_set.jsonl](../eval/retrieval_set.jsonl), com 47 perguntas "known-item": 34 parafraseadas (14 normativa, 9 agregada, 6 estruturada, 5 conversacional) e 13 de identificador. Cada pergunta foi escrita com outras palavras a partir de um trecho conhecido do corpus. `relevante_contem` diz quais trechos um chunk precisa conter (sem acento e sem caixa) para contar como relevante.
 - **Busca:** cada pergunta é buscada só nas bases esperadas (o roteamento não entra na conta), escopo oficial. Denso e BM25 devolvem 50 candidatos cada, como no `retrieve`, e o RRF (k=60) funde as duas listas. "X+rerank@N" reordena os N primeiros da lista X.
 - **Métricas:** hit@k é a fração das perguntas com algum chunk relevante entre os k primeiros; MRR@10 é a média de 1/posição do primeiro relevante. **hit@3 é a métrica que mais pesa:** com `GENERATION_CONTEXT_CHARS=3500` e `GENERATION_CHUNK_CHARS=900`, só uns 3–4 chunks cabem no prompt da geração.
-- **Reranker:** `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`, multilíngue e treinado no mMARCO (que inclui português), rodando em CPU (notebook sem GPU, 12 núcleos) com `max_length=512`. O servidor da turma ainda não tem modelo de rerank.
+- **Reranker:** `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`, multilíngue e treinado no mMARCO (que inclui português), rodando em CPU (notebook sem GPU, 12 núcleos) com `max_length=512`. Desde 07/10 o servidor da turma tem um endpoint de rerank; a comparação está na seção abaixo.
 - **Dependência e fallback:** `sentence-transformers` é dependência declarada em `requirements.txt`. Se não estiver instalada ou o modelo não puder ser carregado, `retrieve` registra o estágio `rerank` como erro e devolve a ordem RRF; o relatório de avaliação continua registrando o resultado real, sem tratar o fallback como rerank bem-sucedido. Para executar deliberadamente sem rerank, use `RERANK_ENABLED=false`.
+
+## Rerank do servidor da turma × cross-encoder local (07/10/2026)
+
+O tutor disponibilizou o endpoint `POST /api/rerank` no servidor ECOA (`{"query", "documents", "top_n"}` → `results` com `index` e `relevance_score`). Ele está integrado como `RERANK_PROVIDER=ecoa` (`EcoaReranker` em [src/rerank.py](../src/rerank.py)), mas o padrão continua `local`: nas mesmas 47 perguntas e no mesmo índice, o cross-encoder local acerta bem mais. O endpoint responde com o modelo `xagi/qwen3-embedding:0.6b-q4_k_m`, o mesmo da busca densa, e por isso acrescenta pouco a ela.
+
+Runs `ablacao-20261007T190427Z` (ECOA, `py .\eval\ablacao_rerank.py --modelo ecoa`) e `ablacao-20261007T191422Z` (local). Índice atual: v6 + 25 conversas sintéticas.
+
+| Configuração | hit@1 | hit@3 | hit@5 | hit@10 | MRR@10 | Latência do rerank |
+|---|---:|---:|---:|---:|---:|---:|
+| híbrido RRF (sem rerank) | 0,51 | 0,64 | 0,68 | 0,87 | 0,61 | — |
+| RRF + rerank@10 do ECOA | 0,55 | 0,70 | 0,72 | 0,87 | 0,65 | média 2,7 s |
+| RRF + rerank@10 local (padrão) | **0,72** | **0,83** | **0,85** | 0,87 | **0,78** | média 1,9 s |
+| denso + rerank@10 do ECOA | 0,57 | 0,68 | 0,74 | 0,81 | 0,65 | média 2,9 s |
+| denso + rerank@10 local | 0,66 | 0,74 | 0,79 | 0,81 | 0,70 | média 1,7 s |
+
+Os números de denso, BM25 e RRF caíram em relação a 30/09 (denso hit@3 0,88 → 0,72) porque o índice mudou com a entrada das conversas sintéticas. Esta medição compara só os dois rerankers entre si. Com `RERANK_PROVIDER=ecoa`, uma falha do endpoint passa as notas ao cross-encoder local, e o log do estágio `rerank` diz qual dos dois respondeu (`extra.rerank_backend`).
 
 ## Resultado no corpus v6 (30/09/2026, run `ablacao-20260930T185340Z`)
 

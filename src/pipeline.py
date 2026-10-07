@@ -15,6 +15,7 @@ from src.obs import Stage, new_query_id, new_run_id, registrar, sessao
 from src.conversation import resposta_conversacional
 from src.generate import ClienteLLM, gerar_resposta
 from src.query_analysis import analisar_query, filtros_para_retrieve
+from src.reformulacao import reformular_pergunta
 from src.rerank import reranker_padrao
 from src.retrieve import DEFAULT_TOP_K, RerankFn, RetrievalResult, retrieve
 from src.router import inferir_motivo_recusa, rotear_pergunta
@@ -81,6 +82,7 @@ def responder(
     query_id: Optional[str] = None,
     escopos: Optional[Sequence[str]] = ESCOPOS_CONSULTADOS,
     session_id: Optional[str] = None,
+    historico: Optional[Sequence[Any]] = None,
 ) -> dict[str, Any]:
     """Roda query_analysis + roteamento + recuperação híbrida + geração para uma pergunta.
 
@@ -116,11 +118,31 @@ def responder(
     pergunta no log leva o id (``obs.sessao``), e ``src/trace.py`` monta com
     ele o caminho da conversa inteira. Sem ``session_id`` os registros ficam
     com ``session_id: null``.
+
+    ``historico`` são as últimas trocas da conversa (``TurnoAnterior`` ou dicts
+    com ``pergunta`` e ``resposta``), enviadas pelo cliente: o backend não guarda
+    memória entre as perguntas. Quando a pergunta parece continuação ("os mesmos
+    contratos", "E em 2024?"), ``src/reformulacao.py`` a reescreve para se
+    sustentar sozinha, e a pergunta reescrita substitui a original em todas as
+    etapas. Nesse caso a resposta leva ``pergunta_reformulada``. Sem histórico,
+    nada muda.
     """
     with sessao(session_id):
-        return _responder(query, top_k=top_k, reranker=reranker, cliente=cliente,
-                          run_id=run_id or new_run_id(), query_id=query_id or new_query_id(),
-                          escopos=escopos)
+        run_id = run_id or new_run_id()
+        query_id = query_id or new_query_id()
+        reformulacao = (
+            reformular_pergunta(query, historico, run_id=run_id, query_id=query_id)
+            if historico else None
+        )
+        resposta = _responder(
+            reformulacao.pergunta if reformulacao else query, top_k=top_k, reranker=reranker,
+            cliente=cliente, run_id=run_id, query_id=query_id, escopos=escopos,
+        )
+        if reformulacao is not None and reformulacao.reescrita:
+            # A resposta devolve o que o usuário digitou; a pergunta que de fato
+            # foi consultada vai à parte, para o front mostrar "entendi como…".
+            resposta = {**resposta, "query": query, "pergunta_reformulada": reformulacao.pergunta}
+        return resposta
 
 
 def _responder(
@@ -253,7 +275,12 @@ def _responder(
                 fields = ", ".join(labels.get(key, key) for key in keys)
                 why = "metadados ausentes" if reason == "sem_campo" else "nenhum resultado com o recorte solicitado"
                 notes.append(f"{bases.get(base, base)}: {fields} ({why})")
-        resposta.answer += "\n\nBusca ampliada; filtros relaxados em " + "; ".join(notes) + "."
+        # Fica em ``avisos``, fora do texto da resposta: é sobre a busca, não
+        # sobre o que foi perguntado, e o front-end decide como mostrar.
+        resposta.avisos.append(
+            "Nenhum resultado atendeu a todos os filtros da pergunta; a busca foi ampliada em "
+            + "; ".join(notes) + "."
+        )
     payload = resposta.model_dump(mode="json")
     if not decisao.bases_selecionadas:
         caminho = "recusa_sem_consulta"

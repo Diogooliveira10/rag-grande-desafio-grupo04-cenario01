@@ -65,6 +65,8 @@ def test_query_delega_ao_pipeline(monkeypatch) -> None:
     session_id = body.pop("session_id")
     assert query_id.startswith("q_")
     assert session_id.startswith("s_")
+    assert body.pop("pergunta_reformulada") is None
+    assert body.pop("avisos") == []
     assert body == _response("Qual e a norma?")
     assert calls == [("Qual e a norma?", 8, session_id)]
 
@@ -397,3 +399,55 @@ def test_cors_libera_o_header_da_chave():
     assert response.status_code == 200
     liberados = response.headers["access-control-allow-headers"].lower()
     assert "x-api-key" in liberados and "x-session-id" in liberados
+
+
+def test_query_repassa_o_historico_ao_pipeline_e_devolve_a_pergunta_reformulada(monkeypatch) -> None:
+    chamadas = []
+
+    def fake_responder(query, *, top_k, run_id=None, query_id=None, session_id=None, historico=None):
+        chamadas.append((query, [(t.pergunta, t.resposta) for t in historico]))
+        return {**_response(query), "pergunta_reformulada": "Quais regras valem para os contratos de TI de 2025?"}
+
+    monkeypatch.setattr(api_module.pipeline, "responder", fake_responder)
+
+    response = client.post("/api/v1/query", json={
+        "query": "Considerando os mesmos contratos, quais regras valem?",
+        "historico": [{"pergunta": "Contratos de TI em 2025?", "resposta": "Há três."}],
+    })
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["query"] == "Considerando os mesmos contratos, quais regras valem?"
+    assert body["pergunta_reformulada"] == "Quais regras valem para os contratos de TI de 2025?"
+    assert chamadas == [(
+        "Considerando os mesmos contratos, quais regras valem?",
+        [("Contratos de TI em 2025?", "Há três.")],
+    )]
+
+
+def test_query_sem_historico_nao_envia_o_argumento_ao_pipeline(monkeypatch) -> None:
+    recebidos = {}
+
+    def fake_responder(query, **kwargs):
+        recebidos.update(kwargs)
+        return _response(query)
+
+    monkeypatch.setattr(api_module.pipeline, "responder", fake_responder)
+
+    response = client.post("/api/v1/query", json={"query": "Qual e a norma?", "historico": []})
+
+    assert response.status_code == 200
+    assert "historico" not in recebidos
+    assert response.json()["pergunta_reformulada"] is None
+
+
+@pytest.mark.parametrize("historico", [
+    [{"pergunta": ""}],
+    [{"resposta": "sem pergunta"}],
+    [{"pergunta": "x"}] * 11,
+    [{"pergunta": "x" * 2001}],
+])
+def test_query_rejeita_historico_malformado(historico) -> None:
+    response = client.post("/api/v1/query", json={"query": "E em 2024?", "historico": historico})
+
+    assert response.status_code == 422

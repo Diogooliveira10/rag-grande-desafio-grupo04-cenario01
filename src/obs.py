@@ -36,6 +36,8 @@ class Stage(str, Enum):
 
     # Conversa/cortesia ou consulta ao acervo: decidida antes da query_analysis.
     INTERACAO = "interacao"
+    # Pergunta de continuação reescrita com o histórico enviado pelo cliente.
+    REFORMULACAO = "reformulacao"
     QUERY_ANALYSIS = "query_analysis"
     ROTEAMENTO = "roteamento"
     RETRIEVAL_DENSO = "retrieval_denso"

@@ -1038,6 +1038,8 @@ def retrieve(
                 span.extra["candidatos"] = len(fused)
                 candidates = {item.chunk_id: item for item in fused}
                 ranked = list(reranker(query, fused))
+                if getattr(reranker, "backend_usado", None):
+                    span.extra["rerank_backend"] = reranker.backend_usado
                 if {item.chunk_id for item in ranked} - candidates.keys():
                     raise ValueError("Reranker devolveu evidência fora dos candidatos")
                 reranked = []
