@@ -433,3 +433,31 @@ João Pedro Félix Reis e Eduarda não participaram deste encontro por questões
 - Utilizei assistentes de IA como apoio para percorrer o fluxo do evaluator e do pipeline, correlacionar logs com a implementação, analisar o contrato funcional de `I2` e localizar o ponto de comparação de fontes do evaluator.
 
 - Revisei as alterações, executei os testes e validei os resultados da avaliação oficial. As conclusões foram baseadas nos dados, código, logs e testes locais, mantendo o Golden Set inalterado.
+
+## Encontro 11 - 2026-10-07
+
+## **Entregamos hoje:**
+
+- Integramos ao `main` o contexto entre perguntas, as melhorias de qualidade do corpus e a correção de extração de PDFs com texto ilegível. Antes dos merges, a suíte foi executada com as contribuições combinadas. No conflito do SQLite, a base foi reconstruída usando o código e os dados integrados, em vez de escolher uma das versões.
+- Concluímos o backend do item 11: o cliente pode enviar as últimas trocas no campo `historico`, o backend reescreve perguntas de continuação antes da análise e devolve o texto em `pergunta_reformulada`. O contrato foi atualizado em `docs/FRONTEND_API_CONTRACT.md`.
+- Implementamos `src/qualidade_corpus.py` entre a extração e a indexação. A etapa atualiza status e metadados sem alterar o texto; o índice foi refeito reaproveitando os vetores existentes, sem gerar vetores novos. Nas atas, 819 chunks com glifos ilegíveis foram marcados como `texto_ilegivel` e removidos da busca, reduzindo os chunks indexados de 2.524 para 1.705; tabelas de lances foram preservadas.
+- Corrigimos metadados de vigência de 1.498 dos 1.561 chunks normativos. A leitura incorreta das URLs entre aspas no manifesto impedia a coleta dos metadados; com a correção, a busca de normas vigentes em 2025 pode usar as datas de vigência e o prompt informa “vigente desde”. Também foram associados dados de modalidade a 3 dos 448 contratos com compra correspondente no corpus, e 44 valores inferiores a R$ 1,00 foram marcados como simbólicos.
+- Corrigimos no evaluator a busca lexical de termos simples e explicitamos quando a validação de conteúdo é não aplicável ou não validável. Acrescentamos testes para os falsos matches de `TI`, `CRISTALIA`, identificadores PNCP e casos sem critério de conteúdo.
+- Os testes focados do evaluator passaram (**34 testes**) e a suíte completa passou com **1.189 testes**; `git diff --check` também passou. Na rodada oficial do Golden Set `20261007T193322Z`, houve **12/26 acertos**. `P5.3` permaneceu falho porque a resposta não continha os quatro termos obrigatórios; nenhum resultado individual mudou frente ao matcher anterior. `P3.1` teve `expected_source_ok=true`.
+- A alteração incidental da base SQLite durante a avaliação oficial foi restaurada; os hashes do Golden Set, corpus, índices, ZIP e requirements permaneceram iguais.
+
+## **Ficou pendente:**
+
+- Concluir o item 13 sobre autoria da base sintética: corrigir as duas linhas de `corpus_manifest.yaml`, atualizar `CORPUS_INVENTORY.md` e `docs/emails_sinteticos.md`.
+- Finalizar a integração do front-end para enviar `historico` e apresentar `pergunta_reformulada`, e validar o fluxo completo com o backend.
+- Validar a chamada ao endpoint `GET /api/v1/history`. Na tentativa local, não foi possível extrair `RAG_API_KEY` do arquivo `.env`, então a requisição não chegou ao endpoint.
+- Avaliar separadamente as falhas restantes do Golden Set, sem ajustar perguntas ou respostas esperadas para aumentar o score.
+
+## **Bloqueios em aberto:**
+
+- A integração do contexto conversacional no front-end depende do envio do campo `historico` e da apresentação de `pergunta_reformulada`.
+- A validação local do histórico da API depende de disponibilizar a chave `RAG_API_KEY` de forma acessível ao comando de teste.
+
+### Uso de assistentes de IA:
+
+- Utilizei assistentes de IA como apoio na inspeção do evaluator e dos testes, implementação da correção, execução dos testes e análise do relatório oficial.

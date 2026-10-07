@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import re
 import statistics
 import sys
 import time
@@ -124,6 +125,18 @@ def _normalizar_texto(valor: Any) -> str:
     return " ".join(texto.lower().split())
 
 
+def _contains_content_term(term: str, text: str) -> bool:
+    term_norm = _normalizar_texto(term)
+    text_norm = _normalizar_texto(text)
+    if re.fullmatch(r"[a-z0-9]+", term_norm):
+        return re.search(rf"(?<!\w){re.escape(term_norm)}(?!\w)", text_norm) is not None
+    return term_norm in text_norm
+
+
+def _has_content_criteria(case: EvalCase) -> bool:
+    return bool(case.deve_conter or case.nao_deve_conter or case.confianca_maxima is not None)
+
+
 def source_base_matches(expected_prefix: str, actual_base_id: str) -> bool:
     expected = _normalizar_texto(expected_prefix)
     actual = _normalizar_texto(actual_base_id)
@@ -138,14 +151,13 @@ def _content_ok(case: EvalCase, response: dict[str, Any]) -> Optional[bool]:
     if "answer" not in response:
         return None
     answer = str(response.get("answer") or "")
-    answer_norm = _normalizar_texto(answer)
 
     for item in case.deve_conter:
-        if _normalizar_texto(item) not in answer_norm:
+        if not _contains_content_term(item, answer):
             return False
 
     for item in case.nao_deve_conter:
-        if _normalizar_texto(item) in answer_norm:
+        if _contains_content_term(item, answer):
             return False
 
     if case.confianca_maxima is not None:
@@ -158,6 +170,16 @@ def _content_ok(case: EvalCase, response: dict[str, Any]) -> Optional[bool]:
             return False
 
     return True
+
+
+def _content_validation_status(
+    case: EvalCase, response: dict[str, Any], content_ok: Optional[bool]
+) -> str:
+    if not _has_content_criteria(case):
+        return "not_applicable"
+    if "answer" not in response or content_ok is None:
+        return "not_validatable"
+    return "validated" if content_ok else "failed"
 
 
 def _expected_source_ok(case: EvalCase, response: dict[str, Any]) -> Optional[bool]:
@@ -219,6 +241,7 @@ def evaluate_case(case: EvalCase, response: dict[str, Any]) -> dict[str, Any]:
         citacao_ok = n_fontes == 0 if is_refusal_obtido else n_fontes > 0
 
     content_ok = _content_ok(case, response)
+    content_validation = _content_validation_status(case, response, content_ok)
     expected_source_ok = _expected_source_ok(case, response)
     escopo_avaliacao = "resposta_completa" if "answer" in response else "roteamento"
     if escopo_avaliacao == "roteamento":
@@ -239,6 +262,7 @@ def evaluate_case(case: EvalCase, response: dict[str, Any]) -> dict[str, Any]:
     if erro_provedor:
         refusal_ok = False
         content_ok = None
+        content_validation = _content_validation_status(case, {}, content_ok)
         expected_source_ok = None
         citacao_ok = None
         acertou = False
@@ -256,6 +280,7 @@ def evaluate_case(case: EvalCase, response: dict[str, Any]) -> dict[str, Any]:
         "refusal_ok": refusal_ok,
         "erro_provedor": erro_provedor,
         "content_ok": content_ok,
+        "content_validation": content_validation,
         "expected_source_ok": expected_source_ok,
         "escopo_avaliacao": escopo_avaliacao,
         "acertou": acertou,
@@ -301,7 +326,9 @@ def _resumo_metricas(resultados: list[dict[str, Any]]) -> dict[str, Any]:
     confianca: dict[str, int] = defaultdict(int)
     tokens_total = 0
     tokens_por_etapa: dict[str, int] = defaultdict(int)
-    content_cases = [r for r in resultados if r.get("content_ok") is not None]
+    content_cases = [
+        r for r in resultados if r.get("content_validation") in {"validated", "failed"}
+    ]
     for resultado in resultados:
         escopos[str(resultado.get("escopo_avaliacao", "desconhecido"))] += 1
         if resultado.get("confidence_level"):
@@ -449,8 +476,9 @@ def render_report_markdown(report: dict[str, Any], run_id: str, built_at: str) -
             "## Casos",
             "",
             "| ID | Tipo | Rota esperada | Rota obtida | Recusa esperada | Recusa obtida "
+            "| Validação de conteúdo "
             "| Fontes | Latência (ms) | Resultado |",
-            "|---|---|---|---|---|---|---:|---:|---|",
+            "|---|---|---|---|---|---|---|---:|---:|---|",
         ]
     )
     for resultado in report["resultados"]:
@@ -459,11 +487,21 @@ def render_report_markdown(report: dict[str, Any], run_id: str, built_at: str) -
         else:
             status = "OK" if resultado["acertou"] else "FALHOU"
         n_fontes = resultado.get("n_fontes")
+        validation_labels = {
+            "validated": "validado",
+            "failed": "falhou",
+            "not_applicable": "não aplicável",
+            "not_validatable": "não validável",
+        }
+        content_validation = validation_labels.get(
+            resultado.get("content_validation"), "—"
+        )
         lines.append(
             f"| {resultado['id']} | {resultado['tipo']} "
             f"| {', '.join(resultado['bases_esperadas']) or '—'} "
             f"| {', '.join(resultado['bases_obtidas']) or '—'} "
             f"| {resultado['is_refusal_esperado']} | {resultado['is_refusal_obtido']} "
+            f"| {content_validation} "
             f"| {'—' if n_fontes is None else n_fontes} | {resultado.get('latencia_ms', '—')} | {status} |"
         )
 

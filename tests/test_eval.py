@@ -1,9 +1,12 @@
+import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from eval.run_eval import (
     EvalCase,
+    _contains_content_term,
     evaluate_case,
     load_golden_set,
     render_report_markdown,
@@ -60,6 +63,128 @@ def test_evaluate_case_acerta_quando_rota_e_recusa_batem():
     assert resultado["refusal_ok"] is True
     assert resultado["escopo_avaliacao"] == "roteamento"
     assert resultado["content_ok"] is None
+
+
+@pytest.mark.parametrize(
+    ("term", "text", "matches"),
+    [
+        ("ti", "estimativa", False),
+        ("ti", "partir", False),
+        ("ti", "último", False),
+        ("ti", "TI", True),
+        ("ti", "resposta com ti isolado", True),
+    ],
+)
+def test_matching_de_termo_simples_respeita_limites_lexicais(term, text, matches):
+    assert _contains_content_term(term, text) is matches
+
+
+def test_matching_de_termo_normal_e_case_insensitive():
+    assert _contains_content_term("cristalia", "A CRISTALIA forneceu o produto.") is True
+    assert _contains_content_term("cristalia", "microcristalia") is False
+
+
+def test_matching_de_identificador_pncp_completo_preserva_pontuacao():
+    identificador = "28741080000155-1-000001/2023-000001"
+    caso = replace(
+        next(case for case in load_golden_set(GOLDEN_SET) if case.id == "I2"),
+        deve_conter=[identificador],
+        nao_deve_conter=[],
+    )
+
+    resultado = evaluate_case(
+        caso,
+        {
+            "answer": f"O identificador PNCP é {identificador}.",
+            "confidence_level": "alta",
+        },
+    )
+
+    assert resultado["content_ok"] is True
+    assert resultado["content_validation"] == "validated"
+
+
+def test_p53_nao_rejeita_substrings_de_ti_dentro_de_outras_palavras():
+    caso = next(case for case in load_golden_set(GOLDEN_SET) if case.id == "P5.3")
+    resposta = {
+        "answer": (
+            "CRISTALIA forneceu DARUNAVIR em TRANSFERÊNCIA DE TECNOLOGIA "
+            "no contrato 1196949440; a estimativa deverá partir dos dados existentes."
+        ),
+        "confidence_level": "alta",
+    }
+
+    resultado = evaluate_case(caso, resposta)
+
+    assert resultado["content_ok"] is True
+    assert resultado["content_validation"] == "validated"
+
+
+def test_p53_rejeita_ti_como_termo_isolado():
+    caso = next(case for case in load_golden_set(GOLDEN_SET) if case.id == "P5.3")
+    resposta = {
+        "answer": (
+            "CRISTALIA forneceu DARUNAVIR em TRANSFERÊNCIA DE TECNOLOGIA "
+            "no contrato 1196949440; trata-se de TI."
+        ),
+        "confidence_level": "alta",
+    }
+
+    resultado = evaluate_case(caso, resposta)
+
+    assert resultado["content_ok"] is False
+    assert resultado["content_validation"] == "failed"
+
+
+def test_deve_conter_vazio_ou_ausente_e_nao_aplicavel(tmp_path):
+    registro = {
+        "id": "SEM-CONTEUDO",
+        "persona": "teste",
+        "titulo": "sem critério textual",
+        "pergunta": "pergunta",
+        "tipo": "recusa",
+        "bases_esperadas": [],
+        "is_refusal_esperado": True,
+        "refusal_reason_esperado": None,
+        "e_pergunta_de_falha_esperada": False,
+    }
+    arquivo = tmp_path / "golden_set_sem_criterio.jsonl"
+    arquivo.write_text(
+        json.dumps(registro)
+        + "\n"
+        + json.dumps({**registro, "id": "VAZIO", "deve_conter": []})
+        + "\n",
+        encoding="utf-8",
+    )
+    casos = load_golden_set(arquivo)
+    resposta = {"answer": "Não posso atender.", "is_refusal": True, "sources_used": []}
+
+    resultados = [evaluate_case(caso, resposta) for caso in casos]
+
+    assert all(resultado["content_ok"] is True for resultado in resultados)
+    assert all(
+        resultado["content_validation"] == "not_applicable"
+        for resultado in resultados
+    )
+    assert all(resultado["acertou"] is True for resultado in resultados)
+
+    report = run_eval(casos, lambda pergunta: resposta)
+    assert report["metricas"]["content_accuracy"] is None
+
+
+def test_conteudo_com_criterio_mas_sem_resposta_e_nao_validavel():
+    caso = next(case for case in load_golden_set(GOLDEN_SET) if case.id == "P5.3")
+
+    resultado = evaluate_case(
+        caso,
+        {
+            "bases_consultadas": caso.bases_esperadas,
+            "is_refusal": False,
+        },
+    )
+
+    assert resultado["content_ok"] is None
+    assert resultado["content_validation"] == "not_validatable"
 
 
 def test_resposta_factual_com_rota_correta_mas_conteudo_e_citacao_errados_falha():
