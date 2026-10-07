@@ -66,6 +66,7 @@ def test_query_delega_ao_pipeline(monkeypatch) -> None:
     assert query_id.startswith("q_")
     assert session_id.startswith("s_")
     assert body.pop("pergunta_reformulada") is None
+    assert body.pop("avisos") == []
     assert body == _response("Qual e a norma?")
     assert calls == [("Qual e a norma?", 8, session_id)]
 

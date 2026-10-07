@@ -275,7 +275,12 @@ def _responder(
                 fields = ", ".join(labels.get(key, key) for key in keys)
                 why = "metadados ausentes" if reason == "sem_campo" else "nenhum resultado com o recorte solicitado"
                 notes.append(f"{bases.get(base, base)}: {fields} ({why})")
-        resposta.answer += "\n\nBusca ampliada; filtros relaxados em " + "; ".join(notes) + "."
+        # Fica em ``avisos``, fora do texto da resposta: é sobre a busca, não
+        # sobre o que foi perguntado, e o front-end decide como mostrar.
+        resposta.avisos.append(
+            "Nenhum resultado atendeu a todos os filtros da pergunta; a busca foi ampliada em "
+            + "; ".join(notes) + "."
+        )
     payload = resposta.model_dump(mode="json")
     if not decisao.bases_selecionadas:
         caminho = "recusa_sem_consulta"
