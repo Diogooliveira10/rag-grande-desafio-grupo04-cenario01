@@ -14,8 +14,8 @@ Os tipos correspondentes do frontend ficam em `src/types/api.ts` no repositório
 | GET | `/health` | — | `{ "status": "ok" }` |
 | POST | `/api/v1/query` | `{ "query": "...", "top_k": 5, "session_id": "s_..." }` | `QueryResponse` |
 | GET | `/api/v1/history` (chave) | `limit` (1–100), `session_id` | `HistoricoItem[]` |
-| GET | `/api/v1/trace/{query_id}` (chave) | — | `TraceResponse` |
-| GET | `/api/v1/sessions/{session_id}/trace` (chave) | — | `SessaoTraceResponse` |
+| GET | `/api/v1/trace/{query_id}` (sessão ou chave) | — | `TraceResponse` |
+| GET | `/api/v1/sessions/{session_id}/trace` (sessão ou chave) | — | `SessaoTraceResponse` |
 | POST | `/api/v1/feedback` | `query_id`, `avaliacao`, `comentario` | `{ "status": "recebido" }` |
 | GET | `/api/v1/explore/contratacoes` | `busca`, `orgao`, `limit`, `offset` | `ContratacaoRecord[]` |
 | GET | `/api/v1/explore/documentos` | `busca`, `tipo`, `limit`, `offset` | `DocumentoRecord[]` |
@@ -58,9 +58,10 @@ sintéticas. Totais incompletos são `null`, não zero.
 ## Rastreabilidade (sessão e trace)
 
 - `session_id` liga as perguntas de uma mesma conversa. Na primeira pergunta o
-  frontend não envia o campo; a API cria um (`s_` + 12 caracteres) e o devolve
-  no `QueryResponse`. Nas perguntas seguintes o frontend reenvia esse valor.
-  Aceita só letras, dígitos, `_` e `-` (até 64); outro formato recebe `422`.
+  frontend não envia o campo; a API cria um (`s_` + 22 caracteres aleatórios)
+  e o devolve no `QueryResponse`. Nas perguntas seguintes o frontend reenvia
+  esse valor. Aceita só letras, dígitos, `_` e `-`, de 16 a 64 caracteres;
+  outro formato recebe `422`.
 - `GET /api/v1/trace/{query_id}`: o caminho de uma pergunta, etapa por etapa
   (`etapas[]` com `stage`, `base` = `"sql"`, `"vetorial"` ou `null`, `input`,
   `output`, `latencia_ms`, `tokens` e `detalhes`: trechos com score, SQL e
@@ -76,16 +77,24 @@ sintéticas. Totais incompletos são `null`, não zero.
 
 ## Proteção do histórico e do trace
 
-As rotas marcadas com (chave) mostram perguntas de todos os usuários e exigem o
-header `X-API-Key` igual à variável `RAG_API_KEY` do `.env` do servidor.
+Dois tipos de acesso:
 
-- Sem o header ou com valor errado: `401`.
-- Servidor sem `RAG_API_KEY` configurada: `403` (as rotas ficam fechadas).
-- `POST /api/v1/query` e `POST /api/v1/feedback` não pedem chave.
-- O CORS libera o header `X-API-Key` para as origens permitidas.
-- A chave é de quem opera a demo, não do usuário final: um site público que
-  embute a chave no JavaScript a entrega a qualquer visitante. Na demo, a tela
-  de trace pede a chave a quem opera ou roda só no ambiente local.
+- **Dono da conversa** (o site público): envia o header `X-Session-Id` com o
+  `session_id` que recebeu no `QueryResponse`. Vê o trace das perguntas da
+  própria conversa e o trace da sessão. Não vê conversas de outras pessoas nem
+  o histórico geral.
+- **Quem opera a demo**: envia `X-API-Key` igual a `RAG_API_KEY` do `.env` do
+  servidor. Vê o histórico geral e o trace de qualquer conversa. A chave nunca
+  vai no código do site: quem tiver o JavaScript teria a chave.
+
+Respostas:
+
+- Trace sem `X-Session-Id` da conversa e sem chave válida: `401`, mesmo quando
+  o id não existe (não revela quais perguntas estão no log). Com acesso e id
+  inexistente: `404`.
+- Histórico sem chave válida: `401`; servidor sem `RAG_API_KEY`: `403`.
+- `POST /api/v1/query` e `POST /api/v1/feedback` não pedem nada.
+- O CORS libera os headers `X-API-Key` e `X-Session-Id`.
 
 O histórico grava pergunta, resposta e comentário do feedback já mascarados
 (CPF, telefone, e-mail pessoal) e apaga consultas com mais de

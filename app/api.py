@@ -11,10 +11,12 @@ avaliacao a essa consulta e ``GET /api/v1/history`` devolve o historico
 salvo. O estagio ``feedback`` ja existia reservado em ``src/obs.py``
 (Stage.FEEDBACK) mas nao estava integrado a nenhum fluxo ate agora.
 
-Protecao: historico e trace mostram perguntas de todos os usuarios, entao
-exigem o header ``X-API-Key`` igual a ``RAG_API_KEY`` do ``.env``
-(``exigir_chave``). Sem a variavel configurada, esses endpoints ficam
-fechados. ``/query`` e ``/feedback`` continuam abertos: sao o uso normal do chat.
+Protecao: o historico mostra perguntas de todos os usuarios e exige o header
+``X-API-Key`` igual a ``RAG_API_KEY`` do ``.env`` (``exigir_chave``); sem a
+variavel configurada, fica fechado. O trace aceita a mesma chave (quem opera a
+demo ve qualquer conversa) ou o header ``X-Session-Id`` igual a sessao da
+pergunta: cada usuario ve so o caminho da propria conversa, sem chave no site.
+``/query`` e ``/feedback`` continuam abertos: sao o uso normal do chat.
 """
 
 from __future__ import annotations
@@ -44,18 +46,45 @@ logger = logging.getLogger(__name__)
 # Ids que chegam do front-end vão para o log e para a URL do trace: só letras,
 # dígitos, "_" e "-".
 _ID_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
+# O session_id da acesso ao trace da conversa: um id curto escolhido pelo
+# cliente ("s_1") seria facil de adivinhar, entao exige pelo menos 16 caracteres.
+_SESSION_PATTERN = r"^[A-Za-z0-9_-]{16,64}$"
+
+
+def _chave_valida(x_api_key: Optional[str]) -> bool:
+    chave = config.RAG_API_KEY
+    return bool(chave and x_api_key) and secrets.compare_digest(x_api_key.encode(), chave.encode())
 
 
 def exigir_chave(x_api_key: Optional[str] = Header(default=None)) -> None:
     """Libera o endpoint só para quem envia ``X-API-Key`` igual a ``RAG_API_KEY``."""
-    chave = config.RAG_API_KEY
-    if not chave:
+    if not config.RAG_API_KEY:
         raise HTTPException(
             status_code=403,
             detail="Endpoint desabilitado: defina RAG_API_KEY no .env do servidor.",
         )
-    if not x_api_key or not secrets.compare_digest(x_api_key.encode(), chave.encode()):
+    if not _chave_valida(x_api_key):
         raise HTTPException(status_code=401, detail="X-API-Key ausente ou invalida.")
+
+
+def _autorizar_trace(
+    x_api_key: Optional[str], x_session_id: Optional[str], sessao_do_trace: Optional[str]
+) -> None:
+    """Trace liberado para a chave de quem opera ou para o dono da conversa.
+
+    Sem nenhuma das duas, responde 401 mesmo quando o id nao existe, para nao
+    revelar quais perguntas estao no log.
+    """
+    if _chave_valida(x_api_key):
+        return
+    if x_session_id and sessao_do_trace and secrets.compare_digest(
+        x_session_id.encode(), sessao_do_trace.encode()
+    ):
+        return
+    raise HTTPException(
+        status_code=401,
+        detail="Envie X-Session-Id da conversa ou X-API-Key.",
+    )
 
 
 def _public_rag_payload(payload: dict) -> dict:
@@ -87,7 +116,7 @@ class QueryRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=50)
     # Conversa a que a pergunta pertence. O front-end reenvia o session_id da
     # primeira resposta; sem ele, a API abre uma sessão nova.
-    session_id: Optional[str] = Field(default=None, pattern=_ID_PATTERN)
+    session_id: Optional[str] = Field(default=None, pattern=_SESSION_PATTERN)
 
     @field_validator("query")
     @classmethod
@@ -189,7 +218,7 @@ app.add_middleware(
     allow_origins=_cors_origins(),
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "X-API-Key"],
+    allow_headers=["Content-Type", "X-API-Key", "X-Session-Id"],
 )
 
 
@@ -279,20 +308,28 @@ def obter_historico(
     return items
 
 
-@app.get("/api/v1/trace/{query_id}", response_model=TraceResponse,
-         dependencies=[Depends(exigir_chave)])
-def obter_trace(query_id: str = Path(min_length=1, max_length=64)) -> dict:
+@app.get("/api/v1/trace/{query_id}", response_model=TraceResponse)
+def obter_trace(
+    query_id: str = Path(min_length=1, max_length=64),
+    x_api_key: Optional[str] = Header(default=None),
+    x_session_id: Optional[str] = Header(default=None),
+) -> dict:
     """Caminho da pergunta pelo pipeline, etapa por etapa, lido do log."""
     trace = montar_trace(query_id)
+    _autorizar_trace(x_api_key, x_session_id, trace["session_id"] if trace else None)
     if trace is None:
         raise HTTPException(status_code=404, detail="query_id sem registro no log.")
     return trace
 
 
-@app.get("/api/v1/sessions/{session_id}/trace", response_model=SessaoTraceResponse,
-         dependencies=[Depends(exigir_chave)])
-def obter_trace_sessao(session_id: str = Path(pattern=_ID_PATTERN)) -> dict:
+@app.get("/api/v1/sessions/{session_id}/trace", response_model=SessaoTraceResponse)
+def obter_trace_sessao(
+    session_id: str = Path(pattern=_SESSION_PATTERN),
+    x_api_key: Optional[str] = Header(default=None),
+    x_session_id: Optional[str] = Header(default=None),
+) -> dict:
     """Caminho da conversa: as perguntas da sessão em ordem, com o resumo de cada uma."""
+    _autorizar_trace(x_api_key, x_session_id, session_id)
     trace = montar_trace_sessao(session_id)
     if trace is None:
         raise HTTPException(status_code=404, detail="session_id sem registro no log.")

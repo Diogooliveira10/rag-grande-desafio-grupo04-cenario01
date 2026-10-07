@@ -349,7 +349,7 @@ def test_explore_nao_expoe_erro_interno(monkeypatch) -> None:
 # Proteção: histórico e trace só com X-API-Key
 # --------------------------------------------------------------------------
 
-_PROTEGIDOS = ["/api/v1/history", "/api/v1/trace/q_1", "/api/v1/sessions/s_1/trace"]
+_PROTEGIDOS = ["/api/v1/history", "/api/v1/trace/q_1", "/api/v1/sessions/s_sessao_de_teste_01/trace"]
 
 
 @pytest.mark.parametrize("url", _PROTEGIDOS)
@@ -362,14 +362,19 @@ def test_endpoint_protegido_com_chave_errada_e_401(url):
     assert TestClient(app, headers={"X-API-Key": "chave-errada"}).get(url).status_code == 401
 
 
-@pytest.mark.parametrize("url", _PROTEGIDOS)
-def test_endpoint_protegido_fica_fechado_sem_rag_api_key_no_servidor(url, monkeypatch):
+def test_historico_fica_fechado_sem_rag_api_key_no_servidor(monkeypatch):
     monkeypatch.setattr(api_module.config, "RAG_API_KEY", "")
 
-    response = client.get(url)
+    response = client.get("/api/v1/history")
 
     assert response.status_code == 403
     assert "RAG_API_KEY" in response.json()["detail"]
+
+
+def test_historico_nao_aceita_session_id_no_lugar_da_chave():
+    response = TestClient(app, headers={"X-Session-Id": "s_sessao_de_teste_01"}).get("/api/v1/history")
+
+    assert response.status_code == 401
 
 
 def test_query_e_feedback_continuam_abertos_sem_chave(monkeypatch):
@@ -386,8 +391,9 @@ def test_cors_libera_o_header_da_chave():
     response = TestClient(app).options("/api/v1/history", headers={
         "Origin": "http://localhost:5173",
         "Access-Control-Request-Method": "GET",
-        "Access-Control-Request-Headers": "X-API-Key",
+        "Access-Control-Request-Headers": "X-API-Key, X-Session-Id",
     })
 
     assert response.status_code == 200
-    assert "x-api-key" in response.headers["access-control-allow-headers"].lower()
+    liberados = response.headers["access-control-allow-headers"].lower()
+    assert "x-api-key" in liberados and "x-session-id" in liberados

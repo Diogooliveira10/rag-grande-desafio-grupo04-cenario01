@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+import config
 from app.api import app
 from src import generate as gen
 from src import obs, pipeline
@@ -324,21 +325,84 @@ def test_api_devolve_session_id_e_reaproveita_o_enviado(api_com_pipeline):
 
 def test_feedback_entra_no_log_com_a_sessao_da_pergunta(api_com_pipeline):
     resposta = client.post("/api/v1/query", json={
-        "query": "Quais contratos de ambulancias foram publicados?", "session_id": "s_feedback",
+        "query": "Quais contratos de ambulancias foram publicados?", "session_id": "s_sessao_feedback_01",
     }).json()
 
     client.post("/api/v1/feedback", json={"query_id": resposta["query_id"], "avaliacao": "positivo"})
 
     feedback = next(r for r in _registros() if r["stage"] == "feedback")
-    assert feedback["session_id"] == "s_feedback"
+    assert feedback["session_id"] == "s_sessao_feedback_01"
 
 
 def test_endpoint_trace_da_sessao_desconhecida_e_404():
-    assert client.get("/api/v1/sessions/s_inexistente/trace").status_code == 404
+    assert client.get("/api/v1/sessions/s_sessao_inexistente/trace").status_code == 404
 
 
-@pytest.mark.parametrize("session_id", ["com espaco", "a/b", "x" * 65])
+@pytest.mark.parametrize("session_id", ["com espaco com espaco", "a/b/c/d/e/f/g/h/i", "x" * 65, "s_curto"])
 def test_session_id_invalido_e_recusado(session_id):
     response = client.post("/api/v1/query", json={"query": "pergunta", "session_id": session_id})
 
     assert response.status_code == 422
+
+
+# --------------------------------------------------------------------------
+# Dono da conversa: X-Session-Id no lugar da chave
+# --------------------------------------------------------------------------
+
+
+def _conversa_sem_chave():
+    """Duas perguntas pela API, como o site público faz: sem X-API-Key."""
+    usuario = TestClient(app)
+    primeira = usuario.post("/api/v1/query", json={"query": "Quais contratos de ambulancias foram publicados?"}).json()
+    return usuario, primeira["session_id"], primeira["query_id"]
+
+
+def test_session_id_gerado_pela_api_e_longo_e_aleatorio():
+    ids = {obs.new_session_id() for _ in range(50)}
+
+    assert len(ids) == 50
+    assert all(i.startswith("s_") and len(i) >= 24 for i in ids)
+
+
+def test_dono_da_conversa_ve_o_proprio_trace_sem_chave(api_com_pipeline):
+    usuario, session_id, query_id = _conversa_sem_chave()
+    dono = {"X-Session-Id": session_id}
+
+    trace = usuario.get(f"/api/v1/trace/{query_id}", headers=dono)
+    sessao = usuario.get(f"/api/v1/sessions/{session_id}/trace", headers=dono)
+
+    assert trace.status_code == 200 and trace.json()["session_id"] == session_id
+    assert sessao.status_code == 200 and sessao.json()["total_perguntas"] == 1
+
+
+def test_dono_ve_o_trace_mesmo_sem_rag_api_key_no_servidor(api_com_pipeline, monkeypatch):
+    usuario, session_id, query_id = _conversa_sem_chave()
+    monkeypatch.setattr(config, "RAG_API_KEY", "")
+
+    response = usuario.get(f"/api/v1/trace/{query_id}", headers={"X-Session-Id": session_id})
+
+    assert response.status_code == 200
+
+
+def test_outra_sessao_nao_ve_o_trace_alheio(api_com_pipeline):
+    usuario, session_id, query_id = _conversa_sem_chave()
+    intruso = {"X-Session-Id": "s_outra_sessao_qualquer"}
+
+    assert usuario.get(f"/api/v1/trace/{query_id}", headers=intruso).status_code == 401
+    assert usuario.get(f"/api/v1/sessions/{session_id}/trace", headers=intruso).status_code == 401
+    assert usuario.get(f"/api/v1/trace/{query_id}").status_code == 401
+
+
+def test_sem_credencial_trace_inexistente_e_401_e_nao_404():
+    sem_chave = TestClient(app)
+
+    assert sem_chave.get("/api/v1/trace/q_inexistente").status_code == 401
+
+
+def test_pergunta_sem_sessao_so_aparece_com_a_chave(pipeline_com_indice):
+    pipeline.responder("Quais contratos de ambulancias foram publicados?",
+                       cliente=lambda m: _resposta_sdk(), query_id="q_sem_dono")
+
+    assert TestClient(app, headers={"X-Session-Id": "s_qualquer_sessao_x"}).get(
+        "/api/v1/trace/q_sem_dono").status_code == 401
+    assert client.get("/api/v1/trace/q_sem_dono").status_code == 200

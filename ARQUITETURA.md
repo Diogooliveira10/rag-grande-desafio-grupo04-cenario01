@@ -145,7 +145,7 @@ As tarefas são distribuídas entre os integrantes a cada encontro conforme as n
 - Rodar o golden set completo de novo com o pipeline atual e registrar o resultado final.
 - Corrigir a geração: confiança alta junto de "nada encontrado" (P2.1) e resposta sem fonte (F1).
 - Fazer o frontend (repositório separado) consumir `query_id`/`session_id`/`feedback`/`history` e mostrar o trace ao lado da resposta, hoje sem cliente; falta também um backend público em HTTPS para o site apontar.
-- Histórico e trace já exigem `X-API-Key` (`RAG_API_KEY`), e o histórico grava textos mascarados com expurgo após `HISTORY_RETENTION_DAYS` dias. Falta decidir, antes de um deploy público, como a tela de trace obtém a chave sem embuti-la no site, e se o log em `logs/` (também mascarado) precisa de expurgo.
+- O histórico exige `X-API-Key` (`RAG_API_KEY`) e grava textos mascarados com expurgo após `HISTORY_RETENTION_DAYS` dias; o trace aceita a chave ou o `X-Session-Id` da própria conversa, então o site público não precisa da chave. Falta decidir se o log em `logs/` (também mascarado) precisa de expurgo.
 - Avaliar respostas e guardrails sobre o suplemento `emails_sinteticos`, recebido e integrado em 2026-10-05: 25 conversas, 20 públicas e 5 restritas ([proveniência e reconstrução](docs/emails_sinteticos.md)).
 - Revisar o casamento de CNPJ sem pontuação nos filtros/consultas.
 - Evitar vazamento de identificadores internos e da mensagem "Busca ampliada" nas respostas ao usuário final.

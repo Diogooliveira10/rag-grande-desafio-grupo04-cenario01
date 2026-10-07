@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 import threading
 import time
 import uuid
@@ -74,8 +75,12 @@ def new_query_id() -> str:
 
 
 def new_session_id() -> str:
-    """Cria um identificador de sessão (conversa) no formato ``s_<id>``."""
-    return f"s_{uuid.uuid4().hex[:12]}"
+    """Cria um identificador de sessão (conversa) no formato ``s_<id>``.
+
+    Aleatório e longo (128 bits): quem tem o id vê o trace da conversa
+    (``app/api.py``), então ele não pode ser adivinhado.
+    """
+    return f"s_{secrets.token_urlsafe(16)}"
 
 
 # Sessão da pergunta em andamento. ``pipeline.responder`` abre a sessão e todo
