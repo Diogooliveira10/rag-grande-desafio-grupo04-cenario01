@@ -159,6 +159,7 @@ Uma pergunta via `responder` gera, no log, uma linha por stage — `interacao` (
 │   ├── prepare_documents.py     ← extração por formato (PDF/HTML/CSV/JSON/JSONL), chunking e metadados canônicos
 │   ├── pca_indicators.py        ← indicadores agregados do PCA (1 indicador = 1 chunk) para a base agregada
 │   ├── ocr.py                   ← OCR (Tesseract) das páginas de PDF escaneadas, usado por prepare_documents.py
+│   ├── qualidade_corpus.py      ← controle de qualidade do normalizado: texto ilegível, vigência das normas, contrato↔compra, valor simbólico
 │   ├── create_embeddings.py     ← embeddings com cache, multi-provedor e escrita incremental
 │   ├── index.py                 ← índice vetorial por base; gera embeddings ou reaproveita os de data/embeddings/
 │   ├── query_analysis.py        ← extrai filtros de ano, valor e órgão da pergunta
@@ -378,6 +379,28 @@ As opções de provedor são `ecoa`, `ollama`, `openai` e `custom`. O cache regi
 provedor, endpoint e modelo para impedir a mistura de espaços vetoriais
 diferentes.
 
+Antes do índice, `src/qualidade_corpus.py` faz o controle de qualidade dos
+JSONL de `data/normalized/` (o da raiz, o combinado da v6 e os da v6 por base).
+Ele não muda o texto dos chunks, só status e metadados, então os vetores
+continuam valendo:
+
+- chunk de PDF sem mapa de caracteres (`/12 /3 □` ou `/U0044/U0049`) recebe
+  `status_extracao: "texto_ilegivel"` e fica fora do índice;
+- as normas recebem número, publicação e início da vigência
+  (`extras.data_vigencia_inicio`), declarados no manifesto em
+  `metadados_por_url`; editais e termos de referência do PNCP recebem a data de
+  publicação da compra vinculada;
+- o contrato herda a modalidade da compra da mesma contratação
+  (`numero_controle_compra`), e a compra, o fornecedor do contrato;
+- valor abaixo de R$ 1,00 recebe `extras.valor_simbolico: true`.
+
+O relatório fica em [`data/inventory/qualidade_v6.json`](data/inventory/qualidade_v6.json).
+
+```bash
+py -m src.qualidade_corpus --verificar   # só conta, sem gravar
+py -m src.qualidade_corpus               # aplica e grava o relatório
+```
+
 `src/index.py` monta o índice usado pela busca: particiona por `base_id`, grava
 os metadados/vetores em `vectors.jsonl` e persiste um índice FAISS em
 `vectors.faiss` para a recuperação densa. Depois de atualizar os documentos ou
@@ -388,6 +411,18 @@ cache, mas a recuperação em `src.retrieve` lê os índices criados por `src.in
 ```bash
 py .\src\index.py --dry-run     # só conta chunks por base, sem chamar o modelo de embeddings
 py .\src\index.py               # gera embeddings de verdade, via o endpoint compartilhado
+```
+
+Chunks sem texto e chunks com `status_extracao: "texto_ilegivel"` ficam fora
+do índice; o manifesto de cada base conta os ilegíveis em
+`chunks_ilegiveis_ignorados`. Para refazer o índice da v6 depois do controle de
+qualidade, sem gerar vetores, reaproveite os vetores da v6 base a base:
+
+```powershell
+foreach ($base in "atas_conversacional", "contratos_estruturado", "editais_normativo", "pca_agregado") {
+  py .\src\index.py --input "data\normalized\v6\$base\documents.jsonl" --output index `
+    --embeddings "data\embeddings\2026-09-30_12-08-51\$base\embeddings.jsonl" --merge-existing
+}
 ```
 
 `--embeddings` reaproveita vetores já publicados em vez de chamar o modelo; cada
@@ -422,7 +457,7 @@ Onde a base fica depende de `DATABASE_URL` no `.env` — o mesmo código e o mes
 - **Preenchido:** Postgres no [Neon](https://neon.tech) (`postgresql://...?sslmode=require`). É a base do projeto. A connection string tem senha: fica só no `.env`, nunca no repositório nem no log (o log mostra só o host). Com o usuário dono, a base se remonta sozinha quando o `documents.jsonl` ou o esquema mudam; com um usuário só de leitura (`rag_leitor`), ela é usada como está e o log da etapa `consulta_sql` marca `base_desatualizada` — quem tem o usuário dono roda `py -m src.structured_db build` uma vez.
 - **Vazio:** SQLite em `data/structured/base_estruturada.sqlite`, versionado no Git com o snapshot v6. Serve a quem não tem a connection string do Neon, aos testes (que sempre usam SQLite temporário, sem internet nem senha; ver `tests/conftest.py`) e às avaliações reproduzíveis. Quando o esquema muda, o arquivo remontado entra no commit, para ninguém ficar com ele alterado.
 
-Tabelas: `contratacoes` e `pca_planos`. Em `contratacoes`, cada linha é uma compra publicada ou um contrato assinado do PNCP: órgão, esfera, município, objeto, modalidade (só as compras trazem), fornecedor (só os contratos trazem) e valor (`valorGlobal` no contrato; homologado, ou estimado, na compra). O contrato guarda o número da compra que o originou (`numero_controle_compra`), e as perguntas sobre "contratações" contam uma vez a contratação que tem os dois registros. Valores abaixo de R$ 1,00 (R$ 0,00 e R$ 0,01 simbólicos do PNCP) ficam fora de média, mediana e ranking. `pca_planos` tem um plano de contratações anual por unidade, com valor total e quantidade de itens. Só entram registros da base agregada cujo número de controle PNCP é de plano (`CNPJ-0-…/ano`): a base traz também compras (`-1-`) e contratos (`-2-`) ligados aos planos, que ficam de fora (na v6, 1 plano entre 377 registros). São só os planos presentes no corpus — o total oficial do PCA do Estado está nos indicadores da base agregada, e o resultado SQL avisa isso.
+Tabelas: `contratacoes` e `pca_planos`. Em `contratacoes`, cada linha é uma compra publicada ou um contrato assinado do PNCP: órgão, esfera, município, objeto, modalidade (só as compras trazem), fornecedor (só os contratos trazem) e valor (`valorGlobal` no contrato; homologado, ou estimado, na compra). O contrato guarda o número da compra que o originou (`numero_controle_compra`), e as perguntas sobre "contratações" contam uma vez a contratação que tem os dois registros. Valores abaixo de R$ 1,00 (R$ 0,00 e R$ 0,01 simbólicos do PNCP) ficam fora de média, mediana e ranking. `pca_planos` tem um plano de contratações anual por unidade, com valor total e quantidade de itens. Só entram registros da base agregada cujo número de controle PNCP é de plano (`CNPJ-0-…/ano`): a base traz também compras (`-1-`) e contratos (`-2-`) ligados aos planos, que não são planos (na v6, 1 plano entre 377 registros). Essas compras e contratos vão para `contratacoes` quando a base de contratos não os tem, são do RJ e foram publicados num ano que ela já cobre: na v6, 184 registros, e a tabela passa de 625 para 809 linhas, todas do RJ publicadas em 2025. São só os planos presentes no corpus — o total oficial do PCA do Estado está nos indicadores da base agregada, e o resultado SQL avisa isso.
 
 **5. Testar o endpoint de LLM/embeddings compartilhado**
 

@@ -23,8 +23,9 @@
   ],
   "dimension": 1024,
   "faiss_index": "vectors.faiss",
-  "total_chunks": 2524,
+  "total_chunks": 1705,
+  "chunks_ilegiveis_ignorados": 819,
   "source_file": "data/normalized/v6/atas_conversacional/documents.jsonl",
-  "source_sha256": "f1c0bbd5a1dd6f8081f23bc523957b8ba4ce9ed681a0f06a63debf11e282d87b",
-  "built_at": "2026-09-30T17:23:38+00:00"
+  "source_sha256": "41b8abe176c30f0fccd48075eec6ac2b82f8ed5058c384a8f613a4e14774c3e7",
+  "built_at": "2026-10-07T19:01:08+00:00"
 }

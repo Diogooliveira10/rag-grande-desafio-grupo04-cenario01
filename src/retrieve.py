@@ -345,6 +345,10 @@ def _records_for(
         chunk_id = str(record.get("chunk_id") or metadata.get("chunk_id") or "")
         if not chunk_id or chunk_id in seen_ids or not _matches_filters(metadata, filters):
             continue
+        # Texto ilegível (src/qualidade_corpus.py) não é evidência: já fica fora
+        # do índice denso, e o BM25 lê o documents.jsonl, onde ele continua.
+        if _metadata_value(metadata, "status_extracao") == "texto_ilegivel":
+            continue
         if selection is not None:
             naturezas, base_ids = selection
             if (
@@ -1034,6 +1038,8 @@ def retrieve(
                 span.extra["candidatos"] = len(fused)
                 candidates = {item.chunk_id: item for item in fused}
                 ranked = list(reranker(query, fused))
+                if getattr(reranker, "backend_usado", None):
+                    span.extra["rerank_backend"] = reranker.backend_usado
                 if {item.chunk_id for item in ranked} - candidates.keys():
                     raise ValueError("Reranker devolveu evidência fora dos candidatos")
                 reranked = []

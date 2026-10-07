@@ -24,7 +24,8 @@
   "dimension": 1024,
   "faiss_index": "vectors.faiss",
   "total_chunks": 625,
+  "chunks_ilegiveis_ignorados": 0,
   "source_file": "data/normalized/v6/contratos_estruturado/documents.jsonl",
-  "source_sha256": "b514a8896801626c6c9872a6b440c50533e0d9d8732c9f44f1135a38faef158a",
-  "built_at": "2026-09-30T17:23:34+00:00"
+  "source_sha256": "b777f80a9f698d8365e020d43321082cae8f8ea8d610e47686caf72d75f30e82",
+  "built_at": "2026-10-07T19:01:10+00:00"
 }

@@ -3,6 +3,7 @@ r"""Ablação da recuperação: denso, BM25, híbrido (RRF) e híbrido + rerank.
 Uso:
     py .\eval\ablacao_rerank.py
     py .\eval\ablacao_rerank.py --modelo BAAI/bge-reranker-v2-m3 --candidatos 10 30 50
+    py .\eval\ablacao_rerank.py --modelo ecoa
 
 O golden set (``eval/golden_set.jsonl``) diz qual base deve responder, mas não
 qual chunk; para medir recuperação usamos ``eval/retrieval_set.jsonl``: cada
@@ -45,7 +46,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import config  # noqa: E402
-from src.rerank import CrossEncoderReranker  # noqa: E402
+from src.rerank import CrossEncoderReranker, EcoaReranker  # noqa: E402
 from src.retrieve import (  # noqa: E402
     DEFAULT_FETCH_K,
     RetrievalResult,
@@ -230,13 +231,16 @@ def render_markdown(relatorio: dict[str, Any]) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--conjunto", type=Path, default=DEFAULT_SET)
-    parser.add_argument("--modelo", default=None, help="cross-encoder (padrão: config.RERANK_MODEL)")
+    parser.add_argument("--modelo", default=None,
+                        help="cross-encoder (padrão: config.RERANK_MODEL), ou 'ecoa' para o /api/rerank da turma")
     parser.add_argument("--candidatos", type=int, nargs="+", default=[TOP_K, config.RERANK_CANDIDATES])
     parser.add_argument("--output", type=Path, default=DEFAULT_RUNS_DIR)
     args = parser.parse_args()
 
     casos = carregar_casos(args.conjunto)
-    reranker = CrossEncoderReranker(args.modelo)
+    # "ecoa" sem fallback: uma falha do endpoint aparece no relatório em vez de
+    # medir o cross-encoder local sem avisar.
+    reranker = EcoaReranker() if args.modelo == "ecoa" else CrossEncoderReranker(args.modelo)
     run_id = "ablacao-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     relatorio = rodar_ablacao(casos, reranker=reranker, candidatos=sorted(set(args.candidatos)))
     relatorio = {

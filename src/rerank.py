@@ -9,13 +9,23 @@ resultado em ``top_k`` depois.
 O modelo padrão (``config.RERANK_MODEL``) é um cross-encoder multilíngue
 treinado no mMARCO (que inclui português) e roda em CPU. O modelo é carregado
 na primeira chamada e fica em cache no processo; o download inicial vai para o
-cache do Hugging Face. Quando o modelo de rerank da turma ganhar endpoint,
-basta outra classe com a mesma assinatura ``(query, resultados) -> resultados``.
+cache do Hugging Face.
+
+Com ``RERANK_PROVIDER=ecoa``, quem dá as notas é o endpoint ``/api/rerank`` do
+servidor da turma (``EcoaReranker``): manda a pergunta e os textos e recebe uma
+nota por texto. Se o endpoint falhar, o cross-encoder local assume; se também
+não houver, o ``retrieve`` segue com a ordem da fusão. ``backend_usado`` diz
+qual dos dois deu as notas, e o ``retrieve`` leva isso ao log. O padrão
+continua sendo o local: o endpoint usa o mesmo modelo de embedding da busca
+densa e, na ablação de 2026-10-07 (``docs/ABLACAO_RERANK.md``), acertou menos.
 """
 
 from __future__ import annotations
 
+import json
+import logging
 import re
+import urllib.request
 from dataclasses import replace
 from functools import lru_cache
 from typing import Any, Callable, Optional, Sequence
@@ -23,7 +33,14 @@ from typing import Any, Callable, Optional, Sequence
 import config
 from src.retrieve import RetrievalResult
 
+logger = logging.getLogger(__name__)
+
 ScoreFn = Callable[[list[tuple[str, str]]], Sequence[float]]
+PostFn = Callable[[str, dict[str, Any], float], dict[str, Any]]
+
+# Teto por texto enviado ao endpoint: os candidatos já vêm resumidos por
+# texto_para_rerank, e o corpo da requisição fica pequeno.
+_MAX_CHARS_ECOA = 2000
 
 _PAR_JSON_RE = re.compile(r'"(\w+)":\s*(?:"((?:[^"\\]|\\.)*)"|(-?\d+(?:\.\d+)?))')
 # Campos que dizem do que o registro trata vêm primeiro; o resto segue na ordem original.
@@ -113,11 +130,82 @@ class CrossEncoderReranker:
         return reordenados
 
 
+def _post_json(url: str, corpo: dict[str, Any], timeout: float) -> dict[str, Any]:
+    # UTF-8 explícito: o servidor recusa (400) texto acentuado em outra codificação.
+    requisicao = urllib.request.Request(
+        url,
+        data=json.dumps(corpo, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json; charset=utf-8"},
+    )
+    with urllib.request.urlopen(requisicao, timeout=timeout) as resposta:
+        return json.loads(resposta.read().decode("utf-8"))
+
+
+class EcoaReranker(CrossEncoderReranker):
+    """Rerank pelo endpoint ``/api/rerank`` do servidor da turma.
+
+    Corpo: ``{"query", "documents", "top_n"}``; resposta: ``{"model",
+    "results": [{"index", "relevance_score"}, ...]}``. Pede nota para todos os
+    textos (``top_n`` = quantidade). Com ``fallback``, uma falha do endpoint
+    (rede, timeout, resposta fora do formato) passa os mesmos pares a ele.
+    """
+
+    def __init__(
+        self,
+        url: str | None = None,
+        *,
+        timeout: float | None = None,
+        fallback: Optional[CrossEncoderReranker] = None,
+        post_fn: Optional[PostFn] = None,
+    ) -> None:
+        super().__init__()
+        self.url = url or config.RERANK_URL
+        self.timeout = timeout if timeout is not None else config.RERANK_TIMEOUT
+        self.fallback = fallback
+        self._post = post_fn or _post_json
+        self.modelo = f"ecoa:{self.url.rsplit('/api/', 1)[-1]}"
+        self.backend_usado: Optional[str] = None
+
+    def _scores_ecoa(self, pares: list[tuple[str, str]]) -> list[float]:
+        documentos = [texto[:_MAX_CHARS_ECOA] for _query, texto in pares]
+        resposta = self._post(
+            self.url,
+            {"query": pares[0][0], "documents": documentos, "top_n": len(documentos)},
+            self.timeout,
+        )
+        notas: dict[int, float] = {}
+        for item in resposta.get("results") or []:
+            nota = item.get("relevance_score", item.get("score"))
+            if isinstance(item.get("index"), int) and nota is not None:
+                notas[item["index"]] = float(nota)
+        if set(notas) != set(range(len(documentos))):
+            raise ValueError(f"/api/rerank devolveu notas para {len(notas)} de {len(documentos)} textos")
+        if resposta.get("model"):
+            self.modelo = f"ecoa:{resposta['model']}"
+        return [notas[indice] for indice in range(len(documentos))]
+
+    def _scores(self, pares: list[tuple[str, str]]) -> list[float]:
+        try:
+            notas = self._scores_ecoa(pares)
+        except Exception as erro:
+            if self.fallback is None:
+                self.backend_usado = None
+                raise
+            logger.warning("Rerank do ECOA falhou (%s); usando %s", type(erro).__name__, self.fallback.modelo)
+            notas = self.fallback._scores(pares)
+            self.backend_usado = f"local:{self.fallback.modelo} (ecoa falhou: {type(erro).__name__})"
+            return notas
+        self.backend_usado = self.modelo
+        return notas
+
+
 def reranker_padrao() -> Optional[CrossEncoderReranker]:
     """Reranker usado pelo pipeline, ou ``None`` com ``RERANK_ENABLED=false``."""
     if not config.RERANK_ENABLED:
         return None
-    return CrossEncoderReranker()
+    if config.RERANK_PROVIDER == "local":
+        return CrossEncoderReranker()
+    return EcoaReranker(fallback=CrossEncoderReranker())
 
 
-__all__ = ["CrossEncoderReranker", "reranker_padrao"]
+__all__ = ["CrossEncoderReranker", "EcoaReranker", "reranker_padrao"]

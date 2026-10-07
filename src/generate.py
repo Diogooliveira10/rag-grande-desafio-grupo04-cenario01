@@ -187,6 +187,14 @@ def _cabecalho(metadata: ChunkMetadata, evidence_id: str | None = None) -> str:
         campos.append(f"documento={metadata.extras['titulo_documento']}")
     if metadata.data_vigencia is not None:
         campos.append(f"vigencia_ate={metadata.data_vigencia.isoformat()}")
+    # Metadados de src/qualidade_corpus.py: início da vigência das normas,
+    # valor simbólico do PNCP e modalidade herdada da compra.
+    if metadata.extras.get("data_vigencia_inicio"):
+        campos.append(f"vigente_desde={metadata.extras['data_vigencia_inicio']}")
+    if metadata.extras.get("valor_simbolico"):
+        campos.append("valor_simbolico=true; R$ 0,00 ou R$ 0,01 no PNCP não é o custo real")
+    if metadata.extras.get("modalidade_fonte") == "compra_vinculada":
+        campos.append(f"modalidade={metadata.extras['modalidade']} (da compra vinculada)")
     if metadata.extras.get("subpergunta"):
         campos.append(f"intencao={metadata.extras['intencao']}: {metadata.extras['subpergunta']}")
     if metadata.extras.get("filtros_relaxados"):

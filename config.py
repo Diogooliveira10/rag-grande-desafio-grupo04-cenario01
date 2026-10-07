@@ -39,9 +39,14 @@ GENERATION_CHUNK_CHARS = int(_env("GENERATION_CHUNK_CHARS", "900"))
 # A geração normal leva de 20 a 90 s no servidor da turma.
 GENERATION_TIMEOUT = float(_env("GENERATION_TIMEOUT", "180"))
 GENERATION_MAX_RETRIES = int(_env("GENERATION_MAX_RETRIES", "1"))
-# Rerank por cross-encoder local (src/rerank.py). O modelo da turma ainda não
-# tem endpoint; RERANK_MODEL aceita qualquer CrossEncoder do sentence-transformers.
+# Rerank (src/rerank.py). "local" (padrão) = cross-encoder local (RERANK_MODEL
+# aceita qualquer CrossEncoder do sentence-transformers); "ecoa" = endpoint
+# /api/rerank do servidor da turma, com o local de reserva. Na ablação de
+# 2026-10-07 o local acertou mais (docs/ABLACAO_RERANK.md).
 RERANK_ENABLED = _env("RERANK_ENABLED", "true").lower() in {"1", "true", "sim", "yes"}
+RERANK_PROVIDER = _env("RERANK_PROVIDER", "local").lower()
+RERANK_URL = _env("RERANK_URL", "") or OLLAMA_URL.rstrip("/").removesuffix("/v1") + "/api/rerank"
+RERANK_TIMEOUT = float(_env("RERANK_TIMEOUT", "30"))
 RERANK_MODEL = _env("RERANK_MODEL", "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1")
 RERANK_CANDIDATES = int(_env("RERANK_CANDIDATES", "10"))
 RERANK_MAX_LENGTH = int(_env("RERANK_MAX_LENGTH", "512"))
