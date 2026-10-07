@@ -193,3 +193,39 @@ A execução oficial não permitiu observar o efeito da equivalência em uma res
 - Utilizei assistentes de IA como apoio para percorrer o fluxo do evaluator e do pipeline, correlacionar logs com a implementação, analisar o contrato funcional de `I2` e localizar o ponto de comparação de fontes do evaluator.
 
 - Revisei as alterações, executei os testes e validei os resultados da avaliação oficial. As conclusões foram baseadas nos dados, código, logs e testes locais, mantendo o Golden Set inalterado.
+
+## Encontro 11 — 2026-10-07
+
+### Relato individual — Diogo Oliveira
+
+**Tarefa do dia:**
+
+Corrigir e testar o matching de conteúdo do evaluator, especialmente o falso matching do termo `TI` no caso `P5.3`, e distinguir casos sem critério de conteúdo definido sem alterar o Golden Set ou o pipeline de RAG.
+
+**O que fiz:**
+
+- Inspecionei `eval/run_eval.py`, `eval/golden_set.jsonl` e `tests/test_eval.py`. Confirmei que o caso `P5.3` proíbe os termos `tecnologia da informação`, `TI` e `contrato de TI`, e exige `CRISTALIA`, `DARUNAVIR`, `TRANSFERÊNCIA DE TECNOLOGIA` e `1196949440`. O matcher anterior fazia busca por substring e podia encontrar `TI` dentro de palavras maiores.
+
+- Implementei no evaluator matching por limites lexicais para termos simples alfanuméricos, preservando a busca por substring em expressões compostas ou com pontuação, inclusive identificadores PNCP.
+
+- Registrei separadamente o estado da validação de conteúdo: validado, falhou, não aplicável ou não validável. Para manter compatibilidade, `content_ok` continua neutro quando a resposta não tem critério textual, mas esses casos não são tratados como conteúdo validado nem entram no cálculo de `content_accuracy`. Não alterei a fórmula de `acertou`.
+
+- Acrescentei testes para `ti` em `estimativa`, `partir` e `último`, para o termo isolado `TI`, para `CRISTALIA`, para um identificador PNCP completo e para casos com `deve_conter` vazio, ausente ou sem resposta para validar.
+
+- Executei os testes focados, com **34 aprovados**, a suíte completa, com **1.189 aprovados**, e `git diff --check`, sem apontamentos.
+
+- Executei o Golden Set oficial com `src.pipeline:responder`. A rodada `20261007T193322Z` terminou com **12/26 acertos**. O `P5.3` permaneceu como falha: a resposta não continha nenhum dos quatro termos obrigatórios. O matcher novo não considerou `TI` dentro de “último”; a comparação com o matcher anterior e as mesmas respostas não apontou mudanças em `content_ok` ou `acertou`. A métrica `content_accuracy` mudou porque os casos sem critério deixaram de ser contabilizados como conteúdo validado.
+
+- No `P3.1`, `expected_source_ok=true`. A execução oficial alterou incidentalmente a base SQLite; restaurei-a ao estado anterior e conferi que os hashes do Golden Set, corpus, índices, ZIP e requirements permaneceram iguais.
+
+- Tentei chamar `http://localhost:8080/api/v1/history` usando a chave `RAG_API_KEY` de `.env`. A chamada não chegou ao endpoint porque não foi possível extrair a chave do arquivo `.env`; nenhuma alteração de código foi feita nessa tentativa.
+
+**Resultado:**
+
+A correção genérica do matching e a representação explícita da ausência de critério foram implementadas e cobertas por testes, sem alteração do Golden Set ou do pipeline de RAG. O score oficial não aumentou: `P5.3` continuou falhando por falta dos termos obrigatórios, e nenhum resultado individual mudou em relação ao matching anterior aplicado às mesmas respostas. A tentativa de consultar o histórico da API ficou pendente por ausência de uma chave extraível de `.env`.
+
+### Uso de assistentes de IA:
+
+- Utilizei assistentes de IA como apoio na inspeção do evaluator e dos testes, implementação da correção, execução dos testes e análise do relatório oficial.
+
+- Conferi os resultados com o Golden Set, o relatório gerado, os hashes dos artefatos e os testes locais. O Golden Set e o pipeline de RAG não foram alterados.
