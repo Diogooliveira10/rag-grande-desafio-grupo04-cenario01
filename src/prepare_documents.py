@@ -36,6 +36,7 @@ from src import ocr
 from src.fetch_corpus import load_manifest
 from src.ingest import chunk_text, sha256_file
 from src.pca_indicators import eh_csv_pca, indicadores_pca
+from src.qualidade_corpus import decodificar_codigos_unicode, motivo_de_texto_ilegivel
 from src.pncp_result_indicators import indicadores_resultados_homologados
 
 
@@ -752,6 +753,39 @@ def _refresh_unit_provenance(
     )
 
 
+def _texto_legivel_da_pagina(path: Path, page_index: int, text: str) -> tuple[str, str, str | None]:
+    """(texto, status, extração) da página de PDF; extração ``None`` = mantém o texto.
+
+    Página escaneada (sem camada de texto) ou com texto ilegível vai para o
+    OCR (src/ocr.py). "Ilegível" é o critério de src/qualidade_corpus.py:
+    glifos sem mapa de caracteres ("/12 /3 □") ou códigos no lugar das letras
+    ("/U0044"), que são só decodificados, sem OCR.
+    """
+    motivo = motivo_de_texto_ilegivel(text) if text else None
+    if text and motivo is None:
+        return text, "ok", None
+    if motivo == "codigos_unicode_no_lugar_das_letras":
+        decodificado = decodificar_codigos_unicode(text)
+        if motivo_de_texto_ilegivel(decodificado) is None:
+            return decodificado, "ok", "codigos_unicode_decodificados"
+    if ocr.disponivel():
+        lido = ocr.texto_da_pagina(path, page_index).strip()
+        # Página vazia aceita o que o OCR ler; texto ilegível só troca por legível.
+        if lido and (not text or motivo_de_texto_ilegivel(lido) is None):
+            return lido, "ok_ocr", ocr.motor()
+    return text, "ok" if text else "sem_texto", None
+
+
+def _reextrair_pagina_ilegivel(path: Path, unit: SourceUnit) -> SourceUnit:
+    """Página de PDF guardada no cache com texto ilegível: tenta de novo."""
+    if unit.formato != "pdf" or unit.status != "ok" or not motivo_de_texto_ilegivel(unit.text):
+        return unit
+    text, status, extracao = _texto_legivel_da_pagina(path, int(unit.extras["pagina"]) - 1, unit.text)
+    if not extracao:
+        return unit
+    return replace(unit, text=text, status=status, extras={**unit.extras, "extracao": extracao})
+
+
 def _pdf_units(
     path: Path,
     base: dict[str, Any],
@@ -772,12 +806,10 @@ def _pdf_units(
         text = (page.extract_text() or "").strip()
         status = "ok" if text else "sem_texto"
         extras: dict[str, Any] = {"pagina": page_number, "total_paginas": total_pages}
-        # Página escaneada: sem camada de texto, tenta o OCR (src/ocr.py).
-        if not text and ocr.disponivel():
-            text = ocr.texto_da_pagina(path, page_number - 1)
-            if text:
-                status = "ok_ocr"
-                extras["extracao"] = ocr.motor()
+        legivel, status_legivel, extracao = _texto_legivel_da_pagina(path, page_number - 1, text)
+        if extracao:
+            text, status = legivel, status_legivel
+            extras["extracao"] = extracao
         yield _make_unit(
             path,
             base,
@@ -1288,6 +1320,8 @@ def prepare_documents(
                         )
                         for unit in units
                     ]
+                # Extrações antigas guardaram glifos ("/12 /3 □") como texto.
+                units = [_reextrair_pagina_ilegivel(path, unit) for unit in units]
                 extraction_cache_hits += 1
             else:
                 units = [

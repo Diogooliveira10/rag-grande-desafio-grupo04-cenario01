@@ -66,11 +66,7 @@ _CAMPOS_DE_NORMA = (
     "data_vigencia_fim", "ambito", "fonte_oficial",
 )
 
-
-# --------------------------------------------------------------------------
 # Texto ilegível
-# --------------------------------------------------------------------------
-
 
 def motivo_de_texto_ilegivel(texto: str) -> Optional[str]:
     """Por que o texto é ilegível, ou ``None`` se ele é legível (ou vazio)."""
@@ -89,6 +85,11 @@ def motivo_de_texto_ilegivel(texto: str) -> Optional[str]:
     return None
 
 
+def decodificar_codigos_unicode(texto: str) -> str:
+    """"/U0044/U0049Á/U0052/U0049/U004F" -> "DIÁRIO" (usado na extração de PDF)."""
+    return _CODIGO_UNICODE.sub(lambda achado: chr(int(achado.group()[2:], 16)), texto)
+
+
 def _marcar_texto(registro: dict[str, Any], extras: dict[str, Any]) -> Optional[str]:
     motivo = motivo_de_texto_ilegivel(str(registro.get("text") or ""))
     if motivo:
@@ -97,9 +98,7 @@ def _marcar_texto(registro: dict[str, Any], extras: dict[str, Any]) -> Optional[
     return motivo
 
 
-# --------------------------------------------------------------------------
 # Metadados declarados no manifesto
-# --------------------------------------------------------------------------
 
 
 def _url_comparavel(url: str) -> str:
@@ -125,9 +124,7 @@ def _ler_manifesto(caminho: Path) -> dict[str, Any]:
     return load_manifest(caminho)
 
 
-# --------------------------------------------------------------------------
 # Enriquecimento
-# --------------------------------------------------------------------------
 
 
 def _numero(valor: Any) -> Optional[float]:
@@ -216,9 +213,7 @@ def enriquecer(registro: Mapping[str, Any], contexto: _Contexto) -> tuple[dict[s
     return novo, mudancas
 
 
-# --------------------------------------------------------------------------
 # Arquivos
-# --------------------------------------------------------------------------
 
 
 def arquivos_padrao(diretorio: Path = NORMALIZED_DIR) -> list[Path]:
