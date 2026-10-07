@@ -406,3 +406,39 @@ def test_pergunta_sem_sessao_so_aparece_com_a_chave(pipeline_com_indice):
     assert TestClient(app, headers={"X-Session-Id": "s_qualquer_sessao_x"}).get(
         "/api/v1/trace/q_sem_dono").status_code == 401
     assert client.get("/api/v1/trace/q_sem_dono").status_code == 200
+
+
+# --------------------------------------------------------------------------
+# Endereço do banco fora do que chega ao usuário
+# --------------------------------------------------------------------------
+
+
+def test_trace_de_log_antigo_nao_mostra_o_host_do_postgres():
+    from src.trace import montar_trace_sessao
+
+    host = "postgres://ep-exemplo-pooler.us-east-2.aws.neon.tech"
+    obs.registrar(run_id="run1", query_id="q_sql", stage=obs.Stage.CONSULTA_SQL, status="ok", latencia_ms=5,
+                  input="Quantos contratos?", output="1 linha(s)", session_id="s_sessao_banco_antiga",
+                  extra={"banco": host, "sql": "SELECT 1", "chunks": [{"source_file": host}]})
+
+    for trace in (montar_trace("q_sql"), montar_trace_sessao("s_sessao_banco_antiga")):
+        assert "neon.tech" not in json.dumps(trace)
+    etapa = montar_trace("q_sql")["etapas"][0]
+    assert etapa["detalhes"]["banco"] == "postgres"
+    assert etapa["detalhes"]["sql"] == "SELECT 1"
+
+
+def test_resposta_da_api_nao_mostra_o_host_em_fonte_sql_antiga(monkeypatch):
+    from app import api as api_module
+
+    payload = {"query": "q", "answer": "a", "bases_consultadas": ["estruturada"], "confidence_level": "alta",
+               "is_refusal": False, "refusal_reason": None,
+               "sources_used": [{"chunk_id": "sql:contratacoes:x:1", "base_id": "contratos_estruturado",
+                                 "source_file": "postgres://ep-exemplo.neon.tech"},
+                                {"chunk_id": "c1", "base_id": "contratos_estruturado",
+                                 "source_file": r"data\raw\v6\c1.json"}]}
+    monkeypatch.setattr(api_module.pipeline, "responder", lambda *a, **kw: payload)
+
+    fontes = client.post("/api/v1/query", json={"query": "q"}).json()["sources_used"]
+
+    assert [f["source_file"] for f in fontes] == ["postgres", "c1.json"]

@@ -16,6 +16,7 @@ Serve o ``GET /api/v1/trace/{query_id}`` e o
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -32,6 +33,20 @@ _BASE_DA_ETAPA = {
 }
 
 _ETAPAS_VETORIAIS = {stage for stage, base in _BASE_DA_ETAPA.items() if base == "vetorial"}
+
+# O trace vai para o usuário do site. Logs gravados antes de
+# ``Banco.rotulo_publico`` trazem o endereço do servidor Postgres; ele sai daqui.
+_ENDERECO_POSTGRES = re.compile(r"postgres(?:ql)?://[^\s\"']+")
+
+
+def _sem_endereco_de_banco(valor: Any) -> Any:
+    if isinstance(valor, str):
+        return _ENDERECO_POSTGRES.sub("postgres", valor)
+    if isinstance(valor, dict):
+        return {chave: _sem_endereco_de_banco(item) for chave, item in valor.items()}
+    if isinstance(valor, list):
+        return [_sem_endereco_de_banco(item) for item in valor]
+    return valor
 
 
 def _registros(campo: str, valor: str, logs_dir: Path) -> list[dict[str, Any]]:
@@ -68,7 +83,7 @@ def montar_trace(query_id: str, logs_dir: Optional[Path] = None) -> Optional[dic
     registros = _registros("query_id", query_id, Path(logs_dir or default_logger.logs_dir))
     if not registros:
         return None
-    return _trace_dos_registros(query_id, registros)
+    return _sem_endereco_de_banco(_trace_dos_registros(query_id, registros))
 
 
 def _trace_dos_registros(query_id: str, registros: list[dict[str, Any]]) -> dict[str, Any]:
@@ -131,7 +146,7 @@ def montar_trace_sessao(session_id: str, logs_dir: Optional[Path] = None) -> Opt
                ("query_id", "pergunta", "inicio", "fim", "latencia_total_ms", "resumo")},
             "etapas": [etapa["stage"] for etapa in trace["etapas"]],
         })
-    return {
+    return _sem_endereco_de_banco({
         "session_id": session_id,
         "inicio": perguntas[0]["inicio"],
         "fim": perguntas[-1]["fim"],
@@ -139,7 +154,7 @@ def montar_trace_sessao(session_id: str, logs_dir: Optional[Path] = None) -> Opt
         "consultou_sql": sum(1 for p in perguntas if p["resumo"].get("consultou_sql")),
         "consultou_vetorial": sum(1 for p in perguntas if p["resumo"].get("consultou_vetorial")),
         "perguntas": perguntas,
-    }
+    })
 
 
 __all__ = ["montar_trace", "montar_trace_sessao"]

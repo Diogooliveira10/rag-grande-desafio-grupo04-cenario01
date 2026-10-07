@@ -87,13 +87,19 @@ def _autorizar_trace(
     )
 
 
+def _public_source_file(source_file: object) -> str:
+    """Nome do arquivo, sem caminho local; fonte SQL antiga sem o host do banco."""
+    texto = str(source_file or "")
+    if texto.startswith(("postgres://", "postgresql://")):
+        return "postgres"
+    return PurePosixPath(texto.replace("\\", "/")).name
+
+
 def _public_rag_payload(payload: dict) -> dict:
     """Remove caminhos locais das fontes antes de persistir ou expor via HTTP."""
     public = dict(payload)
     public["sources_used"] = [
-        {**source, "source_file": PurePosixPath(
-            str(source.get("source_file") or "").replace("\\", "/")
-        ).name}
+        {**source, "source_file": _public_source_file(source.get("source_file"))}
         for source in payload.get("sources_used", [])
     ]
     return public

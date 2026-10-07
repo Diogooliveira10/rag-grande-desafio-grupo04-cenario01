@@ -175,6 +175,7 @@ def test_banco_padrao_escolhe_postgres_so_com_database_url(monkeypatch):
     banco = structured_db.banco_padrao()
     assert banco.dialeto == "postgres"
     assert banco.descricao() == "postgres://host.neon.tech"  # sem usuário nem senha
+    assert banco.rotulo_publico() == "postgres"  # sem o host: vai para resposta e trace
     assert banco._sql("SELECT * FROM t WHERE a = ? AND b = ?") == "SELECT * FROM t WHERE a = %s AND b = %s"
 
 

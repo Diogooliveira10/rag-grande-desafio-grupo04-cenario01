@@ -139,6 +139,14 @@ class Banco:
         host = self.url.split("@", 1)[-1].split("/", 1)[0].split("?", 1)[0]
         return f"postgres://{host}"
 
+    def rotulo_publico(self) -> str:
+        """Identificação que pode sair para o usuário (fonte da resposta, log, trace).
+
+        Sem o host: ``descricao()`` diz qual servidor Postgres foi usado, o que
+        serve a quem opera a carga, mas não a quem lê uma resposta.
+        """
+        return "postgres" if self.dialeto == "postgres" else self.descricao()
+
     def _sql(self, sql: str) -> str:
         return sql.replace("?", "%s") if self.dialeto == "postgres" else sql
 

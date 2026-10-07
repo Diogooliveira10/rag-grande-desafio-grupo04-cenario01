@@ -1096,7 +1096,7 @@ def _chunks(consulta: Consulta, sql: str, cabecalho: str, linhas: list[str], ban
             + "\n"
             + "\n".join(parte),
             metadata=ChunkMetadata(
-                source_file=banco.descricao(),
+                source_file=banco.rotulo_publico(),
                 chunk_id=f"sql:{consulta.tabela}:{consulta.tipo}:{assinatura}:{indice}",
                 base_id=base_id,
                 doc_type="sql",
@@ -1141,7 +1141,7 @@ def consultar_estruturado(
             query_id=query_id,
             stage=Stage.CONSULTA_SQL,
             input=query,
-            extra={"tabela": consulta.tabela, "tipo": consulta.tipo, "banco": banco.descricao()},
+            extra={"tabela": consulta.tabela, "tipo": consulta.tipo, "banco": banco.rotulo_publico()},
         ) as span:
             structured_db.garantir_banco(documents_file, banco, status=span.extra)
             with banco.sessao():
