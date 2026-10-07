@@ -79,7 +79,11 @@ Rodei a suíte completa localmente (322 passed, 1 failed pré-existente e sem re
 Uso de IA: usei o Claude pra desenhar a extração por regex do query_analysis, pra estender os filtros de retrieve.py em cima do código novo do Diogo sem quebrar as features dele, e pra investigar o bug de dependência (pypdf faltando no meu ambiente) que apareceu depois. Rodei os testes, decidi o formato de saída dos filtros e confirmei cada mudança antes de commitar fui eu.
 
 
-## Encontro 7 — 30/09/2026
+## Encontro 7 — 28/09/2026
+
+Falta justificada via email.
+
+## Encontro 8 — 30/09/2026
 
 Contexto: tarefa designada pra mim hoje veio da lista de pendências levantada pelo time: feedback do usuário e histórico de consultas persistido, que a especificação exige e a API ainda não tinha (só existiam /health e /api/v1/query).
 
@@ -97,7 +101,7 @@ Imprevisto: depois de abrir a PR, dei git pull numa hora ruim (estando na minha 
 
 Uso de IA: usei o Claude pra revisar a arquitetura do histórico (decidir por que um SQLite separado fazia mais sentido do que reaproveitar o structured_db.py ou o log JSONL do obs.py), na construção do esqueleto do history_store.py e dos endpoints novos. Rodei os testes, decidi o formato dos endpoints (avaliação positivo/negativo, 404 pra query_id desconhecido) e revisei cada mudança antes de commitar fui eu.
 
-## Encontro 8 — 02/10/2026
+## Encontro 9 — 02/10/2026
 
 Contexto: tarefa de hoje era atualizar o ARQUITETURA.md a partir de um checklist de revisão que comparava o documento, ainda descrevendo o estado de 28/09, sem rerank, sem SQL, índice v1  com o código e os dados reais do main.
 
@@ -120,7 +124,7 @@ Fiz os commits e pushes de cada rodada de correção na branch marco/feedback-hi
 Uso de IA: usei o Claude pra comparar o documento com o código a cada rodada, rodar os diffs de git e redigir o texto de cada seção reescrita. Rodei os comandos, confirmei os resultados e decidi quando um ponto ficava "aceito" ou "sinalizado sem fonte" fui eu; os commits e pushes também.
 
 
-## Encontro 9 — 05/10/2026
+## Encontro 10 — 05/10/2026
 
 Contexto: a apresentação de hoje foi pro Felipe Rafael e, depois do feedback dele, o grupo passou a trabalhar numa lista de 16 correções (P0, P1 e P2) feita em cima do main no commit 146ceea, que inclui a rastreabilidade do fluxo de dados (onde a pergunta consulta a base SQL e a vetorial, com input e output reais de cada etapa) como ponto mais urgente. Fiquei com o item 9: erro de provedor aparecendo como "sem evidência".
 
@@ -134,3 +138,21 @@ A correção: criei o motivo ERRO_PROVEDOR em src/schema.py e fiz os dois caminh
 No avaliador (eval/run_eval.py), erro_provedor nunca conta como acerto, nem de uma recusa esperada sem motivo definido; conteúdo e citação ficam como não avaliados, e o relatório ganhou o contador de falhas do provedor e o status ERRO_PROVEDOR. Escrevi 5 testes novos em tests/test_generate.py e 2 em tests/test_eval.py, e corrigi os 2 testes antigos que esperavam sem_evidencia nesses casos. Mantive o HTTP 200 na API (is_refusal=true com o motivo novo) pra não quebrar histórico e feedback; trocar por 503 fica como decisão do time.
 
 Uso de IA: usei o Claude pra revisar o generate.py e o llm_ecoa.py atualizados.
+
+## Encontro 11 — 07/10/2026
+
+Contexto: o grupo seguiu com a lista de 16 correções do documento Correcoes_Grupo04_2026-10-05. Fiquei primeiro com o item 11, contexto entre perguntas, cujo detalhamento estava no documento enviado no grupo na segunda. Depois que concluí e o merge foi feito, recebi o item 13, proveniência da base sintética.
+
+O que fiz:
+
+Item 11 (concluído): o problema é que o QueryRequest só recebia query e top_k, então uma pergunta como "considerando os mesmos contratos…" (P4.3 do golden set) chegava ao pipeline sem as anteriores, e o backend não tem memória entre perguntas. Escolhi reescrever a pergunta antes da análise, com o cliente enviando as últimas trocas (campo historico), em vez de o backend guardar a conversa.
+
+Criei o src/reformulacao.py: um filtro determinístico (parece_continuacao) decide se a pergunta depende do que veio antes, então perguntas que já se sustentam sozinhas não geram chamada ao LLM; só as últimas 3 trocas entram no prompt, com CPF, telefone e e-mail pessoal mascarados e o histórico tratado como dado, não como instrução; se o modelo falhar ou devolver fora do formato, segue com a pergunta original, e REFORMULACAO_MODE=regras desliga a etapa. A pergunta reescrita substitui a original em todas as etapas seguintes, então os guardrails e a política de sensibilidade valem sobre o texto que de fato é consultado.
+
+Na API (app/api.py), o QueryRequest ganhou historico (até 10 trocas) e a resposta ganhou pergunta_reformulada, para o frontend poder mostrar o que foi consultado. A etapa nova aparece no log como reformulacao, e atualizei o FRONTEND_API_CONTRACT.md, o .env.example e o ARQUITETURA.md. Escrevi testes novos (reformulação, API e pipeline, inclusive guardrail sobre a pergunta reescrita) e a suíte completa passou com 1176 testes. O commit é o ea66a22, na branch marco/contexto-entre-perguntas.
+
+O que falta do item 11 é no frontend: a Eduarda precisa enviar o historico e exibir a pergunta_reformulada.
+
+Item 13 (em andamento): comecei hoje, mas ainda não terminei. O escopo é corrigir a proveniência em quatro pontos: o campo fonte e o campo licenca do corpus_manifest.yaml (linhas 315 e 323), a linha do CORPUS_INVENTORY.md que diz "conversacional_sintetica.zip fornecido pelo grupo" (linha 33) e o docs/emails_sinteticos.md, que diz só "arquivo fornecido", sem autor. Em todos eles o registro deve passar a dizer que a base foi gerada pelo tutor e integrada ao projeto pelo João, com a data de entrega e as condições de uso combinadas com o tutor.
+
+Uso de IA: usei o Claude pra implementar os testes a partir da decisão que tomei (reescrever a pergunta, com o cliente mandando o histórico), e pra ler o item 13 e levantar quais arquivos precisam mudar. fiz o commit e o push; 
