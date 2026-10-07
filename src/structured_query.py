@@ -913,7 +913,7 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
 def _cabecalho(consulta: Consulta, total_tabela: int, termos: tuple[str, ...], juncao: str) -> str:
     if consulta.tabela == "pca_planos":
         origem = (
-            f"Consulta SQL na tabela pca_planos: {total_tabela} planos (PCA) de unidades do RJ presentes no corpus. "
+            f"Consulta SQL na tabela pca_planos: {total_tabela} plano(s) de contratações anual (PCA) de unidades do RJ presentes no corpus. "
             "É a soma só desses planos, NÃO o valor total do PCA do Estado."
         )
     else:

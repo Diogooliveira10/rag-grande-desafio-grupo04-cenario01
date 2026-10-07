@@ -88,6 +88,41 @@ def test_construir_banco_carrega_so_registros_json_das_duas_bases(documents, ban
     assert banco.consultar("SELECT COUNT(*) AS n FROM pca_planos")[0]["n"] == 1
 
 
+def test_pca_planos_so_recebe_planos_e_nao_compras_ou_contratos_da_base_agregada(tmp_path, banco):
+    # A base agregada traz, além dos planos (tipo 0), compras (1) e contratos (2)
+    # ligados a eles, sem anoPca nem valor. Só os planos entram em pca_planos.
+    plano = _plano("42498600000171-0-000004/2025", valor=3_008_979_309.91)
+    compra = {**_plano("42498600000171-1-000123/2025"), "anoPca": None, "valorTotal": None}
+    contrato = {**_plano("42498600000171-2-000045/2025"), "anoPca": None, "valorTotal": None}
+    compra_com_ano = _plano("42498600000171-1-000124/2025")  # o tipo vale mais que o campo
+    sem_tipo_sem_ano = {**_plano("P-sem-ano"), "anoPca": None}
+    documents = escrever_documents(tmp_path / "documents.jsonl",
+                                   planos=[plano, compra, contrato, compra_com_ano, sem_tipo_sem_ano])
+
+    resumo = structured_db.construir_banco(documents, banco)
+
+    assert resumo["pca_planos"] == 1
+    [linha] = banco.consultar("SELECT numero_controle_pncp, ano_pca, valor_total FROM pca_planos")
+    assert linha == {"numero_controle_pncp": "42498600000171-0-000004/2025", "ano_pca": 2025,
+                     "valor_total": 3_008_979_309.91}
+
+
+def test_garantir_banco_remonta_base_de_schema_antigo_com_compras_em_pca_planos(tmp_path, banco):
+    plano = _plano("42498600000171-0-000004/2025")
+    compra = {**_plano("42498600000171-1-000123/2025"), "anoPca": None}
+    documents = escrever_documents(tmp_path / "documents.jsonl", planos=[plano, compra])
+    structured_db.construir_banco(documents, banco)
+    with banco.conectar(somente_leitura=False) as conexao:
+        conexao.execute("INSERT INTO pca_planos (numero_controle_pncp, chunk_id) "
+                        "VALUES ('42498600000171-1-000123/2025', 'p1')")
+        conexao.execute("UPDATE meta SET valor = '3' WHERE chave = 'schema_version'")
+    conexao.close()
+
+    structured_db.garantir_banco(documents, banco)
+
+    assert banco.consultar("SELECT COUNT(*) AS n FROM pca_planos")[0]["n"] == 1
+
+
 def test_contratacao_vira_linha_normalizada(documents, banco):
     structured_db.construir_banco(documents, banco)
 
@@ -123,7 +158,7 @@ def test_cache_sqlite_anterior_e_remontado_para_preservar_zero(documents, banco)
     conexao.close()
     structured_db.garantir_banco(documents, banco)
     assert banco.consultar("SELECT valor FROM contratacoes WHERE numero_controle_pncp = 'A-2'")[0]["valor"] == 0
-    assert banco.consultar("SELECT valor FROM meta WHERE chave = 'schema_version'")[0]["valor"] == "3"
+    assert banco.consultar("SELECT valor FROM meta WHERE chave = 'schema_version'")[0]["valor"] == structured_db.SCHEMA_VERSION
 
 
 def test_registro_repetido_e_deduplicado_pelo_numero_de_controle(tmp_path, banco):

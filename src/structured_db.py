@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sqlite3
 import unicodedata
 from contextlib import closing, contextmanager
@@ -41,6 +42,15 @@ DOCUMENTS_FILE = config.NORMALIZED_DATA_DIR / "documents.jsonl"
 
 BASE_CONTRATACOES = "contratos_estruturado"
 BASE_PCA = "pca_agregado"
+
+# Sobe quando muda o que vai para as tabelas: garantir_banco remonta a base
+# (SQLite ou Postgres) na próxima consulta. "4": pca_planos só com PCA.
+SCHEMA_VERSION = "4"
+
+# numeroControlePNCP = CNPJ-<tipo>-<sequencial>/<ano>; tipo 0 = PCA, 1 = compra,
+# 2 = contrato. A base agregada traz também compras e contratos ligados aos
+# planos, que não são planos.
+_TIPO_CONTROLE_PNCP = re.compile(r"^\d{14}-(\d)-")
 
 # orgaoEntidade.esferaId do PNCP.
 ESFERAS = {"F": "federal", "E": "estadual", "M": "municipal", "D": "distrital", "N": "nao_se_aplica"}
@@ -307,9 +317,18 @@ def _linha_contratacao(chunk: Mapping[str, Any], registro: dict[str, Any]) -> di
     }
 
 
+def _eh_pca(numero_controle: str, registro: Mapping[str, Any]) -> bool:
+    """Plano de contratações: identificador de tipo 0, ou ``anoPca`` quando o
+    identificador não diz o tipo."""
+    tipo = _TIPO_CONTROLE_PNCP.match(numero_controle)
+    if tipo:
+        return tipo.group(1) == "0"
+    return registro.get("anoPca") is not None
+
+
 def _linha_pca(chunk: Mapping[str, Any], registro: dict[str, Any]) -> dict[str, Any] | None:
     numero_controle = registro.get("numeroControlePNCP")
-    if not numero_controle:
+    if not numero_controle or not _eh_pca(str(numero_controle), registro):
         return None
     return {
         "numero_controle_pncp": numero_controle,
@@ -377,7 +396,7 @@ def construir_banco(documents_file: Path = DOCUMENTS_FILE, banco: Optional[Banco
         "destino": banco.descricao(),
         "documents_file": str(documents_file),
         "source_sha256": _sha256(documents_file),
-        "schema_version": "3",
+        "schema_version": SCHEMA_VERSION,
         "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "contratacoes": len(contratacoes),
         "pca_planos": len(planos),
@@ -439,7 +458,7 @@ def garantir_banco(
             versao = banco.consultar("SELECT valor FROM meta WHERE chave = ?", ["schema_version"])
         except Exception:
             versao = []
-    if registrado == _sha256(documents_file) and versao and versao[0]["valor"] == "3":
+    if registrado == _sha256(documents_file) and versao and versao[0]["valor"] == SCHEMA_VERSION:
         return banco
     try:
         construir_banco(documents_file, banco)
