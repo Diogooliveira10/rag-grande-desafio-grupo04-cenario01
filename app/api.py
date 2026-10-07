@@ -38,6 +38,7 @@ from app.catalog_models import ContratacaoRecord, DocumentoRecord, OfficialSourc
 from src.history_store import ConsultaNaoEncontrada, default_store as historico
 from src.obs import Stage, new_query_id, new_run_id, new_session_id
 from src.obs import registrar as obs_registrar
+from src.reformulacao import TurnoAnterior
 from src.schema import RAGResponse
 from src.trace import montar_trace, montar_trace_sessao
 
@@ -117,6 +118,11 @@ class QueryRequest(BaseModel):
     # Conversa a que a pergunta pertence. O front-end reenvia o session_id da
     # primeira resposta; sem ele, a API abre uma sessão nova.
     session_id: Optional[str] = Field(default=None, pattern=_SESSION_PATTERN)
+    # Últimas trocas da conversa, do mais antigo ao mais recente. O backend não
+    # guarda memória entre perguntas: com isso, "considerando os mesmos
+    # contratos…" é reescrita para se sustentar sozinha (src/reformulacao.py).
+    # O pipeline usa só as 3 mais recentes.
+    historico: list[TurnoAnterior] = Field(default_factory=list, max_length=10)
 
     @field_validator("query")
     @classmethod
@@ -137,6 +143,9 @@ class QueryResponse(RAGResponse):
 
     query_id: str
     session_id: str
+    # Pergunta de fato consultada, quando a API reescreveu uma continuação com o
+    # historico enviado. ``query`` continua sendo o que o usuario digitou.
+    pergunta_reformulada: Optional[str] = None
 
 
 class FeedbackRequest(BaseModel):
@@ -232,10 +241,12 @@ def query_rag(request: QueryRequest) -> QueryResponse:
     run_id = new_run_id()
     query_id = new_query_id()
     session_id = request.session_id or new_session_id()
+    # So repassa o historico quando ha um: quem chama sem ele fica como antes.
+    extras = {"historico": request.historico} if request.historico else {}
     try:
         result = pipeline.responder(
             request.query, top_k=request.top_k, run_id=run_id, query_id=query_id,
-            session_id=session_id,
+            session_id=session_id, **extras,
         )
     except Exception as exc:
         logger.exception("Falha ao executar o pipeline RAG")
