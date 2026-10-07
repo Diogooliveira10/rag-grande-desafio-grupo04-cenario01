@@ -6,6 +6,25 @@ isso não mede correção factual. A implementação está em `joao-reis`, com c
 vetores, FAISS, ZIPs e gabarito original preservados. As tentativas anteriores e a
 rodada completa permanecem separadas dos quatro retestes de reparos.
 
+## Situação em 07/10/2026
+
+Este documento registra a rodada de 30/09 e fica como estava. Várias pendências
+citadas abaixo foram resolvidas depois:
+
+| Pendência citada em 30/09 | Situação em 07/10 |
+| --- | --- |
+| Reranking real com ablação | Cross-encoder local no pipeline, com ablação em [ABLACAO_RERANK.md](ABLACAO_RERANK.md). O endpoint `/api/rerank` do servidor da turma entrou como opção em 07/10 e acertou menos que o local. |
+| Feedback e histórico persistidos | `POST /api/v1/feedback` e `GET /api/v1/history`, com SQLite em [src/history_store.py](../src/history_store.py). Desde 07/10 o histórico grava textos mascarados e exige `X-API-Key`. |
+| PostgreSQL executável | A base estruturada roda no Postgres do Neon (`DATABASE_URL`) e no SQLite local, com os mesmos números ([src/structured_db.py](../src/structured_db.py)). |
+| Trilha conversacional de e-mails | Base `emails_sinteticos`, com 25 conversas, integrada em 05/10 ([emails_sinteticos.md](emails_sinteticos.md)). |
+| Contexto entre perguntas | Perguntas de continuação são reescritas com as mensagens anteriores enviadas pelo front-end ([src/reformulacao.py](../src/reformulacao.py), 07/10). |
+| Vigência normativa | 1.498 das 1.561 normas têm data de início de vigência desde o controle de qualidade de 07/10 ([qualidade_v6.json](../data/inventory/qualidade_v6.json)). |
+
+Continuam abertos: preço unitário e equivalência técnica, que dependem de dados que
+o corpus não tem. Os números de avaliação deste documento também são de 30/09: a
+avaliação oficial mais recente é a de 05/10 (13/26, com critério de conteúdo e
+fonte), e o corpus e a base SQL mudaram depois dela.
+
 ## Mudanças implementadas
 
 - Análise opcional por LLM com intenções, bases, filtros, métrica, agrupamentos,
@@ -37,7 +56,8 @@ rodada completa permanecem separadas dos quatro retestes de reparos.
   novas políticas de bloqueio de conteúdo.
 - O hook de reranking recebe candidatos antes do corte final e retorna ao RRF em
   caso de falha. Endpoint oficial de cross-encoder não foi fornecido: este hook
-  testado não equivale à ablação real exigida pelo desafio.
+  testado não equivale à ablação real exigida pelo desafio. *(Resolvido depois:
+  ver "Situação em 07/10/2026".)*
 
 ## Verificação e limites
 
@@ -119,6 +139,8 @@ observabilidade e cálculos determinísticos. Continuam pendentes: cross-encoder
 ablação real, feedback e histórico persistidos, execução PostgreSQL e a trilha
 conversacional de e-mails. Atas e fixtures não substituem essa trilha automaticamente.
 Vigência normativa e preço unitário continuam dependentes de cobertura adequada.
+*(Situação em 30/09. Todas, menos preço unitário, foram resolvidas depois: ver
+"Situação em 07/10/2026".)*
 
 O esquema JSON usa o suporte descrito na documentação de
 [compatibilidade OpenAI do Ollama](https://docs.ollama.com/api/openai-compatibility)
@@ -286,6 +308,8 @@ recusar uma conta sem dados pode diminuir essa pontuação sem piorar a fidelida
 pendências de recuperação em material de escritório, contexto entre perguntas,
 vigência normativa e dados de preços unitários/equivalência técnica. Reranking real,
 feedback/histórico persistidos, PostgreSQL executável e e-mails continuam pendentes.
+*(Situação em 30/09. Todas, menos preços unitários e equivalência técnica, foram
+resolvidas depois: ver "Situação em 07/10/2026".)*
 
 Artefatos: `eval/runs/quality-v6/{responses.jsonl,report.json,REPORT.md,source-audit.json}`
 e `eval/runs/quality-v6-repairs/`. Reteste reproduzível:
