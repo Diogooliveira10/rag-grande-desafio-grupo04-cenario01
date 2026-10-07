@@ -275,3 +275,30 @@ Hoje analisei a base sintética de conversas e fiz os ajustes do query_analysis 
 ### Uso de assistentes de IA:
 
 - Usei o Claude Code para analisar a base sintética, rodar a pergunta de ponta a ponta, depois que implementei as correções usei para os testes e comparar o projeto com o enunciado para dizer o que falta para critério de pronto
+
+## Encontro 11 - 2026-10-07
+
+### Relato individual - Pâmela de Freitas
+
+Hoje fiz o item 7 do documento de correções (qualidade do corpus) e configurei a chave de acesso da API.
+
+#### Qualidade do corpus
+
+- Criei o meu `.env` a partir do `.env.example` e gerei a `RAG_API_KEY` que o Renato pediu, para os endpoints de histórico e de trace.
+- Testei: com a chave, o histórico responde; sem a chave ou com chave errada, a API bloqueia (HTTP 401).
+- Criei o `src/qualidade_corpus.py`, que roda entre a extração e o índice e muda só status e metadados, nunca o texto. Assim o índice foi refeito reaproveitando os vetores, sem gerar nenhum vetor novo.
+- Atas: 819 chunks (52 páginas de 3 PDFs) eram glifos sem letras (`/12 /3 □`) e estavam com status "ok". Marquei como `texto_ilegivel` e tirei do índice e da busca por palavras (atas indexadas: de 2.524 para 1.705). Tabelas de lances continuam, porque o critério é o formato de glifo, não a pouca letra.
+- Normas: 1.498 dos 1.561 chunks ganharam início de vigência (Lei 14.133, LC 123, Decretos 48.816 e 48.760, e editais pela data de publicação da compra). A vigência faltava porque o leitor do manifesto guardava as URLs com aspas, e a coleta nunca achava os metadados. "O que estava vigente em 2025?" passou a filtrar pela vigência das normas, e o prompt mostra "vigente desde".
+- Contratos: só 3 dos 448 têm a compra no corpus e herdaram a modalidade dela. 44 valores abaixo de R$ 1,00 ficaram marcados como simbólicos.
+- 39 testes novos, que falham sem as correções. Suíte completa na branch: **1.177 testes passando**.
+
+#### Sobre o OCR das atas q fiz hoje
+
+- Descobri que o `prepare_documents` só chamava o OCR em página vazia. As páginas de glifos tinham "texto" e nunca passavam pelo OCR. Corrigi: página com glifos vai para o OCR, e os códigos `/U0044` dos decretos são decodificados.
+- Testei com o Tesseract: as 60 páginas das 3 atas foram lidas pelo OCR, com 323 partes de texto legível.
+
+
+### Uso de assistentes de IA:
+
+- Usei o Claude Code para escrever os testes e refazer o índice.
+
