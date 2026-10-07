@@ -79,7 +79,11 @@ Rodei a suíte completa localmente (322 passed, 1 failed pré-existente e sem re
 Uso de IA: usei o Claude pra desenhar a extração por regex do query_analysis, pra estender os filtros de retrieve.py em cima do código novo do Diogo sem quebrar as features dele, e pra investigar o bug de dependência (pypdf faltando no meu ambiente) que apareceu depois. Rodei os testes, decidi o formato de saída dos filtros e confirmei cada mudança antes de commitar fui eu.
 
 
-## Encontro 7 — 30/09/2026
+## Encontro 7 — 28/09/2026
+
+Falta justificada via email.
+
+## Encontro 8 — 30/09/2026
 
 Contexto: tarefa designada pra mim hoje veio da lista de pendências levantada pelo time: feedback do usuário e histórico de consultas persistido, que a especificação exige e a API ainda não tinha (só existiam /health e /api/v1/query).
 
@@ -97,7 +101,7 @@ Imprevisto: depois de abrir a PR, dei git pull numa hora ruim (estando na minha 
 
 Uso de IA: usei o Claude pra revisar a arquitetura do histórico (decidir por que um SQLite separado fazia mais sentido do que reaproveitar o structured_db.py ou o log JSONL do obs.py), na construção do esqueleto do history_store.py e dos endpoints novos. Rodei os testes, decidi o formato dos endpoints (avaliação positivo/negativo, 404 pra query_id desconhecido) e revisei cada mudança antes de commitar fui eu.
 
-## Encontro 8 — 02/10/2026
+## Encontro 9 — 02/10/2026
 
 Contexto: tarefa de hoje era atualizar o ARQUITETURA.md a partir de um checklist de revisão que comparava o documento, ainda descrevendo o estado de 28/09, sem rerank, sem SQL, índice v1  com o código e os dados reais do main.
 
@@ -120,7 +124,7 @@ Fiz os commits e pushes de cada rodada de correção na branch marco/feedback-hi
 Uso de IA: usei o Claude pra comparar o documento com o código a cada rodada, rodar os diffs de git e redigir o texto de cada seção reescrita. Rodei os comandos, confirmei os resultados e decidi quando um ponto ficava "aceito" ou "sinalizado sem fonte" fui eu; os commits e pushes também.
 
 
-## Encontro 9 — 05/10/2026
+## Encontro 10 — 05/10/2026
 
 Contexto: a apresentação de hoje foi pro Felipe Rafael e, depois do feedback dele, o grupo passou a trabalhar numa lista de 16 correções (P0, P1 e P2) feita em cima do main no commit 146ceea, que inclui a rastreabilidade do fluxo de dados (onde a pergunta consulta a base SQL e a vetorial, com input e output reais de cada etapa) como ponto mais urgente. Fiquei com o item 9: erro de provedor aparecendo como "sem evidência".
 
@@ -135,7 +139,7 @@ No avaliador (eval/run_eval.py), erro_provedor nunca conta como acerto, nem de u
 
 Uso de IA: usei o Claude pra revisar o generate.py e o llm_ecoa.py atualizados.
 
-## Encontro 10 — 07/10/2026
+## Encontro 11 — 07/10/2026
 
 Contexto: o grupo seguiu com a lista de 16 correções do documento Correcoes_Grupo04_2026-10-05. Fiquei primeiro com o item 11, contexto entre perguntas, cujo detalhamento estava no documento enviado no grupo na segunda. Depois que concluí e o merge foi feito, recebi o item 13, proveniência da base sintética.
 
