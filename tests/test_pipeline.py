@@ -168,3 +168,98 @@ def test_responder_nao_inventa_evidencia_de_base_sem_resultados(monkeypatch):
     assert "[evidence_id=E1 | base=editais_normativo" in seen["prompt"]
     assert "base=contratos_estruturado" not in seen["prompt"]
     assert [source["base_id"] for source in resposta["sources_used"]] == ["editais_normativo"]
+
+
+def _resultado_c1():
+    return RetrievalResult(
+        chunk_id="c1",
+        content="texto do chunk",
+        metadata={
+            "source_file": "arquivo.json", "chunk_id": "c1", "base_id": "contratos_estruturado",
+            "doc_type": "json", "natureza": "estruturada",
+        },
+        score=1.0,
+    )
+
+
+def _cliente_c1(mensagens):
+    return json.dumps({
+        "answer": "resposta", "is_refusal": False, "confidence_level": "alta", "sources_used": ["c1"],
+    })
+
+
+def test_responder_consulta_a_pergunta_reformulada_e_devolve_a_original(monkeypatch):
+    from src.reformulacao import Reformulacao
+
+    original = "E quanto aos contratos acima de R$ 500 mil?"
+    reescrita = "Quais contratos de manutenção de computadores foram assinados acima de R$ 500 mil?"
+    historico = [{"pergunta": "Contratos de manutenção de computadores em 2025?", "resposta": "Há três."}]
+    vistos = {}
+
+    def reformular_fake(query, hist, **kwargs):
+        vistos["reformular"] = (query, hist, kwargs["query_id"])
+        return Reformulacao(reescrita, True, "reescrita")
+
+    def retrieve_fake(query, route, **kwargs):
+        vistos["retrieve"] = query
+        return [_resultado_c1()]
+
+    monkeypatch.setattr(pipeline, "reformular_pergunta", reformular_fake)
+    monkeypatch.setattr(pipeline, "retrieve", retrieve_fake)
+
+    resposta = pipeline.responder(original, cliente=_cliente_c1, historico=historico, query_id="q-ctx")
+
+    assert vistos["reformular"] == (original, historico, "q-ctx")
+    assert vistos["retrieve"] == reescrita
+    assert resposta["query"] == original
+    assert resposta["pergunta_reformulada"] == reescrita
+    assert resposta["is_refusal"] is False
+
+
+def test_responder_sem_reescrita_nao_acrescenta_pergunta_reformulada(monkeypatch):
+    from src.reformulacao import Reformulacao
+
+    pergunta = "Quais contratos foram assinados acima de R$ 500 mil?"
+    monkeypatch.setattr(
+        pipeline, "reformular_pergunta", lambda q, h, **kw: Reformulacao(q, False, "autossuficiente")
+    )
+    monkeypatch.setattr(pipeline, "retrieve", lambda *a, **kw: [_resultado_c1()])
+
+    resposta = pipeline.responder(pergunta, cliente=_cliente_c1, historico=[{"pergunta": "oi"}])
+
+    assert resposta["query"] == pergunta
+    assert "pergunta_reformulada" not in resposta
+
+
+def test_responder_sem_historico_nao_chama_a_reformulacao(monkeypatch):
+    def nao_deveria_chamar(*args, **kwargs):
+        raise AssertionError("reformular_pergunta chamada sem histórico")
+
+    monkeypatch.setattr(pipeline, "reformular_pergunta", nao_deveria_chamar)
+    monkeypatch.setattr(pipeline, "retrieve", lambda *a, **kw: [_resultado_c1()])
+
+    resposta = pipeline.responder(
+        "Quais contratos foram assinados acima de R$ 500 mil?", cliente=_cliente_c1
+    )
+
+    assert "pergunta_reformulada" not in resposta
+
+
+def test_guardrail_vale_sobre_a_pergunta_reformulada(monkeypatch):
+    """Continuação que, reescrita, pede dado bancário, é recusada como pedido de dado bancário."""
+    from src.reformulacao import Reformulacao
+
+    def retrieve_espiao(*args, **kwargs):
+        raise AssertionError("não deveria buscar")
+
+    monkeypatch.setattr(
+        pipeline, "reformular_pergunta",
+        lambda q, h, **kw: Reformulacao("Qual o número da conta bancária desse fornecedor?", True, "reescrita"),
+    )
+    monkeypatch.setattr(pipeline, "retrieve", retrieve_espiao)
+
+    resposta = pipeline.responder("E o dele?", cliente=lambda m: "{}", historico=[{"pergunta": "x"}])
+
+    assert resposta["is_refusal"] is True
+    assert resposta["refusal_reason"] == RefusalReason.DADOS_BANCARIOS.value
+    assert resposta["query"] == "E o dele?"
