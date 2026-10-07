@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sqlite3
 import unicodedata
 from contextlib import closing, contextmanager
@@ -41,6 +42,16 @@ DOCUMENTS_FILE = config.NORMALIZED_DATA_DIR / "documents.jsonl"
 
 BASE_CONTRATACOES = "contratos_estruturado"
 BASE_PCA = "pca_agregado"
+
+# Sobe quando muda o que vai para as tabelas: garantir_banco remonta a base
+# (SQLite ou Postgres) na próxima consulta. "4": pca_planos só com PCA.
+# "5": compras e contratos da base agregada entram em contratacoes.
+SCHEMA_VERSION = "5"
+
+# numeroControlePNCP = CNPJ-<tipo>-<sequencial>/<ano>; tipo 0 = PCA, 1 = compra,
+# 2 = contrato. A base agregada traz também compras e contratos ligados aos
+# planos, que não são planos.
+_TIPO_CONTROLE_PNCP = re.compile(r"^\d{14}-(\d)-")
 
 # orgaoEntidade.esferaId do PNCP.
 ESFERAS = {"F": "federal", "E": "estadual", "M": "municipal", "D": "distrital", "N": "nao_se_aplica"}
@@ -282,7 +293,7 @@ def _linha_contratacao(chunk: Mapping[str, Any], registro: dict[str, Any]) -> di
         "mes_assinatura": data_assinatura[:7] if data_assinatura else None,
         "tipo_registro": "contrato_assinado" if contrato_assinado else "publicacao_compra",
         "numero_controle_compra": registro.get("numeroControlePncpCompra") if contrato_assinado else None,
-        "fornecedor": registro.get("nomeRazaoSocialFornecedor"),
+        "fornecedor": registro.get("nomeRazaoSocialFornecedor") or (chunk.get("extras") or {}).get("fornecedor"),
         "modalidade": registro.get("modalidadeNome") or (chunk.get("extras") or {}).get("modalidade"),
         "modo_disputa": registro.get("modoDisputaNome"),
         "situacao": registro.get("situacaoCompraNome"),
@@ -307,9 +318,37 @@ def _linha_contratacao(chunk: Mapping[str, Any], registro: dict[str, Any]) -> di
     }
 
 
+def _eh_pca(numero_controle: str, registro: Mapping[str, Any]) -> bool:
+    """Plano de contratações: identificador de tipo 0, ou ``anoPca`` quando o
+    identificador não diz o tipo."""
+    tipo = _TIPO_CONTROLE_PNCP.match(numero_controle)
+    if tipo:
+        return tipo.group(1) == "0"
+    return registro.get("anoPca") is not None
+
+
+def _compra_ou_contrato_da_base_agregada(
+    registro: Mapping[str, Any], anos_publicacao: set[int]
+) -> bool:
+    """Compra (tipo 1) ou contrato (tipo 2) que a base agregada traz ligado a um
+    PCA e que cabe no recorte da tabela ``contratacoes``.
+
+    Só entra no formato completo do PNCP (com ``orgaoEntidade``, o mesmo da
+    base de contratos), de órgão do RJ e publicado num dos anos que a base de
+    contratos já cobre: a tabela continua sendo uma amostra PNCP/RJ do mesmo
+    período, sem misturar registros de outro estado ou de anos anteriores.
+    """
+    tipo = _TIPO_CONTROLE_PNCP.match(str(registro.get("numeroControlePNCP") or ""))
+    if not tipo or tipo.group(1) not in {"1", "2"} or "orgaoEntidade" not in registro:
+        return False
+    uf = (registro.get("unidadeOrgao") or {}).get("ufSigla")
+    publicacao = _data(registro.get("dataPublicacaoPncp"))
+    return uf == "RJ" and publicacao is not None and int(publicacao[:4]) in anos_publicacao
+
+
 def _linha_pca(chunk: Mapping[str, Any], registro: dict[str, Any]) -> dict[str, Any] | None:
     numero_controle = registro.get("numeroControlePNCP")
-    if not numero_controle:
+    if not numero_controle or not _eh_pca(str(numero_controle), registro):
         return None
     return {
         "numero_controle_pncp": numero_controle,
@@ -368,6 +407,18 @@ def construir_banco(documents_file: Path = DOCUMENTS_FILE, banco: Optional[Banco
         for chunk, registro in _registros_json(documents_file, BASE_CONTRATACOES)
         if (linha := _linha_contratacao(chunk, registro))
     }
+    # A base agregada traz compras e contratos ligados aos PCAs; os que a base
+    # de contratos não tem completam a tabela (a versão da base de contratos
+    # prevalece quando o registro está nas duas).
+    anos = {linha["ano_publicacao"] for linha in contratacoes.values() if linha["ano_publicacao"]}
+    da_agregada = 0
+    for chunk, registro in _registros_json(documents_file, BASE_PCA):
+        if not _compra_ou_contrato_da_base_agregada(registro, anos):
+            continue
+        linha = _linha_contratacao(chunk, registro)
+        if linha and linha["numero_controle_pncp"] not in contratacoes:
+            contratacoes[linha["numero_controle_pncp"]] = linha
+            da_agregada += 1
     planos = {
         linha["numero_controle_pncp"]: linha
         for chunk, registro in _registros_json(documents_file, BASE_PCA)
@@ -377,9 +428,10 @@ def construir_banco(documents_file: Path = DOCUMENTS_FILE, banco: Optional[Banco
         "destino": banco.descricao(),
         "documents_file": str(documents_file),
         "source_sha256": _sha256(documents_file),
-        "schema_version": "3",
+        "schema_version": SCHEMA_VERSION,
         "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "contratacoes": len(contratacoes),
+        "contratacoes_da_base_agregada": da_agregada,
         "pca_planos": len(planos),
     }
     tabelas = {
@@ -439,7 +491,7 @@ def garantir_banco(
             versao = banco.consultar("SELECT valor FROM meta WHERE chave = ?", ["schema_version"])
         except Exception:
             versao = []
-    if registrado == _sha256(documents_file) and versao and versao[0]["valor"] == "3":
+    if registrado == _sha256(documents_file) and versao and versao[0]["valor"] == SCHEMA_VERSION:
         return banco
     try:
         construir_banco(documents_file, banco)

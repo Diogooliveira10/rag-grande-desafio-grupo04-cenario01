@@ -101,20 +101,23 @@ As bases oficiais definidas no manifesto são:
 
 O inventário vigente é a versão v6, registrada em `data/inventory/v6.json` e resumida em `CORPUS_INVENTORY.md` e `docs/registro_execucao_v6.md`: **1.400 arquivos** no total (contratos_estruturado 625, editais_normativo 13, atas_conversacional 376, pca_agregado 386), distribuídos por esfera em municipal 804, federal 513 e estadual 83, com limite de até 5 documentos por órgão/base. O histórico de reconstrução do inventário entre as versões está documentado em `data/inventory/DIFF_v2_v3.md`, `DIFF_v3_v4.md` e `DIFF_v4_v5.md`.
 
-O índice oficial vigente ([index/manifest.json](index/manifest.json)) usa embeddings `Qwen3-Embedding-0.6B.Q8_0` (dimensão 1024) em índice FAISS (`index/*/vectors.faiss`), gerados a partir de `data/normalized/v6/documents.jsonl`, e tem **5.621 vetores** no total:
+O índice oficial vigente ([index/manifest.json](index/manifest.json)) usa embeddings `Qwen3-Embedding-0.6B.Q8_0` (dimensão 1024) em índice FAISS (`index/*/vectors.faiss`), gerados a partir de `data/normalized/v6/documents.jsonl`. Depois do controle de qualidade de 2026-10-07 ([src/qualidade_corpus.py](src/qualidade_corpus.py), relatório em [data/inventory/qualidade_v6.json](data/inventory/qualidade_v6.json)), ele tem **4.795 vetores** da v6, mais os 25 das conversas sintéticas:
 
 - 625 chunks de `contratos_estruturado`;
-- 1.561 chunks de `editais_normativo`;
-- 2.524 chunks de `atas_conversacional`;
+- 1.554 chunks de `editais_normativo` (7 ilegíveis fora);
+- 1.705 chunks de `atas_conversacional` (819 ilegíveis fora);
 - 911 chunks de `pca_agregado`.
+
+Os vetores foram reaproveitados (mesmo texto, mesmo SHA-256); o controle de qualidade muda só status e metadados.
 
 **Limitações conhecidas da v6:**
 
-- cerca de 885 dos 2.524 chunks de atas vêm de OCR malsucedido (texto ilegível/garbage);
+- 819 dos 2.524 chunks de atas (52 PDFs inteiros) e 7 páginas de decretos estaduais saíram da extração como glifos sem mapa de caracteres (`/12 /3 □`) ou códigos (`/U0044`). Estão marcados como `texto_ilegivel` e fora do índice. Para recuperá-los é preciso refazer o OCR a partir de `data/raw/v6` (as páginas com `/U0044` podem ser decodificadas na extração) e gerar os vetores desses chunks;
 - os indicadores do PCA (`pca_agregado`) estão praticamente ausentes do corpus coletado (só um PCA confirmado, da Secretaria de Saúde estadual);
-- os 448 contratos assinados não têm o campo `modalidade` preenchido — o PNCP não traz modalidade em contrato assinado, só nas compras publicadas;
+- 445 dos 448 contratos assinados continuam sem `modalidade`: o PNCP não traz modalidade em contrato assinado, e só 3 deles têm a compra vinculada no corpus (eles herdam a modalidade dela). Preencher os outros exige coletar a compra de cada contrato (`numeroControlePncpCompra`) numa nova versão do corpus. Das 177 publicações de compra, só 2 têm contrato no corpus para herdar o fornecedor;
+- as normas têm início de vigência (`extras.data_vigencia_inicio`, declarado no manifesto ou vindo da publicação da compra no PNCP), mas não fim: nenhuma norma do corpus foi revogada. `data_vigencia` continua vazio nelas, porque no projeto ele é o fim da vigência ("vigente até"). Os textos são compilações atuais: a vigência histórica de cada dispositivo não foi verificada;
 - há só 1 registro de "ambulância tipo D" (valor R$ 0,00), insuficiente para perguntas de mediana ou comparação entre esferas;
-- 21 contratos têm valor R$ 0,00 e 6 têm R$ 0,01 (valores simbólicos); a `consulta_sql` os deixa fora das contas de valor;
+- 21 contratos têm valor R$ 0,00, 6 têm R$ 0,01 e 17 compras têm valor estimado R$ 0,00 (valores simbólicos, marcados com `extras.valor_simbolico`); a `consulta_sql` os deixa fora das contas de valor, e o prompt avisa que esse valor não é o custo real;
 - o amparo legal só vem nas compras publicadas: nos contratos assinados ele é nulo, então não dá para contar contratos por lei.
 
 Os diretórios `index/`, `data/normalized/`, `data/structured/` e `data/embeddings/2026-09-30_12-08-51/` estão no `.gitignore`, mas são versionados via `git add -f` (forçado) para que o time compartilhe o índice e o corpus processado sem reprocessar tudo localmente. Os inventários `data/inventory/*.json` são versionados normalmente, e os dois ZIPs da v6 em `atas-zip/` entram por exceção explícita no `.gitignore`. O `-text` do `.gitattributes` nesses caminhos preserva os bytes exatos (sem conversão CRLF/LF), porque os hashes de proveniência dependem deles. `data/app_state/` (onde fica o histórico de perguntas dos usuários, `src/history_store.py`) **não** está nessa lista e permanece fora do Git. A geração do corpus normalizado depende de OCR local (Tesseract + pacote de idioma português) instalado na máquina de quem roda o `prepare`.
@@ -150,7 +153,6 @@ As tarefas são distribuídas entre os integrantes a cada encontro conforme as n
 - O histórico exige `X-API-Key` (`RAG_API_KEY`) e grava textos mascarados com expurgo após `HISTORY_RETENTION_DAYS` dias; o trace aceita a chave ou o `X-Session-Id` da própria conversa, então o site público não precisa da chave. Falta decidir se o log em `logs/` (também mascarado) precisa de expurgo.
 - Avaliar respostas e guardrails sobre o suplemento `emails_sinteticos`, recebido e integrado em 2026-10-05: 25 conversas, 20 públicas e 5 restritas ([proveniência e reconstrução](docs/emails_sinteticos.md)).
 - Revisar o casamento de CNPJ sem pontuação nos filtros/consultas.
-- Evitar vazamento de identificadores internos e da mensagem "Busca ampliada" nas respostas ao usuário final.
 - Decidir o tratamento definitivo para os diretórios ignorados pelo `.gitignore` mas versionados via `git add -f` (`index/`, `data/normalized/`, `data/structured/`, `data/embeddings/2026-09-30_12-08-51/`).
 - No `query_analysis`, transformar em filtro o município citado sozinho ("contratos em Volta Redonda") e o fornecedor ("empresa Cristália").
 - Preparação do Demo Day (23/10).

@@ -132,7 +132,8 @@ Se is_refusal for true, sources_used deve ser uma lista vazia."""
 _SYSTEM_PROMPT += """
 Responda separadamente a cada intenção da pergunta. Uma parte respondível não desaparece
 porque outra parte carece de evidência: explique a lacuna nessa parte, mantendo as fontes
-da parte sustentada. Cite o identificador junto da afirmação que ele sustenta.
+da parte sustentada. Cite o evidence_id entre colchetes, ex.: [E1], junto da afirmação que
+ele sustenta; não escreva chunk_id, nome de base nem outros identificadores no texto.
 Categoria do processo (ex.: Compras, Informática) NÃO é modalidade de licitação.
 Quando modalidade não estiver no registro, diga que não está informada. amparoLegal.nome
 é uma referência legal explícita; não declare inexistência de norma se ela está citada.
@@ -187,6 +188,14 @@ def _cabecalho(metadata: ChunkMetadata, evidence_id: str | None = None) -> str:
         campos.append(f"documento={metadata.extras['titulo_documento']}")
     if metadata.data_vigencia is not None:
         campos.append(f"vigencia_ate={metadata.data_vigencia.isoformat()}")
+    # Metadados de src/qualidade_corpus.py: início da vigência das normas,
+    # valor simbólico do PNCP e modalidade herdada da compra.
+    if metadata.extras.get("data_vigencia_inicio"):
+        campos.append(f"vigente_desde={metadata.extras['data_vigencia_inicio']}")
+    if metadata.extras.get("valor_simbolico"):
+        campos.append("valor_simbolico=true; R$ 0,00 ou R$ 0,01 no PNCP não é o custo real")
+    if metadata.extras.get("modalidade_fonte") == "compra_vinculada":
+        campos.append(f"modalidade={metadata.extras['modalidade']} (da compra vinculada)")
     if metadata.extras.get("subpergunta"):
         campos.append(f"intencao={metadata.extras['intencao']}: {metadata.extras['subpergunta']}")
     if metadata.extras.get("filtros_relaxados"):
@@ -666,6 +675,9 @@ def gerar_resposta(
     resposta, recusa_convertida = _converter_recusa_indevida(resposta, bases_consultadas, erro_parsing)
     if recusa_convertida:
         sensibilidade["recusa_convertida"] = recusa_convertida
+    resposta, ids_no_texto = _numerar_citacoes(resposta, chunks)
+    if ids_no_texto:
+        sensibilidade["ids_internos_no_texto"] = ids_no_texto
     # Defesa em profundidade: o dado pode ter vindo da própria pergunta.
     answer_mascarada, mascaramentos_resposta = mascarar(resposta.answer)
     if mascaramentos_resposta:
@@ -684,6 +696,72 @@ def gerar_resposta(
         recusa_convertida=recusa_convertida,
     )
     return resposta
+
+
+# Identificadores internos que o LLM escreve no texto: evidence_id do prompt
+# (E1), chunk_id completo (base:hash:chunk-...), resultado SQL (sql:tabela:...)
+# e pedaços de chunk_id (chunk-1-7303119b4364, 10-f8902f79c194).
+_ID_INTERNO = (
+    r"(?:E\d{1,3}\b|sql:[a-z_]+(?::[\w.-]+)+|[a-z_]+:[0-9a-f]{8,}(?::[\w-]+)+"
+    r"|chunk-\d+-[0-9a-f]{6,}|\b\d+-[0-9a-f]{12}\b)"
+)
+_ROTULO_ID = r"(?:evidence_id|chunk_id|evid[eê]ncias?|trechos?|chunks?|fontes?)"
+_SEP_ID = r"\s*(?:,|;|\be\b)\s*"
+# Grupo entre parênteses ou colchetes: "(evidence_id=E1)", "[E1, E2]", "(chunks 10-… e 23-…)".
+_RE_GRUPO_IDS = re.compile(
+    rf"\s*[\(\[]\s*(?:{_ROTULO_ID}\s*[=:]?\s*)?({_ID_INTERNO}(?:{_SEP_ID}(?:{_ROTULO_ID}\s*[=:]?\s*)?{_ID_INTERNO})*)\s*[\)\]]",
+    re.IGNORECASE,
+)
+# Fora de grupo, só o que não tem como ser texto comum: rótulo explícito ou id completo.
+_RE_ID_SOLTO = re.compile(
+    rf"(?:{_ROTULO_ID}\s*[=:]\s*{_ID_INTERNO}|sql:[a-z_]+(?::[\w.-]+)+|[a-z_]+:[0-9a-f]{{8,}}(?::[\w-]+)+)",
+    re.IGNORECASE,
+)
+
+
+def _numerar_citacoes(resposta: RAGResponse, chunks: list[Chunk]) -> tuple[RAGResponse, int]:
+    """Troca identificadores internos do texto por ``[n]``, o número da fonte em
+    ``sources_used``; id que não é fonte aceita sai do texto.
+
+    O prompt pede o evidence_id junto da afirmação (liga cada parte da resposta
+    à sua fonte), mas ``E1`` ou ``contratos_estruturado:…`` não dizem nada ao
+    usuário. Devolve a resposta e quantos identificadores foram trocados.
+    """
+    numero_da_fonte = {fonte.chunk_id: indice for indice, fonte in enumerate(resposta.sources_used, start=1)}
+    por_evidence_id = {f"E{indice}": chunk.metadata.chunk_id for indice, chunk in enumerate(chunks, start=1)}
+
+    def numero(token: str) -> Optional[int]:
+        token = re.sub(rf"^{_ROTULO_ID}\s*[=:]?\s*", "", token.strip(), flags=re.IGNORECASE)
+        chunk_id = por_evidence_id.get(token, token)
+        if chunk_id in numero_da_fonte:
+            return numero_da_fonte[chunk_id]
+        for completo, indice in numero_da_fonte.items():
+            if completo.endswith(token) or completo.endswith(f"chunk-{token}"):
+                return indice
+        return None
+
+    trocas = 0
+
+    def grupo(match: re.Match) -> str:
+        nonlocal trocas
+        tokens = re.findall(_ID_INTERNO, match.group(1))
+        trocas += len(tokens)
+        numeros = sorted({n for n in (numero(t) for t in tokens) if n is not None})
+        return f" [{', '.join(map(str, numeros))}]" if numeros else ""
+
+    def solto(match: re.Match) -> str:
+        nonlocal trocas
+        trocas += 1
+        n = numero(match.group(0))
+        return f"[{n}]" if n is not None else ""
+
+    texto = _RE_GRUPO_IDS.sub(grupo, resposta.answer)
+    texto = _RE_ID_SOLTO.sub(solto, texto)
+    if not trocas:
+        return resposta, 0
+    texto = re.sub(r"[ \t]{2,}", " ", texto)
+    texto = re.sub(r"\s+([.,;:])", r"\1", texto).strip()
+    return resposta.model_copy(update={"answer": texto}), trocas
 
 
 # Recusas que o LLM pode marcar por engano; as de guardrail (dados bancários,
