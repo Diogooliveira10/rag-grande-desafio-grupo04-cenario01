@@ -38,7 +38,17 @@ sintéticas. Totais incompletos são `null`, não zero.
 
 `QueryResponse` mantém: `query_id`, `session_id`, `query`, `answer`,
 `bases_consultadas`, `sources_used`, `confidence_level`, `is_refusal`,
-`refusal_reason` e `pergunta_reformulada` (`null` na maioria das respostas).
+`refusal_reason`, `pergunta_reformulada` (`null` na maioria das respostas) e
+`avisos` (lista, quase sempre vazia).
+
+- `answer` não traz identificadores internos. Quando o modelo liga uma
+  afirmação à sua fonte, o texto mostra `[1]`, `[2]`...: o número é a posição
+  da fonte em `sources_used`, começando em 1. O frontend pode transformar cada
+  `[n]` em link para a fonte correspondente.
+- `avisos` traz notas sobre como a resposta foi obtida, separadas do texto. Hoje
+  o único aviso é a busca ampliada: "Nenhum resultado atendeu a todos os filtros
+  da pergunta; a busca foi ampliada em …". Mostrar como nota discreta abaixo da
+  resposta.
 
 - Saudações, agradecimentos, despedidas e ajuda de uso recebem resposta normal,
   sem acervo/LLM quando reconhecidos diretamente.

@@ -184,6 +184,9 @@ class RAGResponse(BaseModel):
     confidence_level: ConfidenceLevel
     is_refusal: bool = False
     refusal_reason: Optional[RefusalReason] = None
+    # Notas para o usuário sobre como a resposta foi obtida (ex.: busca
+    # ampliada porque um filtro zerou o resultado). Ficam fora de ``answer``.
+    avisos: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validar_consistencia_recusa(self) -> "RAGResponse":

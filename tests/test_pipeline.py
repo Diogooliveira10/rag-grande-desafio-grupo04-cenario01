@@ -263,3 +263,29 @@ def test_guardrail_vale_sobre_a_pergunta_reformulada(monkeypatch):
     assert resposta["is_refusal"] is True
     assert resposta["refusal_reason"] == RefusalReason.DADOS_BANCARIOS.value
     assert resposta["query"] == "E o dele?"
+
+
+def test_busca_ampliada_vai_para_avisos_e_nao_para_o_texto(monkeypatch):
+    resultado = RetrievalResult(
+        chunk_id="n1",
+        content="Decreto sobre dispensa",
+        metadata={
+            "source_file": "decreto.pdf", "chunk_id": "n1", "base_id": "editais_normativo",
+            "doc_type": "pdf", "natureza": "normativa",
+            "extras": {"filtros_relaxados": {"sem_campo": ["data_publicacao"]}},
+        },
+        score=1.0,
+    )
+    monkeypatch.setattr(pipeline, "retrieve", lambda query, route, **kwargs: [resultado])
+
+    resposta = pipeline.responder(
+        "Quais normas de 2025 tratam de dispensa de licitação?",
+        cliente=lambda m: json.dumps({"answer": "O decreto trata de dispensa [E1].", "is_refusal": False,
+                                      "confidence_level": "media", "sources_used": ["E1"]}),
+    )
+
+    assert resposta["answer"] == "O decreto trata de dispensa [1]."
+    assert resposta["avisos"] == [
+        "Nenhum resultado atendeu a todos os filtros da pergunta; a busca foi ampliada em "
+        "normas: data de publicação (metadados ausentes)."
+    ]

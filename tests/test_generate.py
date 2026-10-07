@@ -652,3 +652,78 @@ def test_schema_resposta_restringe_citacoes_ao_contexto():
     assert schema['properties']['sources_used']['items']['enum'] == ['chunk-a', 'chunk-b']
     assert schema['properties']['answer']['minLength'] == 1
     assert schema['additionalProperties'] is False
+
+
+# --------------------------------------------------------------------------
+# Identificadores internos no texto viram [n], o número da fonte
+# --------------------------------------------------------------------------
+
+_SQL = "sql:contratacoes:estatistica:c3720065390a:1"
+_ATA = "atas_conversacional:200b812bf0cb1853:chunk-1-7303119b4364"
+_NORMA = "editais_normativo:1f7354fb65590678:chunk-10-f8902f79c194"
+_ATA_PAGINA = "atas_conversacional:e88c7162ee580b8c:pagina-7:chunk-3-54656c243682"
+
+
+def _responder_com(answer, fontes, chunks):
+    return gen.gerar_resposta(
+        "pergunta", chunks, [Natureza.ESTRUTURADA],
+        cliente=lambda mensagens: json.dumps({
+            "answer": answer, "is_refusal": False, "confidence_level": "alta", "sources_used": fontes,
+        }),
+    )
+
+
+@pytest.mark.parametrize("answer, esperado", [
+    # Os quatro formatos encontrados nas respostas reais do log e das avaliações.
+    ("O órgão assinou 5 contratos em 2025, conforme a consulta SQL (evidence_id=E1).",
+     "O órgão assinou 5 contratos em 2025, conforme a consulta SQL [1]."),
+    ("Há registro de preços para computadores (chunk_id=" + _ATA + "). Nada mais.",
+     "Há registro de preços para computadores [2]. Nada mais."),
+    ("O trecho " + _SQL + " mostra 5 registros.", "O trecho [1] mostra 5 registros."),
+    ("Vale o Decreto 48.816/2023 (chunks 10-f8902f79c194 e 1-7303119b4364).",
+     "Vale o Decreto 48.816/2023 [2, 3]."),
+    ("Total de R$ 3 bi [E1] e ata vigente [E2].", "Total de R$ 3 bi [1] e ata vigente [2]."),
+    # chunk_id de ata com página tem um segmento a mais.
+    ("No chunk_id=" + _ATA_PAGINA + ", o fornecedor atrasou.", "No [2], o fornecedor atrasou."),
+])
+def test_ids_internos_no_texto_viram_o_numero_da_fonte(answer, esperado):
+    chunks = [_chunk(_SQL), _chunk(_ATA, base_id="atas_conversacional"), _chunk(_NORMA, base_id="editais_normativo"),
+              _chunk(_ATA_PAGINA, base_id="atas_conversacional")]
+    if "Decreto" in answer:
+        fontes = ["E1", "E3", "E2"]  # a ordem das fontes define o número
+    elif _ATA_PAGINA in answer:
+        fontes = ["E1", "E4"]
+    else:
+        fontes = ["E1", "E2", "E3"]
+
+    resposta = _responder_com(answer, fontes, chunks)
+
+    assert resposta.answer == esperado
+    assert [f.chunk_id for f in resposta.sources_used][:1] == [_SQL]
+
+
+def test_id_que_nao_e_fonte_aceita_sai_do_texto():
+    resposta = _responder_com("Há 5 contratos (evidence_id=E2).", ["E1"], [_chunk(_SQL), _chunk(_ATA)])
+
+    assert resposta.answer == "Há 5 contratos."
+
+
+def test_texto_sem_ids_fica_igual_mesmo_com_letra_e_numero():
+    # "E1" sem parênteses nem rótulo pode ser texto comum (classe E1, item E2).
+    texto = "A classe E1 de servidores teve 3 contratos; o lote 10-A e o CNPJ 33.663.683/0001-16 constam."
+    resposta = _responder_com(texto, ["E1"], [_chunk(_SQL)])
+
+    assert resposta.answer == texto
+
+
+def test_troca_de_ids_fica_registrada_no_log():
+    _responder_com("Há 5 contratos (evidence_id=E1).", ["E1"], [_chunk(_SQL)])
+
+    geracao = next(json.loads(l) for a in obs.default_logger.logs_dir.glob("pipeline-*.jsonl")
+                   for l in a.read_text(encoding="utf-8").splitlines() if json.loads(l)["stage"] == "geracao")
+    assert geracao["extra"]["ids_internos_no_texto"] == 1
+
+
+def test_prompt_pede_evidence_id_entre_colchetes_e_nada_de_chunk_id():
+    assert "[E1]" in gen._SYSTEM_PROMPT
+    assert "não escreva chunk_id" in gen._SYSTEM_PROMPT
