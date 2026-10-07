@@ -6,7 +6,7 @@ import pytest
 
 import config
 from src import obs
-from src.rerank import CrossEncoderReranker, reranker_padrao, texto_para_rerank
+from src.rerank import CrossEncoderReranker, EcoaReranker, reranker_padrao, texto_para_rerank
 from src.retrieve import RetrievalResult, retrieve
 
 
@@ -85,9 +85,15 @@ def test_reranker_padrao_respeita_rerank_enabled(monkeypatch):
 
     monkeypatch.setattr(config, "RERANK_ENABLED", True)
     monkeypatch.setattr(config, "RERANK_MODEL", "modelo-x")
+    monkeypatch.setattr(config, "RERANK_PROVIDER", "local")
     reranker = reranker_padrao()
-    assert isinstance(reranker, CrossEncoderReranker)
+    assert type(reranker) is CrossEncoderReranker
     assert reranker.modelo == "modelo-x"
+
+    monkeypatch.setattr(config, "RERANK_PROVIDER", "ecoa")
+    reranker = reranker_padrao()
+    assert isinstance(reranker, EcoaReranker)
+    assert reranker.fallback.modelo == "modelo-x"
 
 
 def test_retrieve_entrega_mais_candidatos_ao_reranker_do_que_top_k(indice):
@@ -197,3 +203,91 @@ def test_pipeline_sem_rerank_quando_desligado(monkeypatch):
     pipeline.responder("Quais contratos de ambulancias foram publicados?")
 
     assert usados == [None]
+
+
+# --------------------------------------------------------------------------
+# Endpoint /api/rerank do servidor da turma (sem rede: post_fn falso)
+# --------------------------------------------------------------------------
+
+
+def _servidor_por_palavra(palavra, chamadas=None):
+    """Imita o /api/rerank: nota 0.9 para quem contém a palavra, 0.1 senão, fora de ordem."""
+    def post(url, corpo, timeout):
+        if chamadas is not None:
+            chamadas.append((url, corpo, timeout))
+        notas = [0.9 if palavra in doc else 0.1 for doc in corpo["documents"]]
+        resultados = sorted(
+            ({"index": i, "document": doc, "relevance_score": n} for i, (doc, n) in enumerate(zip(corpo["documents"], notas))),
+            key=lambda item: -item["relevance_score"],
+        )
+        return {"model": "xagi/qwen3-embedding:0.6b-q4_k_m", "results": resultados}
+    return post
+
+
+def _servidor_fora_do_ar(url, corpo, timeout):
+    raise TimeoutError("timed out")
+
+
+def test_ecoa_reordena_pelas_notas_do_endpoint_e_manda_o_corpo_esperado():
+    chamadas = []
+    reranker = EcoaReranker(url="http://servidor/api/rerank", timeout=7,
+                            post_fn=_servidor_por_palavra("microempresa", chamadas))
+    candidatos = [_resultado("a", "contrato de ambulancias", 0.9), _resultado("b", "microempresa no pregao", 0.1)]
+
+    reordenados = reranker("microempresa", candidatos)
+
+    assert [r.chunk_id for r in reordenados] == ["b", "a"]
+    assert [r.rerank_score for r in reordenados] == [0.9, 0.1]
+    [(url, corpo, timeout)] = chamadas
+    assert url == "http://servidor/api/rerank" and timeout == 7
+    assert corpo == {"query": "microempresa", "documents": ["contrato de ambulancias", "microempresa no pregao"],
+                     "top_n": 2}
+    assert reranker.backend_usado == reranker.modelo == "ecoa:xagi/qwen3-embedding:0.6b-q4_k_m"
+
+
+def test_ecoa_fora_do_ar_usa_o_cross_encoder_local():
+    local = CrossEncoderReranker("modelo-local", score_fn=_nota_por_palavra("microempresa"))
+    reranker = EcoaReranker(url="http://servidor/api/rerank", post_fn=_servidor_fora_do_ar, fallback=local)
+
+    reordenados = reranker("microempresa", [_resultado("a", "ambulancias", 0.9), _resultado("b", "microempresa", 0.1)])
+
+    assert [r.chunk_id for r in reordenados] == ["b", "a"]
+    assert reranker.backend_usado == "local:modelo-local (ecoa falhou: TimeoutError)"
+
+
+def test_ecoa_sem_fallback_propaga_o_erro():
+    reranker = EcoaReranker(url="http://servidor/api/rerank", post_fn=_servidor_fora_do_ar)
+
+    with pytest.raises(TimeoutError):
+        reranker("q", [_resultado("a", "texto", 0.5)])
+
+
+def test_ecoa_com_nota_faltando_e_erro_e_cai_no_fallback():
+    def incompleto(url, corpo, timeout):
+        return {"results": [{"index": 0, "relevance_score": 0.5}]}
+    local = CrossEncoderReranker("modelo-local", score_fn=lambda pares: [0.0] * len(pares))
+    reranker = EcoaReranker(url="http://servidor/api/rerank", post_fn=incompleto, fallback=local)
+
+    reranker("q", [_resultado("a", "x", 0.5), _resultado("b", "y", 0.4)])
+
+    assert reranker.backend_usado.startswith("local:modelo-local (ecoa falhou: ValueError")
+
+
+def test_ecoa_corta_textos_longos():
+    chamadas = []
+    reranker = EcoaReranker(url="http://servidor/api/rerank", post_fn=_servidor_por_palavra("x", chamadas))
+
+    reranker("q", [_resultado("a", "x" * 5000, 0.5)])
+
+    assert len(chamadas[0][1]["documents"][0]) == 2000
+
+
+def test_retrieve_registra_no_log_qual_backend_deu_as_notas(indice):
+    local = CrossEncoderReranker("modelo-local", score_fn=_nota_por_palavra("microempresa"))
+    reranker = EcoaReranker(url="http://servidor/api/rerank", post_fn=_servidor_fora_do_ar, fallback=local)
+
+    retrieve("microempresa no pregao", {"bases": ["estruturada"]}, top_k=2, reranker=reranker, **indice)
+
+    rerank = next(r for r in _registros() if r["stage"] == "rerank")
+    assert rerank["status"] == "ok"
+    assert rerank["extra"]["rerank_backend"].startswith("local:modelo-local")

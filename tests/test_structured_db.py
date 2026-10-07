@@ -123,6 +123,32 @@ def test_garantir_banco_remonta_base_de_schema_antigo_com_compras_em_pca_planos(
     assert banco.consultar("SELECT COUNT(*) AS n FROM pca_planos")[0]["n"] == 1
 
 
+def test_compras_da_base_agregada_completam_contratacoes_no_mesmo_recorte(tmp_path, banco):
+    ja_na_base = "11111111000111-1-000001/2025"
+    documents = escrever_documents(
+        tmp_path / "documents.jsonl",
+        contratacoes=[_contratacao(ja_na_base, objeto="Versão da base de contratos")],
+        planos=[
+            _plano("42498600000171-0-000004/2025"),
+            _contratacao(ja_na_base, objeto="Versão da base agregada"),
+            _contratacao("11111111000111-1-000002/2025", objeto="Compra nova do RJ em 2025"),
+            _contratacao("11111111000111-1-000003/2024", data="2024-05-10T10:00:00"),  # ano fora da base
+            {**_contratacao("11111111000111-1-000004/2025"),
+             "unidadeOrgao": {"ufSigla": "DF", "municipioNome": "Brasília"}},  # outro estado
+            {k: v for k, v in _contratacao("11111111000111-1-000005/2025").items()
+             if k != "orgaoEntidade"},  # formato reduzido, sem o órgão
+        ],
+    )
+
+    resumo = structured_db.construir_banco(documents, banco)
+
+    assert (resumo["contratacoes"], resumo["contratacoes_da_base_agregada"], resumo["pca_planos"]) == (2, 1, 1)
+    linhas = {l["numero_controle_pncp"]: l["objeto"]
+              for l in banco.consultar("SELECT numero_controle_pncp, objeto FROM contratacoes")}
+    assert linhas == {ja_na_base: "Versão da base de contratos",
+                      "11111111000111-1-000002/2025": "Compra nova do RJ em 2025"}
+
+
 def test_contratacao_vira_linha_normalizada(documents, banco):
     structured_db.construir_banco(documents, banco)
 
