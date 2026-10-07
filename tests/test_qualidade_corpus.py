@@ -80,6 +80,90 @@ def test_tabela_de_lances_e_texto_normal_continuam_legiveis(texto):
     assert qc.motivo_de_texto_ilegivel(texto) is None
 
 
+def test_codigos_unicode_sao_decodificados():
+    assert qc.decodificar_codigos_unicode("/U0044/U0049Á/U0052/U0049/U004F /U0050/U004F/U0044/U0045/U0052") == "DIÁRIO PODER"
+
+
+# --------------------------------------------------------------------------
+# Extração (src/prepare_documents.py): página ilegível vai para o OCR
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def ocr_falso(monkeypatch):
+    from src import prepare_documents as prep
+    chamadas = []
+
+    def ligar(texto_lido):
+        monkeypatch.setattr(prep.ocr, "disponivel", lambda: True)
+        monkeypatch.setattr(prep.ocr, "motor", lambda: "tesseract:por:300")
+        monkeypatch.setattr(prep.ocr, "texto_da_pagina",
+                            lambda caminho, pagina: chamadas.append(pagina) or texto_lido)
+    return chamadas, ligar
+
+
+def test_pagina_com_glifos_vai_para_o_ocr(ocr_falso):
+    from src.prepare_documents import _texto_legivel_da_pagina
+    chamadas, ligar = ocr_falso
+    ligar("ATA DE REGISTRO DE PREÇOS Nº 79/2023")
+    assert _texto_legivel_da_pagina(None, 2, "/0 /1 /2 □ /3") == (
+        "ATA DE REGISTRO DE PREÇOS Nº 79/2023", "ok_ocr", "tesseract:por:300")
+    assert chamadas == [2]
+
+
+def test_ocr_ilegivel_nao_troca_o_texto(ocr_falso):
+    from src.prepare_documents import _texto_legivel_da_pagina
+    _, ligar = ocr_falso
+    ligar("□ □ /4")
+    assert _texto_legivel_da_pagina(None, 0, "/0 /1 □") == ("/0 /1 □", "ok", None)
+
+
+def test_codigos_unicode_sao_decodificados_sem_ocr(ocr_falso):
+    from src.prepare_documents import _texto_legivel_da_pagina
+    chamadas, ligar = ocr_falso
+    ligar("não deveria ser chamado")
+    texto, status, extracao = _texto_legivel_da_pagina(None, 0, "/U0044/U0049Á/U0052/U0049/U004F /U004F/U0046")
+    assert (texto, status, extracao) == ("DIÁRIO OF", "ok", "codigos_unicode_decodificados")
+    assert chamadas == []
+
+
+def test_pagina_legivel_nao_passa_pelo_ocr(ocr_falso):
+    from src.prepare_documents import _texto_legivel_da_pagina
+    chamadas, ligar = ocr_falso
+    ligar("não deveria ser chamado")
+    assert _texto_legivel_da_pagina(None, 0, "Art. 1º Esta Lei") == ("Art. 1º Esta Lei", "ok", None)
+    assert chamadas == []
+
+
+def test_pagina_ilegivel_guardada_no_cache_e_refeita_com_ocr(tmp_path, monkeypatch, ocr_falso):
+    # Caso da máquina com a extração antiga: o cache guardou os glifos como texto.
+    import shutil
+    from src import prepare_documents as prep
+    raiz = qc.config.ROOT_DIR
+    fonte = tmp_path / "fonte"
+    fonte.mkdir()
+    shutil.copy2(next((raiz / "tests" / "fixtures" / "pdf").glob("*.pdf")), fonte / "documento.pdf")
+    saida, relatorio = tmp_path / "documents.jsonl", tmp_path / "report.json"
+    manifesto = raiz / "corpus_manifest.yaml"
+    monkeypatch.setattr(prep.ocr, "disponivel", lambda: False)
+    monkeypatch.setattr(prep.ocr, "motor", lambda: "tesseract:por:300")
+    prep.prepare_documents(fonte, saida, relatorio, manifesto, base_id="exemplos_teste")
+    estado = prep._extraction_state_path(saida)
+    unidades = [json.loads(linha) for linha in estado.read_text(encoding="utf-8").splitlines()]
+    unidades[0].update(text="/0 /1 /2 □ /3", status="ok")
+    estado.write_text("".join(json.dumps(u) + "\n" for u in unidades), encoding="utf-8")
+
+    chamadas, ligar = ocr_falso
+    ligar("Texto recuperado por OCR")
+    monkeypatch.setattr(prep, "_file_units", lambda *a: pytest.fail("o PDF do cache não deve ser extraído inteiro"))
+    prep.prepare_documents(fonte, saida, relatorio, manifesto, base_id="exemplos_teste")
+
+    refeitas = [json.loads(linha) for linha in estado.read_text(encoding="utf-8").splitlines()]
+    assert chamadas == [int(unidades[0]["extras"]["pagina"]) - 1]
+    assert (refeitas[0]["status"], refeitas[0]["text"]) == ("ok_ocr", "Texto recuperado por OCR")
+    assert [u["text"] for u in refeitas[1:]] == [u["text"] for u in unidades[1:]]
+
+
 def test_chunk_ilegivel_recebe_status_e_motivo_sem_mudar_o_texto():
     texto = "/0 /1 /2 □ /3"
     novo = _enriquecer(_registro("atas:a:1", "atas_conversacional", "conversacional", texto=texto))
