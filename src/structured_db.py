@@ -282,7 +282,7 @@ def _linha_contratacao(chunk: Mapping[str, Any], registro: dict[str, Any]) -> di
         "mes_assinatura": data_assinatura[:7] if data_assinatura else None,
         "tipo_registro": "contrato_assinado" if contrato_assinado else "publicacao_compra",
         "numero_controle_compra": registro.get("numeroControlePncpCompra") if contrato_assinado else None,
-        "fornecedor": registro.get("nomeRazaoSocialFornecedor"),
+        "fornecedor": registro.get("nomeRazaoSocialFornecedor") or (chunk.get("extras") or {}).get("fornecedor"),
         "modalidade": registro.get("modalidadeNome") or (chunk.get("extras") or {}).get("modalidade"),
         "modo_disputa": registro.get("modoDisputaNome"),
         "situacao": registro.get("situacaoCompraNome"),

@@ -1441,6 +1441,8 @@ _PERGUNTA_SOBRE_CONTRATOS_RE = re.compile(
 _PERGUNTA_COM_CONTA_RE = re.compile(
     r"\b(?:quant[oa]s|quantidade|total|soma|media|medio|mediana|maiores|menores|ranking|valor(?:es)?)\b"
 )
+_VIGENCIA_RE = re.compile(r"\bvigent[es]*\b|\bvigencia\b|\bem vigor\b")
+_REGISTRO_COM_VIGENCIA_RE = re.compile(r"\b(?:contratos?|atas?)\b")
 
 
 def _analisar_com_trechos(query: str) -> tuple[QueryFilters, str, list[Span]]:
@@ -1470,6 +1472,12 @@ def _analisar_com_trechos(query: str) -> tuple[QueryFilters, str, list[Span]]:
         ("pca", "pca"), ("publicac", "publicacao"), ("publicad", "publicacao"),
         ("resultado", "resultado"), ("homolog", "resultado"),
     ) if termo in resto), None)
+    # "O que estava vigente em 2025?" pede a vigência das normas. Em pergunta
+    # sobre contratos ou atas, "vigente" é a vigência deles e segue pelo
+    # campo de sempre (data_vigencia). "Contratações" sozinha é o assunto
+    # ("regras das contratações"), não o registro.
+    if referencia is None and _VIGENCIA_RE.search(resto) and not _REGISTRO_COM_VIGENCIA_RE.search(resto):
+        referencia = "vigencia"
     analiticos: dict[str, str] = {}
     # Esfera e modalidade saem do texto sem filtros e sem citações de norma
     # ("Lei federal 14.133" não é esfera federal; "Lei do Pregão" não é
@@ -1630,6 +1638,13 @@ def filtros_para_retrieve(filtros: QueryFilters) -> dict[str, Any]:
             anos.append({"operator": "<=", "value": ultimo_ano})
         if anos:
             resultado["ano_pca"] = anos
+    elif filtros.referencia_temporal == "vigencia":
+        # Norma vigente no período = começou a valer antes do fim dele. O
+        # início da vigência vem de src/qualidade_corpus.py (só a base
+        # normativa tem o campo). Nenhuma norma do corpus foi revogada; quando
+        # houver, entra também data_vigencia_fim >= início do período.
+        if ultimo_ano is not None:
+            resultado["data_vigencia_inicio"] = {"operator": "<", "value": date(ultimo_ano + 1, 1, 1)}
     else:
         campo = {
             "assinatura": "data_assinatura", "resultado": "data_resultado",
