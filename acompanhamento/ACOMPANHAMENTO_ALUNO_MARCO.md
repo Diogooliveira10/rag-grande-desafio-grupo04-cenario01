@@ -134,3 +134,21 @@ A correção: criei o motivo ERRO_PROVEDOR em src/schema.py e fiz os dois caminh
 No avaliador (eval/run_eval.py), erro_provedor nunca conta como acerto, nem de uma recusa esperada sem motivo definido; conteúdo e citação ficam como não avaliados, e o relatório ganhou o contador de falhas do provedor e o status ERRO_PROVEDOR. Escrevi 5 testes novos em tests/test_generate.py e 2 em tests/test_eval.py, e corrigi os 2 testes antigos que esperavam sem_evidencia nesses casos. Mantive o HTTP 200 na API (is_refusal=true com o motivo novo) pra não quebrar histórico e feedback; trocar por 503 fica como decisão do time.
 
 Uso de IA: usei o Claude pra revisar o generate.py e o llm_ecoa.py atualizados.
+
+## Encontro 10 — 07/10/2026
+
+Contexto: o grupo seguiu com a lista de 16 correções do documento Correcoes_Grupo04_2026-10-05. Fiquei primeiro com o item 11, contexto entre perguntas, cujo detalhamento estava no documento enviado no grupo na segunda. Depois que concluí e o merge foi feito, recebi o item 13, proveniência da base sintética.
+
+O que fiz:
+
+Item 11 (concluído): o problema é que o QueryRequest só recebia query e top_k, então uma pergunta como "considerando os mesmos contratos…" (P4.3 do golden set) chegava ao pipeline sem as anteriores, e o backend não tem memória entre perguntas. Escolhi reescrever a pergunta antes da análise, com o cliente enviando as últimas trocas (campo historico), em vez de o backend guardar a conversa.
+
+Criei o src/reformulacao.py: um filtro determinístico (parece_continuacao) decide se a pergunta depende do que veio antes, então perguntas que já se sustentam sozinhas não geram chamada ao LLM; só as últimas 3 trocas entram no prompt, com CPF, telefone e e-mail pessoal mascarados e o histórico tratado como dado, não como instrução; se o modelo falhar ou devolver fora do formato, segue com a pergunta original, e REFORMULACAO_MODE=regras desliga a etapa. A pergunta reescrita substitui a original em todas as etapas seguintes, então os guardrails e a política de sensibilidade valem sobre o texto que de fato é consultado.
+
+Na API (app/api.py), o QueryRequest ganhou historico (até 10 trocas) e a resposta ganhou pergunta_reformulada, para o frontend poder mostrar o que foi consultado. A etapa nova aparece no log como reformulacao, e atualizei o FRONTEND_API_CONTRACT.md, o .env.example e o ARQUITETURA.md. Escrevi testes novos (reformulação, API e pipeline, inclusive guardrail sobre a pergunta reescrita) e a suíte completa passou com 1176 testes. O commit é o ea66a22, na branch marco/contexto-entre-perguntas.
+
+O que falta do item 11 é no frontend: a Eduarda precisa enviar o historico e exibir a pergunta_reformulada.
+
+Item 13 (em andamento): comecei hoje, mas ainda não terminei. O escopo é corrigir a proveniência em quatro pontos: o campo fonte e o campo licenca do corpus_manifest.yaml (linhas 315 e 323), a linha do CORPUS_INVENTORY.md que diz "conversacional_sintetica.zip fornecido pelo grupo" (linha 33) e o docs/emails_sinteticos.md, que diz só "arquivo fornecido", sem autor. Em todos eles o registro deve passar a dizer que a base foi gerada pelo tutor e integrada ao projeto pelo João, com a data de entrega e as condições de uso combinadas com o tutor.
+
+Uso de IA: usei o Claude pra implementar os testes a partir da decisão que tomei (reescrever a pergunta, com o cliente mandando o histórico), e pra ler o item 13 e levantar quais arquivos precisam mudar. fiz o commit e o push; 
