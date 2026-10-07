@@ -11,7 +11,8 @@ Lê o JSONL normalizado (saída de ``ingest.py``), agrupa os chunks por
 (``index/<base_id>/vectors.jsonl``) e um manifesto
 (``index/<base_id>/manifest.json``) com o modelo usado, a dimensão dos
 vetores e a proveniência da fonte. Chunks sem texto (ex.: PDFs ainda
-pendentes de extração) são pulados e contados à parte.
+pendentes de extração) e chunks marcados como ``texto_ilegivel`` por
+``src/qualidade_corpus.py`` são pulados e contados à parte.
 """
 
 from __future__ import annotations
@@ -91,7 +92,7 @@ def _chunk_metadata(record: dict[str, Any]) -> dict[str, Any]:
     for key in (
         "document_id", "parent_chunk_id", "origem", "coletado_em", "manifest_hash",
         "sha256", "document_content_sha256", "chunk_content_sha256", "chunking_strategy",
-        "inventory_version", "inventory_hash", "version", "relations",
+        "inventory_version", "inventory_hash", "version", "relations", "status_extracao",
     ):
         if key in record:
             metadata[key] = record[key]
@@ -114,6 +115,11 @@ def read_normalized_chunks(input_file: Path) -> Iterator[NormalizedChunk]:
                 sha256=record.get("sha256", ""),
                 metadata=_chunk_metadata(record),
             )
+
+
+def _texto_ilegivel(chunk: NormalizedChunk) -> bool:
+    """Glifos sem mapa de caracteres, sem palavras (``src/qualidade_corpus.py``)."""
+    return chunk.metadata.get("status_extracao") == "texto_ilegivel"
 
 
 def file_sha256(path: Path) -> str:
@@ -205,9 +211,13 @@ def build_index(
             existing_bases[str(existing["base_id"])] = existing
     by_base: dict[str, list[NormalizedChunk]] = defaultdict(list)
     skipped_sem_texto = 0
+    skipped_ilegiveis: dict[str, int] = defaultdict(int)
     for chunk in read_normalized_chunks(input_file):
         if not chunk.text.strip():
             skipped_sem_texto += 1
+            continue
+        if _texto_ilegivel(chunk):
+            skipped_ilegiveis[chunk.base_id] += 1
             continue
         by_base[chunk.base_id].append(chunk)
 
@@ -273,6 +283,7 @@ def build_index(
             "dimension": dimension or 0,
             "faiss_index": faiss_path.name,
             "total_chunks": len(chunks),
+            "chunks_ilegiveis_ignorados": skipped_ilegiveis.get(base_id, 0),
             "source_file": _relative(input_file),
             "source_sha256": source_hash,
             "built_at": built_at,
@@ -292,6 +303,7 @@ def build_index(
         "source_sha256": source_hash,
         "built_at": built_at,
         "chunks_sem_texto_ignorados": skipped_sem_texto,
+        "chunks_ilegiveis_ignorados": sum(base.get("chunks_ilegiveis_ignorados", 0) for base in bases_summary),
         "bases": bases_summary,
     }
     (output_dir / "manifest.json").write_text(
@@ -330,14 +342,19 @@ def main() -> int:
     if args.dry_run:
         by_base: dict[str, int] = defaultdict(int)
         skipped = 0
+        ilegiveis = 0
         for chunk in read_normalized_chunks(args.input):
             if not chunk.text.strip():
                 skipped += 1
+                continue
+            if _texto_ilegivel(chunk):
+                ilegiveis += 1
                 continue
             by_base[chunk.base_id] += 1
         summary = {
             "chunks_por_base": dict(sorted(by_base.items())),
             "chunks_sem_texto_ignorados": skipped,
+            "chunks_ilegiveis_ignorados": ilegiveis,
         }
         print(json.dumps(summary, ensure_ascii=False))
         return 0
@@ -356,6 +373,7 @@ def main() -> int:
             for base in manifest["bases"]
         ],
         "chunks_sem_texto_ignorados": manifest["chunks_sem_texto_ignorados"],
+        "chunks_ilegiveis_ignorados": manifest["chunks_ilegiveis_ignorados"],
     }
     print(json.dumps(summary, ensure_ascii=False))
     return 0

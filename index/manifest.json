@@ -1,9 +1,10 @@
 {
   "embedding_model": "Qwen3-Embedding-0.6B.Q8_0",
-  "source_file": "data/normalized/emails_sinteticos/documents.jsonl",
-  "source_sha256": "904da93a5ae1fa08ddea0eef3d21ca028f18688f80fde73bfc3e8f12fb727ed5",
-  "built_at": "2026-10-05T17:29:42+00:00",
+  "source_file": "data/normalized/v6/editais_normativo/documents.jsonl",
+  "source_sha256": "05ce97bb1e0d9f86472a4cf2ce74179b74d66f2fb645d8d7650aeb6aba121c6e",
+  "built_at": "2026-10-07T19:01:11+00:00",
   "chunks_sem_texto_ignorados": 0,
+  "chunks_ilegiveis_ignorados": 826,
   "bases": [
     {
       "base_id": "atas_conversacional",
@@ -30,10 +31,11 @@
       ],
       "dimension": 1024,
       "faiss_index": "vectors.faiss",
-      "total_chunks": 2524,
+      "total_chunks": 1705,
+      "chunks_ilegiveis_ignorados": 819,
       "source_file": "data/normalized/v6/atas_conversacional/documents.jsonl",
-      "source_sha256": "f1c0bbd5a1dd6f8081f23bc523957b8ba4ce9ed681a0f06a63debf11e282d87b",
-      "built_at": "2026-09-30T17:23:38+00:00"
+      "source_sha256": "41b8abe176c30f0fccd48075eec6ac2b82f8ed5058c384a8f613a4e14774c3e7",
+      "built_at": "2026-10-07T19:01:08+00:00"
     },
     {
       "base_id": "contratos_estruturado",
@@ -61,9 +63,10 @@
       "dimension": 1024,
       "faiss_index": "vectors.faiss",
       "total_chunks": 625,
+      "chunks_ilegiveis_ignorados": 0,
       "source_file": "data/normalized/v6/contratos_estruturado/documents.jsonl",
-      "source_sha256": "b514a8896801626c6c9872a6b440c50533e0d9d8732c9f44f1135a38faef158a",
-      "built_at": "2026-09-30T17:23:34+00:00"
+      "source_sha256": "b777f80a9f698d8365e020d43321082cae8f8ea8d610e47686caf72d75f30e82",
+      "built_at": "2026-10-07T19:01:10+00:00"
     },
     {
       "base_id": "editais_normativo",
@@ -90,10 +93,11 @@
       ],
       "dimension": 1024,
       "faiss_index": "vectors.faiss",
-      "total_chunks": 1561,
+      "total_chunks": 1554,
+      "chunks_ilegiveis_ignorados": 7,
       "source_file": "data/normalized/v6/editais_normativo/documents.jsonl",
-      "source_sha256": "460a388d791f862d6ae6f487305181d2e7a7b8056f6746af861f934e8a064147",
-      "built_at": "2026-09-30T17:23:36+00:00"
+      "source_sha256": "05ce97bb1e0d9f86472a4cf2ce74179b74d66f2fb645d8d7650aeb6aba121c6e",
+      "built_at": "2026-10-07T19:01:11+00:00"
     },
     {
       "base_id": "emails_sinteticos",

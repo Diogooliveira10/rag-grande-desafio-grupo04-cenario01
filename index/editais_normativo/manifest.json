@@ -23,8 +23,9 @@
   ],
   "dimension": 1024,
   "faiss_index": "vectors.faiss",
-  "total_chunks": 1561,
+  "total_chunks": 1554,
+  "chunks_ilegiveis_ignorados": 7,
   "source_file": "data/normalized/v6/editais_normativo/documents.jsonl",
-  "source_sha256": "460a388d791f862d6ae6f487305181d2e7a7b8056f6746af861f934e8a064147",
-  "built_at": "2026-09-30T17:23:36+00:00"
+  "source_sha256": "05ce97bb1e0d9f86472a4cf2ce74179b74d66f2fb645d8d7650aeb6aba121c6e",
+  "built_at": "2026-10-07T19:01:11+00:00"
 }

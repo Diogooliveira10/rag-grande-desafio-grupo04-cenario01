@@ -120,6 +120,41 @@ bases:
           data_vigencia_inicio: "2023-11-28"
           ambito: "Poder Executivo estadual direto, autárquico e fundacional do RJ"
           fonte_oficial: "Controladoria Geral do Estado do Rio de Janeiro — Diário Oficial"
+        # Endereços de onde a v6 coletou as normas (reuso de versões anteriores,
+        # sem passar por metadados_por_url). src/qualidade_corpus.py aplica estes
+        # metadados aos chunks pela origem.
+        "https://www.mppi.mp.br/internet/wp-content/uploads/2021/04/L14133.pdf":
+          titulo: "Lei nº 14.133/2021"
+          tipo_documento: "lei_federal"
+          numero_norma: "Lei 14.133/2021"
+          data_publicacao: "2021-04-01"
+          data_vigencia_inicio: "2021-04-01"
+          ambito: "federal"
+          fonte_oficial: "Texto do Planalto, cópia publicada pelo MPPI"
+        "https://legis.senado.gov.br/norma/33382036/publicacao/33383820":
+          titulo: "Lei nº 14.133/2021"
+          tipo_documento: "lei_federal"
+          numero_norma: "Lei 14.133/2021"
+          data_publicacao: "2021-04-01"
+          data_vigencia_inicio: "2021-04-01"
+          ambito: "federal"
+          fonte_oficial: "Senado Federal — Legislação Federal"
+        "https://legis.senado.gov.br/norma/572878/publicacao/34621013":
+          titulo: "Lei Complementar nº 123/2006"
+          tipo_documento: "lei_federal"
+          numero_norma: "LC 123/2006"
+          data_publicacao: "2006-12-15"
+          data_vigencia_inicio: "2006-12-15"
+          ambito: "federal"
+          fonte_oficial: "Senado Federal — Legislação Federal"
+        "https://www.cge.rj.gov.br/wp-content/uploads/2024/01/decreto-48.760.pdf":
+          titulo: "Decreto Estadual nº 48.760/2023 — Plano de Contratações Anual (PCA) e Sistema PCA RJ"
+          tipo_documento: "decreto_estadual"
+          numero_norma: "Decreto 48.760/2023"
+          data_publicacao: "2023-10-24"
+          data_vigencia_inicio: "2023-10-24"
+          ambito: "Poder Executivo estadual direto, autárquico e fundacional do RJ"
+          fonte_oficial: "Controladoria Geral do Estado do Rio de Janeiro — Diário Oficial"
       linked_source_inventory_base: "contratos_estruturado"
       documentos_edital_filtro:
         campos:

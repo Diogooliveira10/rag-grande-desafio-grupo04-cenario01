@@ -159,6 +159,7 @@ Uma pergunta via `responder` gera, no log, uma linha por stage — `interacao` (
 │   ├── prepare_documents.py     ← extração por formato (PDF/HTML/CSV/JSON/JSONL), chunking e metadados canônicos
 │   ├── pca_indicators.py        ← indicadores agregados do PCA (1 indicador = 1 chunk) para a base agregada
 │   ├── ocr.py                   ← OCR (Tesseract) das páginas de PDF escaneadas, usado por prepare_documents.py
+│   ├── qualidade_corpus.py      ← controle de qualidade do normalizado: texto ilegível, vigência das normas, contrato↔compra, valor simbólico
 │   ├── create_embeddings.py     ← embeddings com cache, multi-provedor e escrita incremental
 │   ├── index.py                 ← índice vetorial por base; gera embeddings ou reaproveita os de data/embeddings/
 │   ├── query_analysis.py        ← extrai filtros de ano, valor e órgão da pergunta
@@ -378,6 +379,28 @@ As opções de provedor são `ecoa`, `ollama`, `openai` e `custom`. O cache regi
 provedor, endpoint e modelo para impedir a mistura de espaços vetoriais
 diferentes.
 
+Antes do índice, `src/qualidade_corpus.py` faz o controle de qualidade dos
+JSONL de `data/normalized/` (o da raiz, o combinado da v6 e os da v6 por base).
+Ele não muda o texto dos chunks, só status e metadados, então os vetores
+continuam valendo:
+
+- chunk de PDF sem mapa de caracteres (`/12 /3 □` ou `/U0044/U0049`) recebe
+  `status_extracao: "texto_ilegivel"` e fica fora do índice;
+- as normas recebem número, publicação e início da vigência
+  (`extras.data_vigencia_inicio`), declarados no manifesto em
+  `metadados_por_url`; editais e termos de referência do PNCP recebem a data de
+  publicação da compra vinculada;
+- o contrato herda a modalidade da compra da mesma contratação
+  (`numero_controle_compra`), e a compra, o fornecedor do contrato;
+- valor abaixo de R$ 1,00 recebe `extras.valor_simbolico: true`.
+
+O relatório fica em [`data/inventory/qualidade_v6.json`](data/inventory/qualidade_v6.json).
+
+```bash
+py -m src.qualidade_corpus --verificar   # só conta, sem gravar
+py -m src.qualidade_corpus               # aplica e grava o relatório
+```
+
 `src/index.py` monta o índice usado pela busca: particiona por `base_id`, grava
 os metadados/vetores em `vectors.jsonl` e persiste um índice FAISS em
 `vectors.faiss` para a recuperação densa. Depois de atualizar os documentos ou
@@ -388,6 +411,18 @@ cache, mas a recuperação em `src.retrieve` lê os índices criados por `src.in
 ```bash
 py .\src\index.py --dry-run     # só conta chunks por base, sem chamar o modelo de embeddings
 py .\src\index.py               # gera embeddings de verdade, via o endpoint compartilhado
+```
+
+Chunks sem texto e chunks com `status_extracao: "texto_ilegivel"` ficam fora
+do índice; o manifesto de cada base conta os ilegíveis em
+`chunks_ilegiveis_ignorados`. Para refazer o índice da v6 depois do controle de
+qualidade, sem gerar vetores, reaproveite os vetores da v6 base a base:
+
+```powershell
+foreach ($base in "atas_conversacional", "contratos_estruturado", "editais_normativo", "pca_agregado") {
+  py .\src\index.py --input "data\normalized\v6\$base\documents.jsonl" --output index `
+    --embeddings "data\embeddings\2026-09-30_12-08-51\$base\embeddings.jsonl" --merge-existing
+}
 ```
 
 `--embeddings` reaproveita vetores já publicados em vez de chamar o modelo; cada

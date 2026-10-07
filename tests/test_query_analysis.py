@@ -505,6 +505,44 @@ def test_texto_sem_filtros_tira_so_as_expressoes_que_viraram_filtro(pergunta, es
 
 
 # --------------------------------------------------------------------------
+# Vigência das normas (item 7): o início da vigência vem de
+# src/qualidade_corpus.py, só na base normativa.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("pergunta", [
+    "O que estava vigente em 2025 sobre pesquisa de preços?",
+    "O que estava vigente em 2025 sobre pesquisa de preços nas contratações do Estado do RJ?",
+    "Quais regras de dispensa estavam em vigor em 2024?",
+    "Qual decreto estadual tinha vigência em 2023?",
+])
+def test_pergunta_sobre_vigencia_de_norma_filtra_o_inicio_da_vigencia(pergunta):
+    filtros = qa.analisar_query(pergunta).filtros
+    assert filtros.referencia_temporal == "vigencia"
+    retrieve = qa.filtros_para_retrieve(filtros)
+    fim_do_ano = date(filtros.intervalo_de_anos()[1] + 1, 1, 1)
+    assert retrieve["data_vigencia_inicio"] == {"operator": "<", "value": fim_do_ano, "optional": True}
+    assert "data_vigencia" not in retrieve
+
+
+@pytest.mark.parametrize("pergunta", [
+    "Quais contratos estavam vigentes em 2025?",
+    "Quais atas de registro de preço estavam vigentes em 2025?",
+])
+def test_contrato_ou_ata_vigente_continua_pela_vigencia_do_registro(pergunta):
+    filtros = qa.analisar_query(pergunta).filtros
+    assert filtros.referencia_temporal is None
+    retrieve = qa.filtros_para_retrieve(filtros)
+    assert "data_vigencia" in retrieve and "data_vigencia_inicio" not in retrieve
+
+
+def test_vigencia_sem_ano_nao_cria_filtro():
+    filtros = qa.analisar_query("Qual lei de licitações está vigente?").filtros
+    assert filtros.referencia_temporal == "vigencia"
+    assert qa.filtros_para_retrieve(filtros) == {}
+
+
+# --------------------------------------------------------------------------
 # Logging (stage query_analysis em logs/pipeline-AAAA-MM-DD.jsonl)
 # --------------------------------------------------------------------------
 
