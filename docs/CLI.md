@@ -6,8 +6,9 @@ consultar todas as opções de um comando, acrescente `--help`.
 ## Snapshot oficial v6
 
 A v6 é a versão ativa: 1.400 arquivos, cinco arquivos por órgão/base no máximo
-e 5.621 chunks normalizados, dos quais 4.795 indexados (os 826 com texto
-ilegível ficam fora; ver `py -m src.qualidade_corpus` no README). As
+e 5.090 chunks normalizados e indexados após a recuperação OCR de 2026-10-07,
+com zero trechos ilegíveis (ver `py -m src.qualidade_corpus` no README).
+Com os 25 chunks sintéticos, o índice ativo contém 5.115 chunks. As
 referências a v3 nas seções de coleta abaixo são exemplos históricos; para
 consultar o snapshot pronto, use a CLI existente:
 

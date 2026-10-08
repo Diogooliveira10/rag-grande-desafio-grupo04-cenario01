@@ -44,19 +44,40 @@ Esta etapa não completa todos os requisitos do desafio: cross-encoder e ablaç�
 
 **Controle de qualidade 2026-10-07** (item 7 do documento de correções). [src/qualidade_corpus.py](../src/qualidade_corpus.py) rodou sobre os JSONL normalizados da v6 e o índice foi refeito com os vetores desta pasta (`index.py --embeddings ... --merge-existing`), sem chamar modelo: os textos e os SHA-256 dos chunks não mudaram, e os vetores dos chunks que ficaram no índice são idênticos aos anteriores. Relatório completo em [data/inventory/qualidade_v6.json](../data/inventory/qualidade_v6.json).
 
-- Texto ilegível: 819 chunks de atas (52 páginas de 3 PDFs, todos os chunks de cada página) e 7 páginas de decretos estaduais vieram da extração como glifos sem mapa de caracteres (`/12 /3 □`) ou códigos (`/U0044`). Viraram `status_extracao: "texto_ilegivel"` e saíram do índice (atas 2.524 → 1.705; normas 1.561 → 1.554). O critério é o formato de glifo, não a proporção de letras: tabelas de lances (CNPJ, datas, R$) têm pouca letra e continuam. A causa estava na extração: o `prepare_documents` só mandava para o OCR a página sem texto, e essas páginas tinham "texto" (os glifos). Agora a página ilegível também vai para o OCR, e os códigos `/U0044` são decodificados sem OCR. Os 826 chunks vêm de 5 arquivos (3 atas em `atas-zip/atas_conversacional-v6.zip` e os Decretos 48.816 e 48.760); recuperar o conteúdo exige extraí-los de novo e gerar os vetores dos chunks novos com o mesmo modelo do índice.
+- Texto ilegível: 819 chunks de atas (52 páginas de 3 PDFs, todos os chunks de cada página) e 7 páginas de decretos estaduais vieram da extração como glifos sem mapa de caracteres (`/12 /3 □`) ou códigos (`/U0044`). Viraram `status_extracao: "texto_ilegivel"` e saíram do índice (atas 2.524 → 1.705; normas 1.561 → 1.554). O critério é o formato de glifo, não a proporção de letras: tabelas de lances (CNPJ, datas, R$) têm pouca letra e continuam. A causa estava na extração: o `prepare_documents` só mandava para o OCR a página sem texto, e essas páginas tinham "texto" (os glifos). Agora a página ilegível também vai para o OCR, e os códigos `/U0044` são decodificados sem OCR. Os 826 chunks vêm de 5 arquivos (3 atas em `atas-zip/atas_conversacional-v6.zip` e os Decretos 48.816 e 48.760); a recuperação foi executada na etapa abaixo, com o mesmo modelo do índice.
 - Vigência das normas: 1.498 dos 1.561 chunks normativos receberam `extras.data_vigencia_inicio`. Lei 14.133/2021 (duas cópias), LC 123/2006 e Decretos 48.816/2023 e 48.760/2023 pelos `metadados_por_url` do manifesto; cinco editais e termos de referência pela publicação da compra vinculada no PNCP. Ficaram sem data as duas páginas que só listam legislação (Redelog e CGE) e o termo de referência do MPRJ, cuja compra não está no corpus. A causa da falta era dupla: a v6 coletou as normas de endereços diferentes dos declarados (reuso de versões anteriores), e o leitor do manifesto guarda as chaves de `metadados_por_url` com aspas, de modo que a coleta não as encontrava.
 - Contrato e compra: só 3 dos 448 contratos têm a compra vinculada no corpus (herdaram a modalidade) e só 2 das 177 publicações têm contrato no corpus (uma herdou o fornecedor; a outra tem dois contratados, listados em `fornecedores_contratados`).
 - Valor simbólico: 44 registros da base estruturada abaixo de R$ 1,00 (21 contratos de R$ 0,00, 6 de R$ 0,01 e 17 compras com estimado R$ 0,00) receberam `extras.valor_simbolico`.
 
 
 
+## Recuperação OCR 2026-10-07
+
+Execução de [eval/runs/recover_illegible_v6.py](../eval/runs/recover_illegible_v6.py), com os arquivos brutos locais, Tesseract `por:300` e o mesmo GGUF Q8 e configuração da geração original. O manifesto atual já havia mudado; a extração usou os bytes CRLF do manifesto de `bb5aa49931219040f53223567b86a23ec8eff0c1`, cujo SHA-256 coincide com o inventário v6 (`26c19ee26dbfcbf9e1e1f5d746bd09f017a980518cb57ec351248a6e8f04094d`). Não houve nova coleta nem alteração do inventário.
+
+A execução revelou dois casos não cobertos pela correção inicial: cabeçalhos `/U0044` em páginas cujo restante já era legível e números de página isolados antes de parágrafos longos ou seções. A decodificação passou a ocorrer antes do limiar de ilegibilidade; os números continuam no texto, junto do conteúdo, sem chunks numéricos isolados. O cache desses preâmbulos é invalidado seletivamente. Testes de regressão cobrem ambos os casos e a decodificação no cache.
+
+| Base | Chunks anteriores | Chunks atuais/indexados | Registros vetoriais reutilizados | Novos registros vetoriais |
+|---|---:|---:|---:|---:|
+| contratos_estruturado | 625 | 625 | 625 | 0 |
+| editais_normativo | 1.561 | 1.557 | 1.544 | 13 |
+| atas_conversacional | 2.524 | 1.997 | 1.705 | 292 |
+| pca_agregado | 911 | 911 | 911 | 0 |
+| **Total v6** | **5.621** | **5.090** | **4.785** | **305** |
+
+São 283 textos distintos novos (270 de atas e 13 de normas); repetições de texto compartilham o vetor, resultando nos 305 registros novos. Vetores em `data/embeddings/2026-10-07_21-18-41_ocr-recovery/`; o apontador `v6-pipeline/embedding-run.json` e a auditoria offline foram atualizados. Todos têm dimensão 1.024, são finitos e não nulos; os vetores dos textos inalterados são idênticos aos anteriores. A nova segmentação explica a redução do total, não a perda de páginas recuperadas.
+
+`py -m src.qualidade_corpus` confirmou **zero chunks ilegíveis**. Os JSONL por base, combinado v6 e ativo foram sincronizados, preservando as 25 conversas sintéticas. O índice FAISS foi montado e validado em staging antes da promoção: **5.115 chunks ativos**, sem mudança nas bases de contratos, PCA e e-mails. A auditoria offline conferiu os 1.400 arquivos brutos, hashes, proveniência e todos os 5.090 vetores. Relatório da recuperação em [eval/runs/v6-ocr-recovery.json](../eval/runs/v6-ocr-recovery.json). Após as correções, **1.252 testes offline passaram** (`python -m pytest -q tests --basetemp=logs/recovery-final-tests-temp-4`).
+
+SQLite e Neon **não** foram remontados; essa etapa continua com Renato. Não houve upload, push ou chamadas de modelos remotos. Os ZIPs de entrega existentes não foram regenerados.
+
 ## Artefatos versionados e preservação
 
 Os commits da v6 incluem o inventário, os vetores por base, FAISS, documentos
 normalizados ativos, SQLite e os dois ZIPs em `atas-zip/`. Os inventários v4/v5
 ficam como histórico e suporte aos testes. O ZIP e os embeddings completos da v5
-permanecem apenas no disco. Não foi configurado Git LFS.
+não foram versionados e foram removidos na limpeza autorizada descrita acima.
+Não foi configurado Git LFS.
 
 `.gitattributes` preserva os bytes dos snapshots para evitar que a conversão
 CRLF/LF invalide os hashes de proveniência. Credenciais, cache de queries,

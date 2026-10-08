@@ -161,6 +161,10 @@ def _chunking_fingerprint(unit: SourceUnit, chunk_size: int, overlap: int) -> st
             "chunking_sugerido": unit.chunking_sugerido,
             "natureza": unit.natureza,
             "formato": unit.formato,
+            # Invalidate only the section caches affected by the page-number fix.
+            **({"numeric_page_preamble": 1} if re.match(
+                r"^\s*\d+\s*\n", unit.text,
+            ) else {}),
         }
     )
 
@@ -761,13 +765,14 @@ def _texto_legivel_da_pagina(path: Path, page_index: int, text: str) -> tuple[st
     glifos sem mapa de caracteres ("/12 /3 □") ou códigos no lugar das letras
     ("/U0044"), que são só decodificados, sem OCR.
     """
+    # A mostly readable page can still have an encoded header. Decode before
+    # the whole-page quality threshold, otherwise its first chunk stays bad.
+    decodificado = decodificar_codigos_unicode(text)
+    if decodificado != text and motivo_de_texto_ilegivel(decodificado) is None:
+        return decodificado, "ok", "codigos_unicode_decodificados"
     motivo = motivo_de_texto_ilegivel(text) if text else None
     if text and motivo is None:
         return text, "ok", None
-    if motivo == "codigos_unicode_no_lugar_das_letras":
-        decodificado = decodificar_codigos_unicode(text)
-        if motivo_de_texto_ilegivel(decodificado) is None:
-            return decodificado, "ok", "codigos_unicode_decodificados"
     if ocr.disponivel():
         lido = ocr.texto_da_pagina(path, page_index).strip()
         # Página vazia aceita o que o OCR ler; texto ilegível só troca por legível.
@@ -778,7 +783,7 @@ def _texto_legivel_da_pagina(path: Path, page_index: int, text: str) -> tuple[st
 
 def _reextrair_pagina_ilegivel(path: Path, unit: SourceUnit) -> SourceUnit:
     """Página de PDF guardada no cache com texto ilegível: tenta de novo."""
-    if unit.formato != "pdf" or unit.status != "ok" or not motivo_de_texto_ilegivel(unit.text):
+    if unit.formato != "pdf" or unit.status != "ok":
         return unit
     text, status, extracao = _texto_legivel_da_pagina(path, int(unit.extras["pagina"]) - 1, unit.text)
     if not extracao:
@@ -1041,8 +1046,14 @@ def _file_units(
     )
 
 
+def _join_numeric_page_preamble(text: str) -> str:
+    """Keep an OCR page number attached to the following paragraph."""
+    return re.sub(r"^\s*(\d+)[ \t]*\n\s*\n", r"\1\n", text, count=1)
+
+
 def _section_chunks(text: str, chunk_size: int, overlap: int) -> list[str]:
     """Divide normas por cabeçalhos e só usa overlap dentro de seções longas."""
+    text = _join_numeric_page_preamble(text)
     sections = [
         section.strip()
         for section in re.split(
@@ -1051,8 +1062,13 @@ def _section_chunks(text: str, chunk_size: int, overlap: int) -> list[str]:
         )
         if section.strip()
     ]
+    # OCR sometimes leaves only a page number before the first heading.
+    # Keep it with the section, not as a separate, context-free numeric chunk.
+    if len(sections) > 1 and sections[0].isdigit():
+        sections[1] = sections[0] + "\n" + sections[1]
+        sections.pop(0)
     if len(sections) <= 1:
-        return list(chunk_text(text, chunk_size, overlap))
+        return list(chunk_text("\n".join(sections), chunk_size, overlap))
 
     chunks: list[str] = []
     for section in sections:
@@ -1076,7 +1092,7 @@ def _chunks_for_unit(unit: SourceUnit, chunk_size: int, overlap: int) -> tuple[l
         return [unit.text.strip()], "registro_inteiro"
     if "cláusula" in hint or "clausula" in hint or "artigo" in hint:
         return _section_chunks(unit.text, chunk_size, overlap), "secoes_normativas"
-    return list(chunk_text(unit.text, chunk_size, overlap)), "generico"
+    return list(chunk_text(_join_numeric_page_preamble(unit.text), chunk_size, overlap)), "generico"
 
 
 def _chunk_records(unit: SourceUnit, chunk_size: int, overlap: int) -> list[dict[str, Any]]:

@@ -1,17 +1,16 @@
 {
   "arquivos": {
-    "data/normalized/documents.jsonl": "201ab3491c5c73dccc85bae840683cb0cd54b1241afd39b85247bb65a453c033",
-    "data/normalized/v6/documents.jsonl": "1d8c7e068739058057c9d5b8f3431f10274e227d9cbbe13129a1206f5075d82c",
-    "data/normalized/v6/atas_conversacional/documents.jsonl": "41b8abe176c30f0fccd48075eec6ac2b82f8ed5058c384a8f613a4e14774c3e7",
+    "data/normalized/documents.jsonl": "d8a4f47f5758d88d78a670b09896e0ed7b0e26687fefccee809af68fd0827504",
+    "data/normalized/v6/documents.jsonl": "672137f484609fa185f336092e17fcebc9d4363b39ea41947a758a2a23edee4f",
+    "data/normalized/v6/atas_conversacional/documents.jsonl": "49bbe3018486517e75a08765aeaff3df0d3627c04433a07fabb01adedf7df083",
     "data/normalized/v6/contratos_estruturado/documents.jsonl": "b777f80a9f698d8365e020d43321082cae8f8ea8d610e47686caf72d75f30e82",
-    "data/normalized/v6/editais_normativo/documents.jsonl": "05ce97bb1e0d9f86472a4cf2ce74179b74d66f2fb645d8d7650aeb6aba121c6e",
+    "data/normalized/v6/editais_normativo/documents.jsonl": "0dad201cc9f0703d90a22106dd9f402f53f34532b0d501f9c201562d3d339c62",
     "data/normalized/v6/pca_agregado/documents.jsonl": "048de1b19f6b3212e3e0d4fd88a1adac02cf03db319d78219ee5038e95fe47bb"
   },
   "por_base": {
     "atas_conversacional": {
-      "chunks": 2524,
-      "modalidade_da_compra_vinculada": 2,
-      "texto_ilegivel": 819
+      "chunks": 1997,
+      "modalidade_da_compra_vinculada": 2
     },
     "contratos_estruturado": {
       "chunks": 625,
@@ -21,9 +20,8 @@
       "valor_simbolico": 44
     },
     "editais_normativo": {
-      "chunks": 1561,
-      "com_inicio_de_vigencia": 1498,
-      "texto_ilegivel": 7
+      "chunks": 1557,
+      "com_inicio_de_vigencia": 1494
     },
     "emails_sinteticos": {
       "chunks": 25
@@ -32,67 +30,7 @@
       "chunks": 911
     }
   },
-  "documentos_com_texto_ilegivel": {
-    "atas_conversacional:809e0cd4537bf608:pagina-1": 9,
-    "atas_conversacional:809e0cd4537bf608:pagina-2": 14,
-    "atas_conversacional:809e0cd4537bf608:pagina-3": 17,
-    "atas_conversacional:809e0cd4537bf608:pagina-4": 17,
-    "atas_conversacional:809e0cd4537bf608:pagina-5": 10,
-    "atas_conversacional:cb7bc4c66c368414:pagina-1": 12,
-    "atas_conversacional:cb7bc4c66c368414:pagina-10": 19,
-    "atas_conversacional:cb7bc4c66c368414:pagina-11": 17,
-    "atas_conversacional:cb7bc4c66c368414:pagina-12": 20,
-    "atas_conversacional:cb7bc4c66c368414:pagina-13": 19,
-    "atas_conversacional:cb7bc4c66c368414:pagina-14": 18,
-    "atas_conversacional:cb7bc4c66c368414:pagina-15": 20,
-    "atas_conversacional:cb7bc4c66c368414:pagina-16": 18,
-    "atas_conversacional:cb7bc4c66c368414:pagina-17": 19,
-    "atas_conversacional:cb7bc4c66c368414:pagina-18": 21,
-    "atas_conversacional:cb7bc4c66c368414:pagina-19": 19,
-    "atas_conversacional:cb7bc4c66c368414:pagina-2": 20,
-    "atas_conversacional:cb7bc4c66c368414:pagina-20": 7,
-    "atas_conversacional:cb7bc4c66c368414:pagina-21": 21,
-    "atas_conversacional:cb7bc4c66c368414:pagina-22": 19,
-    "atas_conversacional:cb7bc4c66c368414:pagina-23": 18,
-    "atas_conversacional:cb7bc4c66c368414:pagina-24": 19,
-    "atas_conversacional:cb7bc4c66c368414:pagina-25": 18,
-    "atas_conversacional:cb7bc4c66c368414:pagina-26": 19,
-    "atas_conversacional:cb7bc4c66c368414:pagina-27": 19,
-    "atas_conversacional:cb7bc4c66c368414:pagina-28": 20,
-    "atas_conversacional:cb7bc4c66c368414:pagina-29": 19,
-    "atas_conversacional:cb7bc4c66c368414:pagina-3": 20,
-    "atas_conversacional:cb7bc4c66c368414:pagina-30": 18,
-    "atas_conversacional:cb7bc4c66c368414:pagina-31": 19,
-    "atas_conversacional:cb7bc4c66c368414:pagina-32": 17,
-    "atas_conversacional:cb7bc4c66c368414:pagina-33": 23,
-    "atas_conversacional:cb7bc4c66c368414:pagina-34": 29,
-    "atas_conversacional:cb7bc4c66c368414:pagina-35": 22,
-    "atas_conversacional:cb7bc4c66c368414:pagina-36": 18,
-    "atas_conversacional:cb7bc4c66c368414:pagina-37": 1,
-    "atas_conversacional:cb7bc4c66c368414:pagina-4": 19,
-    "atas_conversacional:cb7bc4c66c368414:pagina-45": 1,
-    "atas_conversacional:cb7bc4c66c368414:pagina-47": 1,
-    "atas_conversacional:cb7bc4c66c368414:pagina-48": 2,
-    "atas_conversacional:cb7bc4c66c368414:pagina-49": 3,
-    "atas_conversacional:cb7bc4c66c368414:pagina-5": 20,
-    "atas_conversacional:cb7bc4c66c368414:pagina-6": 16,
-    "atas_conversacional:cb7bc4c66c368414:pagina-7": 19,
-    "atas_conversacional:cb7bc4c66c368414:pagina-8": 19,
-    "atas_conversacional:cb7bc4c66c368414:pagina-9": 19,
-    "atas_conversacional:d27cd498708180f1:pagina-1": 13,
-    "atas_conversacional:d27cd498708180f1:pagina-2": 9,
-    "atas_conversacional:d27cd498708180f1:pagina-3": 11,
-    "atas_conversacional:d27cd498708180f1:pagina-4": 15,
-    "atas_conversacional:d27cd498708180f1:pagina-5": 14,
-    "atas_conversacional:d27cd498708180f1:pagina-6": 3,
-    "editais_normativo:13c500a82afb4143:pagina-2": 1,
-    "editais_normativo:13c500a82afb4143:pagina-3": 1,
-    "editais_normativo:9699114e71c760d9:pagina-1": 1,
-    "editais_normativo:9699114e71c760d9:pagina-2": 1,
-    "editais_normativo:9699114e71c760d9:pagina-3": 1,
-    "editais_normativo:9699114e71c760d9:pagina-4": 1,
-    "editais_normativo:9699114e71c760d9:pagina-5": 1
-  },
+  "documentos_com_texto_ilegivel": {},
   "vigencias": {
     "00394502002864-1-000861/2025": {
       "tipo_documento": "documento_de_contratacao",
@@ -134,14 +72,14 @@
       "data_publicacao": "2023-10-24",
       "data_vigencia_inicio": "2023-10-24",
       "fonte_vigencia": "manifesto",
-      "chunks": 67
+      "chunks": 66
     },
     "Decreto 48.816/2023": {
       "tipo_documento": "decreto_estadual",
       "data_publicacao": "2023-11-25",
       "data_vigencia_inicio": "2023-11-25",
       "fonte_vigencia": "manifesto",
-      "chunks": 136
+      "chunks": 133
     },
     "LC 123/2006": {
       "tipo_documento": "lei_federal",

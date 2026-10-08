@@ -1,0 +1,49 @@
+{
+  "started_at": "2026-10-07_21-18-41",
+  "run": "logs/recovery-v6-2026-10-07_21-18-41",
+  "stage": "completed",
+  "collection_manifest_commit": "bb5aa49931219040f53223567b86a23ec8eff0c1",
+  "collection_manifest_sha256": "sha256:26c19ee26dbfcbf9e1e1f5d746bd09f017a980518cb57ec351248a6e8f04094d",
+  "embedding_folder": "data/embeddings/2026-10-07_21-18-41_ocr-recovery",
+  "bases": {
+    "contratos_estruturado": {
+      "before_chunks": 625,
+      "chunks": 625,
+      "vectors": 625,
+      "reused_vectors": 625,
+      "new_vectors": 0
+    },
+    "editais_normativo": {
+      "before_chunks": 1561,
+      "chunks": 1557,
+      "vectors": 1557,
+      "reused_vectors": 1544,
+      "new_vectors": 13,
+      "generated_unique_texts": 13,
+      "recovered_pages": 7
+    },
+    "atas_conversacional": {
+      "before_chunks": 2524,
+      "chunks": 1997,
+      "vectors": 1997,
+      "reused_vectors": 1705,
+      "new_vectors": 292,
+      "generated_unique_texts": 270,
+      "recovered_pages": 52
+    },
+    "pca_agregado": {
+      "before_chunks": 911,
+      "chunks": 911,
+      "vectors": 911,
+      "reused_vectors": 911,
+      "new_vectors": 0
+    }
+  },
+  "total_v6_chunks": 5090,
+  "total_index_chunks": 5115,
+  "unreadable_chunks": 0,
+  "checks_passed": true,
+  "database_rebuild_performed": false,
+  "uploads_performed": false,
+  "generated_unique_texts": 283
+}

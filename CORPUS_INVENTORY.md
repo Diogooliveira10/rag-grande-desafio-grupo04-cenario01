@@ -32,7 +32,7 @@ A base ativa também inclui `emails_sinteticos`, separadamente:
 
 - Fonte: `conversacional_sintetica.zip` fornecido pelo grupo (52.963 bytes nos JSONs canônicos).
 - Canonização: somente JSON individual; TXT e JSONL consolidados são cópias, não novas conversas.
-- Base ativa: **1.425 arquivos de origem** e **5.646 chunks** (5.621 da v6 + 25 sintéticos). Desde o controle de qualidade de 2026-10-07, 826 chunks da v6 com texto ilegível (819 de atas e 7 de decretos) ficam fora do índice: **4.820 chunks indexados**. Relatório em [data/inventory/qualidade_v6.json](data/inventory/qualidade_v6.json).
+- Base ativa: **1.425 arquivos de origem** e **5.115 chunks normalizados e indexados** (5.090 da v6 + 25 sintéticos). A recuperação OCR de 2026-10-07 reprocessou as 52 páginas de atas e decodificou os cabeçalhos de 7 páginas de decretos: **zero trechos ilegíveis**. A quantidade de chunks mudou porque o texto recuperado é segmentado novamente, sem criar uma nova coleta. Relatórios em [data/inventory/qualidade_v6.json](data/inventory/qualidade_v6.json) e [eval/runs/v6-ocr-recovery.json](eval/runs/v6-ocr-recovery.json).
 - Não é uma nova coleta PNCP nem uma versão v7. O suplemento tem coleta local própria.
 - Proveniência, classificação e reconstrução: [docs/emails_sinteticos.md](docs/emails_sinteticos.md).
 
