@@ -127,6 +127,40 @@ def test_codigos_unicode_sao_decodificados_sem_ocr(ocr_falso):
     assert chamadas == []
 
 
+def test_cabecalho_unicode_em_pagina_legivel_e_decodificado_sem_ocr(ocr_falso):
+    from src.prepare_documents import _texto_legivel_da_pagina
+    chamadas, ligar = ocr_falso
+    ligar("não deveria ser chamado")
+    corpo = "Art. 1º Esta Lei estabelece normas gerais. " * 100
+    texto = "/U0044/U0049Á/U0052/U0049/U004F\n" + corpo
+    assert qc.motivo_de_texto_ilegivel(texto) is None
+    assert _texto_legivel_da_pagina(None, 0, texto) == (
+        "DIÁRIO\n" + corpo, "ok", "codigos_unicode_decodificados",
+    )
+    assert chamadas == []
+
+
+def test_numero_de_pagina_fica_junto_da_primeira_secao():
+    from src.prepare_documents import _section_chunks
+    texto = "08\nCLÁUSULA PRIMEIRA - OBJETO\nAquisição de material.\nCLÁUSULA SEGUNDA - VALOR\nR$ 100,00."
+    chunks = _section_chunks(texto, 1200, 150)
+    assert len(chunks) == 2
+    assert chunks[0].startswith("08\nCLÁUSULA PRIMEIRA")
+    assert all(qc.motivo_de_texto_ilegivel(chunk) is None for chunk in chunks)
+
+
+def test_numero_de_pagina_nao_vira_chunk_antes_de_paragrafo_longo():
+    from types import SimpleNamespace
+    from src.prepare_documents import _chunks_for_unit, _section_chunks
+    texto = "08\n\n" + "Características do material contratado. " * 100
+    unit = SimpleNamespace(text=texto, chunking_sugerido="Texto por seção, com overlap",
+                           formato="pdf", natureza="conversacional")
+    genericos, _ = _chunks_for_unit(unit, 1200, 150)
+    for chunks in (genericos, _section_chunks(texto, 1200, 150)):
+        assert chunks[0].startswith("08\nCaracterísticas")
+        assert all(qc.motivo_de_texto_ilegivel(chunk) is None for chunk in chunks)
+
+
 def test_pagina_legivel_nao_passa_pelo_ocr(ocr_falso):
     from src.prepare_documents import _texto_legivel_da_pagina
     chamadas, ligar = ocr_falso
@@ -135,7 +169,14 @@ def test_pagina_legivel_nao_passa_pelo_ocr(ocr_falso):
     assert chamadas == []
 
 
-def test_pagina_ilegivel_guardada_no_cache_e_refeita_com_ocr(tmp_path, monkeypatch, ocr_falso):
+@pytest.mark.parametrize("texto_cache,texto_esperado,paginas_ocr", [
+    ("/0 /1 /2 □ /3", "Texto recuperado por OCR", True),
+    ("/U0044/U0049Á/U0052/U0049/U004F\n" + "Art. 1º Texto legível. " * 100,
+     "DIÁRIO\n" + "Art. 1º Texto legível. " * 100, False),
+])
+def test_pagina_ilegivel_guardada_no_cache_e_refeita_com_ocr(
+    tmp_path, monkeypatch, ocr_falso, texto_cache, texto_esperado, paginas_ocr,
+):
     # Caso da máquina com a extração antiga: o cache guardou os glifos como texto.
     import shutil
     from src import prepare_documents as prep
@@ -150,7 +191,7 @@ def test_pagina_ilegivel_guardada_no_cache_e_refeita_com_ocr(tmp_path, monkeypat
     prep.prepare_documents(fonte, saida, relatorio, manifesto, base_id="exemplos_teste")
     estado = prep._extraction_state_path(saida)
     unidades = [json.loads(linha) for linha in estado.read_text(encoding="utf-8").splitlines()]
-    unidades[0].update(text="/0 /1 /2 □ /3", status="ok")
+    unidades[0].update(text=texto_cache, status="ok")
     estado.write_text("".join(json.dumps(u) + "\n" for u in unidades), encoding="utf-8")
 
     chamadas, ligar = ocr_falso
@@ -159,8 +200,10 @@ def test_pagina_ilegivel_guardada_no_cache_e_refeita_com_ocr(tmp_path, monkeypat
     prep.prepare_documents(fonte, saida, relatorio, manifesto, base_id="exemplos_teste")
 
     refeitas = [json.loads(linha) for linha in estado.read_text(encoding="utf-8").splitlines()]
-    assert chamadas == [int(unidades[0]["extras"]["pagina"]) - 1]
-    assert (refeitas[0]["status"], refeitas[0]["text"]) == ("ok_ocr", "Texto recuperado por OCR")
+    assert chamadas == ([int(unidades[0]["extras"]["pagina"]) - 1] if paginas_ocr else [])
+    assert (refeitas[0]["status"], refeitas[0]["text"]) == (
+        "ok_ocr" if paginas_ocr else "ok", texto_esperado,
+    )
     assert [u["text"] for u in refeitas[1:]] == [u["text"] for u in unidades[1:]]
 
 

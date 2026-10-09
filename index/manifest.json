@@ -1,10 +1,10 @@
 {
   "embedding_model": "Qwen3-Embedding-0.6B.Q8_0",
-  "source_file": "data/normalized/v6/editais_normativo/documents.jsonl",
-  "source_sha256": "05ce97bb1e0d9f86472a4cf2ce74179b74d66f2fb645d8d7650aeb6aba121c6e",
-  "built_at": "2026-10-07T19:01:11+00:00",
+  "source_file": "data/normalized/v6/documents.jsonl",
+  "source_sha256": "672137f484609fa185f336092e17fcebc9d4363b39ea41947a758a2a23edee4f",
+  "built_at": "2026-10-08T02:19:52+00:00",
   "chunks_sem_texto_ignorados": 0,
-  "chunks_ilegiveis_ignorados": 826,
+  "chunks_ilegiveis_ignorados": 0,
   "bases": [
     {
       "base_id": "atas_conversacional",
@@ -31,11 +31,11 @@
       ],
       "dimension": 1024,
       "faiss_index": "vectors.faiss",
-      "total_chunks": 1705,
-      "chunks_ilegiveis_ignorados": 819,
+      "total_chunks": 1997,
+      "chunks_ilegiveis_ignorados": 0,
       "source_file": "data/normalized/v6/atas_conversacional/documents.jsonl",
-      "source_sha256": "41b8abe176c30f0fccd48075eec6ac2b82f8ed5058c384a8f613a4e14774c3e7",
-      "built_at": "2026-10-07T19:01:08+00:00"
+      "source_sha256": "49bbe3018486517e75a08765aeaff3df0d3627c04433a07fabb01adedf7df083",
+      "built_at": "2026-10-08T02:19:50+00:00"
     },
     {
       "base_id": "contratos_estruturado",
@@ -93,11 +93,11 @@
       ],
       "dimension": 1024,
       "faiss_index": "vectors.faiss",
-      "total_chunks": 1554,
-      "chunks_ilegiveis_ignorados": 7,
+      "total_chunks": 1557,
+      "chunks_ilegiveis_ignorados": 0,
       "source_file": "data/normalized/v6/editais_normativo/documents.jsonl",
-      "source_sha256": "05ce97bb1e0d9f86472a4cf2ce74179b74d66f2fb645d8d7650aeb6aba121c6e",
-      "built_at": "2026-10-07T19:01:11+00:00"
+      "source_sha256": "0dad201cc9f0703d90a22106dd9f402f53f34532b0d501f9c201562d3d339c62",
+      "built_at": "2026-10-08T02:19:52+00:00"
     },
     {
       "base_id": "emails_sinteticos",

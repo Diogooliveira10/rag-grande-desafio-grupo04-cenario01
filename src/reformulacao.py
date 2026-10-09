@@ -276,12 +276,13 @@ def reformular_pergunta(
     Nunca levanta exceção por causa do modelo; o motivo vai para o log.
     """
     turnos = _turnos_do_prompt(historico or [])
-    if not turnos:
-        return Reformulacao(query, False, "sem_historico")
-    if REFORMULACAO_MODE != "llm":
-        return Reformulacao(query, False, "modo_desligado")
-    if not parece_continuacao(query):
-        return Reformulacao(query, False, "autossuficiente")
+    from src.obs import registrar_pulo
+    motivo = ("sem_historico" if not turnos else "modo_desligado" if REFORMULACAO_MODE != "llm"
+              else "autossuficiente" if not parece_continuacao(query) else None)
+    if motivo:
+        registrar_pulo(run_id=run_id, query_id=query_id, stage=Stage.REFORMULACAO,
+                       query=query, motivo=motivo)
+        return Reformulacao(query, False, motivo)
     if so_troca_o_ano(query):
         # Sem modelo: o qwen3 às vezes raciocina até o teto e não devolve nada
         # justamente nesse caso, o mais comum de continuação.
@@ -300,20 +301,24 @@ def reformular_pergunta(
     ) as span:
         try:
             saida = (cliente or _cliente_padrao(diagnosticos))(_mensagens(query, turnos))
+            span.tokens = token_usage_from_response(saida, extra=span.extra)
             span.extra.update(diagnosticos)
-            if not isinstance(saida, str):
-                span.tokens = token_usage_from_response(saida)
+            span.modelo = diagnosticos.get("model") or getattr(saida, "model", None)
             reescrita = _extrair_pergunta(_texto(saida))
         except (ValueError, KeyError, TypeError, AttributeError, IndexError) as erro:
             # Saída fora do formato: segue com a pergunta anterior anexada.
             span.extra.update(diagnosticos)
+            span.modelo = diagnosticos.get("model")
             span.extra.update({"fallback": "contexto_anexado", "error_type": type(erro).__name__})
+            span.status = "degradado"
             pergunta = _com_contexto(query, turnos)
             span.set_result({"pergunta": mascarar(pergunta)[0], "reescrita": True, "motivo": "saida_invalida"})
             return Reformulacao(pergunta, True, "saida_invalida")
         except Exception as erro:  # noqa: BLE001 - provedor fora do ar não derruba a consulta
             span.extra.update(diagnosticos)
+            span.modelo = diagnosticos.get("model")
             span.extra.update({"fallback": "contexto_anexado", "error_type": type(erro).__name__})
+            span.status = "degradado"
             pergunta = _com_contexto(query, turnos)
             span.set_result({"pergunta": mascarar(pergunta)[0], "reescrita": True, "motivo": "llm_falhou"})
             return Reformulacao(pergunta, True, "llm_falhou")

@@ -1,7 +1,42 @@
+from datetime import datetime
+import json
+from pathlib import Path
+import shutil
+import uuid
+import warnings
+
 import pytest
 
 import config
 from src import obs, structured_query
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_configure(config):
+    """Use a unique local temp folder unless --basetemp was explicit."""
+    if config.option.basetemp is None:
+        stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        path = Path(config.rootpath) / ".tmp" / "tests" / f"{stamp}-{uuid.uuid4().hex[:8]}"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        config.option.basetemp = str(path)
+        config._managed_test_temp = path
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Successful runs leave no fixtures behind; failed runs get a marker."""
+    path = getattr(session.config, "_managed_test_temp", None)
+    if path is None or not path.exists() or path.is_symlink():
+        return
+    try:
+        if exitstatus == 0:
+            shutil.rmtree(path)
+        else:
+            (path / ".pytest-run.json").write_text(json.dumps({
+                "completed": True, "exitstatus": int(exitstatus),
+                "finished_at": datetime.now().astimezone().isoformat(),
+            }) + "\n", encoding="utf-8")
+    except OSError as error:
+        warnings.warn(f"Could not finalize test temporary files: {error}", RuntimeWarning)
 
 
 @pytest.fixture(autouse=True)
@@ -16,6 +51,14 @@ def _logs_em_diretorio_temporario(tmp_path, monkeypatch):
     monkeypatch.setattr(query_analysis.config, "MODEL_MIN_INTERVAL_SECONDS", 0)
     from src import conversation
     monkeypatch.setattr(conversation, "CONVERSATION_MODE", "regras")
+
+
+@pytest.fixture(autouse=True)
+def _historico_da_api_isolado(tmp_path, monkeypatch):
+    """All API tests use disposable SQLite, including tests outside test_app_api."""
+    from app import api
+    from src.history_store import HistoricoStore
+    monkeypatch.setattr(api, "historico", HistoricoStore(db_path=tmp_path / "api-history.sqlite"))
 
 
 @pytest.fixture(autouse=True)

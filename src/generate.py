@@ -18,6 +18,7 @@ from src.schema import (
     SourceRef,
 )
 from src.sensitivity import filtrar_chunks_permitidos, mascarar, mascarar_chunks
+from src.log_evidence import auditoria_completa, auditar_geracao
 
 # --------------------------------------------------------------------------
 # Cliente LLM — único ponto de integração real com llm_ecoa.py
@@ -67,11 +68,12 @@ def _cliente_padrao(schema: Optional[dict] = None) -> ClienteLLM:
     return _chamar
 
 
-def _texto_e_tokens(saida: Any) -> tuple[str, TokenUsage]:
-    """Aceita ``str`` (clientes simples/falsos) ou a resposta do SDK OpenAI."""
+def _texto_e_tokens(saida: Any, *, extra: dict[str, Any] | None = None) -> tuple[str, TokenUsage]:
+    """Aceita ``str`` ou SDK; texto sem usage tem consumo explicitamente desconhecido."""
+    tokens = token_usage_from_response(saida, extra=extra)
     if isinstance(saida, str):
-        return saida, TokenUsage()
-    return saida.choices[0].message.content or "", token_usage_from_response(saida)
+        return saida, tokens
+    return saida.choices[0].message.content or "", tokens
 
 
 # --------------------------------------------------------------------------
@@ -502,6 +504,8 @@ def _logar_evento(
         output = f"recusa: {resposta.refusal_reason.value if resposta.refusal_reason else '-'}"
     else:
         output = f"resposta {resposta.confidence_level.value}; {len(resposta.sources_used)} fontes"
+    if status == "ok" and (extra.get("llm") or {}).get("fallback_used"):
+        status = "degradado"
     registrar(
         run_id=run_id,
         query_id=query_id,
@@ -517,6 +521,8 @@ def _logar_evento(
             "is_refusal": resposta.is_refusal,
             "bases_consultadas": [b.value for b in resposta.bases_consultadas],
             "num_sources": len(resposta.sources_used),
+            "answer_truncated": len(mascarar(resposta.answer or "")[0]) > _LIMITE_DE_TEXTO_NO_LOG,
+            "log_text_limit": _LIMITE_DE_TEXTO_NO_LOG,
             # A resposta como saiu da etapa, para acompanhar o dado até o usuário.
             "resposta": {
                 "answer": _texto_para_log(resposta.answer),
@@ -593,6 +599,63 @@ def _logar_validacao(
 # API pública
 # --------------------------------------------------------------------------
 
+
+def pode_responder_sql(chunks: list[Chunk], bases: list[Natureza]) -> bool:
+    """Mesmo critério de suficiência usado pelo atalho SQL e pela geração."""
+    if not bases or not set(bases) <= {Natureza.ESTRUTURADA, Natureza.AGREGADA}:
+        return False
+    permitidos, _ = filtrar_chunks_permitidos(chunks)
+    sql = [c for c in permitidos if c.metadata.doc_type == "sql"
+           and c.metadata.extras.get("geracao_deterministica")]
+    if not sql or any(c.metadata.doc_type == "sql" and c not in sql for c in permitidos):
+        return False
+    for chunk in chunks:
+        extra = chunk.metadata.extras
+        if extra.get("operacao") == "buscar" or extra.get("calculo_disponivel") is False:
+            return False
+    numero_intencoes = max((c.metadata.extras.get("total_intencoes", 0) for c in chunks), default=0)
+    if numero_intencoes and len({c.metadata.extras.get("intencao") for c in sql}) != numero_intencoes:
+        return False
+    return (all(isinstance(c.metadata.extras.get("resultado_sql"), dict)
+                and "linhas" in c.metadata.extras["resultado_sql"] for c in sql)
+            and any(c.metadata.extras["resultado_sql"]["linhas"] for c in sql))
+
+
+def _resposta_sql_deterministica(
+    query: str, chunks: list[Chunk], bases: list[Natureza]
+) -> Optional[RAGResponse]:
+    """Preserva números calculados sem submeter uma conta pronta ao LLM."""
+    if not pode_responder_sql(chunks, bases):
+        return None
+    sql = [c for c in chunks if c.metadata.doc_type == "sql"
+           and c.metadata.extras.get("geracao_deterministica")]
+    partes, fontes = [], []
+    for chunk in sql:
+        resultado = chunk.metadata.extras.get("resultado_sql")
+        if not isinstance(resultado, dict) or "linhas" not in resultado:
+            return None
+        if chunk.metadata.extras.get("parte") == 1:
+            cabecalho = re.sub(r"^Consulta SQL na tabela [a-z_]+:", "Acervo consultado:", resultado["cabecalho"])
+            cabecalho = cabecalho.replace("tipo_registro=contrato_assinado", "somente contratos assinados")
+            cabecalho = cabecalho.replace("campo_valor=valor_contratado", "valor contratado")
+            cabecalho = cabecalho.replace("campo_valor=valor_estimado", "valor estimado")
+            cabecalho = cabecalho.replace("campo_valor=valor_homologado", "valor homologado")
+            partes.append(cabecalho)
+            if resultado.get("politica"):
+                partes.append(resultado["politica"])
+        linhas = resultado["linhas"]
+        if linhas:
+            numero = len(fontes) + 1
+            partes.append("\n".join(f"{linha} [{numero}]" for linha in linhas))
+            fontes.append(SourceRef(chunk_id=chunk.metadata.chunk_id, base_id=chunk.metadata.base_id,
+                                    source_file=chunk.metadata.source_file))
+    if not fontes:
+        return None
+    return RAGResponse(query=query, answer="\n\n".join(partes), bases_consultadas=bases,
+                       sources_used=fontes, confidence_level=ConfidenceLevel.ALTA,
+                       is_refusal=False, refusal_reason=None)
+
+
 def gerar_resposta(
     query: str,
     chunks: list[Chunk],
@@ -632,6 +695,24 @@ def gerar_resposta(
         _logar_evento(run_id, query_id, "sem_chunks", inicio, resposta, **sensibilidade)
         return resposta
 
+    resposta_sql = _resposta_sql_deterministica(query, chunks, bases_consultadas)
+    if resposta_sql is not None:
+        answer, mascaramentos_resposta = mascarar(resposta_sql.answer)
+        resposta_sql = resposta_sql.model_copy(update={"answer": answer})
+        fontes_sql = [source.chunk_id for source in resposta_sql.sources_used]
+        if auditoria_completa():
+            usados = [c for c in chunks if c.metadata.chunk_id in fontes_sql]
+            sensibilidade["auditoria_evidencias"] = auditar_geracao(chunks, usados, metodo="sql_deterministico")
+        _logar_evento(run_id, query_id, "ok", inicio, resposta_sql,
+                      metodo="sql_deterministico", llm_called=False,
+                      evidencias_usadas=fontes_sql, chunks_no_prompt=0,
+                      chunks_fora_do_orcamento=0, prompt_chunk_ids=[], prompt=[],
+                      **sensibilidade)
+        _logar_validacao(run_id, query_id, time.monotonic(), resposta_sql,
+                        erro_parsing=None, citacoes_descartadas=[], chaves_alias=[],
+                        mascaramentos_resposta=mascaramentos_resposta)
+        return resposta_sql
+
     chunks_prompt = _chunks_no_orcamento(chunks, bases_requeridas=bases_consultadas)
     sensibilidade["chunks_no_prompt"] = len(chunks_prompt)
     sensibilidade["chunks_fora_do_orcamento"] = len(chunks) - len(chunks_prompt)
@@ -645,13 +726,22 @@ def gerar_resposta(
         chunk.metadata.chunk_id for chunk in chunks if chunk.metadata.chunk_id not in selecionados_ids
     ]
     sensibilidade["chunks_excluidos_orcamento"] = sensibilidade["evidencias_fora_do_prompt"]
+    mensagens = _montar_prompt(query, chunks_prompt)
+    if auditoria_completa():
+        sensibilidade["auditoria_evidencias"] = auditar_geracao(
+            chunks, chunks_prompt, metodo="llm", mensagens=mensagens)
     chunks = chunks_prompt
-    mensagens = _montar_prompt(query, chunks)
     sensibilidade["prompt"] = _prompt_para_log(mensagens)
+    sensibilidade["prompt_truncated"] = any(
+        len(mascarar(str(message.get("content", "")))[0]) > _LIMITE_DE_TEXTO_NO_LOG
+        for message in mensagens
+    )
     cliente = cliente or _cliente_padrao(_schema_resposta([f"E{i}" for i in range(1, len(chunks) + 1)]))
 
+    sensibilidade["llm_called"] = True
+    sensibilidade["uso_tokens"] = {"status": "indisponivel", "fonte": "response.usage"}
     try:
-        bruto, tokens = _texto_e_tokens(cliente(mensagens))
+        bruto, tokens = _texto_e_tokens(cliente(mensagens), extra=sensibilidade)
     except Exception as exc:
         llm_info = dict(getattr(cliente, "diagnosticos", {}))
         sensibilidade["llm"] = llm_info

@@ -523,6 +523,22 @@ def _promover_identificadores_exatos(
     return ordenados[:limite]
 
 
+def _registrar_evidencias(
+    span: Any, resultados: Sequence[RetrievalResult], *,
+    antes_do_top_k: Sequence[RetrievalResult] | None = None,
+) -> None:
+    from src.log_evidence import auditoria_completa, auditar_candidatos
+    span.extra["evidencias"] = _evidencias(resultados)
+    span.extra["evidencias_fora_do_log"] = max(0, len(resultados) - 10)
+    if auditoria_completa():
+        audit = auditar_candidatos(antes_do_top_k if antes_do_top_k is not None else resultados)
+        if antes_do_top_k is not None:
+            selecionados = {item.chunk_id for item in resultados}
+            for item in audit["candidatos"]:
+                item["selecionado_apos_top_k"] = item["chunk_id"] in selecionados
+        span.extra["auditoria_evidencias"] = audit
+
+
 def _evidencias(resultados: Sequence[RetrievalResult], limite: int = 10) -> list[dict[str, Any]]:
     return [
         {
@@ -556,7 +572,8 @@ def _default_embed(query: str) -> list[float]:
     return _embed_fn_com_uso([])([query])[0]
 
 
-def _embed_fn_com_uso(uso: list[TokenUsage], estatisticas: dict[str, int] | None = None) -> EmbedFn:
+def _embed_fn_com_uso(uso: list[TokenUsage], estatisticas: dict[str, int] | None = None,
+                       observacoes: list[dict] | None = None) -> EmbedFn:
     """Embedding padrão (servidor da turma) que anota o ``usage`` de cada chamada.
 
     Usado por ``retrieve`` para preencher ``tokens`` do stage
@@ -582,7 +599,14 @@ def _embed_fn_com_uso(uso: list[TokenUsage], estatisticas: dict[str, int] | None
 
         aguardar_modelo()
         client = OpenAI(base_url=config.OLLAMA_URL, api_key=config.OLLAMA_API_KEY, timeout=60.0, max_retries=0)
-        response = client.embeddings.create(model=config.EMBEDDING_MODEL, input=encoded)
+        from src.model_observation import observar_chamada
+        diagnostics: dict = {}
+        try:
+            response = observar_chamada(lambda: client.embeddings.create(model=config.EMBEDDING_MODEL, input=encoded),
+                provider="ecoa", model=config.EMBEDDING_MODEL, sdk_max_retries=0, diagnosticos=diagnostics)
+        finally:
+            if observacoes is not None:
+                observacoes.extend(diagnostics.get("chamadas_modelo", []))
         uso.append(token_usage_from_response(response))
         vectors = [item.embedding for item in sorted(response.data, key=lambda item: getattr(item, "index", 0))]
         if len(vectors) != len(texts) or not all(
@@ -900,7 +924,7 @@ def retrieve(
     diretamente, continuam aplicando os filtros de forma estrita.
 
     Cada etapa registra seu stage (``retrieval_denso``, ``retrieval_bm25``,
-    ``fusao_rrf``, ``rerank``) em ``logs/pipeline-AAAA-MM-DD.jsonl``.
+    ``fusao_rrf``, ``rerank``) em ``logs/pipeline/pipeline-AAAA-MM-DD.jsonl``.
     """
     bases = None
     route_filters = filters
@@ -942,7 +966,12 @@ def retrieve(
 
     uso_embedding: list[TokenUsage] = []
     estatisticas_embedding = {"calls": 0, "cache_hits": 0}
-    embed_da_consulta = embed_fn or _embed_fn_com_uso(uso_embedding, estatisticas_embedding)
+    observacoes_embedding: list[dict] = []
+    embed_original = embed_fn or _embed_fn_com_uso(uso_embedding, estatisticas_embedding, observacoes_embedding)
+    def embed_da_consulta(texts):
+        if embed_fn is not None:
+            estatisticas_embedding["calls"] += 1
+        return embed_original(texts)
     recuperacao_degradada = False
     with _span(Stage.RETRIEVAL_DENSO) as span:
         try:
@@ -965,14 +994,24 @@ def retrieve(
                 raise
             dense = []
             recuperacao_degradada = True
+            span.status = "degradado"
             span.extra.update({"degraded": True, "fallback": "bm25", "error_type": type(error).__name__,
                                "status_code": getattr(error, "status_code", None)})
         span.set_result(_resumo(dense))
-        span.extra["evidencias"] = _evidencias(dense)
+        _registrar_evidencias(span, dense)
         span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(query, dense)
         span.extra.update({"query_embedding": estatisticas_embedding})
+        if observacoes_embedding:
+            from src.model_observation import resumir_uso
+            span.extra["chamadas_modelo"] = observacoes_embedding
+            span.extra["uso_tokens"] = resumir_uso(observacoes_embedding)[1]
+            span.modelo = observacoes_embedding[-1]["model"]
+        elif estatisticas_embedding["cache_hits"]:
+            span.extra["uso_tokens"] = {"status": "cache"}
+        elif embed_fn is not None and estatisticas_embedding["calls"]:
+            span.extra["uso_tokens"] = {"status": "indisponivel", "fonte": "funcao_injetada_sem_usage"}
         if uso_embedding:
-            span.modelo = config.EMBEDDING_MODEL
+            span.modelo = span.modelo or config.EMBEDDING_MODEL
             span.tokens = TokenUsage(
                 prompt=sum(u.prompt for u in uso_embedding),
                 completion=sum(u.completion for u in uso_embedding),
@@ -990,7 +1029,7 @@ def retrieve(
             escopos=escopos,
         )
         span.set_result(_resumo(sparse))
-        span.extra["evidencias"] = _evidencias(sparse)
+        _registrar_evidencias(span, sparse)
         span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(query, sparse)
 
     identificadores_exatos: list[RetrievalResult] = []
@@ -1026,20 +1065,28 @@ def retrieve(
                     **item.metadata.get("extras", {}), "filtros_relaxados": ignored,
                 }}
         span.set_result(_resumo(fused))
-        span.extra["evidencias"] = _evidencias(fused)
+        _registrar_evidencias(span, fused)
         span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(query, fused)
         span.extra["identificadores_exactos_adicionados"] = [
             item.chunk_id for item in identificadores_exatos
         ]
+    if reranker is None or not fused:
+        from src.obs import registrar_pulo
+        registrar_pulo(run_id=run_id, query_id=query_id, stage=Stage.RERANK, query=query,
+                       motivo="desabilitado" if reranker is None else "sem_candidatos")
     if reranker is not None and fused:
         try:
             with _span(Stage.RERANK, rerank_k=rerank_k) as span:
                 span.modelo = getattr(reranker, "modelo", None)
                 span.extra["candidatos"] = len(fused)
                 candidates = {item.chunk_id: item for item in fused}
+                span.extra["fallback_on_error"] = "fusao_rrf"
                 ranked = list(reranker(query, fused))
                 if getattr(reranker, "backend_usado", None):
                     span.extra["rerank_backend"] = reranker.backend_usado
+                    if "ecoa falhou" in reranker.backend_usado:
+                        span.status = "degradado"
+                        span.extra["fallback"] = "reranker_local"
                 if {item.chunk_id for item in ranked} - candidates.keys():
                     raise ValueError("Reranker devolveu evidência fora dos candidatos")
                 reranked = []
@@ -1053,9 +1100,10 @@ def retrieve(
                         seen.add(item.chunk_id)
                 if not reranked:
                     raise ValueError("Reranker vazio")
+                antes_do_top_k = reranked
                 reranked = _promover_identificadores_exatos(reranked, identificadores_exatos, top_k)
                 span.set_result(_resumo(reranked))
-                span.extra["evidencias"] = _evidencias(reranked)
+                _registrar_evidencias(span, reranked, antes_do_top_k=antes_do_top_k)
                 span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(
                     query, reranked
                 )

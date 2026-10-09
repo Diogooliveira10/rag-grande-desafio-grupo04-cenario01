@@ -23,9 +23,9 @@
   ],
   "dimension": 1024,
   "faiss_index": "vectors.faiss",
-  "total_chunks": 1554,
-  "chunks_ilegiveis_ignorados": 7,
+  "total_chunks": 1557,
+  "chunks_ilegiveis_ignorados": 0,
   "source_file": "data/normalized/v6/editais_normativo/documents.jsonl",
-  "source_sha256": "05ce97bb1e0d9f86472a4cf2ce74179b74d66f2fb645d8d7650aeb6aba121c6e",
-  "built_at": "2026-10-07T19:01:11+00:00"
+  "source_sha256": "0dad201cc9f0703d90a22106dd9f402f53f34532b0d501f9c201562d3d339c62",
+  "built_at": "2026-10-08T02:19:52+00:00"
 }

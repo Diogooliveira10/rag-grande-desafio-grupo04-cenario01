@@ -30,6 +30,8 @@ import re
 import sqlite3
 import unicodedata
 from contextlib import closing, contextmanager
+from contextvars import ContextVar
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -46,7 +48,8 @@ BASE_PCA = "pca_agregado"
 # Sobe quando muda o que vai para as tabelas: garantir_banco remonta a base
 # (SQLite ou Postgres) na próxima consulta. "4": pca_planos só com PCA.
 # "5": compras e contratos da base agregada entram em contratacoes.
-SCHEMA_VERSION = "5"
+# "6": contratos da agregada entram também pelo ano de assinatura.
+SCHEMA_VERSION = "6"
 
 # numeroControlePNCP = CNPJ-<tipo>-<sequencial>/<ano>; tipo 0 = PCA, 1 = compra,
 # 2 = contrato. A base agregada traz também compras e contratos ligados aos
@@ -119,6 +122,20 @@ _INDICES = (
 )
 
 
+_sql_observation: ContextVar[dict[str, Any] | None] = ContextVar("sql_observation", default=None)
+
+
+@contextmanager
+def observar_consultas() -> Iterator[dict[str, Any]]:
+    """Bounded SQL templates/parameters, including failed/relaxed attempts."""
+    observation = {"total": 0, "fora_do_log": 0, "consultas": []}
+    token = _sql_observation.set(observation)
+    try:
+        yield observation
+    finally:
+        _sql_observation.reset(token)
+
+
 @dataclass
 class _Sessao:
     conexao: Any = None
@@ -181,10 +198,30 @@ class Banco:
         Dentro de ``with banco.sessao():`` reaproveita a mesma conexão (no Neon,
         abrir conexão custa quase 1 s); fora, abre e fecha uma por consulta.
         """
-        if self._sessao.conexao is not None:
-            return self._executar(self._sessao.conexao, sql, parametros)
-        with closing(self.conectar()) as conexao:
-            return self._executar(conexao, sql, parametros)
+        observation = _sql_observation.get()
+        event = {"sql": self._sql(sql), "parametros": list(parametros), "status": "ok"}
+        started = time.perf_counter()
+        try:
+            if self._sessao.conexao is not None:
+                result = self._executar(self._sessao.conexao, sql, parametros)
+            else:
+                with closing(self.conectar()) as conexao:
+                    result = self._executar(conexao, sql, parametros)
+            event["linhas_retornadas"] = len(result)
+            return result
+        except Exception as error:
+            event.update({"status": "erro", "error_type": type(error).__name__})
+            raise
+        finally:
+            if observation is not None:
+                from src.obs import bounded_log_value
+                event["latencia_ms"] = max(0, round((time.perf_counter() - started) * 1000))
+                observation["total"] += 1
+                if len(observation["consultas"]) >= 20:
+                    # Keep first ten and latest ten, so the final query is visible.
+                    del observation["consultas"][10]
+                    observation["fora_do_log"] += 1
+                observation["consultas"].append(bounded_log_value(event))
 
     def _executar(self, conexao: Any, sql: str, parametros: Sequence[Any]) -> list[dict[str, Any]]:
         cursor = conexao.cursor()
@@ -333,17 +370,21 @@ def _compra_ou_contrato_da_base_agregada(
     """Compra (tipo 1) ou contrato (tipo 2) que a base agregada traz ligado a um
     PCA e que cabe no recorte da tabela ``contratacoes``.
 
-    Só entra no formato completo do PNCP (com ``orgaoEntidade``, o mesmo da
-    base de contratos), de órgão do RJ e publicado num dos anos que a base de
-    contratos já cobre: a tabela continua sendo uma amostra PNCP/RJ do mesmo
-    período, sem misturar registros de outro estado ou de anos anteriores.
+    Só entra no formato completo do PNCP, de órgão do RJ, no período que a
+    base estruturada cobre. Compras usam publicação; contratos podem também
+    usar assinatura. Não descarte um contrato assinado no período só porque
+    sua publicação ocorreu em outro ano. As datas originais são preservadas.
     """
     tipo = _TIPO_CONTROLE_PNCP.match(str(registro.get("numeroControlePNCP") or ""))
     if not tipo or tipo.group(1) not in {"1", "2"} or "orgaoEntidade" not in registro:
         return False
     uf = (registro.get("unidadeOrgao") or {}).get("ufSigla")
     publicacao = _data(registro.get("dataPublicacaoPncp"))
-    return uf == "RJ" and publicacao is not None and int(publicacao[:4]) in anos_publicacao
+    assinatura = _data(registro.get("dataAssinatura")) if tipo.group(1) == "2" else None
+    return uf == "RJ" and any(
+        data is not None and int(data[:4]) in anos_publicacao
+        for data in (publicacao, assinatura)
+    )
 
 
 def _linha_pca(chunk: Mapping[str, Any], registro: dict[str, Any]) -> dict[str, Any] | None:
@@ -410,7 +451,8 @@ def construir_banco(documents_file: Path = DOCUMENTS_FILE, banco: Optional[Banco
     # A base agregada traz compras e contratos ligados aos PCAs; os que a base
     # de contratos não tem completam a tabela (a versão da base de contratos
     # prevalece quando o registro está nas duas).
-    anos = {linha["ano_publicacao"] for linha in contratacoes.values() if linha["ano_publicacao"]}
+    anos = {linha[campo] for linha in contratacoes.values()
+            for campo in ("ano_publicacao", "ano_assinatura") if linha[campo]}
     da_agregada = 0
     for chunk, registro in _registros_json(documents_file, BASE_PCA):
         if not _compra_ou_contrato_da_base_agregada(registro, anos):

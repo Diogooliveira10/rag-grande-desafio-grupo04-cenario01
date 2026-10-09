@@ -19,6 +19,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from src.obs import Stage
+from src.offline_observation import observar_offline, observar_lote_embedding
+
 from config import (
     EMBEDDING_MODEL,
     CUSTOM_API_KEY,
@@ -250,6 +253,7 @@ def _materialize_record(
     return record
 
 
+@observar_offline(Stage.EMBEDDINGS)
 def create_embeddings(
     input_path: Path,
     output_path: Path,
@@ -376,7 +380,8 @@ def create_embeddings(
     generated_parts: list[Path] = []
     for start in range(0, len(pending_items), batch_size):
         batch = pending_items[start : start + batch_size]
-        vectors = embedder([text for _, (text, _) in batch])
+        with observar_lote_embedding(model=model, count=len(batch)):
+            vectors = embedder([text for _, (text, _) in batch])
         if len(vectors) != len(batch):
             raise RuntimeError("o endpoint retornou quantidade incorreta de embeddings")
         for (digest, (_, input_digest)), vector in zip(batch, vectors):

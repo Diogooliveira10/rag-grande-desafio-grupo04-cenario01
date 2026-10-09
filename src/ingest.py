@@ -16,11 +16,17 @@ import argparse
 import hashlib
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Any, Iterator
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+from src.obs import Stage
+from src.offline_observation import observar_offline
+
 DEFAULT_INPUT = PROJECT_ROOT / "data" / "raw" / "v1"
 DEFAULT_OUTPUT = PROJECT_ROOT / "data" / "normalized" / "documents.jsonl"
 
@@ -61,6 +67,7 @@ def chunk_text(text: str, max_chars: int = 1200, overlap: int = 150) -> Iterator
         yield current
 
 
+@observar_offline(Stage.INGESTAO)
 def ingest(
     input_dir: Path,
     output_file: Path,

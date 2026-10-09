@@ -13,7 +13,7 @@ Os tipos correspondentes do frontend ficam em `src/types/api.ts` no repositório
 |---|---|---|---|
 | GET | `/health` | — | `{ "status": "ok" }` |
 | POST | `/api/v1/query` | `{ "query": "...", "top_k": 5, "session_id": "s_...", "historico": [{ "pergunta": "...", "resposta": "..." }] }` | `QueryResponse` |
-| GET | `/api/v1/history` (chave) | `limit` (1–100), `session_id` | `HistoricoItem[]` |
+| GET | `/api/v1/history` (aberto temporariamente) | `limit` (1–100), `session_id` | `HistoricoItem[]` |
 | GET | `/api/v1/trace/{query_id}` (sessão ou chave) | — | `TraceResponse` |
 | GET | `/api/v1/sessions/{session_id}/trace` (sessão ou chave) | — | `SessaoTraceResponse` |
 | POST | `/api/v1/feedback` | `query_id`, `avaliacao`, `comentario` | `{ "status": "recebido" }` |
@@ -65,6 +65,28 @@ sintéticas. Totais incompletos são `null`, não zero.
 - CPF, telefone e e-mail pessoal são mascarados antes da interpretação por
   modelo e na resposta conversacional.
 
+## Respostas numéricas
+
+Operações analíticas suportadas (total, contagem, média, mediana, ranking,
+agrupamento e evolução) sem intenção normativa/conversacional são renderizadas
+diretamente dos resultados SQL, sem passar os números pelo LLM. O contrato
+`QueryResponse` não muda: as fontes continuam em `sources_used` e o texto cita
+`[n]`. Perguntas mistas e operações sem cálculo disponível mantêm o caminho
+normal de geração. Quando o SQL é suficiente, a busca vetorial/BM25/RRF e o
+reranker são pulados (`motivo=calculo_sql_suficiente`, `attempted=false`);
+`consultou_vetorial=false` não indica erro. Não é preciso mudar o frontend.
+
+“Contratos de 2025” usa o ano de assinatura; “contratos publicados em 2025”
+usa publicação. Totais incluem todos os valores registrados, inclusive zeros
+e centavos. Média, mediana e extremos informativos consideram valores >=
+R$ 1,00, com essa qualificação explícita. Ausência de registros não é total
+financeiro zero, e o corpus é uma amostra, não um censo do RJ.
+
+No trace, `geracao.detalhes.metodo="sql_deterministico"`, `llm_called=false`
+e `evidencias_usadas` identificam o caminho; `prompt=[]` é esperado, não falha
+na observabilidade. Validação CLI/navegador e números conferidos no bruto:
+[NUMERICAL_VALIDATION.md](NUMERICAL_VALIDATION.md).
+
 ## Contexto entre perguntas
 
 O backend não guarda memória entre as perguntas: quem dá contexto é o frontend,
@@ -90,7 +112,7 @@ reenviando as últimas trocas no campo opcional `historico` de
   ignoradas. Os guardrails (dados bancários, credenciais, juízo de legalidade)
   valem sobre a pergunta reescrita.
 - O trace mostra a etapa `reformulacao` (pergunta original, pergunta reescrita
-  e tokens) antes das demais, só nas perguntas em que o modelo foi chamado.
+  e tokens); quando não é necessária, registra `status=pulado` com o motivo.
 - `REFORMULACAO_MODE=regras` desliga a reescrita (o `historico` é ignorado).
 
 ## Rastreabilidade (sessão e trace)
@@ -105,27 +127,48 @@ reenviando as últimas trocas no campo opcional `historico` de
   `output`, `latencia_ms`, `tokens` e `detalhes`: trechos com score, SQL e
   linhas devolvidas, prompt e resposta do LLM). `resumo` diz se a pergunta
   consultou a base SQL (`consultou_sql`) e a vetorial (`consultou_vetorial`),
-  quantas evidências vieram de cada uma e quais fontes foram citadas.
+  quantas evidências vieram de cada uma e quais fontes foram citadas. Nos logs
+  novos, `consultou_*` significa tentativa; `sql_retornou_evidencia` e
+  `vetorial_retornou_evidencia` distinguem retorno de chunks. Uma tentativa SQL
+  com erro não aparece como SQL não consultado.
   Perguntas registradas antes de 05/10 vêm com `caminho: null`, sem
   `fontes_citadas` (só a contagem, em `num_fontes`) e com
   `evidencias_vetorial` às vezes como número total em vez de contagem por base.
+- Campos aditivos do trace: `status`, `completo`, `latencia_metodo` e
+  `latencia_pipeline_ms`. O tempo total vem do envelope API/pipeline monotônico,
+  sem somar etapas sobrepostas nem feedback posterior. Início sem fim é
+  `incompleto`/`completo=false`; logs antigos sem envelope têm `completo=null`
+  e `latencia_metodo=soma_etapas_legado` (estimativa).
+- `etapas[]` pode conter `requisicao_inicio`, `pipeline_inicio`,
+  `pipeline_fim`, `persistencia_historico` e `requisicao_fim`, além dos stages
+  anteriores. Renderize stages desconhecidos de forma genérica. `pulado`
+  significa não executado; `degradado` significa fallback tratado. Os detalhes
+  incluem `outcome`, origem, sequência, motivo e metadados permitidos. O evento
+  terminal da API confirma retorno preparado, não recebimento pelo navegador.
 - `GET /api/v1/sessions/{session_id}/trace`: a conversa inteira, com as
   perguntas em ordem (`perguntas[]` com `query_id`, `pergunta`, `resumo` e os
   nomes das etapas) e quantas delas usaram SQL e busca vetorial. O detalhe de
-  cada pergunta vem do trace por `query_id`.
+  cada pergunta vem do trace por `query_id`. Cada pergunta também inclui
+  `status`, `completo` e `latencia_metodo`. Para limites de texto, SQL/evidências,
+  privacidade e interpretação dos eventos, veja [OBSERVABILIDADE.md](OBSERVABILIDADE.md).
 - Os dois respondem `404` quando o id não está no log. Dados pessoais (CPF,
   telefone, e-mail) chegam mascarados, como no log.
 
-## Proteção do histórico e do trace
+## Histórico temporariamente aberto e proteção do trace
 
-Dois tipos de acesso:
+**Decisão temporária da demo:** `GET /api/v1/history` não exige chave, inclusive
+quando `RAG_API_KEY` está vazia. Qualquer cliente pode listar as consultas de
+todos os usuários. `session_id` é apenas um filtro, não autenticação. Não
+exponha dados sensíveis nem use essa abertura como política de produção.
+A máscara de dados pessoais não substitui controle de acesso.
+
+O trace mantém dois tipos de acesso:
 
 - **Dono da conversa** (o site público): envia o header `X-Session-Id` com o
   `session_id` que recebeu no `QueryResponse`. Vê o trace das perguntas da
-  própria conversa e o trace da sessão. Não vê conversas de outras pessoas nem
-  o histórico geral.
+  própria conversa e o trace da sessão. Não vê traces de outras pessoas.
 - **Quem opera a demo**: envia `X-API-Key` igual a `RAG_API_KEY` do `.env` do
-  servidor. Vê o histórico geral e o trace de qualquer conversa. A chave nunca
+  servidor. Vê o trace de qualquer conversa. A chave nunca
   vai no código do site: quem tiver o JavaScript teria a chave.
 
 Respostas:
@@ -133,7 +176,7 @@ Respostas:
 - Trace sem `X-Session-Id` da conversa e sem chave válida: `401`, mesmo quando
   o id não existe (não revela quais perguntas estão no log). Com acesso e id
   inexistente: `404`.
-- Histórico sem chave válida: `401`; servidor sem `RAG_API_KEY`: `403`.
+- Histórico: aberto sem `X-API-Key`; não retorna `401`/`403` por falta de chave.
 - `POST /api/v1/query` e `POST /api/v1/feedback` não pedem nada.
 - O CORS libera os headers `X-API-Key` e `X-Session-Id`.
 

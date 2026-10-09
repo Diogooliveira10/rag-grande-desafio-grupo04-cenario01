@@ -85,7 +85,7 @@ def _chunk_sql():
 def test_resumo_diz_que_a_pergunta_usou_so_a_base_vetorial(pipeline_com_indice):
     pipeline.responder("Quais contratos de ambulancias foram publicados?", cliente=lambda m: _resposta_sdk())
 
-    resumo = _registros()[-1]
+    resumo = next(r for r in _registros() if r["stage"] == "resumo_consulta")
     assert resumo["stage"] == "resumo_consulta"
     assert resumo["status"] == "ok"
     assert resumo["output"]["caminho"] == "consulta"
@@ -105,7 +105,7 @@ def test_resumo_diz_que_a_pergunta_usou_sql_e_vetorial(pipeline_com_indice, monk
         cliente=lambda m: _resposta_sdk(sources=("sql:contratacoes:listagem:abc:1",)),
     )
 
-    resumo = _registros()[-1]["output"]
+    resumo = next(r["output"] for r in _registros() if r["stage"] == "resumo_consulta")
     assert resumo["consultou_sql"] is True
     assert resumo["consultou_vetorial"] is True
     assert resumo["evidencias_sql"] == 1
@@ -115,7 +115,7 @@ def test_resumo_diz_que_a_pergunta_usou_sql_e_vetorial(pipeline_com_indice, monk
 def test_resumo_de_recusa_do_roteador_nao_consulta_nenhuma_base():
     pipeline.responder("Esse contrato de ambulâncias foi fraude?", cliente=lambda m: _resposta_sdk())
 
-    resumo = _registros()[-1]
+    resumo = next(r for r in _registros() if r["stage"] == "resumo_consulta")
     assert resumo["stage"] == "resumo_consulta"
     assert resumo["status"] == "recusa"
     assert resumo["output"]["caminho"] == "recusa_sem_consulta"
@@ -183,10 +183,11 @@ def test_trace_monta_o_caminho_da_pergunta_em_ordem(pipeline_com_indice):
     assert trace["query_id"] == "q_trace"
     assert trace["pergunta"] == "Quais contratos de ambulancias foram publicados?"
     assert [e["stage"] for e in trace["etapas"]] == [
-        "query_analysis", "roteamento", "retrieval_denso", "retrieval_bm25", "fusao_rrf",
-        "geracao", "validacao", "resumo_consulta",
+        "pipeline_inicio", "reformulacao", "interacao", "query_analysis", "roteamento",
+        "retrieval_denso", "retrieval_bm25", "fusao_rrf", "rerank", "consulta_sql",
+        "geracao", "validacao", "resumo_consulta", "pipeline_fim",
     ]
-    assert [e["ordem"] for e in trace["etapas"]] == list(range(1, 9))
+    assert [e["ordem"] for e in trace["etapas"]] == list(range(1, 15))
     bases = {e["stage"]: e["base"] for e in trace["etapas"]}
     assert bases["retrieval_denso"] == "vetorial" and bases["fusao_rrf"] == "vetorial"
     assert bases["geracao"] is None
@@ -270,7 +271,8 @@ def test_endpoint_trace_devolve_o_caminho(pipeline_com_indice):
     corpo = response.json()
     assert corpo["query_id"] == "q_api"
     assert corpo["resumo"]["consultou_vetorial"] is True
-    assert corpo["etapas"][-1]["stage"] == "resumo_consulta"
+    assert corpo["etapas"][-1]["stage"] == "pipeline_fim"
+    assert corpo["completo"] is True
 
 
 def test_endpoint_trace_de_query_id_desconhecido_e_404():
@@ -302,7 +304,7 @@ def test_responder_grava_session_id_em_todas_as_etapas(pipeline_com_indice):
                        cliente=lambda m: _resposta_sdk(), session_id="s_conversa")
 
     registros = _registros()
-    assert len(registros) == 8
+    assert len(registros) == 14
     assert {r["session_id"] for r in registros} == {"s_conversa"}
 
 
@@ -340,7 +342,7 @@ def test_trace_da_sessao_lista_as_perguntas_em_ordem(pipeline_com_indice, monkey
     assert [p["query_id"] for p in trace["perguntas"]] == ["q_1", "q_2"]
     assert [p["ordem"] for p in trace["perguntas"]] == [1, 2]
     assert trace["perguntas"][0]["pergunta"] == "Quais contratos de ambulancias foram publicados?"
-    assert trace["perguntas"][0]["etapas"][-1] == "resumo_consulta"
+    assert trace["perguntas"][0]["etapas"][-1] == "pipeline_fim"
     assert [p["resumo"]["consultou_sql"] for p in trace["perguntas"]] == [False, True]
     assert trace["consultou_sql"] == 1
     assert trace["consultou_vetorial"] == 2
