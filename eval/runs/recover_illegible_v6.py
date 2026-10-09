@@ -1,7 +1,8 @@
 """Recover v6 garbled PDF pages with the existing extraction and embedding CLIs.
 
 No collection, remote model calls, database rebuilds or uploads. Originals are
-preserved under logs/. A staged index is validated before replacing index/.
+preserved under data/backups/recovery/. Diagnostics go under logs/maintenance/.
+A staged index is validated before replacing index/.
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ from datetime import datetime
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 os.chdir(ROOT)
+import config
 from src.index import build_index, stored_embed_fn, file_sha256
 from src.qualidade_corpus import motivo_de_texto_ilegivel
 
@@ -42,9 +44,12 @@ def main():
                         help='Original normalized snapshot for before/after counts when retrying')
     args = parser.parse_args()
     stamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-    run = ROOT / 'logs' / ('recovery-v6-' + stamp)
-    run.mkdir()
-    state = {'started_at': stamp, 'run': run.relative_to(ROOT).as_posix()}
+    run = config.MAINTENANCE_LOGS_DIR / 'recovery' / stamp
+    backup = config.BACKUPS_DIR / 'recovery' / stamp
+    run.mkdir(parents=True)
+    backup.mkdir(parents=True)
+    state = {'started_at': stamp, 'run': run.relative_to(ROOT).as_posix(),
+             'backup': backup.relative_to(ROOT).as_posix()}
 
     def stage(name, **extra):
         state.update(stage=name, **extra)
@@ -67,16 +72,15 @@ def main():
         stage('backup')
         # Only active files can be changed by this recovery. Do not copy old
         # versions or archival snapshots on every retry.
-        normalized_backup = run / 'normalized-before'
+        normalized_backup = backup / 'normalized-before'
         normalized_backup.mkdir()
         shutil.copytree(ROOT / 'data/normalized/v6', normalized_backup / 'v6')
         shutil.copy2(ROOT / 'data/normalized/documents.jsonl', normalized_backup / 'documents.jsonl')
         if (ROOT / 'data/normalized/emails_sinteticos').exists():
             shutil.copytree(ROOT / 'data/normalized/emails_sinteticos', normalized_backup / 'emails_sinteticos')
-        shutil.copytree(ROOT / 'index', run / 'index-before')
-        shutil.copy2(ROOT / 'data/inventory/qualidade_v6.json', run / 'qualidade-before.json')
+        shutil.copy2(ROOT / 'data/inventory/qualidade_v6.json', backup / 'qualidade-before.json')
         for name in ('embedding-run.json', 'offline-audit.json'):
-            shutil.copy2(ROOT / 'eval/runs/v6-pipeline' / name, run / name)
+            shutil.copy2(ROOT / 'eval/runs/v6-pipeline' / name, backup / name)
         before = {base: rows(args.baseline_normalized / 'v6' / base / 'documents.jsonl') for base in BASES}
         original_root = rows(ROOT / 'data/normalized/documents.jsonl')
         old_index = json.loads((ROOT / 'index/manifest.json').read_text(encoding='utf-8'))
@@ -91,7 +95,7 @@ def main():
         manifest_bytes = manifest_bytes.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
         inventory = json.loads((ROOT / 'data/inventory/v6.json').read_text(encoding='utf-8'))
         assert 'sha256:' + hashlib.sha256(manifest_bytes).hexdigest() == inventory['manifest_hash']
-        manifest_path = run / 'corpus_manifest_v6.yaml'
+        manifest_path = backup / 'corpus_manifest_v6.yaml'
         manifest_path.write_bytes(manifest_bytes)
         state['collection_manifest_commit'] = manifest_commit
         state['collection_manifest_sha256'] = inventory['manifest_hash']
@@ -192,7 +196,9 @@ def main():
         assert manifest['chunks_ilegiveis_ignorados'] == 0
 
         stage('promote-index')
-        displaced = run / 'index-at-promotion'
+        # The existing index stays live until promotion. Move it once into
+        # the backup instead of retaining two byte-identical index copies.
+        displaced = backup / 'index-before'
         (ROOT / 'index').rename(displaced)
         try:
             staged.rename(ROOT / 'index')

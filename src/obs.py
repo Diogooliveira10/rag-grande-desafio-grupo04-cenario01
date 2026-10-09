@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import secrets
 import threading
 import time
@@ -11,7 +12,7 @@ import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field, is_dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from enum import Enum
 from functools import wraps
 from pathlib import Path
@@ -195,10 +196,41 @@ def _mascarar_textos(valor: Any) -> Any:
 class PipelineLogger:
     """Grava eventos estruturados e correlacionados do pipeline em JSONL."""
 
-    def __init__(self, logs_dir: str | Path = "logs") -> None:
-        """Configura o diretório e o controle de escrita concorrente."""
+    def __init__(self, logs_dir: str | Path = "logs", *, retention_days: int = 0) -> None:
+        """Configura o diretório; zero dias preserva todos os arquivos."""
+        if retention_days < 0:
+            raise ValueError("retention_days deve ser não negativo")
         self.logs_dir = Path(logs_dir)
+        self.retention_days = retention_days
         self._lock = threading.Lock()
+        self._last_cleanup: tuple[Path, date] | None = None
+
+    def expired_paths(self, now: datetime | None = None) -> list[Path]:
+        """Somente JSONL diários antigos; nunca diretórios, links ou backups."""
+        if not self.retention_days:
+            return []
+        current = now or datetime.now().astimezone()
+        cutoff = current.date() - timedelta(days=self.retention_days)
+        expired = []
+        for path in sorted(self.logs_dir.glob("pipeline-*.jsonl")):
+            match = re.fullmatch(r"pipeline-(\d{4}-\d{2}-\d{2})\.jsonl", path.name)
+            if not match or not path.is_file() or path.is_symlink():
+                continue
+            try:
+                day = date.fromisoformat(match[1])
+            except ValueError:
+                continue
+            if day < cutoff:
+                expired.append(path)
+        return expired
+
+    def _purge_expired(self, now: datetime) -> None:
+        for path in self.expired_paths(now):
+            try:
+                path.unlink()
+            except OSError:
+                # Retention failure must not turn a successful query into HTTP 500.
+                logging.getLogger(__name__).warning("Não foi possível expurgar %s", path)
 
     def log_path(self, now: datetime | None = None) -> Path:
         """Retorna o caminho diário ``pipeline-AAAA-MM-DD.jsonl``."""
@@ -224,6 +256,11 @@ class PipelineLogger:
         line = json.dumps(data, ensure_ascii=False, default=_json_default)
         try:
             with self._lock:
+                now = datetime.now().astimezone()
+                cleanup_key = (self.logs_dir, now.date())
+                if self._last_cleanup != cleanup_key:
+                    self._purge_expired(now)
+                    self._last_cleanup = cleanup_key
                 path.parent.mkdir(parents=True, exist_ok=True)
                 with path.open("a", encoding="utf-8") as stream:
                     stream.write(line + "\n")
@@ -487,4 +524,4 @@ def lifecycle(*, run_id: str, query_id: str, query: str, start: Stage, end: Stag
 
 # Caminho absoluto: o log vai para <repo>/logs independentemente do diretório
 # de onde o pipeline é executado.
-default_logger = PipelineLogger(config.PIPELINE_LOGS_DIR)
+default_logger = PipelineLogger(config.PIPELINE_LOGS_DIR, retention_days=config.LOG_RETENTION_DAYS)

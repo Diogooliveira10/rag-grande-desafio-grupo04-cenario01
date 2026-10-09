@@ -80,9 +80,15 @@ INDEX_DIR = ROOT_DIR / "index"
 DATABASE_URL = _env("DATABASE_URL", "")
 LOGS_DIR = ROOT_DIR / "logs"
 PIPELINE_LOGS_DIR = LOGS_DIR / "pipeline"
+MAINTENANCE_LOGS_DIR = LOGS_DIR / "maintenance"
+BACKUPS_DIR = ROOT_DIR / "data" / "backups"
+TEST_TEMP_DIR = ROOT_DIR / ".tmp" / "tests"
 # API HTTP (app/api.py): chave exigida no header X-API-Key pelos endpoints que
 # expõem perguntas de outros usuários (histórico e trace). Vazia = esses
 # endpoints ficam fechados. Nunca versionar o valor.
 RAG_API_KEY = _env("RAG_API_KEY", "")
 # Dias que o histórico (src/history_store.py) guarda cada consulta; 0 = sem expurgo.
 HISTORY_RETENTION_DAYS = int(_env("HISTORY_RETENTION_DAYS", "30"))
+# Daily pipeline files follow history retention by default; 0 keeps all files.
+LOG_RETENTION_DAYS = int(_env("LOG_RETENTION_DAYS", str(HISTORY_RETENTION_DAYS)))
+MAINTENANCE_RETENTION_DAYS = int(_env("MAINTENANCE_RETENTION_DAYS", "14"))

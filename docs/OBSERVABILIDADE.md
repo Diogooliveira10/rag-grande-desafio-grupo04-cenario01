@@ -2,6 +2,7 @@
 
 Os eventos de execução ficam em `logs/pipeline/pipeline-AAAA-MM-DD.jsonl`.
 O histórico de perguntas/respostas é separado: `data/app_state/historico.sqlite`.
+Diagnósticos de manutenção não são consultas: ficam em `logs/maintenance/`.
 
 ## Caminho de uma pergunta
 
@@ -149,6 +150,10 @@ validação anterior ao handler, CORS ou renderização no navegador. O evento
 A aplicação deve ser reiniciada para carregar o código atualizado. Não é
 necessário migrar SQLite, reindexar o corpus ou reescrever logs antigos.
 Os logs anteriores não ganham retroativamente prompt, resposta ou sessão.
+
+`LOG_RETENTION_DAYS` controla a retenção diária (padrão 30; `0` mantém tudo).
+Backups não participam do expurgo. Consulte `python -m src.log_maintenance cleanup`
+para um plano sem alteração e acrescente `--apply` somente para executá-lo.
 
 Falha de I/O ao gravar log produz diagnóstico no logger Python e não derruba a
 consulta. Se o armazenamento inteiro estiver indisponível, não há garantia de
