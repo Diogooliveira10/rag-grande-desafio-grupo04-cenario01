@@ -651,8 +651,12 @@ def _resposta_sql_deterministica(
                                     source_file=chunk.metadata.source_file))
     if not fontes:
         return None
+    # "Nenhum registro" é ausência na amostra de 809 registros, não no RJ: a
+    # conta está certa, mas não sustenta confiança alta (P2.1 do golden set).
+    sem_registros = all(chunk.metadata.extras.get("sem_registros") for chunk in sql)
     return RAGResponse(query=query, answer="\n\n".join(partes), bases_consultadas=bases,
-                       sources_used=fontes, confidence_level=ConfidenceLevel.ALTA,
+                       sources_used=fontes,
+                       confidence_level=ConfidenceLevel.MEDIA if sem_registros else ConfidenceLevel.ALTA,
                        is_refusal=False, refusal_reason=None)
 
 

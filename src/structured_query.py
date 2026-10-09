@@ -335,7 +335,7 @@ def _singular(token: str) -> str:
 
 
 # Radicais que nunca descrevem o objeto, em qualquer flexão ("comparando", "publicaram").
-_RADICAIS_GENERICOS = ("compar", "publica", "assina", "vigen", "contrat", "registr", "realiz", "celebr")
+_RADICAIS_GENERICOS = ("compar", "publica", "assina", "vigen", "contrat", "registr", "realiz", "celebr", "firma")
 
 
 def _termos_do_objeto(texto: str) -> tuple[str, ...]:
@@ -1142,7 +1142,10 @@ def _chunks(consulta: Consulta, sql: str, cabecalho: str, linhas: list[str], ban
                             "média, mediana, mínimo e máximo consideram valores >= R$ 1,00. "
                             "Campos ausentes não são zero. Esta amostra não é um censo do RJ."},
                         "geracao_deterministica": consulta.tipo in {"estatistica", "ranking", "agrupamento", "evolucao"}
-                        and not consulta.norma_citada},
+                        and not consulta.norma_citada,
+                        # Nada atendeu aos filtros: é ausência na amostra, não um número calculado.
+                        "sem_registros": not linhas or all(
+                            linha.startswith("Nenhum registro encontrado") for linha in linhas)},
             ),
         )
         for indice, parte in enumerate(partes, 1)
