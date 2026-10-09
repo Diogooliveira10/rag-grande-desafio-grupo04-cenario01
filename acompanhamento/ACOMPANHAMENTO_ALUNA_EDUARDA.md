@@ -98,3 +98,14 @@
 - Desenvolvi as telas "Ver caminho" e "Caminho da conversa", exibindo as bases consultadas, evidências, etapas do pipeline, tempo de execução e detalhes do trace.
 - Corrigi a segurança do frontend, removendo o uso de `X-API-Key` e o histórico geral do site público, além de adicionar tratamentos para erros de sessão, trace antigo e falhas de rede.
 - Melhorei o indicador de carregamento e validei a implementação com testes automatizados, build do frontend e chamadas reais aos endpoints de trace.
+
+## Encontro 12 - 2026-10-09
+
+### Relato individual - Eduarda
+
+- Finalizei a integração do frontend com o fluxo de conversas do backend, armazenando o `session_id` em `sessionStorage`, enviando o histórico recente para manter o contexto e recuperando automaticamente sessões inválidas.
+- Implementei a rastreabilidade das respostas e da conversa, com resumos das bases SQL e vetorial, evidências, fontes citadas, confiança, tempo de execução e linha do tempo das etapas do pipeline.
+- Adicionei detalhes de auditoria ao trace, incluindo scores, movimentação no rerank, consultas SQL, resultados, entradas, saídas e prompts recolhíveis.
+- Ajustei os estados de carregamento e erro para uma experiência mais clara e amigável, com tempo decorrido, previsão aproximada, nova tentativa e mensagens específicas para traces indisponíveis ou pertencentes a outra conversa.
+- Reforcei a segurança do site ao remover a chave administrativa e o histórico geral do frontend público, utilizando apenas `X-Session-Id` para acessar os traces da própria conversa.
+- Atualizei os tipos, serviços, documentação, testes automatizados e arquivos do GitHub Pages, validando o funcionamento integrado com a API real.
