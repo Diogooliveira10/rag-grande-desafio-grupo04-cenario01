@@ -974,7 +974,7 @@ _NAO_E_ORGAO = frozenset(
 _QUALIFICADORES_DE_ORGAO = frozenset(
     """
     municipal estadual federal nacional regional geral publica publico especial executiva
-    executivo militar civil legislativa metropolitana superior extraordinaria
+    executivo militar civil legislativa metropolitana superior extraordinaria central
     """.split()
 )
 # Dentro do nome só entram estas conectoras ("Secretaria de Ciência e
@@ -1398,7 +1398,22 @@ def _extrair_orgao(query_original: str) -> tuple[Optional[str], Optional[str]]:
         nome = _nome_a_partir_do_gatilho(tokens, indice, sem_caixa)
         if nome:
             return nome, None
-    return _sigla_de_orgao(tokens)
+    nome, sigla = _sigla_de_orgao(tokens)
+    if nome:
+        return nome, sigla
+    # Fallback: palavras de gatilho não formaram nome completo, mas o corpus
+    # pode ter o órgão. Ex.: "BANCO CENTRAL DO BRASIL" — "central" não era
+    # qualificador, então o nome parou em "banco". Tenta com os tokens a
+    # partir do gatilho.
+    for indice, bruto in enumerate(tokens):
+        gatilho = _normalize(bruto.strip(_PONTUACAO))
+        if gatilho not in _GATILHOS_ORGAO:
+            continue
+        palavras = [_normalize(t.strip(_PONTUACAO)) for t in tokens[indice:] if _normalize(t.strip(_PONTUACAO)) not in _NAO_SAO_NOME]
+        nome = _orgao_do_catalogo(palavras)
+        if nome:
+            return nome, None
+    return None, None
 
 
 # --------------------------------------------------------------------------
@@ -1465,7 +1480,7 @@ def _analisar_com_trechos(query: str) -> tuple[QueryFilters, str, list[Span]]:
     resto = _sem_trechos(texto, trechos)
     metrica = next((valor for padrao, valor in (
         (r"\bmediana\b", "mediana"), (r"\b(?:media|medio)\b", "media"),
-        (r"\b(?:soma|total)\b", "soma"), (r"\b(?:quantos|quantas|quantidade)\b", "contagem"),
+        (r"\b(?:soma|total)\b", "soma"), (r"\bvalor\b", "soma"), (r"\b(?:quantos|quantas|quantidade)\b", "contagem"),
         (r"\b(?:maior|maiores|maximo)\b", "maximo"), (r"\b(?:menor|menores|minimo)\b", "minimo"),
     ) if re.search(padrao, resto)), None)
     agrupamentos = [campo for termo, campo in (

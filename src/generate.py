@@ -259,7 +259,7 @@ def _representar_registro(conteudo: str) -> str:
         "dataVigenciaInicio", "dataVigenciaFim", "anoPca", "valorGlobal", "valorInicial",
         "valorTotalHomologado", "valorTotalEstimado", "valorUnitarioHomologado", "valorUnitarioEstimado",
         "valorTotal", "valor", "quantidade", "quantidadeHomologada", "unidadeMedida", "amparoLegal",
-        "orgaoEntidade", "unidadeOrgao", "categoriaProcesso", "tipoContrato", "modalidadeNome")
+        "orgaoEntidade", "unidadeOrgao", "municipio", "uf", "esfera", "categoriaProcesso", "tipoContrato", "modalidadeNome")
     view = {k: registro[k] for k in campos if k in registro and registro[k] is not None}
     if "categoriaProcesso" in registro or "objetoContrato" in registro or "objetoCompra" in registro:
         view["modalidade_licitacao"] = registro.get("modalidadeNome") or "não informada neste registro"
