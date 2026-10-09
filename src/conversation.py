@@ -69,6 +69,7 @@ def _interpret_interaction(query: str, *, run_id: str, query_id: str) -> Interac
         except Exception as error:
             # Falha/saída inválida não transforma uma consulta factual em conversa.
             span.extra.update(diagnostics)
+            span.status = "degradado"
             span.extra["fallback"] = "pipeline_rag"
             span.extra["error_type"] = type(error).__name__
             span.set_result({"tipo_interacao": "consulta", "fallback": True})

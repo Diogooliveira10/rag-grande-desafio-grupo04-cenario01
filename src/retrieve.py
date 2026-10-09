@@ -900,7 +900,7 @@ def retrieve(
     diretamente, continuam aplicando os filtros de forma estrita.
 
     Cada etapa registra seu stage (``retrieval_denso``, ``retrieval_bm25``,
-    ``fusao_rrf``, ``rerank``) em ``logs/pipeline-AAAA-MM-DD.jsonl``.
+    ``fusao_rrf``, ``rerank``) em ``logs/pipeline/pipeline-AAAA-MM-DD.jsonl``.
     """
     bases = None
     route_filters = filters
@@ -965,10 +965,12 @@ def retrieve(
                 raise
             dense = []
             recuperacao_degradada = True
+            span.status = "degradado"
             span.extra.update({"degraded": True, "fallback": "bm25", "error_type": type(error).__name__,
                                "status_code": getattr(error, "status_code", None)})
         span.set_result(_resumo(dense))
         span.extra["evidencias"] = _evidencias(dense)
+        span.extra["evidencias_fora_do_log"] = max(0, len(dense) - 10)
         span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(query, dense)
         span.extra.update({"query_embedding": estatisticas_embedding})
         if uso_embedding:
@@ -991,6 +993,7 @@ def retrieve(
         )
         span.set_result(_resumo(sparse))
         span.extra["evidencias"] = _evidencias(sparse)
+        span.extra["evidencias_fora_do_log"] = max(0, len(sparse) - 10)
         span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(query, sparse)
 
     identificadores_exatos: list[RetrievalResult] = []
@@ -1027,19 +1030,28 @@ def retrieve(
                 }}
         span.set_result(_resumo(fused))
         span.extra["evidencias"] = _evidencias(fused)
+        span.extra["evidencias_fora_do_log"] = max(0, len(fused) - 10)
         span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(query, fused)
         span.extra["identificadores_exactos_adicionados"] = [
             item.chunk_id for item in identificadores_exatos
         ]
+    if reranker is None or not fused:
+        from src.obs import registrar_pulo
+        registrar_pulo(run_id=run_id, query_id=query_id, stage=Stage.RERANK, query=query,
+                       motivo="desabilitado" if reranker is None else "sem_candidatos")
     if reranker is not None and fused:
         try:
             with _span(Stage.RERANK, rerank_k=rerank_k) as span:
                 span.modelo = getattr(reranker, "modelo", None)
                 span.extra["candidatos"] = len(fused)
                 candidates = {item.chunk_id: item for item in fused}
+                span.extra["fallback_on_error"] = "fusao_rrf"
                 ranked = list(reranker(query, fused))
                 if getattr(reranker, "backend_usado", None):
                     span.extra["rerank_backend"] = reranker.backend_usado
+                    if "ecoa falhou" in reranker.backend_usado:
+                        span.status = "degradado"
+                        span.extra["fallback"] = "reranker_local"
                 if {item.chunk_id for item in ranked} - candidates.keys():
                     raise ValueError("Reranker devolveu evidência fora dos candidatos")
                 reranked = []
@@ -1056,6 +1068,7 @@ def retrieve(
                 reranked = _promover_identificadores_exatos(reranked, identificadores_exatos, top_k)
                 span.set_result(_resumo(reranked))
                 span.extra["evidencias"] = _evidencias(reranked)
+                span.extra["evidencias_fora_do_log"] = max(0, len(reranked) - 10)
                 span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(
                     query, reranked
                 )

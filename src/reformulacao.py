@@ -228,12 +228,13 @@ def reformular_pergunta(
     Nunca levanta exceção por causa do modelo; o motivo vai para o log.
     """
     turnos = _turnos_do_prompt(historico or [])
-    if not turnos:
-        return Reformulacao(query, False, "sem_historico")
-    if REFORMULACAO_MODE != "llm":
-        return Reformulacao(query, False, "modo_desligado")
-    if not parece_continuacao(query):
-        return Reformulacao(query, False, "autossuficiente")
+    from src.obs import registrar_pulo
+    motivo = ("sem_historico" if not turnos else "modo_desligado" if REFORMULACAO_MODE != "llm"
+              else "autossuficiente" if not parece_continuacao(query) else None)
+    if motivo:
+        registrar_pulo(run_id=run_id, query_id=query_id, stage=Stage.REFORMULACAO,
+                       query=query, motivo=motivo)
+        return Reformulacao(query, False, motivo)
 
     diagnosticos: dict = {}
     with default_logger.span(
@@ -250,11 +251,13 @@ def reformular_pergunta(
             # Saída fora do formato: segue com a pergunta original.
             span.extra.update(diagnosticos)
             span.extra.update({"fallback": "pergunta_original", "error_type": type(erro).__name__})
+            span.status = "degradado"
             span.set_result({"pergunta": query, "reescrita": False, "motivo": "saida_invalida"})
             return Reformulacao(query, False, "saida_invalida")
         except Exception as erro:  # noqa: BLE001 - provedor fora do ar não derruba a consulta
             span.extra.update(diagnosticos)
             span.extra.update({"fallback": "pergunta_original", "error_type": type(erro).__name__})
+            span.status = "degradado"
             span.set_result({"pergunta": query, "reescrita": False, "motivo": "llm_falhou"})
             return Reformulacao(query, False, "llm_falhou")
 

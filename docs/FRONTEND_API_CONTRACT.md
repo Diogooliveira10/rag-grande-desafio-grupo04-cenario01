@@ -90,7 +90,7 @@ reenviando as últimas trocas no campo opcional `historico` de
   ignoradas. Os guardrails (dados bancários, credenciais, juízo de legalidade)
   valem sobre a pergunta reescrita.
 - O trace mostra a etapa `reformulacao` (pergunta original, pergunta reescrita
-  e tokens) antes das demais, só nas perguntas em que o modelo foi chamado.
+  e tokens); quando não é necessária, registra `status=pulado` com o motivo.
 - `REFORMULACAO_MODE=regras` desliga a reescrita (o `historico` é ignorado).
 
 ## Rastreabilidade (sessão e trace)
@@ -105,11 +105,27 @@ reenviando as últimas trocas no campo opcional `historico` de
   `output`, `latencia_ms`, `tokens` e `detalhes`: trechos com score, SQL e
   linhas devolvidas, prompt e resposta do LLM). `resumo` diz se a pergunta
   consultou a base SQL (`consultou_sql`) e a vetorial (`consultou_vetorial`),
-  quantas evidências vieram de cada uma e quais fontes foram citadas.
+  quantas evidências vieram de cada uma e quais fontes foram citadas. Nos logs
+  novos, `consultou_*` significa tentativa; `sql_retornou_evidencia` e
+  `vetorial_retornou_evidencia` distinguem retorno de chunks. Uma tentativa SQL
+  com erro não aparece como SQL não consultado.
+- Campos aditivos do trace: `status`, `completo`, `latencia_metodo` e
+  `latencia_pipeline_ms`. O tempo total vem do envelope API/pipeline monotônico,
+  sem somar etapas sobrepostas nem feedback posterior. Início sem fim é
+  `incompleto`/`completo=false`; logs antigos sem envelope têm `completo=null`
+  e `latencia_metodo=soma_etapas_legado` (estimativa).
+- `etapas[]` pode conter `requisicao_inicio`, `pipeline_inicio`,
+  `pipeline_fim`, `persistencia_historico` e `requisicao_fim`, além dos stages
+  anteriores. Renderize stages desconhecidos de forma genérica. `pulado`
+  significa não executado; `degradado` significa fallback tratado. Os detalhes
+  incluem `outcome`, origem, sequência, motivo e metadados permitidos. O evento
+  terminal da API confirma retorno preparado, não recebimento pelo navegador.
 - `GET /api/v1/sessions/{session_id}/trace`: a conversa inteira, com as
   perguntas em ordem (`perguntas[]` com `query_id`, `pergunta`, `resumo` e os
   nomes das etapas) e quantas delas usaram SQL e busca vetorial. O detalhe de
-  cada pergunta vem do trace por `query_id`.
+  cada pergunta vem do trace por `query_id`. Cada pergunta também inclui
+  `status`, `completo` e `latencia_metodo`. Para limites de texto, SQL/evidências,
+  privacidade e interpretação dos eventos, veja [OBSERVABILIDADE.md](OBSERVABILIDADE.md).
 - Os dois respondem `404` quando o id não está no log. Dados pessoais (CPF,
   telefone, e-mail) chegam mascarados, como no log.
 

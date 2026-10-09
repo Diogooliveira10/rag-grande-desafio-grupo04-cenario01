@@ -1133,6 +1133,9 @@ def consultar_estruturado(
     consulta = consulta_da_intencao(intencao) if intencao is not None else detectar_consulta(query, filtros, bases)
     documents_file = Path(documents_file or DOCUMENTS_FILE)
     if consulta is None or not documents_file.exists():
+        from src.obs import registrar_pulo
+        registrar_pulo(run_id=run_id, query_id=query_id, stage=Stage.CONSULTA_SQL, query=query,
+                       motivo="nao_aplicavel" if consulta is None else "corpus_ausente")
         return []
     banco = banco or structured_db.banco_padrao()
     try:
@@ -1144,8 +1147,10 @@ def consultar_estruturado(
             extra={"tabela": consulta.tabela, "tipo": consulta.tipo, "banco": banco.rotulo_publico()},
         ) as span:
             structured_db.garantir_banco(documents_file, banco, status=span.extra)
-            with banco.sessao():
-                sql, cabecalho, linhas = executar_consulta(consulta, banco)
+            with structured_db.observar_consultas() as consultas:
+                span.extra["execucao_sql"] = consultas
+                with banco.sessao():
+                    sql, cabecalho, linhas = executar_consulta(consulta, banco)
             chunks = _chunks(consulta, sql, cabecalho, linhas, banco)
             span.extra.update({
                 "sql": sql, "linhas": len(linhas), "chunks": len(chunks),

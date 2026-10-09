@@ -79,6 +79,7 @@ INDEX_DIR = ROOT_DIR / "index"
 # data/structured/; preenchido = Postgres (ex.: Neon). Nunca versionar o valor.
 DATABASE_URL = _env("DATABASE_URL", "")
 LOGS_DIR = ROOT_DIR / "logs"
+PIPELINE_LOGS_DIR = LOGS_DIR / "pipeline"
 # API HTTP (app/api.py): chave exigida no header X-API-Key pelos endpoints que
 # expõem perguntas de outros usuários (histórico e trace). Vazia = esses
 # endpoints ficam fechados. Nunca versionar o valor.

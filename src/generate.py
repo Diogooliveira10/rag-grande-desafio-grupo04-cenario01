@@ -502,6 +502,8 @@ def _logar_evento(
         output = f"recusa: {resposta.refusal_reason.value if resposta.refusal_reason else '-'}"
     else:
         output = f"resposta {resposta.confidence_level.value}; {len(resposta.sources_used)} fontes"
+    if status == "ok" and (extra.get("llm") or {}).get("fallback_used"):
+        status = "degradado"
     registrar(
         run_id=run_id,
         query_id=query_id,
@@ -517,6 +519,8 @@ def _logar_evento(
             "is_refusal": resposta.is_refusal,
             "bases_consultadas": [b.value for b in resposta.bases_consultadas],
             "num_sources": len(resposta.sources_used),
+            "answer_truncated": len(mascarar(resposta.answer or "")[0]) > _LIMITE_DE_TEXTO_NO_LOG,
+            "log_text_limit": _LIMITE_DE_TEXTO_NO_LOG,
             # A resposta como saiu da etapa, para acompanhar o dado até o usuário.
             "resposta": {
                 "answer": _texto_para_log(resposta.answer),
@@ -648,6 +652,10 @@ def gerar_resposta(
     chunks = chunks_prompt
     mensagens = _montar_prompt(query, chunks)
     sensibilidade["prompt"] = _prompt_para_log(mensagens)
+    sensibilidade["prompt_truncated"] = any(
+        len(mascarar(str(message.get("content", "")))[0]) > _LIMITE_DE_TEXTO_NO_LOG
+        for message in mensagens
+    )
     cliente = cliente or _cliente_padrao(_schema_resposta([f"E{i}" for i in range(1, len(chunks) + 1)]))
 
     try:

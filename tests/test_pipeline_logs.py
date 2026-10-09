@@ -272,8 +272,9 @@ def test_pipeline_amarra_todos_os_stages_pelo_mesmo_run_id(monkeypatch, indice):
     assert resposta["is_refusal"] is False
     registros = _registros()
     assert [r["stage"] for r in registros] == [
-        "query_analysis", "roteamento", "retrieval_denso", "retrieval_bm25", "fusao_rrf", "geracao", "validacao",
-        "resumo_consulta",
+        "pipeline_inicio", "reformulacao", "interacao", "query_analysis", "roteamento",
+        "retrieval_denso", "retrieval_bm25", "fusao_rrf", "rerank", "consulta_sql", "geracao", "validacao",
+        "resumo_consulta", "pipeline_fim",
     ]
     assert len({r["run_id"] for r in registros}) == 1
     assert len({r["query_id"] for r in registros}) == 1

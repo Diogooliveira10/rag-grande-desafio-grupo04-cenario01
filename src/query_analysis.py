@@ -124,6 +124,7 @@ def _analisar_llm(query: str, cliente: Any, span: Any) -> QueryAnalysisResult:
                     span.extra["llm"] = cached.get("llm", {})
                     span.modelo = cached.get("llm", {}).get("model", config.GENERATION_MODEL)
                     if cached.get("fallback"):
+                        span.status = "degradado"
                         span.extra["fallback"] = cached["fallback"]
                     return result.model_copy(update={"query_original": query})
             except (ValueError, KeyError):
@@ -1596,6 +1597,8 @@ def analisar_query(
                 return result
             except Exception as error:
                 # A mensagem de erro de validação repete o texto que o LLM devolveu.
+                span.status = "degradado"
+                span.extra["error_type"] = type(error).__name__
                 span.extra["fallback"] = _para_o_log(f"{type(error).__name__}: {error}")
                 if cliente is None and isinstance(error, (ValueError, KeyError)):
                     result = QueryAnalysisResult(query_original=query, filtros=_analisar(query))

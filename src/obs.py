@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import secrets
 import threading
 import time
@@ -15,6 +16,9 @@ from enum import Enum
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, ParamSpec, TypeVar
+
+import config
+from src.log_context import current_details, current_execution, current_origin, stage_outcome
 
 _model_call_lock = threading.Lock()
 _last_model_call = 0.0
@@ -34,6 +38,11 @@ def aguardar_modelo() -> None:
 class Stage(str, Enum):
     """Nomes permitidos para as etapas observáveis do pipeline."""
 
+    REQUISICAO_INICIO = "requisicao_inicio"
+    REQUISICAO_FIM = "requisicao_fim"
+    PIPELINE_INICIO = "pipeline_inicio"
+    PIPELINE_FIM = "pipeline_fim"
+    PERSISTENCIA_HISTORICO = "persistencia_historico"
     # Conversa/cortesia ou consulta ao acervo: decidida antes da query_analysis.
     INTERACAO = "interacao"
     # Pergunta de continuação reescrita com o histórico enviado pelo cliente.
@@ -165,13 +174,13 @@ class LogRecord:
     def to_dict(self) -> dict[str, Any]:
         """Converte o registro para um dicionário pronto para serialização.
 
-        Os textos de ``input``/``output``, inclusive dentro de dicionários e
+        Os textos de ``input``/``output``/``extra``, inclusive dentro de dicionários e
         listas, passam pelo mascaramento de ``src/sensitivity.py``: CPF,
         telefone e e-mail pessoal da pergunta não ficam gravados no log.
         """
         data = asdict(self)
         data["stage"] = self.stage.value
-        for campo in ("input", "output"):
+        for campo in ("input", "output", "extra"):
             data[campo] = _mascarar_textos(data[campo])
         return data
 
@@ -199,11 +208,30 @@ class PipelineLogger:
     def write(self, record: LogRecord) -> Path:
         """Acrescenta um registro ao JSONL e retorna seu caminho."""
         path = self.log_path(datetime.fromisoformat(record.ts))
-        line = json.dumps(record.to_dict(), ensure_ascii=False, default=_json_default)
-        with self._lock:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("a", encoding="utf-8") as stream:
-                stream.write(line + "\n")
+        data = record.to_dict()
+        context = current_execution()
+        data["extra"] = {**_mascarar_textos(current_details()), **data["extra"],
+                         "schema_version": 2, "origem": data["extra"].get("origem", current_origin())}
+        data["extra"].update({"outcome": stage_outcome(record.status, data["extra"]),
+                              "attempted": record.status != "pulado"})
+        if context and (record.run_id, record.query_id) == (context.run_id, context.query_id):
+            context.sequence += 1
+            data["extra"].update({"schema_version": 2, "origem": context.origin,
+                                  "sequencia": context.sequence})
+            context.events.append({"stage": data["stage"], "status": data["status"],
+                                   "extra": data["extra"], "latencia_ms": data["latencia_ms"],
+                                   "tokens": data["tokens"]})
+        line = json.dumps(data, ensure_ascii=False, default=_json_default)
+        try:
+            with self._lock:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with path.open("a", encoding="utf-8") as stream:
+                    stream.write(line + "\n")
+        except OSError:
+            # Logging is an aid, never a reason to fail an otherwise valid query.
+            if context:
+                context.logging_errors += 1
+            logging.getLogger(__name__).exception("Falha ao gravar evento de observabilidade")
         return path
 
     def span(
@@ -251,6 +279,7 @@ class LogSpan:
         self.modelo = modelo
         self.extra = extra
         self.output: Any = None
+        self.status = "ok"
         self.tokens = TokenUsage()
         self._started = 0.0
         self._timestamp = ""
@@ -275,11 +304,15 @@ class LogSpan:
     ) -> bool:
         """Persiste o evento e retorna ``False`` para preservar exceções."""
         latency = max(0, round((time.perf_counter() - self._started) * 1000))
-        status = "erro" if exc is not None else "ok"
+        status = "erro" if exc is not None else self.status
+        if status == "ok" and (self.extra.get("fallback_used")
+                               or (self.extra.get("llm") or {}).get("fallback_used")):
+            status = "degradado"
         output = self.output
         extra = dict(self.extra)
         if exc is not None:
-            output = f"{type(exc).__name__}: {exc}"
+            output = (f"{type(exc).__name__}: falha ao salvar histórico"
+                      if self.stage == Stage.PERSISTENCIA_HISTORICO else f"{type(exc).__name__}: {exc}")
             extra["error_type"] = type(exc).__name__
 
         self.logger.write(
@@ -384,6 +417,74 @@ def registrar(
     )
 
 
+def bounded_log_value(value: Any, limit: int = 8000) -> Any:
+    """Mask before truncating so a cut cannot expose half of a personal identifier."""
+    if isinstance(value, str):
+        value = _mascarar_textos(value)
+        return value if len(value) <= limit else value[:limit] + "…"
+    if isinstance(value, Mapping):
+        return {key: bounded_log_value(item, limit) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [bounded_log_value(item, limit) for item in value]
+    return value
+
+
+def registrar_pulo(*, run_id: str, query_id: str, stage: Stage, query: str, motivo: str) -> None:
+    """Explicit skipped stages only inside a complete pipeline/request context."""
+    if current_execution() is not None:
+        registrar(run_id=run_id, query_id=query_id, stage=stage, status="pulado",
+                  latencia_ms=0, input=query, output=None, extra={"motivo": motivo})
+
+
+@dataclass
+class Lifecycle:
+    output: Any = None
+    status: str = "ok"
+    extra: dict[str, Any] = field(default_factory=dict)
+
+
+@contextmanager
+def lifecycle(*, run_id: str, query_id: str, query: str, start: Stage, end: Stage,
+              extra: dict[str, Any] | None = None) -> Iterator[Lifecycle]:
+    """Monotonic wall time and a terminal event even when an exception escapes.
+
+    A process kill still leaves a start without a finish: an incomplete trace,
+    not a false success. No stack trace/error message is exposed to the client.
+    """
+    started = time.perf_counter()
+    timestamp = datetime.now().astimezone().isoformat(timespec="milliseconds")
+    state = Lifecycle()
+    from src.log_context import runtime_context
+    try:
+        snapshot = runtime_context()
+    except Exception as error:
+        snapshot = {"unavailable": True, "error_type": type(error).__name__}
+        logging.getLogger(__name__).warning("Metadados de observabilidade indisponíveis: %s",
+                                            type(error).__name__)
+    metadata = {"contexto_execucao": snapshot, **(extra or {})}
+    default_logger.write(LogRecord(ts=timestamp, run_id=run_id, query_id=query_id, stage=start,
+                                   status="iniciado", latencia_ms=0, input=query, output=None,
+                                   extra=metadata))
+    try:
+        yield state
+    except BaseException as error:
+        state.status = "erro"
+        state.extra.update({"error_type": type(error).__name__, "completed": False})
+        raise
+    finally:
+        context = current_execution()
+        state.extra.setdefault("completed", True)
+        if context:
+            state.extra.update({"etapas": context.stages(), "logging_errors": context.logging_errors,
+                                "tokens_reportados": context.reported_tokens()})
+        masked_output = _mascarar_textos(state.output)
+        bounded_output = bounded_log_value(masked_output)
+        state.extra.update({"log_text_limit": 8000, "output_truncated": bounded_output != masked_output})
+        registrar(run_id=run_id, query_id=query_id, stage=end, status=state.status,
+                  latencia_ms=(time.perf_counter() - started) * 1000, input=query,
+                  output=bounded_output, extra=state.extra)
+
+
 # Caminho absoluto: o log vai para <repo>/logs independentemente do diretório
 # de onde o pipeline é executado.
-default_logger = PipelineLogger(Path(__file__).resolve().parents[1] / "logs")
+default_logger = PipelineLogger(config.PIPELINE_LOGS_DIR)

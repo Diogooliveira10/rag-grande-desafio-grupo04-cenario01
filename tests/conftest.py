@@ -19,6 +19,14 @@ def _logs_em_diretorio_temporario(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _historico_da_api_isolado(tmp_path, monkeypatch):
+    """All API tests use disposable SQLite, including tests outside test_app_api."""
+    from app import api
+    from src.history_store import HistoricoStore
+    monkeypatch.setattr(api, "historico", HistoricoStore(db_path=tmp_path / "api-history.sqlite"))
+
+
+@pytest.fixture(autouse=True)
 def _chave_da_api_de_teste(monkeypatch):
     """Histórico e trace exigem X-API-Key; os testes usam esta chave, nunca a do .env."""
     monkeypatch.setattr(config, "RAG_API_KEY", "chave-de-teste")

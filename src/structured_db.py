@@ -30,6 +30,8 @@ import re
 import sqlite3
 import unicodedata
 from contextlib import closing, contextmanager
+from contextvars import ContextVar
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -119,6 +121,20 @@ _INDICES = (
 )
 
 
+_sql_observation: ContextVar[dict[str, Any] | None] = ContextVar("sql_observation", default=None)
+
+
+@contextmanager
+def observar_consultas() -> Iterator[dict[str, Any]]:
+    """Bounded SQL templates/parameters, including failed/relaxed attempts."""
+    observation = {"total": 0, "fora_do_log": 0, "consultas": []}
+    token = _sql_observation.set(observation)
+    try:
+        yield observation
+    finally:
+        _sql_observation.reset(token)
+
+
 @dataclass
 class _Sessao:
     conexao: Any = None
@@ -181,10 +197,30 @@ class Banco:
         Dentro de ``with banco.sessao():`` reaproveita a mesma conexão (no Neon,
         abrir conexão custa quase 1 s); fora, abre e fecha uma por consulta.
         """
-        if self._sessao.conexao is not None:
-            return self._executar(self._sessao.conexao, sql, parametros)
-        with closing(self.conectar()) as conexao:
-            return self._executar(conexao, sql, parametros)
+        observation = _sql_observation.get()
+        event = {"sql": self._sql(sql), "parametros": list(parametros), "status": "ok"}
+        started = time.perf_counter()
+        try:
+            if self._sessao.conexao is not None:
+                result = self._executar(self._sessao.conexao, sql, parametros)
+            else:
+                with closing(self.conectar()) as conexao:
+                    result = self._executar(conexao, sql, parametros)
+            event["linhas_retornadas"] = len(result)
+            return result
+        except Exception as error:
+            event.update({"status": "erro", "error_type": type(error).__name__})
+            raise
+        finally:
+            if observation is not None:
+                from src.obs import bounded_log_value
+                event["latencia_ms"] = max(0, round((time.perf_counter() - started) * 1000))
+                observation["total"] += 1
+                if len(observation["consultas"]) >= 20:
+                    # Keep first ten and latest ten, so the final query is visible.
+                    del observation["consultas"][10]
+                    observation["fora_do_log"] += 1
+                observation["consultas"].append(bounded_log_value(event))
 
     def _executar(self, conexao: Any, sql: str, parametros: Sequence[Any]) -> list[dict[str, Any]]:
         cursor = conexao.cursor()
