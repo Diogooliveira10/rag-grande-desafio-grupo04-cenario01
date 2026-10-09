@@ -1092,3 +1092,14 @@ def test_soma_pelo_cnpj_do_orgao(base_cnpj):
     _, _, linhas = sq.executar_consulta(consulta, base_cnpj["banco"])
 
     assert "2 registros" in linhas[0] and "R$ 4.000,00" in linhas[0]
+
+
+@pytest.mark.parametrize("verbo", ["foram firmados", "firmou", "firmaram"])
+def test_firmar_nao_vira_termo_do_objeto(verbo):
+    assert sq._termos_do_objeto(f"quantos contratos de ambulancia {verbo}") == ("ambulancia",)
+
+
+def test_resultado_sql_vazio_e_marcado_sem_registros(base):
+    chunks = _consultar("Quantos contratos de helicóptero existem?", base, metrica="contagem")
+
+    assert chunks and all(chunk.metadata.extras["sem_registros"] for chunk in chunks)

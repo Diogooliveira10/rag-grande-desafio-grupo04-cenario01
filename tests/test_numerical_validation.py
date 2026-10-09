@@ -105,3 +105,20 @@ def test_symbolic_only_is_zero_total_not_missing_statistics():
     assert "total R$ 0,00" in text
     assert "média, mediana, mínimo e máximo não informados" in text
     assert "total não informado" in structured_query._estatisticas([])
+
+
+def test_sql_sem_registros_responde_com_confianca_media():
+    # P2.1: "nenhum registro" é ausência na amostra, não um número calculado.
+    vazio = sql_chunk(1, ["Nenhum registro encontrado com os filtros aplicados e os termos de objeto: ambulancia."])
+    vazio.metadata.extras["sem_registros"] = True
+    response = generate.gerar_resposta("Quantos contratos de ambulância em 2024?", [vazio],
+        [Natureza.ESTRUTURADA], cliente=lambda _: pytest.fail("cálculo pronto não chama o LLM"))
+    assert response.confidence_level.value == "media"
+    assert "Nenhum registro encontrado" in response.answer
+
+
+def test_sql_com_registros_continua_com_confianca_alta():
+    response = generate.gerar_resposta("Quantos contratos de ambulância em 2025?",
+        [sql_chunk(1, ["Geral: 13 registros; total R$ 8.266.940,37"])],
+        [Natureza.ESTRUTURADA], cliente=lambda _: pytest.fail("cálculo pronto não chama o LLM"))
+    assert response.confidence_level.value == "alta"
