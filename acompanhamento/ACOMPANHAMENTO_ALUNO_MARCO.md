@@ -167,4 +167,6 @@ Atualizei a main, criei a branch marco/proveniencia-base-sintetica e corrigi o r
 
 A data de entrega (05/10/2026) vem do registro do João no acompanhamento dele, e as condições de uso foram combinadas com o tutor e passadas pelo grupo: a base é usada na apresentação, pode ficar no repositório, não tem licença nem restrição e não precisa citar autoria. Registrei isso no campo licenca do corpus_manifest.yaml e no docs/emails_sinteticos.md. Rodei a suíte (pytest -m "not llm") e passaram 1261 testes. O commit principal é o 1a05b92, com push da branch para revisão do grupo no PR.
 
-Uso de IA: usei o Claude pra localizar as ocorrências de "fornecida pelo grupo" no repositório e aplicar as edições nos arquivos. Conferi o git diff --stat, rodei a suíte, fiz o commit e o push.
+Situação dos meus itens da lista de correções: o item 9 (erro de provedor aparecendo como "sem evidência") está concluído e mergeado na main; o item 11 (contexto entre perguntas) está concluído e mergeado, com o commit ea66a22; o item 13 (proveniência da base sintética) está concluído, com o commit 1a05b92 na branch marco/proveniencia-base-sintetica, aguardando revisão no PR.
+
+Uso de IA: usei o Claude pra localizar as ocorrências de "fornecida pelo grupo" no repositório e aplicar as edições nos arquivos. Fiz o commit e o push.
