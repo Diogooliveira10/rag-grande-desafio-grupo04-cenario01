@@ -289,7 +289,7 @@ def reformular_pergunta(
         pergunta = _com_contexto(query, turnos)
         with default_logger.span(
             run_id=run_id, query_id=query_id, stage=Stage.REFORMULACAO, input=query,
-            extra={"turnos_no_prompt": len(turnos)},
+            extra={"turnos_no_prompt": len(turnos), "metodo": "regras", "llm_called": False},
         ) as span:
             span.set_result({"pergunta": mascarar(pergunta)[0], "reescrita": True, "motivo": "troca_de_ano"})
         return Reformulacao(pergunta, True, "troca_de_ano")
