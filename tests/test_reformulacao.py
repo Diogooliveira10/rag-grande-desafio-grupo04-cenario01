@@ -162,6 +162,24 @@ def test_saida_fora_do_formato_anexa_a_pergunta_anterior(saida):
     assert resultado == Reformulacao(P43_COM_CONTEXTO, True, "saida_invalida")
 
 
+def test_falha_volta_ate_a_ultima_pergunta_que_se_sustenta_sozinha():
+    historico = [
+        TurnoAnterior(pergunta="Quais contratos de software foram assinados em 2025?"),
+        TurnoAnterior(pergunta="Quantos contratos de ambulância foram firmados em 2024?"),
+        TurnoAnterior(pergunta="E qual foi o valor total deles?"),
+    ]
+
+    def cliente(mensagens):
+        raise ConnectionError("provedor fora do ar")
+
+    resultado = reformular_pergunta("E desses, qual o maior?", historico, cliente=cliente)
+
+    assert resultado.pergunta == (
+        "E desses, qual o maior? (continuação da pergunta anterior: Quantos contratos de "
+        "ambulância foram firmados em 2024? / E qual foi o valor total deles?)"
+    )
+
+
 def test_falha_com_ano_na_pergunta_tira_o_ano_da_anterior():
     def cliente(mensagens):
         raise ConnectionError("provedor fora do ar")
