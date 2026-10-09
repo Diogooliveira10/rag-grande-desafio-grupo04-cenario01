@@ -155,4 +155,16 @@ O que falta do item 11 é no frontend: a Eduarda precisa enviar o historico e ex
 
 Item 13 (em andamento): comecei hoje, mas ainda não terminei. O escopo é corrigir a proveniência em quatro pontos: o campo fonte e o campo licenca do corpus_manifest.yaml (linhas 315 e 323), a linha do CORPUS_INVENTORY.md que diz "conversacional_sintetica.zip fornecido pelo grupo" (linha 33) e o docs/emails_sinteticos.md, que diz só "arquivo fornecido", sem autor. Em todos eles o registro deve passar a dizer que a base foi gerada pelo tutor e integrada ao projeto pelo João, com a data de entrega e as condições de uso combinadas com o tutor.
 
-Uso de IA: usei o Claude pra implementar os testes a partir da decisão que tomei (reescrever a pergunta, com o cliente mandando o histórico), e pra ler o item 13 e levantar quais arquivos precisam mudar. fiz o commit e o push; 
+Uso de IA: usei o Claude pra implementar os testes a partir da decisão que tomei (reescrever a pergunta, com o cliente mandando o histórico), e pra ler o item 13 e levantar quais arquivos precisam mudar. fiz o commit e o push;
+
+## Encontro 12 — 09/10/2026
+
+Contexto: terminei o item 13 da lista de correções (documento Correcoes_Grupo04_2026-10-05), proveniência da base sintética, que tinha começado no encontro anterior. O repositório dizia que a base sintética conversacional foi "fornecida pelo grupo", mas ela foi gerada pelo tutor e integrada ao projeto pelo João (commits d31925f e 146ceea).
+
+O que fiz:
+
+Atualizei a main, criei a branch marco/proveniencia-base-sintetica e corrigi o registro de autoria em seis arquivos: o campo fonte e o campo licenca da base emails_sinteticos no corpus_manifest.yaml, a linha de Fonte do CORPUS_INVENTORY.md, o docs/emails_sinteticos.md (ganhou um item de Autoria com a data e os dois commits, e "arquivo fornecido" virou "arquivo recebido do tutor"), o docstring de src/synthetic_conversations.py, que também dizia "fornecidas pelo grupo", e, depois do retorno do grupo, a tabela de bases do README.md e uma frase do ARQUITETURA.md, que tinham o mesmo erro.
+
+A data de entrega (05/10/2026) vem do registro do João no acompanhamento dele, e as condições de uso foram combinadas com o tutor e passadas pelo grupo: a base é usada na apresentação, pode ficar no repositório, não tem licença nem restrição e não precisa citar autoria. Registrei isso no campo licenca do corpus_manifest.yaml e no docs/emails_sinteticos.md. Rodei a suíte (pytest -m "not llm") e passaram 1261 testes. O commit principal é o 1a05b92, com push da branch para revisão do grupo no PR.
+
+Uso de IA: usei o Claude pra localizar as ocorrências de "fornecida pelo grupo" no repositório e aplicar as edições nos arquivos. Conferi o git diff --stat, rodei a suíte, fiz o commit e o push.
