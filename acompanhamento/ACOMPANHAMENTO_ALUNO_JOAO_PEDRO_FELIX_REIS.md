@@ -439,3 +439,71 @@ Na conferência local, `HEAD` e `origin/joao-reis` estavam alinhados em `146ceea
 
 Utilizei assistentes de IA como apoio à análise do histórico e do código, à consolidação das correções, à elaboração de testes e documentação, à revisão da integração e à preparação de explicações sobre as estratégias e os arquivos do projeto. As verificações foram feitas com comandos Git, testes offline, leitura dos artefatos, conferência de hashes e comparação com os contratos existentes. Solicitei a separação entre autoria individual e trabalho compartilhado e entre resultados históricos, alterações publicadas e pendências locais, sem registrar como concluída uma avaliação factual que não foi executada nesta atualização.
 
+
+## Atualização — 09/10/2026
+
+### Atividades realizadas
+
+Nesta sessão, trabalhei na correção de bugs do pipeline SQL, na preparação do repositório para novos clones e na integração do frontend com o backend.
+
+**Backend (branch `joao-reis`):**
+
+Corrigi o pipeline SQL que estava filtrando incorretamente termos de objeto. Palavras como "somando", "celebrado", "principais" e termos de reformulação ("continuação", "pergunta", "anterior") estavam sendo tratadas como descritores de objeto contratado, gerando filtros vazios ou incorretos. Adicionei essas formas às stop words e ajustei o stemmer para capturar gerúndios.
+
+Implementei a extração de órgão por catálogo do corpus. O sistema agora reconhece "BANCO CENTRAL DO BRASIL" como órgão, mesmo quando "central" não está na lista de qualificadores. Adicionei um fallback que consulta o catálogo de órgãos do banco quando a heurística de tokens não forma o nome completo.
+
+Ajustei a detecção de métrica para reconhecer "valor" como trigger de soma. Perguntas como "Qual o valor de todos os contratos de 2025?" agora são roteadas corretamente para o SQL determinístico, em vez de irem para a busca vetorial onde o LLM somava apenas os3 contratos recuperados.
+
+Incluí o `numero_controle_pncp` na listagem SQL para que o LLM possa identificar contratos específicos. O output agora mostra o PNCP control number junto com valor, data e órgão.
+
+Abri temporariamente o endpoint de histórico (`GET /api/v1/history`) mantendo os traces protegidos por `X-API-Key` ou `X-Session-Id`. O histórico agora é acessível sem autenticação para facilitar a demonstração.
+
+Integrei o merge de `origin/main` preservando as correções de reformulação de continuação e o novo comportamento de contexto anexado quando o modelo falha.
+
+**Frontend (fork `sevenRevy/frontendRAG`, branch `main`):**
+
+Preparei o repositório para novos clones com documentação completa de instalação e scripts de diagnóstico. Adicionei `npm run check:backend` e `npm run check:query` para verificar a API, o corpus e o banco estruturado antes de abrir a interface.
+
+Implementei o envio de `session_id` e `histórico` nas consultas de continuação. O frontend agora mantém o ID de sessão entre perguntas e envia as trocas anteriores para que o backend possa reformular continuções como "E em 2024?".
+
+Corrigi o botão "Consultar no NEXO" da página de Contratações para usar o PNCP control number em vez do `numero_contrato`. O `numeroContratoEmpenho` não está no banco de dados, então a consulta falhava. Agora gera queries como "Quais são os detalhes do contrato PNCP 00038166000105-2-000007/2025?" que encontram o contrato corretamente.
+
+### Resultado da sessão
+
+O pipeline SQL agora responde corretamente:
+- "Qual o valor de todos os contratos de 2025?" → R$2.546.786.958,21 (SQL completo, antes: R$673M de3 contratos)
+- "Quais contratos do BANCO CENTRAL DO BRASIL?" →5 contratos listados com PNCP number
+- "Quais são as principais contratações de BANCO CENTRAL DO BRASIL?" →3 fontes, confiança média (antes: 0 fontes, confiança baixa)
+- "E em 2024?" → Reformulada corretamente com contexto da pergunta anterior
+
+O frontend agora envia histórico nas continuações e os atalhos da página inicial funcionam corretamente. Os scripts de diagnóstico validam a API antes de abrir a interface.
+
+Foram executados590 testes do backend e36 testes do frontend, todos passando.
+
+### Commits realizados
+
+Backend (`origin/joao-reis`):
+- `32b1045` — `fix(api): abrir historico temporariamente mantendo traces protegidos`
+- `423f182` — `feat(observabilidade): alinhar logs offline e cobertura de uso dos modelos`
+- `b36ae90` — `merge: integrar main preservando contexto, logs e historico aberto`
+- `77f3e4a` — `fix(sql): filtrar gerundios, extrair orgao por catalogo e detectar valor como soma`
+- `505fac0` — `fix(sql): filtrar termos de reformulacao do contexto`
+- `6c8e5f3` — `fix(sql): incluir numero_controle_pncp na listagem para identificar contratos`
+- `527d7e9` — `fix(sql): filtrar principal/principais dos termos de objeto`
+
+Frontend (`sevenRevy/frontendRAG`, `main`):
+- `21ab3a9` — `feat(setup): adicionar diagnostico do backend e pergunta real`
+- `dde41be` — `docs(setup): preparar execucao apos clone da fork com backend joao-reis`
+- `8d315a9` — `feat(chat): enviar historico e session_id nas continuacoes`
+- `91c0fbb` — `fix(contratacoes): usar PNCP number na consulta para encontrar contrato`
+
+### Pendências
+
+- Instalar `sentence_transformers` no ambiente do servidor para habilitar o rerank por cross-encoder (atualmente usa fallback RRF).
+- Avaliar se o endpoint de histórico deve permanecer aberto ou voltar a exigir autenticação após a demonstração.
+- Testar o fluxo completo com o frontend conectado ao backend, incluindo feedback e histórico persistido.
+- Revisar se o SQL de listagem deveria incluir também o `numero_contrato` (numeroContratoEmpenho) quando disponível no payload do PNCP.
+
+### Uso de IA
+
+Utilizei assistentes de IA para análise de logs de pipeline, diagnóstico de queries SQL com resultado incorreto, implementação de correções em stop words e stemmer, criação de scripts de diagnóstico do frontend, e elaboração de documentação de instalação. As correções foram validadas com testes automatizados e consultas reais ao endpoint da API.
