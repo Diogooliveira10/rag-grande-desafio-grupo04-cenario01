@@ -1,4 +1,4 @@
-"""Validação e representação das conversas sintéticas fornecidas pelo grupo.
+"""Validação e representação das conversas sintéticas geradas pelo tutor.
 
 A classificação vem do documento, nunca do LLM nem do padrão da base.
 Dados bancários e credenciais são restritos mesmo se rotulados como públicos.

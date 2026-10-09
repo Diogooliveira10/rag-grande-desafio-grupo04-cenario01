@@ -7,7 +7,10 @@ O snapshot PNCP v6 permanece intacto; este suplemento não é uma versão v7.
 
 ## Proveniência e formato canônico
 
-- Arquivo fornecido: `conversacional_sintetica.zip` (72.765 bytes).
+- Autoria: base gerada pelo tutor e integrada ao projeto por João em 2026-10-05
+  (commits `d31925f` e `146ceea`). Os 25 JSONs não têm campo de autoria; a
+  proveniência está registrada aqui, no manifesto e no inventário.
+- Arquivo recebido do tutor: `conversacional_sintetica.zip` (72.765 bytes).
 - SHA-256: `8dac3c770922363d677e7e19c8d6660df4dbb003dadc88af8fc314a872744625`.
 - 51 arquivos no ZIP: 25 JSON individuais, 25 TXT equivalentes, 1 JSONL consolidado.
 - Os registros do consolidado foram comparados aos JSONs individuais: são iguais.
@@ -15,8 +18,9 @@ O snapshot PNCP v6 permanece intacto; este suplemento não é uma versão v7.
   Somente os 25 JSONs individuais foram importados, totalizando 52.963 bytes.
 - 25 `conversation_id` únicos, 45 mensagens. Canais: 13 e-mails, 9 chamados
   de ouvidoria, 2 pareceres técnicos e 1 transcrição de sessão.
-- Licença do arquivo não informada; o manifesto não atribui licença de dados
-  abertos do PNCP ao material sintético.
+- Licença do arquivo não informada, e as condições de uso ainda precisam ser
+  confirmadas com o tutor; o manifesto não atribui licença de dados abertos do
+  PNCP ao material sintético.
 
 ## Preparação e segurança
 
