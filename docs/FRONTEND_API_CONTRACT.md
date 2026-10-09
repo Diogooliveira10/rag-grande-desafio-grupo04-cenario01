@@ -65,6 +65,26 @@ sintéticas. Totais incompletos são `null`, não zero.
 - CPF, telefone e e-mail pessoal são mascarados antes da interpretação por
   modelo e na resposta conversacional.
 
+## Respostas numéricas
+
+Operações analíticas suportadas (total, contagem, média, mediana, ranking,
+agrupamento e evolução) sem intenção normativa/conversacional são renderizadas
+diretamente dos resultados SQL, sem passar os números pelo LLM. O contrato
+`QueryResponse` não muda: as fontes continuam em `sources_used` e o texto cita
+`[n]`. Perguntas mistas e operações sem cálculo disponível mantêm o caminho
+normal de geração.
+
+“Contratos de 2025” usa o ano de assinatura; “contratos publicados em 2025”
+usa publicação. Totais incluem todos os valores registrados, inclusive zeros
+e centavos. Média, mediana e extremos informativos consideram valores >=
+R$ 1,00, com essa qualificação explícita. Ausência de registros não é total
+financeiro zero, e o corpus é uma amostra, não um censo do RJ.
+
+No trace, `geracao.detalhes.metodo="sql_deterministico"`, `llm_called=false`
+e `evidencias_usadas` identificam o caminho; `prompt=[]` é esperado, não falha
+na observabilidade. Validação CLI/navegador e números conferidos no bruto:
+[NUMERICAL_VALIDATION.md](NUMERICAL_VALIDATION.md).
+
 ## Contexto entre perguntas
 
 O backend não guarda memória entre as perguntas: quem dá contexto é o frontend,
