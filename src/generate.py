@@ -598,29 +598,35 @@ def _logar_validacao(
 # --------------------------------------------------------------------------
 
 
-def _resposta_sql_deterministica(
-    query: str, chunks: list[Chunk], bases: list[Natureza]
-) -> Optional[RAGResponse]:
-    """Preserva números calculados sem submeter uma conta pronta ao LLM.
-
-    Só atalha operações analíticas explicitamente marcadas pelo executor SQL.
-    Perguntas normativas/conversacionais, listagens e intenções sem cálculo
-    continuam no caminho de geração normal.
-    """
+def pode_responder_sql(chunks: list[Chunk], bases: list[Natureza]) -> bool:
+    """Mesmo critério de suficiência usado pelo atalho SQL e pela geração."""
     if not bases or not set(bases) <= {Natureza.ESTRUTURADA, Natureza.AGREGADA}:
-        return None
-    sql = [c for c in chunks if c.metadata.doc_type == "sql"
+        return False
+    permitidos, _ = filtrar_chunks_permitidos(chunks)
+    sql = [c for c in permitidos if c.metadata.doc_type == "sql"
            and c.metadata.extras.get("geracao_deterministica")]
-    if not sql or any(c.metadata.doc_type == "sql" and c not in sql for c in chunks):
-        return None
+    if not sql or any(c.metadata.doc_type == "sql" and c not in sql for c in permitidos):
+        return False
     for chunk in chunks:
         extra = chunk.metadata.extras
         if extra.get("operacao") == "buscar" or extra.get("calculo_disponivel") is False:
-            return None
+            return False
     numero_intencoes = max((c.metadata.extras.get("total_intencoes", 0) for c in chunks), default=0)
     if numero_intencoes and len({c.metadata.extras.get("intencao") for c in sql}) != numero_intencoes:
-        return None
+        return False
+    return (all(isinstance(c.metadata.extras.get("resultado_sql"), dict)
+                and "linhas" in c.metadata.extras["resultado_sql"] for c in sql)
+            and any(c.metadata.extras["resultado_sql"]["linhas"] for c in sql))
 
+
+def _resposta_sql_deterministica(
+    query: str, chunks: list[Chunk], bases: list[Natureza]
+) -> Optional[RAGResponse]:
+    """Preserva números calculados sem submeter uma conta pronta ao LLM."""
+    if not pode_responder_sql(chunks, bases):
+        return None
+    sql = [c for c in chunks if c.metadata.doc_type == "sql"
+           and c.metadata.extras.get("geracao_deterministica")]
     partes, fontes = [], []
     for chunk in sql:
         resultado = chunk.metadata.extras.get("resultado_sql")

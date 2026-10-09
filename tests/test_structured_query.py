@@ -418,13 +418,14 @@ def test_sem_documents_nao_consulta_nem_loga(tmp_path):
 # --------------------------------------------------------------------------
 
 
-def test_pipeline_poe_resultado_sql_antes_dos_chunks_da_busca(base, monkeypatch):
+def test_pipeline_misto_poe_resultado_sql_antes_dos_chunks_da_busca(base, monkeypatch):
     vistos = {}
+    bases_mistas = ESTRUTURADA + [Natureza.NORMATIVA]
     monkeypatch.setattr(sq, "DOCUMENTS_FILE", base["documents_file"])
     monkeypatch.setattr(sq.structured_db, "banco_padrao", lambda: base["banco"])
     monkeypatch.setattr(
         pipeline, "rotear_pergunta",
-        lambda q, **kw: RouteDecision(bases_selecionadas=ESTRUTURADA, justificativa="t", confidence=0.9),
+        lambda q, **kw: RouteDecision(bases_selecionadas=bases_mistas, justificativa="t", confidence=0.9),
     )
     metadata = ChunkMetadata(source_file="f.json", chunk_id="busca-1", base_id="contratos_estruturado", doc_type="json")
     monkeypatch.setattr(

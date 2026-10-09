@@ -1136,6 +1136,19 @@ def _chunks(consulta: Consulta, sql: str, cabecalho: str, linhas: list[str], ban
     ]
 
 
+def pode_consultar_sql_direto(
+    query: str, filtros: QueryFilters, bases: Iterable[Natureza],
+    *, intencao: Optional[QueryIntent] = None,
+) -> bool:
+    """Planejamento sem I/O; só contas que podem dispensar a busca vetorial."""
+    bases = list(bases)
+    if not bases or not set(bases) <= {Natureza.ESTRUTURADA, Natureza.AGREGADA}:
+        return False
+    consulta = consulta_da_intencao(intencao) if intencao is not None else detectar_consulta(query, filtros, bases)
+    return bool(consulta and consulta.tipo in {"estatistica", "ranking", "agrupamento", "evolucao"}
+                and not consulta.norma_citada)
+
+
 # Linhas do resultado SQL gravadas no log da etapa ``consulta_sql``.
 _LINHAS_NO_LOG = 20
 

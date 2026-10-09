@@ -15,14 +15,14 @@ from src.obs import (Stage, bounded_log_value, lifecycle, new_query_id, new_run_
                      registrar, registrar_pulo, sessao)
 from src.log_context import current_execution, execution, log_details
 from src.conversation import resposta_conversacional
-from src.generate import ClienteLLM, gerar_resposta
+from src.generate import ClienteLLM, gerar_resposta, pode_responder_sql
 from src.query_analysis import analisar_query, filtros_para_retrieve
 from src.reformulacao import Reformulacao, reformular_pergunta
 from src.rerank import reranker_padrao
 from src.retrieve import DEFAULT_TOP_K, RerankFn, RetrievalResult, retrieve
 from src.router import inferir_motivo_recusa, rotear_pergunta
 from src.schema import Chunk, ChunkMetadata
-from src.structured_query import consultar_estruturado
+from src.structured_query import consultar_estruturado, pode_consultar_sql_direto
 
 # Só as bases de escopo "oficial" no manifesto respondem perguntas; fixtures de
 # teste e amostras experimentais ficam de fora da busca.
@@ -114,10 +114,10 @@ def responder(
     campo não é descartado, e se os filtros zerarem o resultado a busca é
     refeita sem eles.
 
-    Perguntas de conta (ranking, estatística, comparação, evolução,
-    agrupamento) sobre as bases estruturada/agregada também passam pela etapa
-    ``consulta_sql`` (``src/structured_query.py``), cujo resultado entra como
-    evidência antes dos chunks da busca.
+    Perguntas exclusivamente analíticas sobre as bases estruturada/agregada
+    tentam ``consulta_sql`` antes da recuperação. SQL suficiente dispensa busca
+    e reranker; SQL indisponível/insuficiente preserva a busca como fallback.
+    Perguntas mistas mantêm a recuperação e o resultado SQL antes dos chunks.
 
     ``run_id`` e ``query_id`` são repassados a todas as etapas, amarrando no
     log (``logs/pipeline/pipeline-AAAA-MM-DD.jsonl``) os stages de uma mesma pergunta.
@@ -222,20 +222,39 @@ def _responder(
     chunks: list[Chunk] = []
     filtros_relaxados: dict[str, dict[str, list[str]]] = {}
     refusal_reason_hint = None
-    if decisao.bases_selecionadas and reranker is None:
-        # Compartilhado pelos caminhos convencional e de intenções; desligável
-        # com RERANK_ENABLED=false. Ablação em docs/ABLACAO_RERANK.md.
-        reranker = reranker_padrao()
+    reranker_resolvido = reranker is not None
+    def buscar(pergunta: str, route: Any, **kwargs: Any):
+        nonlocal reranker, reranker_resolvido
+        # Um cálculo SQL suficiente não precisa carregar o cross-encoder.
+        if not reranker_resolvido:
+            reranker = reranker_padrao()
+            reranker_resolvido = True
+        return retrieve(pergunta, route, reranker=reranker, **kwargs)
+
+    def pular_busca_sql() -> None:
+        for stage in (Stage.RETRIEVAL_DENSO, Stage.RETRIEVAL_BM25, Stage.FUSAO_RRF, Stage.RERANK):
+            registrar_pulo(run_id=run_id, query_id=query_id, stage=stage, query=query,
+                           motivo="calculo_sql_suficiente")
+
     if decisao.bases_selecionadas and analise.intencoes:
         grupos: list[list[Chunk]] = []
         for numero, intent in enumerate(analise.intencoes):
             route = {"bases": [b for b in intent.bases if b in decisao.bases_selecionadas]}
             with log_details(intencao=numero, tentativa_busca=1):
-                resultados = retrieve(intent.pergunta, route, top_k=top_k,
-                    filters=filtros_para_retrieve(intent.filtros), reranker=reranker,
-                    escopos=escopos, run_id=run_id, query_id=query_id)
-                grupo = consultar_estruturado(intent.pergunta, intent.filtros, route["bases"],
-                    intencao=intent, run_id=run_id, query_id=query_id)
+                grupo = None
+                if pode_consultar_sql_direto(intent.pergunta, intent.filtros, route["bases"], intencao=intent):
+                    grupo = consultar_estruturado(intent.pergunta, intent.filtros, route["bases"],
+                        intencao=intent, run_id=run_id, query_id=query_id)
+                if grupo and pode_responder_sql(grupo, route["bases"]):
+                    resultados = []
+                    pular_busca_sql()
+                else:
+                    resultados = buscar(intent.pergunta, route, top_k=top_k,
+                        filters=filtros_para_retrieve(intent.filtros),
+                        escopos=escopos, run_id=run_id, query_id=query_id)
+                if grupo is None:
+                    grupo = consultar_estruturado(intent.pergunta, intent.filtros, route["bases"],
+                        intencao=intent, run_id=run_id, query_id=query_id)
             calculo_disponivel = bool(grupo)
             grupo += [_chunk_from_retrieval(item) for item in resultados]
             for chunk in grupo:
@@ -263,17 +282,26 @@ def _responder(
                     vistos.add(key)
     elif decisao.bases_selecionadas:
         filtros = filtros_para_retrieve(analise.filtros)
+        sql_chunks = None
         with log_details(tentativa_busca=1):
-            resultados = retrieve(
-                query, decisao, top_k=top_k, filters=filtros, reranker=reranker,
-                escopos=escopos, run_id=run_id, query_id=query_id,
-            )
-        if filtros and not resultados:
+            if pode_consultar_sql_direto(query, analise.filtros, decisao.bases_selecionadas):
+                sql_chunks = consultar_estruturado(
+                    query, analise.filtros, decisao.bases_selecionadas, run_id=run_id, query_id=query_id)
+            sql_suficiente = bool(sql_chunks) and pode_responder_sql(sql_chunks, decisao.bases_selecionadas)
+            if sql_suficiente:
+                resultados = []
+                pular_busca_sql()
+            else:
+                resultados = buscar(
+                    query, decisao, top_k=top_k, filters=filtros,
+                    escopos=escopos, run_id=run_id, query_id=query_id,
+                )
+        if filtros and not resultados and not sql_suficiente:
             # Os filtros são heurísticos; se zeraram tudo, a busca sem eles
             # ainda dá evidência ao generate (que decide se basta).
             with log_details(tentativa_busca=2, motivo="filtros_sem_resultado"):
-                resultados = retrieve(
-                    query, decisao, top_k=top_k, filters=None, reranker=reranker,
+                resultados = buscar(
+                    query, decisao, top_k=top_k, filters=None,
                     escopos=escopos, run_id=run_id, query_id=query_id,
                 )
         chunks = [_chunk_from_retrieval(item) for item in resultados]
@@ -283,9 +311,10 @@ def _responder(
         }
         # Ranking/estatística/comparação: o resultado SQL vai à frente, para
         # caber no orçamento do prompt antes dos trechos da busca.
-        sql_chunks = consultar_estruturado(
-            query, analise.filtros, decisao.bases_selecionadas, run_id=run_id, query_id=query_id
-        )
+        if sql_chunks is None:
+            sql_chunks = consultar_estruturado(
+                query, analise.filtros, decisao.bases_selecionadas, run_id=run_id, query_id=query_id
+            )
         from src.structured_query import requer_calculo
         for chunk in sql_chunks + chunks:
             chunk.metadata.extras = {**chunk.metadata.extras,

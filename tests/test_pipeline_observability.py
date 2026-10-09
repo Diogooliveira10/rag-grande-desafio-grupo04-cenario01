@@ -94,7 +94,8 @@ def test_factual_api_trace_follows_evidence_to_prompt_to_final_response(local_pi
     assert trace['completo'] is True
     assert trace['status'] == 'ok'
     assert trace['resumo']['consultou_sql'] is True
-    assert trace['resumo']['consultou_vetorial'] is True
+    assert trace['resumo']['consultou_vetorial'] is False
+    assert event('retrieval_denso')['extra']['motivo'] == 'calculo_sql_suficiente'
     assert trace['latencia_metodo'] == 'requisicao_monotonica'
     assert trace['latencia_total_ms'] == events[-1]['latencia_ms']
     assert trace['latencia_pipeline_ms'] == event('pipeline_fim')['latencia_ms']
