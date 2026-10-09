@@ -100,7 +100,7 @@ def test_extrai_orgao_simples():
 
 def test_extrai_orgao_com_pontuacao_no_fim():
     resultado = qa.analisar_query("contratos da Prefeitura de Niteroi, acima de 100 mil.")
-    assert resultado.filtros.orgao == "Prefeitura de Niteroi"
+    assert resultado.filtros.orgao == "MUNICIPIO DE NITEROI"
 
 
 def test_sem_orgao_quando_nao_mencionado():
@@ -802,12 +802,13 @@ def test_texto_sem_filtros_tira_expressoes_de_tempo(pergunta, esperado):
 @pytest.mark.parametrize("pergunta, orgao", [
     ("Qual o total da Secretaria de Saúde no PCA?", "Secretaria de Saúde"),
     ("Qual o total da Secretaria de Saúde do PCA de 2025?", "Secretaria de Saúde"),
-    ("Contratos da Prefeitura de Niterói na Saúde", "Prefeitura de Niterói"),
-    ("Contratos da Prefeitura de Niterói no PNCP em 2025", "Prefeitura de Niterói"),
-    ("Contratos da Prefeitura do Rio no RJ", "Prefeitura do Rio"),
-    ("Contratos da Prefeitura de Niterói Edital 5/2024", "Prefeitura de Niterói"),
-    ("Contratos Da Prefeitura De Maricá Em 2025", "Prefeitura De Maricá"),
-    ("Prefeitura Do Rio No PNCP", "Prefeitura Do Rio"),
+    # Prefeitura sai com o nome do órgão no PNCP ("MUNICIPIO DE X"), item 9.
+    ("Contratos da Prefeitura de Niterói na Saúde", "MUNICIPIO DE NITEROI"),
+    ("Contratos da Prefeitura de Niterói no PNCP em 2025", "MUNICIPIO DE NITEROI"),
+    ("Contratos da Prefeitura do Rio no RJ", "MUNICIPIO DE RIO DE JANEIRO"),
+    ("Contratos da Prefeitura de Niterói Edital 5/2024", "MUNICIPIO DE NITEROI"),
+    ("Contratos Da Prefeitura De Maricá Em 2025", "MUNICIPIO DE MARICA"),
+    ("Prefeitura Do Rio No PNCP", "MUNICIPIO DE RIO DE JANEIRO"),
     ("Contratos da Secretaria de Ciência e Tecnologia", "Secretaria de Ciência e Tecnologia"),
     ("Tribunal de Contas do Estado do Rio de Janeiro", "Tribunal de Contas do Estado do Rio de Janeiro"),
 ])
@@ -816,12 +817,12 @@ def test_orgao_termina_antes_de_no_na_em_e_de_siglas_do_sistema(pergunta, orgao)
 
 # Órgão sem depender de maiúscula, gatilhos novos, siglas, esfera e modalidade (02/10).
 @pytest.mark.parametrize("pergunta, orgao", [
-    ("quantos contratos da prefeitura de niterói em 2025?", "prefeitura de niterói"),
+    ("quantos contratos da prefeitura de niterói em 2025?", "MUNICIPIO DE NITEROI"),
     ("contratos da secretaria municipal de saúde de niterói", "secretaria municipal de saúde de niterói"),
     ("fundo municipal de saude de marica", "fundo municipal de saude de marica"),
     ("Comando da Aeronáutica contratou o quê?", "Comando da Aeronáutica"),
     ("defensoria publica do estado contratos acima de 1 milhao", "defensoria publica do estado"),
-    ("contratos do municipio de niteroi", "municipio de niteroi"),
+    ("contratos do municipio de niteroi", "MUNICIPIO DE NITEROI"),
     ("procuradoria geral do estado", "procuradoria geral do estado"),
     ("controladoria geral do estado em 2025", "controladoria geral do estado"),
     ("policia militar do estado do rio de janeiro", "policia militar do estado do rio de janeiro"),
@@ -829,7 +830,7 @@ def test_orgao_termina_antes_de_no_na_em_e_de_siglas_do_sistema(pergunta, orgao)
     ("secretaria de estado de saude contratos", "secretaria de estado de saude"),
     ("secretaria de ciencia e tecnologia", "secretaria de ciencia e tecnologia"),
     ("secretaria de saude e prefeitura de niteroi", "secretaria de saude"),
-    ("prefeitura de niteroi de ambulancias", "prefeitura de niteroi"),
+    ("prefeitura de niteroi de ambulancias", "MUNICIPIO DE NITEROI"),
     ("Contratos Da Secretaria De Saúde Acima De 1 Milhão", "Secretaria De Saúde"),
     ("contratos da SEEDUC em 2025", "Secretaria de Estado de Educação"),
     ("contratos da ses acima de 1 milhão", "Secretaria de Estado de Saúde"),
@@ -886,21 +887,21 @@ def test_modalidade_vira_contains_de_cada_palavra_na_busca():
     ("Quantos contratos do Comando da Marinha e informe o valor total", "Comando da Marinha"),
     ("liste os contratos da secretaria de saúde e informe o total", "secretaria de saúde"),
     ("Qual o total da Secretaria de Saúde e da Prefeitura de Niterói?", "Secretaria de Saúde"),
-    ("Quantas compras da Prefeitura de Niterói de material de limpeza?", "Prefeitura de Niterói"),
+    ("Quantas compras da Prefeitura de Niterói de material de limpeza?", "MUNICIPIO DE NITEROI"),
     ("Quantos contratos da Secretaria Municipal de Saúde de ambulâncias em 2025?", "Secretaria Municipal de Saúde"),
-    ("quantos contratos do município de são gonçalo em 2025?", "município de são gonçalo"),
-    ("gastos do municipio de volta redonda em 2024", "municipio de volta redonda"),
-    ("contratos da prefeitura de campos dos goytacazes", "prefeitura de campos dos goytacazes"),
+    ("quantos contratos do município de são gonçalo em 2025?", "MUNICIPIO DE SAO GONCALO"),
+    ("gastos do municipio de volta redonda em 2024", "MUNICIPIO DE VOLTA REDONDA"),
+    ("contratos da prefeitura de campos dos goytacazes", "MUNICIPIO DE CAMPOS DOS GOYTACAZES"),
     ("fundo municipal de saude de marica", "fundo municipal de saude de marica"),
     ("câmara municipal de três rios contratou o quê?", "câmara municipal de três rios"),
-    ("prefeitura de petropolis contratos", "prefeitura de petropolis"),
-    ("Total Gasto pela Prefeitura de São Gonçalo em 2025", "Prefeitura de São Gonçalo"),
+    ("prefeitura de petropolis contratos", "MUNICIPIO DE PETROPOLIS"),
+    ("Total Gasto pela Prefeitura de São Gonçalo em 2025", "MUNICIPIO DE SAO GONCALO"),
     ("Quanto a Secretaria de Estado de Saúde (SES) planejou gastar no PCA de 2025?", "Secretaria de Estado de Saúde"),
-    ("Quantos contratos da Prefeitura do Rio de Janeiro de janeiro a março de 2025", "Prefeitura do Rio de Janeiro"),
+    ("Quantos contratos da Prefeitura do Rio de Janeiro de janeiro a março de 2025", "MUNICIPIO DE RIO DE JANEIRO"),
     ("procuradoria geral do estado", "procuradoria geral do estado"),
     ("Contratos da FIOCRUZ em 2025", "Fundação Oswaldo Cruz"),
     ("contratos do TCE-RJ", "Tribunal de Contas do Estado"),
-    ('Quantos contratos da "Prefeitura de Niterói" em 2025?', "Prefeitura de Niterói"),
+    ('Quantos contratos da "Prefeitura de Niterói" em 2025?', "MUNICIPIO DE NITEROI"),
     # não é órgão
     ("Qual o total gasto por órgão federal em 2025?", None),
     ("Quantos contratos de empresa pública em 2025?", None),
@@ -916,6 +917,30 @@ def test_modalidade_vira_contains_de_cada_palavra_na_busca():
 ])
 def test_orgao_confere_com_catalogo_e_municipios(pergunta, orgao):
     assert qa.analisar_query(pergunta).filtros.orgao == orgao
+
+
+# Item 9 das pendências até o Demo Day: "Prefeitura de X" vira o nome do órgão
+# no PNCP, "MUNICIPIO DE X" ("PREFEITURA MUNICIPAL DE X" é o nome da unidade).
+@pytest.mark.parametrize("pergunta, orgao", [
+    ("Quais contratos da Prefeitura de Maricá existem?", "MUNICIPIO DE MARICA"),
+    ("Quais contratos da Prefeitura Municipal de Duque de Caxias?", "MUNICIPIO DE DUQUE DE CAXIAS"),
+    ("Contratos da Prefeitura da Cidade do Rio de Janeiro", "MUNICIPIO DE RIO DE JANEIRO"),
+    ("contratos da prefeitura do rio em 2025", "MUNICIPIO DE RIO DE JANEIRO"),
+    ("contratos da prefeitura de volta redonda acima de 100 mil", "MUNICIPIO DE VOLTA REDONDA"),
+    ("Contratos da Prefeitura de Sumidouro", "Município de Sumidouro"),  # cidade fora do corpus
+    ("Contratos da Câmara Municipal de Maricá", "Câmara Municipal de Maricá"),
+    ("Contratos da Secretaria Municipal de Saúde de Niterói", "Secretaria Municipal de Saúde de Niterói"),
+])
+def test_prefeitura_vira_o_nome_do_orgao_no_pncp(pergunta, orgao):
+    assert qa.analisar_query(pergunta).filtros.orgao == orgao
+
+
+def test_filtro_da_prefeitura_casa_com_o_orgao_gravado_no_pncp():
+    from src.retrieve import _matches_filters
+    filtros = qa.filtros_para_retrieve(qa.analisar_query("Quais contratos da Prefeitura de Maricá existem?").filtros)
+    assert _matches_filters({"extras": {"orgao": "MUNICIPIO DE MARICA"}}, filtros)
+    assert not _matches_filters({"extras": {"orgao": "MARICA CAMARA MUNICIPAL"}}, filtros)
+    assert not _matches_filters({"extras": {"orgao": "MUNICIPIO DE NITEROI"}}, filtros)
 
 
 @pytest.mark.parametrize("pergunta, esfera", [
