@@ -112,7 +112,7 @@ def test_so_as_tres_trocas_mais_recentes_entram_no_prompt():
     chamadas = []
     historico = [TurnoAnterior(pergunta=f"pergunta antiga número {n}") for n in range(5)]
 
-    reformular_pergunta("E em 2024?", historico, cliente=_cliente("E em 2024?", chamadas))
+    reformular_pergunta("E os outros órgãos?", historico, cliente=_cliente("x", chamadas))
 
     usuario = chamadas[0][1]["content"]
     assert "número 0" not in usuario and "número 1" not in usuario
@@ -180,22 +180,31 @@ def test_falha_volta_ate_a_ultima_pergunta_que_se_sustenta_sozinha():
     )
 
 
-def test_falha_com_ano_na_pergunta_tira_o_ano_da_anterior():
-    def cliente(mensagens):
-        raise ConnectionError("provedor fora do ar")
+@pytest.mark.parametrize("pergunta", ["E em 2024?", "e 2024", "E para 2024?", "E no ano de 2024?", "Então, em 2024?"])
+def test_continuacao_que_so_troca_o_ano_e_reescrita_sem_modelo(pergunta):
+    chamadas = []
 
-    resultado = reformular_pergunta("E em 2024?", HISTORICO, cliente=cliente)
+    resultado = reformular_pergunta(pergunta, HISTORICO, cliente=_cliente("x", chamadas))
 
-    assert resultado.pergunta == (
-        "E em 2024? (continuação da pergunta anterior: Quais órgãos do RJ contrataram "
-        "manutenção de computadores?)"
+    assert chamadas == []
+    assert resultado.motivo == "troca_de_ano" and resultado.reescrita is True
+    # O ano da anterior sai, senão a análise lê "2025 ... 2024" como intervalo.
+    assert resultado.pergunta.endswith(
+        "(continuação da pergunta anterior: Quais órgãos do RJ contrataram manutenção de computadores?)"
     )
 
 
-def test_modelo_que_devolve_a_mesma_pergunta_nao_conta_como_reescrita():
-    resultado = reformular_pergunta("E em 2024?", HISTORICO, cliente=_cliente("e em 2024?"))
+@pytest.mark.parametrize("pergunta", [
+    "E em 2024, quais órgãos?", "E o valor em 2024?", "E em 2024 e 2025?", "Contratos de 2024?",
+])
+def test_continuacao_com_mais_que_o_ano_continua_indo_ao_modelo(pergunta):
+    assert reformulacao.so_troca_o_ano(pergunta) is False
 
-    assert resultado == Reformulacao("E em 2024?", False, "autossuficiente")
+
+def test_modelo_que_devolve_a_mesma_pergunta_nao_conta_como_reescrita():
+    resultado = reformular_pergunta("E os outros órgãos?", HISTORICO, cliente=_cliente("e os outros orgaos?"))
+
+    assert resultado == Reformulacao("E os outros órgãos?", False, "autossuficiente")
 
 
 def test_modo_desligado_nao_chama_o_modelo(monkeypatch):
@@ -212,8 +221,8 @@ def test_aceita_historico_em_dict():
     chamadas = []
 
     reformular_pergunta(
-        "E em 2024?", [{"pergunta": "Contratos de TI em 2025?", "resposta": "Há 3."}],
-        cliente=_cliente("Contratos de TI em 2024?", chamadas),
+        "E os outros órgãos?", [{"pergunta": "Contratos de TI em 2025?", "resposta": "Há 3."}],
+        cliente=_cliente("Contratos de TI de outros órgãos em 2025?", chamadas),
     )
 
     assert "Contratos de TI em 2025?" in chamadas[0][1]["content"]
