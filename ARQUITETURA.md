@@ -144,16 +144,14 @@ As tarefas são distribuídas entre os integrantes a cada encontro conforme as n
 
 ### Pendências em aberto
 
-- Melhorar a cobertura de indicadores do PCA e dos contratos sem `modalidade`; o OCR das atas já foi recuperado. Remontar SQLite e Neon com os dados normalizados atualizados.
+- Melhorar a cobertura de indicadores do PCA e dos contratos sem `modalidade`; o OCR das atas já foi recuperado e SQLite e Neon foram remontados em 2026-10-09 (schema 7, com `fornecedor_cnpj`).
 - Criar um gabarito de conteúdo para o golden set: hoje o avaliador confere só rota e recusa, não se a resposta está certa. A conferência contra o SQLite encontrou respostas erradas em P2.1, P4.2, P4.3 e P5.3, e a F1 sai sem fonte; as causas de P4.2, P4.3 e P5.3 foram corrigidas na `consulta_sql` em 2026-10-02, mas o golden set ainda não foi rodado de novo. A validação contra o corpus mostrou que P3.1 e P3.2 são sustentadas só em parte e que a regra da P6.1 (microempresa em pregão eletrônico) não está no corpus.
 - Reescrever as perguntas do golden set que dependem da anterior ("nesses contratos") e incluir casos da base de atas e de identificador (CNPJ, número de controle).
-- Rodar o golden set completo de novo com o pipeline atual e registrar o resultado final.
+- Golden set rodado em 2026-10-09 (`golden-2026-10-09-cnpj`): 14/26 com gabarito de conteúdo; rota 24/26, recusa 26/26, citação 25/26. Falta ajustar o avaliador (formato de valores e frases equivalentes), reduzir a confiança alta com evidência parcial e rodar de novo.
 - Corrigir a geração: confiança alta junto de "nada encontrado" (P2.1) e resposta sem fonte (F1).
 - Fazer o frontend (repositório separado) consumir `query_id`/`session_id`/`feedback`/`history` e mostrar o trace ao lado da resposta, hoje sem cliente; falta também um backend público em HTTPS para o site apontar.
 - Histórico e trace aceitam a `X-API-Key` (`RAG_API_KEY`) ou o `X-Session-Id` da própria conversa, então o site público não precisa da chave; `HISTORY_PUBLIC=true` abre o histórico geral para uma demo. O histórico grava textos mascarados com expurgo após `HISTORY_RETENTION_DAYS` dias. O log mascarado em `logs/pipeline/` segue `LOG_RETENTION_DAYS` (por padrão, a retenção do histórico); diagnósticos em `logs/maintenance/` seguem 14 dias via manutenção explícita, sem expurgar backups.
 - Avaliar respostas e guardrails sobre o suplemento `emails_sinteticos`, gerado pelo tutor e integrado em 2026-10-05: 25 conversas, 20 públicas e 5 restritas ([proveniência e reconstrução](docs/emails_sinteticos.md)).
-- Revisar o casamento de CNPJ sem pontuação nos filtros/consultas.
-- Decidir o tratamento definitivo para os diretórios ignorados pelo `.gitignore` mas versionados via `git add -f` (`index/`, `data/normalized/`, `data/structured/`, `data/embeddings/2026-09-30_12-08-51/`).
 - No `query_analysis`, transformar em filtro o município citado sozinho ("contratos em Volta Redonda") e o fornecedor ("empresa Cristália").
 - Preparação do Demo Day (23/10).
 

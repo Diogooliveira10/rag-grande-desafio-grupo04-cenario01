@@ -13,7 +13,8 @@ Consulte o [inventário](CORPUS_INVENTORY.md), o
 A consulta também inclui o [suplemento sintético conversacional](docs/emails_sinteticos.md):
 25 conversas fictícias (45 mensagens), em uma base separada dos dados reais da v6.
 
-Os vetores em `data/embeddings/2026-09-30_12-08-51/`, os índices em `index/`,
+Os vetores ativos em `data/embeddings/2026-10-07_21-18-41_ocr-recovery/` (a v6
+após a recuperação OCR; a geração original fica em `2026-09-30_12-08-51/`), os índices em `index/`,
 os documentos normalizados e o SQLite da v6 estão versionados para consulta.
 As credenciais ECOA continuam locais no `.env`. Os arquivos brutos são externos
 ao Git; as fontes públicas constam nos metadados. As entregas das atas estão em
@@ -436,7 +437,7 @@ qualidade, sem gerar vetores, reaproveite os vetores da v6 base a base:
 ```powershell
 foreach ($base in "atas_conversacional", "contratos_estruturado", "editais_normativo", "pca_agregado") {
   py .\src\index.py --input "data\normalized\v6\$base\documents.jsonl" --output index `
-    --embeddings "data\embeddings\2026-09-30_12-08-51\$base\embeddings.jsonl" --merge-existing
+    --embeddings "data\embeddings\2026-10-07_21-18-41_ocr-recovery\$base\embeddings.jsonl" --merge-existing
 }
 ```
 
