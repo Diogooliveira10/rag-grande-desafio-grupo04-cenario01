@@ -16,7 +16,9 @@ Serve o ``GET /api/v1/trace/{query_id}`` e o
 from __future__ import annotations
 
 import json
+import logging
 import re
+import sqlite3
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -52,7 +54,21 @@ def _sem_endereco_de_banco(valor: Any) -> Any:
 
 
 def _registros(campo: str, valor: str, logs_dir: Path) -> list[dict[str, Any]]:
-    """Linhas do log com ``registro[campo] == valor``, em ordem de horário."""
+    """Indexed lookup; only changed/new JSONL bytes require import."""
+    from src.log_store import EventStore
+    if logs_dir.resolve() == Path(default_logger.logs_dir).resolve():
+        default_logger.flush()
+    legacy = [config.LOGS_DIR] if logs_dir == config.PIPELINE_LOGS_DIR else []
+    try:
+        registros = EventStore(logs_dir).records(campo, valor, legacy)
+        return sorted(registros, key=_timestamp_key)
+    except (OSError, sqlite3.Error):
+        logging.getLogger(__name__).warning("Índice de trace indisponível; leitura JSONL de compatibilidade")
+        return _registros_jsonl(campo, valor, logs_dir)
+
+
+def _registros_jsonl(campo: str, valor: str, logs_dir: Path) -> list[dict[str, Any]]:
+    """Fallback/legacy reader when the derived index cannot be used."""
     registros: list[dict[str, Any]] = []
     # Transitional reader: only the actual configured directory may also read
     # legacy root files. Isolated test/custom directories never read real logs.

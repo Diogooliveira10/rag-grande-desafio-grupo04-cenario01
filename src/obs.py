@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import secrets
 import threading
@@ -204,6 +205,8 @@ class PipelineLogger:
         self.retention_days = retention_days
         self._lock = threading.Lock()
         self._last_cleanup: tuple[Path, date] | None = None
+        self._writer = None
+        self._writer_pid = os.getpid()
 
     def expired_paths(self, now: datetime | None = None) -> list[Path]:
         """Somente JSONL diários antigos; nunca diretórios, links ou backups."""
@@ -255,21 +258,51 @@ class PipelineLogger:
                                    "tokens": data["tokens"]})
         line = json.dumps(data, ensure_ascii=False, default=_json_default)
         try:
+            from src.log_store import EventStore, QueuedEventWriter
+            if self._writer_pid != os.getpid():
+                # A fork must not reuse a queue whose consumer stayed in the parent.
+                self._writer, self._lock = None, threading.Lock()
+                self._writer_pid = os.getpid()
             with self._lock:
                 now = datetime.now().astimezone()
                 cleanup_key = (self.logs_dir, now.date())
                 if self._last_cleanup != cleanup_key:
                     self._purge_expired(now)
                     self._last_cleanup = cleanup_key
-                path.parent.mkdir(parents=True, exist_ok=True)
-                with path.open("a", encoding="utf-8") as stream:
-                    stream.write(line + "\n")
-        except OSError:
-            # Logging is an aid, never a reason to fail an otherwise valid query.
-            if context:
-                context.logging_errors += 1
-            logging.getLogger(__name__).exception("Falha ao gravar evento de observabilidade")
+                if self._writer and self._writer.store.directory != Path(self.logs_dir).resolve():
+                    self._writer.close()
+                    self._writer = None
+                if context:
+                    if self._writer is None:
+                        self._writer = QueuedEventWriter(self.logs_dir)
+                    job = self._writer.submit(path, line, lambda error: self._write_error(error, context))
+                else:
+                    # Isolated module calls promise an immediately readable event.
+                    EventStore(self.logs_dir).append_batch([(path, line)])
+                    job = None
+            if job and record.stage in {Stage.PIPELINE_FIM, Stage.REQUISICAO_FIM}:
+                job.done.wait()  # Trace/history can read the complete execution now.
+        except Exception as error:
+            self._write_error(error, context)
         return path
+
+    @staticmethod
+    def _write_error(error: BaseException, context: Any) -> None:
+        if context:
+            context.logging_errors += 1
+        logging.getLogger(__name__).error("Falha ao gravar evento de observabilidade",
+            exc_info=(type(error), error, error.__traceback__))
+
+    def flush(self) -> None:
+        """Wait for queued events before building an envelope or reading a trace."""
+        if self._writer_pid == os.getpid() and self._writer is not None:
+            self._writer.flush()
+
+    def close(self) -> None:
+        """Flush on orderly shutdown; JSONL and the index stay readable."""
+        if self._writer_pid == os.getpid() and self._writer is not None:
+            self._writer.close()
+            self._writer = None
 
     def span(
         self,
@@ -509,6 +542,7 @@ def lifecycle(*, run_id: str, query_id: str, query: str, start: Stage, end: Stag
         state.extra.update({"error_type": type(error).__name__, "completed": False})
         raise
     finally:
+        default_logger.flush()
         context = current_execution()
         state.extra.setdefault("completed", True)
         if context:
