@@ -149,7 +149,7 @@ def _resumo_derivado(etapas: list[dict[str, Any]]) -> dict[str, Any]:
         "consultou_vetorial": bool(stages & _ETAPAS_VETORIAIS),
     }
     chunks_sql = [etapa["detalhes"].get("chunks") for etapa in etapas
-                  if etapa["stage"] == Stage.CONSULTA_SQL.value]
+                  if etapa["stage"] == Stage.CONSULTA_SQL.value and etapa["status"] != "pulado"]
     if any(isinstance(chunks, int) for chunks in chunks_sql):
         resumo["evidencias_sql"] = sum(chunks for chunks in chunks_sql if isinstance(chunks, int))
     vetorial = _evidencias_vetoriais(etapas)

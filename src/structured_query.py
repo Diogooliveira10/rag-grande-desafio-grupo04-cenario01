@@ -87,7 +87,7 @@ _RE_AGRUPAMENTO = re.compile(
     r"\bmais frequen|\bmais usad|\bmais comu|\bpor modalidades?\b|\bpor orgaos?\b|\bpor municipios?\b|\bpor esferas?\b"
 )
 _RE_COMPARACAO = re.compile(r"\bmais car[oa]s?\b|\bmais barat|\bpag(?:ou|aram|am|a) mais\b|\bcompar")
-_RE_ESTATISTICA = re.compile(r"\bmedia\b|\bmedio\b|\bmediana\b|\btotal\b|\bsoma\b|\bquant[oa]s?\b|\bquantidade\b")
+_RE_ESTATISTICA = re.compile(r"\bmedia\b|\bmedio\b|\bmediana\b|\btotal\b|\bsoma\b|\bquant[oa]s?\b|\bquantidade\b|\bvalor\b")
 _RE_CONTAGEM_CONTRATOS = re.compile(
     r"\b(?:(?P<numero>\d+|um|dois|tres|quatro|cinco)\s+ou\s+mais|"
     r"(?:pelo\s+menos|no\s+minimo)\s+(?P<minimo>\d+|um|dois|tres|quatro|cinco))"
@@ -142,6 +142,8 @@ _PALAVRAS_GENERICAS = frozenset(
     semestre trimestre existem quantidade registro registros realizado realizadas realizados
     servico servicos aquisicao aquisicoes fornecimento prestacao especializada especializado
     informacao informacoes detalhe detalhes firmaram firmou celebraram disponiveis disponivel
+    comparando publicando assinando somando informando mostrando listando buscando calculando
+    continuacao anterior pergunta
     assinou assinaram contratou contrataram comprou compraram gastou gastaram
     seguem segue seguindo base baseado baseada baseados baseadas fundamentado fundamentada fundamentados
     fundamentadas fundamento amparo amparado amparada amparados amparadas conforme lei leis decreto decretos
@@ -333,7 +335,7 @@ def _singular(token: str) -> str:
 
 
 # Radicais que nunca descrevem o objeto, em qualquer flexão ("comparando", "publicaram").
-_RADICAIS_GENERICOS = ("compar", "publica", "assina", "vigen", "contrat", "registr", "realiz")
+_RADICAIS_GENERICOS = ("compar", "publica", "assina", "vigen", "contrat", "registr", "realiz", "celebr")
 
 
 def _termos_do_objeto(texto: str) -> tuple[str, ...]:
@@ -501,7 +503,7 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
     # Contrato conta pela assinatura, salvo quando a pergunta pede a publicação.
     referencia_temporal = filtros.referencia_temporal or ("assinatura" if so_contratos else None)
     termos_objeto = _termos_do_objeto(texto_objeto) if tabela == "contratacoes" else ()
-    if tipo == "listagem" and not termos_objeto and not modalidade_termos:
+    if tipo == "listagem" and not termos_objeto and not modalidade_termos and not orgao_termos:
         return None  # "Quais contratos existem?" sem assunto: a busca normal responde
     return Consulta(
         tabela=tabela,
