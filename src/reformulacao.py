@@ -234,8 +234,16 @@ def _com_contexto(query: str, turnos: list[tuple[str, str]]) -> str:
     roteamento e a busca. A pergunta atual vem primeiro: o que ela diz
     ("E em 2025?") prevalece sobre o que é herdado. Se ela traz um ano, os anos
     da anterior saem, senão a análise lê "2024 ... 2025" como um intervalo.
+
+    Se a anterior também é continuação ("E qual foi o valor total deles?"),
+    volta até a última que se sustenta sozinha e anexa todas, em ordem.
     """
-    anterior = turnos[-1][0]
+    anteriores: list[str] = []
+    for pergunta, _ in reversed(turnos):
+        anteriores.insert(0, pergunta)
+        if not parece_continuacao(pergunta):
+            break
+    anterior = " / ".join(anteriores)
     if _ANO.search(query):
         anterior = re.sub(r"\s+([?.,;!])", r"\1", " ".join(_ANO_HERDADO.sub("", anterior).split()))
     return f"{' '.join(query.split())} (continuação da pergunta anterior: {anterior})"
