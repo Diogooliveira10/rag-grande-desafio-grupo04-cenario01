@@ -66,7 +66,8 @@ class Reformulacao:
 
     pergunta: str
     reescrita: bool
-    # sem_historico | modo_desligado | autossuficiente | reescrita | llm_falhou | saida_invalida
+    # sem_historico | modo_desligado | autossuficiente | reescrita | troca_de_ano
+    # | llm_falhou | saida_invalida
     # Em llm_falhou e saida_invalida a pergunta vem com a anterior anexada.
     motivo: str
 
@@ -227,6 +228,19 @@ _ANO = re.compile(r"\b(?:19|20)\d{2}\b")
 _ANO_HERDADO = re.compile(r"(?:\b(?:em|de|no ano de|do ano de)\s+)?\b(?:19|20)\d{2}\b", re.IGNORECASE)
 
 
+# "E em 2025?", "E 2024?", "E para 2023?", "E no ano de 2024?": a pergunta só troca o ano.
+_SO_ANO = re.compile(
+    r"^(?:e|e entao|entao|e agora|agora|e quanto a|e para|e no ano de|e do ano de|e de|e em|e no)?"
+    r"\s*(?:em\s+)?(?:19|20)\d{2}$"
+)
+
+
+def so_troca_o_ano(query: str) -> bool:
+    """True para continuação que só muda o ano ("E em 2025?"); a reescrita é por regra."""
+    normalizado = " ".join(re.sub(r"[^\w\s]", " ", _sem_acento(query)).split())
+    return bool(_SO_ANO.match(normalizado))
+
+
 def _com_contexto(query: str, turnos: list[tuple[str, str]]) -> str:
     """Pergunta com a anterior anexada, quando o modelo não reescreveu.
 
@@ -268,6 +282,16 @@ def reformular_pergunta(
         return Reformulacao(query, False, "modo_desligado")
     if not parece_continuacao(query):
         return Reformulacao(query, False, "autossuficiente")
+    if so_troca_o_ano(query):
+        # Sem modelo: o qwen3 às vezes raciocina até o teto e não devolve nada
+        # justamente nesse caso, o mais comum de continuação.
+        pergunta = _com_contexto(query, turnos)
+        with default_logger.span(
+            run_id=run_id, query_id=query_id, stage=Stage.REFORMULACAO, input=query,
+            extra={"turnos_no_prompt": len(turnos)},
+        ) as span:
+            span.set_result({"pergunta": mascarar(pergunta)[0], "reescrita": True, "motivo": "troca_de_ano"})
+        return Reformulacao(pergunta, True, "troca_de_ano")
 
     diagnosticos: dict = {}
     with default_logger.span(
