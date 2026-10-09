@@ -146,7 +146,8 @@ def _trace_dos_registros(query_id: str, registros: list[dict[str, Any]]) -> dict
             "base": _BASE_DA_ETAPA.get(registro.get("stage")),
             "status": registro.get("status"),
             "ts": registro.get("ts"),
-            "latencia_ms": registro.get("latencia_ms", 0),
+            # Logs de antes de 25/09 gravavam a latência com casas decimais.
+            "latencia_ms": round(registro.get("latencia_ms") or 0),
             "input": registro.get("input"),
             "output": registro.get("output"),
             "tokens": registro.get("tokens"),

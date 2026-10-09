@@ -232,6 +232,19 @@ def test_trace_de_log_antigo_tira_evidencias_e_confianca_das_etapas():
     assert resumo["num_fontes"] == 2
 
 
+def test_trace_de_log_antigo_com_latencia_decimal_responde_200():
+    linha = {"ts": "2026-09-21T10:00:00+00:00", "run_id": "run1", "query_id": "q_decimal",
+             "stage": "geracao", "status": "ok", "latencia_ms": 1234.6, "input": "x", "output": "y"}
+    arquivo = obs.default_logger.logs_dir / "pipeline-2026-09-21.jsonl"
+    arquivo.parent.mkdir(parents=True, exist_ok=True)
+    arquivo.write_text(json.dumps(linha) + "\n", encoding="utf-8")
+
+    resposta = client.get("/api/v1/trace/q_decimal")
+
+    assert resposta.status_code == 200
+    assert resposta.json()["etapas"][0]["latencia_ms"] == 1235
+
+
 def test_trace_de_log_antigo_sem_lista_de_evidencias_usa_o_total_do_output():
     obs.registrar(run_id="run1", query_id="q_velho2", stage=obs.Stage.RERANK, status="ok", latencia_ms=1,
                   input="Quantos contratos?", output="10 chunks; top base: contratos_estruturado",
