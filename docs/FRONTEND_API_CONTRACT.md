@@ -142,6 +142,9 @@ reenviando as últimas trocas no campo opcional `historico` de
   significa não executado; `degradado` significa fallback tratado. Os detalhes
   incluem `outcome`, origem, sequência, motivo e metadados permitidos. O evento
   terminal da API confirma retorno preparado, não recebimento pelo navegador.
+- Perguntas antigas sem `resumo_consulta` vêm com `caminho: null`, sem
+  `fontes_citadas` (só a contagem, em `num_fontes`) e com
+  `evidencias_vetorial` às vezes como número total em vez de contagem por base.
 - `GET /api/v1/sessions/{session_id}/trace`: a conversa inteira, com as
   perguntas em ordem (`perguntas[]` com `query_id`, `pergunta`, `resumo` e os
   nomes das etapas) e quantas delas usaram SQL e busca vetorial. O detalhe de

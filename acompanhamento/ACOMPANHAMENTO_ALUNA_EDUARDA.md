@@ -88,3 +88,13 @@
 - No repositório do frontend, planejei como a rastreabilidade das consultas deverá ser apresentada ao usuário.
 - Estruturei o fluxo para exibir de forma clara o caminho real de cada consulta, incluindo o uso de SQL, a busca vetorial e as principais etapas do pipeline, sempre vinculadas ao respectivo `query_id`.
 - Preparei essa estrutura para consumir o trace real do backend quando ele estiver disponível, sem utilizar dados mockados ou simular informações que ainda não são fornecidas pela API.
+
+## Encontro 11 - 2026-10-08
+
+### Relato individual - Eduarda
+
+- Atualizei o backend e o frontend com as versões mais recentes da `main` e validei a integração local entre os dois projetos.
+- Implementei o controle de sessão e o envio do histórico da conversa, mantendo o contexto entre perguntas e descartando os dados ao iniciar uma nova conversa.
+- Desenvolvi as telas "Ver caminho" e "Caminho da conversa", exibindo as bases consultadas, evidências, etapas do pipeline, tempo de execução e detalhes do trace.
+- Corrigi a segurança do frontend, removendo o uso de `X-API-Key` e o histórico geral do site público, além de adicionar tratamentos para erros de sessão, trace antigo e falhas de rede.
+- Melhorei o indicador de carregamento e validei a implementação com testes automatizados, build do frontend e chamadas reais aos endpoints de trace.

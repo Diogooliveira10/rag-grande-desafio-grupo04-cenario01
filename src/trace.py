@@ -107,14 +107,65 @@ def _timestamp_key(registro: dict[str, Any]) -> float:
         return 0.0
 
 
+_CHUNKS_NO_OUTPUT = re.compile(r"^(\d+) chunks?\b")
+
+
+def _evidencias_vetoriais(etapas: list[dict[str, Any]]) -> dict[str, int] | int | None:
+    """Evidências da busca vetorial que chegaram à geração, num log antigo.
+
+    Usa a última etapa vetorial: a lista ``evidencias`` do ``extra``, contada
+    por base como no ``resumo_consulta``; sem ela, o total de "N chunks" do
+    output, que não diz a base de cada trecho.
+    """
+    for etapa in reversed(etapas):
+        if etapa["base"] != "vetorial" or etapa["status"] == "pulado":
+            continue
+        evidencias = etapa["detalhes"].get("evidencias")
+        if isinstance(evidencias, list):
+            por_base: dict[str, int] = {}
+            for evidencia in evidencias:
+                if not isinstance(evidencia, dict) or str(evidencia.get("chunk_id", "")).startswith("sql:"):
+                    continue
+                base_id = str(evidencia.get("base_id"))
+                por_base[base_id] = por_base.get(base_id, 0) + 1
+            return por_base
+        total = _CHUNKS_NO_OUTPUT.match(str(etapa["output"] or ""))
+        if total:
+            return int(total.group(1))
+    return None
+
+
 def _resumo_derivado(etapas: list[dict[str, Any]]) -> dict[str, Any]:
-    """Resumo para perguntas registradas antes do stage ``resumo_consulta``."""
+    """Resumo para perguntas registradas antes do stage ``resumo_consulta``.
+
+    Tira do que as etapas antigas já gravavam o que der: evidências SQL e
+    vetoriais, confiança e recusa. As fontes citadas não estão nesses logs
+    (só a contagem, em ``num_fontes``).
+    """
     stages = {etapa["stage"] for etapa in etapas if etapa["status"] != "pulado"}
-    return {
+    resumo: dict[str, Any] = {
         "caminho": None,
         "consultou_sql": Stage.CONSULTA_SQL.value in stages,
         "consultou_vetorial": bool(stages & _ETAPAS_VETORIAIS),
     }
+    chunks_sql = [etapa["detalhes"].get("chunks") for etapa in etapas
+                  if etapa["stage"] == Stage.CONSULTA_SQL.value and etapa["status"] != "pulado"]
+    if any(isinstance(chunks, int) for chunks in chunks_sql):
+        resumo["evidencias_sql"] = sum(chunks for chunks in chunks_sql if isinstance(chunks, int))
+    vetorial = _evidencias_vetoriais(etapas)
+    if vetorial is not None:
+        resumo["evidencias_vetorial"] = vetorial
+    # A validação revê o que a geração decidiu; vale a última que gravou.
+    for etapa in reversed(etapas):
+        if etapa["stage"] not in (Stage.VALIDACAO.value, Stage.GERACAO.value):
+            continue
+        detalhes = etapa["detalhes"]
+        for campo in ("is_refusal", "confidence_level"):
+            if campo in detalhes:
+                resumo.setdefault(campo, detalhes[campo])
+        if isinstance(detalhes.get("num_sources"), int):
+            resumo.setdefault("num_fontes", detalhes["num_sources"])
+    return resumo
 
 
 def montar_trace(query_id: str, logs_dir: Optional[Path] = None) -> Optional[dict[str, Any]]:
@@ -134,7 +185,8 @@ def _trace_dos_registros(query_id: str, registros: list[dict[str, Any]]) -> dict
             "base": _BASE_DA_ETAPA.get(registro.get("stage")),
             "status": registro.get("status"),
             "ts": registro.get("ts"),
-            "latencia_ms": registro.get("latencia_ms", 0),
+            # Logs de antes de 25/09 gravavam a latência com casas decimais.
+            "latencia_ms": round(registro.get("latencia_ms") or 0),
             "input": registro.get("input"),
             "output": registro.get("output"),
             "tokens": registro.get("tokens"),

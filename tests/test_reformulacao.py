@@ -18,6 +18,11 @@ HISTORICO = [
     )
 ]
 
+P43_COM_CONTEXTO = (
+    P43 + " (continuação da pergunta anterior: Quais órgãos do RJ contrataram manutenção de "
+    "computadores em 2025?)"
+)
+
 
 def _cliente(pergunta: str, chamadas: list | None = None):
     def cliente(mensagens):
@@ -107,7 +112,7 @@ def test_so_as_tres_trocas_mais_recentes_entram_no_prompt():
     chamadas = []
     historico = [TurnoAnterior(pergunta=f"pergunta antiga número {n}") for n in range(5)]
 
-    reformular_pergunta("E em 2024?", historico, cliente=_cliente("E em 2024?", chamadas))
+    reformular_pergunta("E os outros órgãos?", historico, cliente=_cliente("x", chamadas))
 
     usuario = chamadas[0][1]["content"]
     assert "número 0" not in usuario and "número 1" not in usuario
@@ -132,13 +137,13 @@ def test_dado_pessoal_do_historico_e_da_pergunta_sai_mascarado_do_prompt():
         assert dado not in usuario
 
 
-def test_falha_do_modelo_mantem_a_pergunta_original():
+def test_falha_do_modelo_anexa_a_pergunta_anterior():
     def cliente(mensagens):
         raise ConnectionError("provedor fora do ar")
 
     resultado = reformular_pergunta(P43, HISTORICO, cliente=cliente)
 
-    assert resultado == Reformulacao(P43, False, "llm_falhou")
+    assert resultado == Reformulacao(P43_COM_CONTEXTO, True, "llm_falhou")
 
 
 @pytest.mark.parametrize(
@@ -151,16 +156,55 @@ def test_falha_do_modelo_mantem_a_pergunta_original():
         json.dumps({"pergunta": "x" * (reformulacao.MAX_CHARS_REFORMULADA + 1)}),
     ],
 )
-def test_saida_fora_do_formato_mantem_a_pergunta_original(saida):
+def test_saida_fora_do_formato_anexa_a_pergunta_anterior(saida):
     resultado = reformular_pergunta(P43, HISTORICO, cliente=lambda mensagens: saida)
 
-    assert resultado == Reformulacao(P43, False, "saida_invalida")
+    assert resultado == Reformulacao(P43_COM_CONTEXTO, True, "saida_invalida")
+
+
+def test_falha_volta_ate_a_ultima_pergunta_que_se_sustenta_sozinha():
+    historico = [
+        TurnoAnterior(pergunta="Quais contratos de software foram assinados em 2025?"),
+        TurnoAnterior(pergunta="Quantos contratos de ambulância foram firmados em 2024?"),
+        TurnoAnterior(pergunta="E qual foi o valor total deles?"),
+    ]
+
+    def cliente(mensagens):
+        raise ConnectionError("provedor fora do ar")
+
+    resultado = reformular_pergunta("E desses, qual o maior?", historico, cliente=cliente)
+
+    assert resultado.pergunta == (
+        "E desses, qual o maior? (continuação da pergunta anterior: Quantos contratos de "
+        "ambulância foram firmados em 2024? / E qual foi o valor total deles?)"
+    )
+
+
+@pytest.mark.parametrize("pergunta", ["E em 2024?", "e 2024", "E para 2024?", "E no ano de 2024?", "Então, em 2024?"])
+def test_continuacao_que_so_troca_o_ano_e_reescrita_sem_modelo(pergunta):
+    chamadas = []
+
+    resultado = reformular_pergunta(pergunta, HISTORICO, cliente=_cliente("x", chamadas))
+
+    assert chamadas == []
+    assert resultado.motivo == "troca_de_ano" and resultado.reescrita is True
+    # O ano da anterior sai, senão a análise lê "2025 ... 2024" como intervalo.
+    assert resultado.pergunta.endswith(
+        "(continuação da pergunta anterior: Quais órgãos do RJ contrataram manutenção de computadores?)"
+    )
+
+
+@pytest.mark.parametrize("pergunta", [
+    "E em 2024, quais órgãos?", "E o valor em 2024?", "E em 2024 e 2025?", "Contratos de 2024?",
+])
+def test_continuacao_com_mais_que_o_ano_continua_indo_ao_modelo(pergunta):
+    assert reformulacao.so_troca_o_ano(pergunta) is False
 
 
 def test_modelo_que_devolve_a_mesma_pergunta_nao_conta_como_reescrita():
-    resultado = reformular_pergunta("E em 2024?", HISTORICO, cliente=_cliente("e em 2024?"))
+    resultado = reformular_pergunta("E os outros órgãos?", HISTORICO, cliente=_cliente("e os outros orgaos?"))
 
-    assert resultado == Reformulacao("E em 2024?", False, "autossuficiente")
+    assert resultado == Reformulacao("E os outros órgãos?", False, "autossuficiente")
 
 
 def test_modo_desligado_nao_chama_o_modelo(monkeypatch):
@@ -177,8 +221,8 @@ def test_aceita_historico_em_dict():
     chamadas = []
 
     reformular_pergunta(
-        "E em 2024?", [{"pergunta": "Contratos de TI em 2025?", "resposta": "Há 3."}],
-        cliente=_cliente("Contratos de TI em 2024?", chamadas),
+        "E os outros órgãos?", [{"pergunta": "Contratos de TI em 2025?", "resposta": "Há 3."}],
+        cliente=_cliente("Contratos de TI de outros órgãos em 2025?", chamadas),
     )
 
     assert "Contratos de TI em 2025?" in chamadas[0][1]["content"]
