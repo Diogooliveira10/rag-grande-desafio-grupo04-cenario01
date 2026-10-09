@@ -68,11 +68,12 @@ def _cliente_padrao(schema: Optional[dict] = None) -> ClienteLLM:
     return _chamar
 
 
-def _texto_e_tokens(saida: Any) -> tuple[str, TokenUsage]:
-    """Aceita ``str`` (clientes simples/falsos) ou a resposta do SDK OpenAI."""
+def _texto_e_tokens(saida: Any, *, extra: dict[str, Any] | None = None) -> tuple[str, TokenUsage]:
+    """Aceita ``str`` ou SDK; texto sem usage tem consumo explicitamente desconhecido."""
+    tokens = token_usage_from_response(saida, extra=extra)
     if isinstance(saida, str):
-        return saida, TokenUsage()
-    return saida.choices[0].message.content or "", token_usage_from_response(saida)
+        return saida, tokens
+    return saida.choices[0].message.content or "", tokens
 
 
 # --------------------------------------------------------------------------
@@ -737,8 +738,10 @@ def gerar_resposta(
     )
     cliente = cliente or _cliente_padrao(_schema_resposta([f"E{i}" for i in range(1, len(chunks) + 1)]))
 
+    sensibilidade["llm_called"] = True
+    sensibilidade["uso_tokens"] = {"status": "indisponivel", "fonte": "response.usage"}
     try:
-        bruto, tokens = _texto_e_tokens(cliente(mensagens))
+        bruto, tokens = _texto_e_tokens(cliente(mensagens), extra=sensibilidade)
     except Exception as exc:
         llm_info = dict(getattr(cliente, "diagnosticos", {}))
         sensibilidade["llm"] = llm_info

@@ -168,7 +168,7 @@ def _trace_dos_registros(query_id: str, registros: list[dict[str, Any]]) -> dict
         method, status, complete = "soma_etapas_legado", None, None
     if terminal:
         details = terminal.get("extra") or {}
-        for key in ("etapas", "history_saved", "http_status", "logging_errors", "tokens_reportados"):
+        for key in ("etapas", "history_saved", "http_status", "logging_errors", "tokens_reportados", "cobertura_tokens"):
             if key in details:
                 resumo[key] = details[key]
     pergunta = next((r["input"] for r in core if isinstance(r.get("input"), str)), None)

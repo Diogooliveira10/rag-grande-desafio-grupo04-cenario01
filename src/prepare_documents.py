@@ -33,6 +33,8 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from src import ocr
+from src.obs import Stage
+from src.offline_observation import observar_offline
 from src.fetch_corpus import load_manifest
 from src.ingest import chunk_text, sha256_file
 from src.pca_indicators import eh_csv_pca, indicadores_pca
@@ -1255,6 +1257,7 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     partial.replace(path)
 
 
+@observar_offline(Stage.PREPARACAO)
 def prepare_documents(
     input_dir: Path,
     output_path: Path,

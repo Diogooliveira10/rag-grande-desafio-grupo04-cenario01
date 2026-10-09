@@ -47,6 +47,13 @@ class ExecutionContext:
         return {key: sum(event["tokens"].get(key, 0) for event in self.events)
                 for key in ("prompt", "completion", "total")}
 
+    def token_coverage(self) -> dict[str, Any]:
+        counts = {status: 0 for status in ("reportado", "parcial", "indisponivel", "cache", "nao_aplicavel")}
+        for event in self.events:
+            status = (event["extra"].get("uso_tokens") or {}).get("status", "nao_aplicavel")
+            counts[status] = counts.get(status, 0) + 1
+        return {"eventos_por_status": counts, "escopo": "uso_disponivel; não é custo total faturado"}
+
 
 def stage_outcome(status: str, extra: dict[str, Any]) -> str:
     if status in {"erro", "erro_llm", "saida_invalida"}:

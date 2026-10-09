@@ -572,7 +572,8 @@ def _default_embed(query: str) -> list[float]:
     return _embed_fn_com_uso([])([query])[0]
 
 
-def _embed_fn_com_uso(uso: list[TokenUsage], estatisticas: dict[str, int] | None = None) -> EmbedFn:
+def _embed_fn_com_uso(uso: list[TokenUsage], estatisticas: dict[str, int] | None = None,
+                       observacoes: list[dict] | None = None) -> EmbedFn:
     """Embedding padrão (servidor da turma) que anota o ``usage`` de cada chamada.
 
     Usado por ``retrieve`` para preencher ``tokens`` do stage
@@ -598,7 +599,14 @@ def _embed_fn_com_uso(uso: list[TokenUsage], estatisticas: dict[str, int] | None
 
         aguardar_modelo()
         client = OpenAI(base_url=config.OLLAMA_URL, api_key=config.OLLAMA_API_KEY, timeout=60.0, max_retries=0)
-        response = client.embeddings.create(model=config.EMBEDDING_MODEL, input=encoded)
+        from src.model_observation import observar_chamada
+        diagnostics: dict = {}
+        try:
+            response = observar_chamada(lambda: client.embeddings.create(model=config.EMBEDDING_MODEL, input=encoded),
+                provider="ecoa", model=config.EMBEDDING_MODEL, sdk_max_retries=0, diagnosticos=diagnostics)
+        finally:
+            if observacoes is not None:
+                observacoes.extend(diagnostics.get("chamadas_modelo", []))
         uso.append(token_usage_from_response(response))
         vectors = [item.embedding for item in sorted(response.data, key=lambda item: getattr(item, "index", 0))]
         if len(vectors) != len(texts) or not all(
@@ -958,7 +966,12 @@ def retrieve(
 
     uso_embedding: list[TokenUsage] = []
     estatisticas_embedding = {"calls": 0, "cache_hits": 0}
-    embed_da_consulta = embed_fn or _embed_fn_com_uso(uso_embedding, estatisticas_embedding)
+    observacoes_embedding: list[dict] = []
+    embed_original = embed_fn or _embed_fn_com_uso(uso_embedding, estatisticas_embedding, observacoes_embedding)
+    def embed_da_consulta(texts):
+        if embed_fn is not None:
+            estatisticas_embedding["calls"] += 1
+        return embed_original(texts)
     recuperacao_degradada = False
     with _span(Stage.RETRIEVAL_DENSO) as span:
         try:
@@ -988,8 +1001,17 @@ def retrieve(
         _registrar_evidencias(span, dense)
         span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(query, dense)
         span.extra.update({"query_embedding": estatisticas_embedding})
+        if observacoes_embedding:
+            from src.model_observation import resumir_uso
+            span.extra["chamadas_modelo"] = observacoes_embedding
+            span.extra["uso_tokens"] = resumir_uso(observacoes_embedding)[1]
+            span.modelo = observacoes_embedding[-1]["model"]
+        elif estatisticas_embedding["cache_hits"]:
+            span.extra["uso_tokens"] = {"status": "cache"}
+        elif embed_fn is not None and estatisticas_embedding["calls"]:
+            span.extra["uso_tokens"] = {"status": "indisponivel", "fonte": "funcao_injetada_sem_usage"}
         if uso_embedding:
-            span.modelo = config.EMBEDDING_MODEL
+            span.modelo = span.modelo or config.EMBEDDING_MODEL
             span.tokens = TokenUsage(
                 prompt=sum(u.prompt for u in uso_embedding),
                 completion=sum(u.completion for u in uso_embedding),

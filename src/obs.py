@@ -59,6 +59,13 @@ class Stage(str, Enum):
     GERACAO = "geracao"
     VALIDACAO = "validacao"
     FEEDBACK = "feedback"
+    COLETA = "coleta"
+    INVENTARIO = "inventario"
+    INGESTAO = "ingestao"
+    PREPARACAO = "preparacao"
+    EMBEDDINGS = "embeddings"
+    INDEXACAO = "indexacao"
+    EMBEDDING_LOTE = "embedding_lote"
     # Fecha cada pergunta: bases consultadas (SQL e vetorial), evidências e fontes citadas.
     RESUMO_CONSULTA = "resumo_consulta"
 
@@ -117,11 +124,22 @@ def sessao_atual() -> str | None:
     return _sessao_atual.get()
 
 
-def token_usage_from_response(response: Any) -> TokenUsage:
-    """Extrai tokens de ``response.usage`` ou retorna uma contagem zerada."""
+def token_usage_from_response(response: Any, *, extra: dict[str, Any] | None = None) -> TokenUsage:
+    """Preserva contadores inteiros; metadado distingue zero de uso desconhecido."""
     usage = getattr(response, "usage", None)
     if usage is None and isinstance(response, dict):
         usage = response.get("usage")
+    def informado(key: str) -> bool:
+        value = usage.get(key) if isinstance(usage, Mapping) else getattr(usage, key, None)
+        return value is not None
+    if extra is not None:
+        fields = {key: informado(key + "_tokens") for key in ("prompt", "completion", "total")}
+        embedding = getattr(response, "data", None) is not None or isinstance(response, Mapping) and "data" in response
+        available = usage is not None and any(fields.values())
+        complete = fields["prompt"] and fields["total"] and (fields["completion"] or embedding)
+        extra["uso_tokens"] = {"status": "reportado" if complete else "parcial" if available else "indisponivel",
+                               "fonte": "response.usage", "chamadas_observadas": 1,
+                               "campos_reportados": fields}
     if usage is None:
         return TokenUsage()
 
@@ -249,6 +267,16 @@ class PipelineLogger:
                          "schema_version": 2, "origem": data["extra"].get("origem", current_origin())}
         data["extra"].update({"outcome": stage_outcome(record.status, data["extra"]),
                               "attempted": record.status != "pulado"})
+        llm = data["extra"].get("llm") or {}
+        if "llm_called" in llm:
+            data["extra"]["llm_called"] = llm["llm_called"]
+        if llm.get("uso_tokens"):
+            data["extra"]["uso_tokens"] = llm["uso_tokens"]
+        if "uso_tokens" not in data["extra"]:
+            data["extra"]["uso_tokens"] = {"status": "reportado" if record.tokens.total else
+                "indisponivel" if data["extra"].get("llm_called") else "nao_aplicavel"}
+        if data["extra"].get("llm_called") or llm.get("llm_called"):
+            data["modelo"] = data["modelo"] or data["extra"].get("model") or llm.get("model")
         if context and (record.run_id, record.query_id) == (context.run_id, context.query_id):
             context.sequence += 1
             data["extra"].update({"schema_version": 2, "origem": context.origin,
@@ -364,7 +392,7 @@ class LogSpan:
         """Define a saída observável e captura tokens opcionais."""
         self.output = output
         if response is not None:
-            self.tokens = token_usage_from_response(response)
+            self.tokens = token_usage_from_response(response, extra=self.extra)
 
     def __exit__(
         self,
@@ -547,7 +575,8 @@ def lifecycle(*, run_id: str, query_id: str, query: str, start: Stage, end: Stag
         state.extra.setdefault("completed", True)
         if context:
             state.extra.update({"etapas": context.stages(), "logging_errors": context.logging_errors,
-                                "tokens_reportados": context.reported_tokens()})
+                                "tokens_reportados": context.reported_tokens(),
+                                "cobertura_tokens": context.token_coverage()})
         masked_output = _mascarar_textos(state.output)
         bounded_output = bounded_log_value(masked_output)
         state.extra.update({"log_text_limit": 8000, "output_truncated": bounded_output != masked_output})

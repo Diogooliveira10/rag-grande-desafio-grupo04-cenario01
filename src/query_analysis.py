@@ -121,7 +121,10 @@ def _analisar_llm(query: str, cliente: Any, span: Any) -> QueryAnalysisResult:
                         continue
                     result = QueryAnalysisResult.model_validate(cached["analysis"])
                     span.extra["cache_hit"] = True
-                    span.extra["llm"] = cached.get("llm", {})
+                    span.extra["llm"] = {**cached.get("llm", {}), "llm_called": False,
+                                         "chamadas_modelo": [], "uso_tokens": {"status": "cache"}}
+                    span.extra["llm_called"] = False
+                    span.extra["uso_tokens"] = {"status": "cache"}
                     span.modelo = cached.get("llm", {}).get("model", config.GENERATION_MODEL)
                     if cached.get("fallback"):
                         span.status = "degradado"
@@ -132,11 +135,13 @@ def _analisar_llm(query: str, cliente: Any, span: Any) -> QueryAnalysisResult:
     span.modelo = config.GENERATION_MODEL
     span.extra["cache_hit"] = False
     chamada = cliente or _cliente_padrao(_schema_analise())
+    span.extra["llm_called"] = True
+    span.extra["uso_tokens"] = {"status": "indisponivel", "fonte": "response.usage"}
     try:
         raw, usage = _texto_e_tokens(chamada([
             {"role": "system", "content": _PROMPT},
             {"role": "user", "content": f"Data da consulta: {date.today().isoformat()}. Corpus: v6, amostra principalmente de 2025.\nPergunta: {query}"},
-        ]))
+        ]), extra=span.extra)
     finally:
         span.extra["llm"] = dict(getattr(chamada, "diagnosticos", {}))
         span.modelo = span.extra["llm"].get("model", config.GENERATION_MODEL)

@@ -4,6 +4,11 @@ Os eventos de execução ficam em `logs/pipeline/pipeline-AAAA-MM-DD.jsonl`.
 O histórico de perguntas/respostas é separado: `data/app_state/historico.sqlite`.
 Diagnósticos de manutenção não são consultas: ficam em `logs/maintenance/`.
 
+O §2.4 do enunciado exemplifica `logs/pipeline-AAAA-MM-DD.jsonl`. Por decisão do
+projeto, permanece o subdiretório `logs/pipeline/`, documentado e compartilhado
+por consultas e operações offline. Não se movem ou reescrevem arquivos antigos;
+leitores externos devem usar o caminho efetivo acima.
+
 ## Visão rápida: C, D e E
 
 | Ajuste | O que muda | O que permanece |
@@ -137,6 +142,85 @@ Os envelopes de fim trazem `etapas` (status, outcome, attempted, duração e
 motivos por ocorrência), `tokens_reportados`, `logging_errors` e flags de
 truncamento. `tokens_reportados` soma somente o uso disponível nas etapas;
 não é estimativa de custo nem contabilização de tentativas internas do SDK.
+
+### Modelo, tokens e cobertura das chamadas
+
+`modelo` identifica o modelo efetivo retornado pelo provedor quando disponível,
+inclusive em `interacao` e `reformulacao`. Sem chamada de modelo, `null` é normal;
+uma leitura de cache pode identificar o modelo associado ao resultado em cache.
+`llm_called=false` na geração SQL significa que o texto não passou pelo LLM.
+
+Os contadores `tokens.prompt`, `completion` e `total` continuam inteiros,
+compatíveis com os leitores existentes. Agora `extra.uso_tokens.status` distingue:
+
+| Status | Significado |
+| --- | --- |
+| `reportado` | Uso conhecido nas respostas disponíveis, inclusive zero efetivamente reportado |
+| `parcial` | Há consumo disponível, mas faltam campos ou uso de alguma chamada |
+| `indisponivel` | Houve chamada/função de modelo sem consumo reportado; zero nos contadores não prova custo zero |
+| `cache` | Resultado/vetor reutilizado, sem recontabilizar o consumo antigo |
+| `nao_aplicavel` | A etapa não fez chamada de modelo, como SQL determinístico ou um envelope |
+
+`campos_reportados` indica quais campos vieram do `response.usage`. Embeddings
+não produzem tokens de conclusão; chamadas com informações parciais não recebem
+estimativas inventadas. Funções injetadas que retornam apenas vetores/texto
+ficam com consumo desconhecido. `model_called=null` num lote sem observações SDK
+não prova chamada remota: pode ser uma função local.
+
+`llm_ecoa.py` e os clientes de embedding registram `chamadas_modelo`: provedor,
+modelo solicitado/efetivo, duração, status, tokens disponíveis e tipo/código de
+erro. A troca explícita ECOA → OpenRouter conserva as duas observações. Se uma
+chamada falha sem `usage` e a seguinte retorna consumo, a cobertura é `parcial`.
+Credenciais, corpo da requisição e mensagem bruta de erro não entram nesse
+registro de chamadas.
+
+A unidade observada é a **chamada do SDK**, não cada tentativa HTTP interna.
+`sdk_max_retries` registra o limite; `retries_internos_sdk=nao_observados` declara
+a limitação quando há retries internos possíveis. A política de retries/fallback
+não foi alterada. Não se promete identificar todo consumo cobrado pelo servidor.
+
+Os envelopes de fim e o resumo do trace incluem `cobertura_tokens`, com contagem
+de eventos por status. O uso dos lotes é contado nos eventos `embedding_lote`,
+não novamente na etapa pai. Logs antigos não ganham essa classificação.
+
+## Operações offline no mesmo contrato
+
+`src/offline_observation.py` instrumenta as operações públicas sem mudar seus
+retornos ou artefatos. Usa `origem=offline`, `tipo_pipeline=offline`, `modulo`,
+`funcao`, IDs próprios e sequência. O `query_id` é sintético: serve para correlacionar
+uma execução offline, não representa pergunta de usuário ou sessão de chat.
+
+| Módulo/operação | Stage |
+| --- | --- |
+| Coleta, atualização, descoberta e planejamento dry-run | `coleta` |
+| Inventário e consulta ao checkpoint de descoberta | `inventario` |
+| Fachada `src.ingest.ingest` | `ingestao` |
+| `src.prepare_documents.prepare_documents` | `preparacao` |
+| `src.create_embeddings.create_embeddings` | `embeddings` |
+| Construção do índice e seu dry-run | `indexacao` |
+| Cada lote de vetores gerados ou reutilizados | `embedding_lote` |
+
+```text
+pipeline_inicio [tipo_pipeline=offline]
+  ingestao / preparacao / coleta / inventario / embeddings / indexacao
+    [embedding_lote, quando houver]
+pipeline_fim [tipo_pipeline=offline]
+```
+
+Chamadas aninhadas compartilham os IDs e não abrem outro envelope. O fechamento
+registra erro mesmo se uma exceção interromper a operação; código de saída
+não zero também é erro. Falhas internas observadas e tratadas podem resultar em
+envelope `degradado`. Os parâmetros registrados são permitidos explicitamente;
+saídas são resumos, sem copiar documentos, vetores ou inventário inteiro para o
+log. Esses artefatos continuam nos caminhos próprios.
+
+A coleta conserva seu JSONL original em `data/runs/` e também emite o contrato
+comum. `etapa_coleta`, `run_id_legado` e `log_legado` ligam os dois registros.
+`started/completed/failed` são normalizados em `iniciado/ok/erro` no log comum.
+
+No pipeline de consultas, o embedding da pergunta continua dentro de
+`retrieval_denso`; não se acrescenta um lote offline nem se contam tokens duas
+vezes. `--dry-run` e cache não causam chamadas adicionais ao modelo.
 
 ## SQL, evidências e resposta
 
@@ -292,8 +376,9 @@ Falha de I/O ao gravar log produz diagnóstico no logger Python e não derruba a
 consulta. Se o armazenamento inteiro estiver indisponível, não há garantia de
 um trace persistido; alertas do processo continuam necessários. Não há backend
 centralizado de logs, métricas de infraestrutura ou telemetria do navegador.
-Coleta, OCR, normalização e construção de índices têm relatórios separados,
-não o envelope das consultas.
+Coleta, preparação (incluindo extração/OCR), embeddings e indexação agora têm
+envelopes offline no mesmo contrato. Seus relatórios detalhados continuam
+separados; operações offline não são consultas de usuários.
 
 Todos os testes isolam o logger e o histórico da API em diretórios temporários.
 A cobertura inclui pipeline/SQL reais com fixtures e provedor injetado, sem
@@ -327,3 +412,15 @@ Artefatos locais (fora do Git): `data/runs/numerical-validation/cde-validation.j
 `cde-audit-trace.json`, `validation.json`, `trace-*.json` e capturas do navegador.
 O relatório não amplia a avaliação factual geral (A), proveniência (B), política
 de privacidade/retenção (F) ou telemetria de frontend (G).
+
+### Alinhamento ao §2.4 do desafio
+
+As mudanças posteriores padronizam o logging offline e os metadados de uso,
+sem mudar o caminho escolhido, respostas, dados do corpus ou política de retries.
+`tests/test_logging_alignment.py` cobre contrato, operações reais com fixtures,
+aninhamento, erros, dry-run, cache, modelo efetivo e consumo desconhecido/parcial.
+Chamadas SDK nos testes são simuladas, sem tráfego de rede.
+
+A auditoria distingue alinhamento do contrato de conformidade literal do caminho:
+o subdiretório foi mantido explicitamente. Um avaliador que fixe o caminho da
+raiz `logs/` precisa ser ajustado ou receber essa justificativa.

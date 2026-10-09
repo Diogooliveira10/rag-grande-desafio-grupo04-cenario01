@@ -243,19 +243,21 @@ def reformular_pergunta(
     ) as span:
         try:
             saida = (cliente or _cliente_padrao(diagnosticos))(_mensagens(query, turnos))
+            span.tokens = token_usage_from_response(saida, extra=span.extra)
             span.extra.update(diagnosticos)
-            if not isinstance(saida, str):
-                span.tokens = token_usage_from_response(saida)
+            span.modelo = diagnosticos.get("model") or getattr(saida, "model", None)
             reescrita = _extrair_pergunta(_texto(saida))
         except (ValueError, KeyError, TypeError, AttributeError, IndexError) as erro:
             # Saída fora do formato: segue com a pergunta original.
             span.extra.update(diagnosticos)
+            span.modelo = diagnosticos.get("model")
             span.extra.update({"fallback": "pergunta_original", "error_type": type(erro).__name__})
             span.status = "degradado"
             span.set_result({"pergunta": query, "reescrita": False, "motivo": "saida_invalida"})
             return Reformulacao(query, False, "saida_invalida")
         except Exception as erro:  # noqa: BLE001 - provedor fora do ar não derruba a consulta
             span.extra.update(diagnosticos)
+            span.modelo = diagnosticos.get("model")
             span.extra.update({"fallback": "pergunta_original", "error_type": type(erro).__name__})
             span.status = "degradado"
             span.set_result({"pergunta": query, "reescrita": False, "motivo": "llm_falhou"})

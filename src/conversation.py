@@ -57,8 +57,9 @@ def _interpret_interaction(query: str, *, run_id: str, query_id: str) -> Interac
                 [{"role": "system", "content": _INTERACTION_PROMPT}, {"role": "user", "content": masked}],
                 response_format={"type": "json_object"}, max_tokens=1200, diagnosticos=diagnostics,
             )
-            span.tokens = token_usage_from_response(response)
+            span.tokens = token_usage_from_response(response, extra=span.extra)
             span.extra.update(diagnostics)
+            span.modelo = diagnostics.get("model") or getattr(response, "model", None)
             text = response.choices[0].message.content or ""
             start, end = text.find("{"), text.rfind("}")
             decision = InteractionDecision.model_validate(json.loads(text[start:end + 1]))
@@ -69,6 +70,7 @@ def _interpret_interaction(query: str, *, run_id: str, query_id: str) -> Interac
         except Exception as error:
             # Falha/saída inválida não transforma uma consulta factual em conversa.
             span.extra.update(diagnostics)
+            span.modelo = diagnostics.get("model")
             span.status = "degradado"
             span.extra["fallback"] = "pipeline_rag"
             span.extra["error_type"] = type(error).__name__

@@ -29,10 +29,13 @@ def completar_chat(mensagens: list[dict], *, response_format: dict | None = None
                    diagnosticos: dict | None = None, **parametros):
     """Modo auto: ECOA com fallback Free; modo openrouter: sem chamadas ao LLM ECOA."""
     from src.obs import aguardar_modelo
+    from src.model_observation import observar_chamada
 
     info = diagnosticos if diagnosticos is not None else {}
     info.update({"provider": "ecoa", "model_requested": GENERATION_MODEL,
-                 "model": GENERATION_MODEL, "fallback_used": False})
+                 "model": GENERATION_MODEL, "fallback_used": False,
+                 "llm_called": False, "chamadas_modelo": [],
+                 "uso_tokens": {"status": "nao_aplicavel"}})
     arguments = {"messages": mensagens, "temperature": 0.2, **parametros}
     if response_format is not None:
         arguments["response_format"] = response_format
@@ -49,8 +52,10 @@ def completar_chat(mensagens: list[dict], *, response_format: dict | None = None
         fallback_arguments = {**arguments, "max_tokens": min(arguments.get("max_tokens", config.OPENROUTER_MAX_TOKENS), config.OPENROUTER_MAX_TOKENS),
                               "extra_body": {"provider": {"require_parameters": True}}}
         try:
-            return fallback.chat.completions.create(
-                model=config.OPENROUTER_MODEL_FALLBACK, **fallback_arguments)
+            return observar_chamada(
+                lambda: fallback.chat.completions.create(model=config.OPENROUTER_MODEL_FALLBACK, **fallback_arguments),
+                provider="openrouter", model=config.OPENROUTER_MODEL_FALLBACK,
+                sdk_max_retries=0, diagnosticos=info)
         except Exception as fallback_error:
             info["fallback_error_type"] = type(fallback_error).__name__
             raise
@@ -62,7 +67,10 @@ def completar_chat(mensagens: list[dict], *, response_format: dict | None = None
             timeout=config.GENERATION_TIMEOUT, max_retries=config.GENERATION_MAX_RETRIES
         ) if hasattr(client, "with_options") else client
         try:
-            response = primary.chat.completions.create(model=GENERATION_MODEL, **arguments)
+            response = observar_chamada(
+                lambda: primary.chat.completions.create(model=GENERATION_MODEL, **arguments),
+                provider="ecoa", model=GENERATION_MODEL,
+                sdk_max_retries=config.GENERATION_MAX_RETRIES, diagnosticos=info)
         except Exception as error:
             if not erro_de_disponibilidade(error) or not config.OPENROUTER_API_KEY:
                 raise
@@ -97,10 +105,9 @@ def gerar_resposta(prompt: str) -> str:
 
 def gerar_embedding(texto: str) -> list[float]:
     """Exemplo simples de geração de embedding vetorial para um texto."""
-    response = client.embeddings.create(
-        model=EMBEDDING_MODEL,
-        input=texto,
-    )
+    from src.model_observation import observar_chamada
+    response = observar_chamada(lambda: client.embeddings.create(model=EMBEDDING_MODEL, input=texto),
+        provider="ecoa", model=EMBEDDING_MODEL, sdk_max_retries=getattr(client, "max_retries", None))
     return response.data[0].embedding
 
 
@@ -120,10 +127,9 @@ def gerar_embeddings(
         return []
     normalized_base_url = _normalizar_base_url(base_url)
     active_client = client if normalized_base_url == _normalizar_base_url(OLLAMA_URL) else _client_for(normalized_base_url, api_key)
-    response = active_client.embeddings.create(
-        model=model,
-        input=textos,
-    )
+    from src.model_observation import observar_chamada
+    response = observar_chamada(lambda: active_client.embeddings.create(model=model, input=textos),
+        provider="openai_compativel", model=model, sdk_max_retries=getattr(active_client, "max_retries", None))
     ordered = sorted(response.data, key=lambda item: getattr(item, "index", 0))
     return [item.embedding for item in ordered]
 

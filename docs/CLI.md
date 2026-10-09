@@ -3,6 +3,14 @@
 Os comandos abaixo foram conferidos com as interfaces atuais em `src/`. Para
 consultar todas as opções de um comando, acrescente `--help`.
 
+Coleta, inventário, ingestão/preparação, embeddings e indexação registram o
+contrato comum em `logs/pipeline/pipeline-AAAA-MM-DD.jsonl`, inclusive operações
+dry-run válidas. Cada execução recebe IDs próprios (`query_id` sintético,
+`origem=offline`), sem sessão de chat. Relatórios e logs de coleta em `data/runs/`
+continuam existindo. Lotes de embedding indicam se os tokens foram reportados,
+reutilizados por cache ou não informados. O logging não altera os retornos da
+CLI nem dispara chamadas extras ao modelo. Veja [OBSERVABILIDADE.md](OBSERVABILIDADE.md).
+
 ## Snapshot oficial v6
 
 A v6 é a versão ativa: 1.400 arquivos, cinco arquivos por órgão/base no máximo

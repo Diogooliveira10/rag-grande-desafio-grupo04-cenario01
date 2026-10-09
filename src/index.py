@@ -32,6 +32,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import config  # noqa: E402
+from src.obs import Stage
+from src.offline_observation import observar_offline, observar_lote_embedding
 
 EmbedFn = Callable[[list[str]], list[list[float]]]
 
@@ -149,7 +151,9 @@ def _default_embed_fn(model: str) -> EmbedFn:
     client = OpenAI(base_url=config.OLLAMA_URL, api_key=config.OLLAMA_API_KEY)
 
     def embed(texts: list[str]) -> list[list[float]]:
-        response = client.embeddings.create(model=model, input=texts)
+        from src.model_observation import observar_chamada
+        response = observar_chamada(lambda: client.embeddings.create(model=model, input=texts),
+            provider="ecoa", model=model, sdk_max_retries=getattr(client, "max_retries", None))
         return [item.embedding for item in response.data]
 
     return embed
@@ -188,10 +192,12 @@ def stored_embed_fn(embeddings_file: Path) -> tuple[EmbedFn, str]:
             raise KeyError(f"{len(missing)} chunk(s) sem vetor em {embeddings_file}: {missing[:3]}")
         return [vectors[digest] for digest in digests]
 
+    embed.observation_source = "cache"
     embed.encoding_config = json.loads(configurations.pop())
     return embed, models.pop()
 
 
+@observar_offline(Stage.INDEXACAO)
 def build_index(
     input_file: Path,
     output_dir: Path,
@@ -244,7 +250,9 @@ def build_index(
         embedding_rows: list[list[float]] = []
         with vectors_path.open("w", encoding="utf-8", newline="\n") as handle:
             for batch in batched(chunks, batch_size):
-                embeddings = embed_fn([chunk.text for chunk in batch])
+                with observar_lote_embedding(model=model, count=len(batch),
+                    cache=getattr(embed_fn, "observation_source", None) == "cache", base_id=base_id):
+                    embeddings = embed_fn([chunk.text for chunk in batch])
                 if len(embeddings) != len(batch):
                     raise RuntimeError(
                         f"embed_fn retornou {len(embeddings)} vetores para {len(batch)} textos"
@@ -312,6 +320,23 @@ def build_index(
     return global_manifest
 
 
+@observar_offline(Stage.INDEXACAO)
+def _dry_run_index(input_file: Path) -> dict[str, Any]:
+    by_base: dict[str, int] = defaultdict(int)
+    skipped = 0
+    ilegiveis = 0
+    for chunk in read_normalized_chunks(input_file):
+        if not chunk.text.strip():
+            skipped += 1
+            continue
+        if _texto_ilegivel(chunk):
+            ilegiveis += 1
+            continue
+        by_base[chunk.base_id] += 1
+    return {"chunks_por_base": dict(sorted(by_base.items())),
+            "chunks_sem_texto_ignorados": skipped, "chunks_ilegiveis_ignorados": ilegiveis}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, default=DEFAULT_INPUT, help="JSONL normalizado de entrada")
@@ -340,22 +365,7 @@ def main() -> int:
         parser.error("--batch-size deve ser >= 1")
 
     if args.dry_run:
-        by_base: dict[str, int] = defaultdict(int)
-        skipped = 0
-        ilegiveis = 0
-        for chunk in read_normalized_chunks(args.input):
-            if not chunk.text.strip():
-                skipped += 1
-                continue
-            if _texto_ilegivel(chunk):
-                ilegiveis += 1
-                continue
-            by_base[chunk.base_id] += 1
-        summary = {
-            "chunks_por_base": dict(sorted(by_base.items())),
-            "chunks_sem_texto_ignorados": skipped,
-            "chunks_ilegiveis_ignorados": ilegiveis,
-        }
+        summary = _dry_run_index(args.input)
         print(json.dumps(summary, ensure_ascii=False))
         return 0
 
