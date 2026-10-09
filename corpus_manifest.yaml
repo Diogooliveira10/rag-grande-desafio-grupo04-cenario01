@@ -347,7 +347,7 @@ bases:
   - base_id: emails_sinteticos
     escopo: oficial
     natureza: conversacional
-    fonte: "Conversações sintéticas de compras públicas do RJ, geradas pelo tutor e integradas ao projeto por João em 2026-10-05"
+    fonte: "Conversações sintéticas de compras públicas do RJ, geradas pelo tutor"
     acesso:
       tipo: arquivo_local
       origem: "data/synthetic/conversacional_sintetica"
