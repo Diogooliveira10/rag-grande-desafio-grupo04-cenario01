@@ -302,3 +302,18 @@ Hoje fiz o item 7 do documento de correções (qualidade do corpus) e configurei
 
 - Usei o Claude Code para escrever os testes e refazer o índice.
 
+## Encontro 12 - 2026-10-09
+
+### Relato individual - Pâmela de Freitas
+
+Hoje fiz correção no query_analysis "Prefeitura de X" não casava com × "MUNICIPIO DE X"
+
+- "Quais contratos da Prefeitura de Maricá existem?" gerava o filtro "Prefeitura de Maricá", mas no PNCP o órgão se chama "MUNICIPIO DE MARICA" ("PREFEITURA MUNICIPAL DE MARICA" é o nome da unidade). O filtro não casava com nada, e a busca era ampliada sem ele.
+- Agora "Prefeitura (Municipal) de X", "Prefeitura da Cidade do X", "Município de X" e "Prefeitura do Rio" viram o nome do órgão no PNCP, tirado do catálogo de órgãos do corpus.
+- A pergunta de Maricá passou a trazer só os contratos do MUNICIPIO DE MARICA, sem ampliar a busca (antes vinham 625 trechos de todos os órgãos). O SQL continuou com o mesmo resultado.
+
+
+### Uso de assistentes de IA:
+
+- Usei o Claude Code para implementar a correção
+
