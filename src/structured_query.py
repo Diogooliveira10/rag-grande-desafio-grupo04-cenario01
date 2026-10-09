@@ -143,6 +143,7 @@ _PALAVRAS_GENERICAS = frozenset(
     servico servicos aquisicao aquisicoes fornecimento prestacao especializada especializado
     informacao informacoes detalhe detalhes firmaram firmou celebraram disponiveis disponivel
     comparando publicando assinando somando informando mostrando listando buscando calculando
+    continuacao anterior pergunta
     assinou assinaram contratou contrataram comprou compraram gastou gastaram
     seguem segue seguindo base baseado baseada baseados baseadas fundamentado fundamentada fundamentados
     fundamentadas fundamento amparo amparado amparada amparados amparadas conforme lei leis decreto decretos
