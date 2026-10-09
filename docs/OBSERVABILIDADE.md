@@ -4,6 +4,17 @@ Os eventos de execução ficam em `logs/pipeline/pipeline-AAAA-MM-DD.jsonl`.
 O histórico de perguntas/respostas é separado: `data/app_state/historico.sqlite`.
 Diagnósticos de manutenção não são consultas: ficam em `logs/maintenance/`.
 
+## Visão rápida: C, D e E
+
+| Ajuste | O que muda | O que permanece |
+| --- | --- | --- |
+| C — SQL direto | Uma conta suficiente dispensa recuperação e reranker | Regras de cálculo, fontes e fallback |
+| D — Auditoria opcional | Registra evidências completas quando habilitada | Resumo padrão, orçamento do LLM e mascaramento |
+| E — Fila e índice | Grava eventos em lotes e consulta traces por índice | JSONL como fonte de verdade e contrato da API |
+
+Esses ajustes valem para CLI e API/frontend, pois compartilham o pipeline.
+Não exigem mudanças no frontend ou reconstrução do corpus.
+
 ## Caminho de uma pergunta
 
 Uma chamada válida a `POST /api/v1/query` produz:
@@ -26,6 +37,13 @@ requisicao_fim
 
 O caminho varia: cortesia não consulta o acervo, guardrails podem recusar,
 intenções podem repetir a busca/SQL e filtros podem exigir uma segunda busca.
+Perguntas exclusivamente analíticas tentam SQL primeiro. Se o resultado é
+suficiente para a resposta determinística, busca densa, BM25, RRF e rerank ficam
+com `status=pulado`, `attempted=false` e `motivo=calculo_sql_suficiente`;
+`consultou_vetorial=false`. Nem embeddings nem cross-encoder são carregados
+nesse caminho. SQL ausente/insuficiente mantém a busca como fallback; perguntas
+mistas continuam recuperando evidências não calculáveis por SQL. Em múltiplas
+intenções, o desvio é avaliado por subpergunta, sem descartar a outra intenção.
 A ordem efetiva é a ordem dos eventos, não um checklist de etapas obrigatórias.
 `interacao` registra também decisões por regras, com `metodo=regras` e
 `llm_called=false`. `pipeline_fim` contém a resposta final, inclusive avisos e
@@ -40,6 +58,38 @@ inválidos recebem `422` e um envelope `rejeitado`, sem gravar corpo não valida
 Uma chamada direta a `src.pipeline.responder` tem o envelope `pipeline_*`,
 mas não `requisicao_*` nem persistência de histórico. Chamadas isoladas a módulos
 não prometem uma execução completa do pipeline.
+
+### SQL direto: exemplo de funcionamento (C)
+
+Para **“Qual o valor total dos contratos de 2025 no corpus?”**, o caminho é:
+
+```text
+Pergunta -> análise dos filtros -> roteamento -> tentativa SQL
+                                                   |
+                                         Resultado suficiente?
+                                          /                 \
+                                        sim                 não
+                                         |                   |
+                              resposta determinística   recuperação normal
+                              com fontes SQL            e geração/guardrails
+```
+
+`src/structured_query.py` identifica operações analíticas suportadas e executa
+SQL fixo e parametrizado; o LLM não escreve a consulta. O resultado precisa
+atender ao critério de suficiência compartilhado com `src/generate.py`.
+Nesse caso, `src/pipeline.py` pula a recuperação e a geração apenas formata os
+resultados SQL com citações, sem pedir ao LLM para reescrever os números.
+
+No exemplo, “contratos de 2025” considera assinatura; “publicados em 2025”
+considera publicação. O resultado continua limitado à amostra presente no corpus,
+não ao total de contratos do RJ.
+
+Não basta a pergunta mencionar um número: listagens, métricas não suportadas e
+perguntas mistas não ganham automaticamente o desvio. Se SQL falhar ou não
+fornecer evidência suficiente, a recuperação continua disponível; isso não
+garante uma resposta, pois a geração ainda aplica os guardrails e pode recusar.
+Em uma pergunta com intenções analítica e normativa separadas, só a parte
+analítica suficiente dispensa busca; a normativa continua recuperando evidências.
 
 ## Contrato dos eventos
 
@@ -106,13 +156,43 @@ não é estimativa de custo nem contabilização de tentativas internas do SDK.
   `sql_retornou_evidencia` e `vetorial_retornou_evidencia` distinguem retorno de
   evidência. `degradado` indica erros/fallbacks tratados.
 
-Textos são limitados a 8.000 caracteres por string. A geração informa
+No resumo padrão, textos são limitados a 8.000 caracteres por string. A geração informa
 `prompt_truncated` e `answer_truncated`; os envelopes informam
 `output_truncated` e `log_text_limit`. A resposta HTTP/histórico não é reduzida
 por esses limites do log. CPF, telefone e e-mail pessoal são mascarados também
 em `extra` (parâmetros SQL, resultados, erros), **antes** de cortar textos.
-Não é gravada a saída bruta integral do provedor, nem o texto de cada candidato
-recuperado; o prompt mostra a evidência efetivamente enviada à geração.
+Não é gravada a saída bruta integral do provedor. No modo padrão, não se grava
+o texto de cada candidato recuperado; o prompt mostra a evidência efetivamente
+enviada à geração.
+
+### Auditoria completa opcional (D)
+
+`LOG_EVIDENCE_DETAIL=resumo` mantém os limites acima e é o padrão. Para investigar
+novas execuções, altere no `.env`:
+
+```dotenv
+LOG_EVIDENCE_DETAIL=completo
+```
+
+**Reinicie o backend** para carregar a configuração. Para voltar ao modo compacto,
+use `LOG_EVIDENCE_DETAIL=resumo` e reinicie novamente. O campo aditivo
+`extra.auditoria_evidencias` registra, sem os cortes do resumo:
+
+- todos os candidatos **retornados por cada etapa**, com texto, metadados,
+  posição e scores, inclusive além dos primeiros 10; no rerank, também os
+  candidatos pontuados que ficaram fora do `top_k`;
+- todas as linhas do resultado SQL, além das primeiras 20 do resumo;
+- evidências disponíveis à geração, texto original mascarado e texto selecionado,
+  seleção/exclusão por orçamento e prompt completo mascarado;
+- na geração SQL, evidências usadas na resposta e ausência de prompt de LLM.
+
+Isso não aumenta o contexto enviado ao modelo nem muda respostas. As mesmas
+regras de mascaramento/sensibilidade continuam válidas; conteúdo restrito não
+é copiado para a auditoria. Evidências da geração já passaram pelo filtro de
+sensibilidade; os candidatos anteriores permanecem rastreáveis nas etapas de
+recuperação. Não é uma cópia do corpus inteiro nem auditoria de todos os comandos
+de construção do banco. Há mais serialização, I/O e espaço em disco; use o modo
+completo quando precisar investigar. Logs antigos não ganham esses detalhes.
 
 ## Trace e tempo total
 
@@ -123,6 +203,59 @@ Os endpoints existentes continuam:
 
 Mesma autorização: `X-Session-Id` da conversa ou `X-API-Key` administrativa.
 Os campos novos são aditivos; nomes antigos e leitura de JSONL legado continuam.
+
+### Persistência e índice local (E)
+
+`src/log_store.py` mantém uma fila FIFO limitada a 256 eventos por processo,
+com lotes de até 64. O contexto (sessão, origem e sequência) é capturado antes
+de enfileirar. Fila cheia aplica contrapressão, sem descartar silenciosamente.
+Eventos terminais/flush esperam a persistência; encerramento normal drena a fila.
+Chamadas isoladas, sem contexto de execução, mantêm escrita imediata.
+
+```text
+Etapa da consulta
+  -> captura contexto, mascara e serializa o evento
+  -> coloca na fila limitada do processo
+  -> worker reúne um lote
+  -> obtém lock de escrita no SQLite
+  -> acrescenta eventos ao JSONL e atualiza o índice
+  -> libera o lock
+
+Pedido de trace
+  -> importa apenas bytes novos de JSONL, quando houver
+  -> busca eventos pelo índice
+  -> monta a resposta no contrato existente
+```
+
+A fila desloca a gravação para o worker, mas não elimina todo o custo da etapa:
+captura de contexto, mascaramento e serialização continuam no chamador. Se a
+fila estiver cheia, ele espera espaço. Antes de concluir os envelopes da
+consulta/requisição, há espera pelos eventos pendentes; por isso, o trace pode
+ser consultado após a resposta sem depender de uma gravação futura da fila.
+Falhas de persistência são reportadas no logger Python e contabilizadas no
+contexto, sem transformar uma resposta calculada em erro HTTP.
+
+`logs/pipeline/pipeline-index.sqlite` é um **índice derivado**, em SQLite/WAL.
+O lock transacional coordena append JSONL entre processos que usam esse mesmo
+índice. Há índices por `query_id`, `session_id` e `run_id`. A consulta quente não
+relê o conteúdo JSONL: verifica os arquivos e busca pelo índice. Arquivos legados
+são importados incrementalmente, por offset; duplicatas são eliminadas.
+Substituição, truncamento e remoção detectados atualizam o cache sem modificar os
+logs. O índice acompanha o expurgo existente, sem mudar a política de retenção.
+
+JSONL continua sendo a fonte de verdade. Se o append ocorrer antes de uma falha
+na transação do índice, a leitura seguinte recupera os registros do JSONL. Com
+a aplicação parada, pode-se apagar o índice e seus arquivos `-wal`/`-shm` para
+reconstruí-lo na próxima leitura. Falha de SQLite/I/O permite a leitura linear
+legada como fallback, quando os JSONL estiverem acessíveis.
+
+Limites: filesystem local compartilhado entre os processos; não é um coletor
+distribuído, nem se recomenda WAL em filesystem de rede. Escritores externos
+que não usam o índice não participam do lock. Uma morte abrupta pode perder
+eventos ainda na fila; não se promete `fsync` por evento ou transação atômica
+entre JSONL e SQLite. Importação inicial/reconstrução ainda lê os arquivos,
+respostas de trace continuam proporcionais ao número de eventos da consulta e
+a descoberta dos arquivos continua proporcional à quantidade de arquivos.
 
 | Campo do trace | Significado |
 | --- | --- |
@@ -165,4 +298,32 @@ não o envelope das consultas.
 Todos os testes isolam o logger e o histórico da API em diretórios temporários.
 A cobertura inclui pipeline/SQL reais com fixtures e provedor injetado, sem
 chamadas externas: `tests/test_pipeline_observability.py`, `tests/test_trace.py`
-e `tests/test_pipeline_logs.py`.
+e `tests/test_pipeline_logs.py`. Os ajustes C/D/E são cobertos também por
+`tests/test_sql_fast_path.py`, `tests/test_log_evidence.py` e
+`tests/test_log_store.py` (incluindo processos concorrentes, contrapressão,
+flush, importação incremental e reconstrução do índice).
+
+### Validação dos ajustes C/D/E — 09/10/2026
+
+- Backend: `python -m pytest -q` — **1.338 testes passaram**.
+- Frontend: `npm test` em `../frontendRAG` — **36 testes passaram**, sem alterar
+  arquivos do frontend.
+- CLI e navegador Edge/Playwright: **20/20 verificações** nos dez casos de
+  `eval/validate_numerical_corpus.py`; números iguais ao gabarito do corpus bruto,
+  fontes SQL válidas e traces completos. Todos os dez traces da API indicaram
+  `consultou_vetorial=false`, quatro etapas puladas por SQL suficiente,
+  geração determinística e `logging_errors=0`.
+- Nessa rodada local, pipeline de **57–96 ms**; CLI incluindo inicialização do
+  processo de **0,61–0,67 s**. Não são benchmarks de produção/SLA.
+- Auditoria completa verificada também por CLI real com total de contratos de
+  2025; o resumo permanece o padrão. Fixtures verificam candidatos além de 10,
+  resultado SQL além de 20 linhas, evidências excluídas e prompt além de 8.000
+  caracteres, sem mudar o contexto enviado ao modelo.
+- Concorrência: cinco execuções consecutivas com três processos e 90 eventos
+  íntegros por execução. Trace quente testado sem abrir conteúdo JSONL; a leitura
+  indexada foi comparada com a leitura legada no log real.
+
+Artefatos locais (fora do Git): `data/runs/numerical-validation/cde-validation.json`,
+`cde-audit-trace.json`, `validation.json`, `trace-*.json` e capturas do navegador.
+O relatório não amplia a avaliação factual geral (A), proveniência (B), política
+de privacidade/retenção (F) ou telemetria de frontend (G).

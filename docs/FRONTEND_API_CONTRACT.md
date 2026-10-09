@@ -72,7 +72,9 @@ agrupamento e evolução) sem intenção normativa/conversacional são renderiza
 diretamente dos resultados SQL, sem passar os números pelo LLM. O contrato
 `QueryResponse` não muda: as fontes continuam em `sources_used` e o texto cita
 `[n]`. Perguntas mistas e operações sem cálculo disponível mantêm o caminho
-normal de geração.
+normal de geração. Quando o SQL é suficiente, a busca vetorial/BM25/RRF e o
+reranker são pulados (`motivo=calculo_sql_suficiente`, `attempted=false`);
+`consultou_vetorial=false` não indica erro. Não é preciso mudar o frontend.
 
 “Contratos de 2025” usa o ano de assinatura; “contratos publicados em 2025”
 usa publicação. Totais incluem todos os valores registrados, inclusive zeros
