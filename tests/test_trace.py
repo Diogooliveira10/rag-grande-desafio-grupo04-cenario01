@@ -208,6 +208,38 @@ def test_trace_de_log_antigo_sem_resumo_deduz_as_bases():
     assert [e["base"] for e in trace["etapas"]] == [None, "sql", None]
 
 
+def test_trace_de_log_antigo_tira_evidencias_e_confianca_das_etapas():
+    def etapa(stage, output, extra):
+        obs.registrar(run_id="run1", query_id="q_velho", stage=stage, status="ok", latencia_ms=1,
+                      input="Quantos contratos?", output=output, extra=extra)
+
+    etapa(obs.Stage.FUSAO_RRF, "3 chunks; top base: editais_normativo", {"evidencias": [
+        {"chunk_id": "editais_normativo:a", "base_id": "editais_normativo"},
+        {"chunk_id": "editais_normativo:b", "base_id": "editais_normativo"},
+        {"chunk_id": "pca_agregado:c", "base_id": "pca_agregado"},
+    ]})
+    etapa(obs.Stage.CONSULTA_SQL, "2 linha(s) em 1 chunk(s)", {"linhas": 2, "chunks": 1})
+    etapa(obs.Stage.GERACAO, "resposta media; 2 fontes",
+          {"confidence_level": "media", "is_refusal": False, "num_sources": 2})
+    etapa(obs.Stage.VALIDACAO, "2 fontes válidas", {"confidence_level": "baixa", "is_refusal": False})
+
+    resumo = montar_trace("q_velho")["resumo"]
+
+    assert resumo["evidencias_sql"] == 1
+    assert resumo["evidencias_vetorial"] == {"editais_normativo": 2, "pca_agregado": 1}
+    assert resumo["confidence_level"] == "baixa"
+    assert resumo["is_refusal"] is False
+    assert resumo["num_fontes"] == 2
+
+
+def test_trace_de_log_antigo_sem_lista_de_evidencias_usa_o_total_do_output():
+    obs.registrar(run_id="run1", query_id="q_velho2", stage=obs.Stage.RERANK, status="ok", latencia_ms=1,
+                  input="Quantos contratos?", output="10 chunks; top base: contratos_estruturado",
+                  extra={"rerank_k": 10})
+
+    assert montar_trace("q_velho2")["resumo"]["evidencias_vetorial"] == 10
+
+
 def test_trace_de_query_id_desconhecido_e_none():
     obs.registrar(run_id="run1", query_id="q_outro", stage=obs.Stage.ROTEAMENTO, status="ok",
                   latencia_ms=0, input="x", output="y")

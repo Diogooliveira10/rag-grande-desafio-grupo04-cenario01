@@ -106,6 +106,9 @@ reenviando as últimas trocas no campo opcional `historico` de
   linhas devolvidas, prompt e resposta do LLM). `resumo` diz se a pergunta
   consultou a base SQL (`consultou_sql`) e a vetorial (`consultou_vetorial`),
   quantas evidências vieram de cada uma e quais fontes foram citadas.
+  Perguntas registradas antes de 05/10 vêm com `caminho: null`, sem
+  `fontes_citadas` (só a contagem, em `num_fontes`) e com
+  `evidencias_vetorial` às vezes como número total em vez de contagem por base.
 - `GET /api/v1/sessions/{session_id}/trace`: a conversa inteira, com as
   perguntas em ordem (`perguntas[]` com `query_id`, `pergunta`, `resumo` e os
   nomes das etapas) e quantas delas usaram SQL e busca vetorial. O detalhe de
