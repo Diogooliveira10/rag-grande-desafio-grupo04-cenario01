@@ -347,7 +347,7 @@ bases:
   - base_id: emails_sinteticos
     escopo: oficial
     natureza: conversacional
-    fonte: "Conversações sintéticas de compras públicas do RJ fornecidas pelo grupo"
+    fonte: "Conversações sintéticas de compras públicas do RJ, geradas pelo tutor e integradas ao projeto por João em 2026-10-05"
     acesso:
       tipo: arquivo_local
       origem: "data/synthetic/conversacional_sintetica"
@@ -355,7 +355,7 @@ bases:
     selecao_deterministica: true
     volume_alvo: 25
     formato: json
-    licenca: "Conteúdo sintético fornecido pelo grupo; licença não informada"
+    licenca: "Conteúdo sintético gerado pelo tutor; licença não informada, condições de uso a confirmar com o tutor"
     dados_sinteticos: true
     sensitivity_default: restrito
     deduplicacao: "conversation_id + SHA-256; somente JSON individual, sem duplicar TXT/JSONL"
