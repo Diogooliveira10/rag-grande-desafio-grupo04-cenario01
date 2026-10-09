@@ -1030,3 +1030,65 @@ def test_mediana_por_veiculo_nao_compila_calculo_sobre_global():
     filters = analisar_query(question, modo='regras').filtros
     assert filters.tipo_valor == 'unitario'
     assert sq.detectar_consulta(question, filters, ESTRUTURADA + AGREGADA) is None
+
+
+# --------------------------------------------------------------------------
+# Filtro por CNPJ (do órgão ou do fornecedor)
+# --------------------------------------------------------------------------
+
+def _contrato(numero, ni_fornecedor, fornecedor, valor, cnpj_orgao="29131075000193"):
+    return {
+        "numeroControlePNCP": numero, "anoContrato": 2025, "dataAssinatura": "2025-05-10",
+        "dataPublicacaoPncp": "2025-05-12T00:00:00", "objetoContrato": "Serviços de consultoria",
+        "valorGlobal": valor, "niFornecedor": ni_fornecedor, "nomeRazaoSocialFornecedor": fornecedor,
+        "orgaoEntidade": {"cnpj": cnpj_orgao, "razaoSocial": "MUNICIPIO DE MARICA", "esferaId": "M"},
+        "unidadeOrgao": {"ufSigla": "RJ", "municipioNome": "Maricá", "nomeUnidade": "U"},
+    }
+
+
+@pytest.fixture
+def base_cnpj(tmp_path):
+    documents = escrever_documents(tmp_path / "documents.jsonl", contratacoes=[
+        _contrato("29131075000193-2-000001/2025", "05340639000130", "PRIME CONSULTORIA", 1000.0),
+        _contrato("29131075000193-2-000002/2025", "05340639000130", "PRIME CONSULTORIA", 3000.0),
+        _contrato("30381552000158-2-000003/2025", "15064270000133", "OUTRA LTDA", 500.0,
+                  cnpj_orgao="30381552000158"),
+        _contrato("30381552000158-2-000004/2025", "12345678901", "PESSOA FISICA", 100.0,
+                  cnpj_orgao="30381552000158"),
+    ])
+    banco = Banco(sqlite_path=tmp_path / "base.sqlite")
+    structured_db.construir_banco(documents, banco)
+    return {"banco": banco, "documents_file": documents}
+
+
+def test_fornecedor_cnpj_vem_do_ni_fornecedor_e_cpf_fica_vazio(base_cnpj):
+    linhas = base_cnpj["banco"].consultar(
+        "SELECT numero_controle_pncp, fornecedor_cnpj FROM contratacoes ORDER BY numero_controle_pncp")
+
+    assert [linha["fornecedor_cnpj"] for linha in linhas] == [
+        "05340639000130", "05340639000130", "15064270000133", None]
+
+
+@pytest.mark.parametrize("pergunta", [
+    "Quais contratos tem o fornecedor de CNPJ 05.340.639/0001-30?",
+    "Quais contratos tem o fornecedor de CNPJ 05340639000130?",
+])
+def test_listagem_pelo_cnpj_do_fornecedor(pergunta, base_cnpj):
+    from src.query_analysis import analisar_query
+    consulta = sq.detectar_consulta(pergunta, analisar_query(pergunta).filtros, ESTRUTURADA)
+
+    _, _, linhas = sq.executar_consulta(consulta, base_cnpj["banco"])
+
+    assert consulta.tipo == "listagem"
+    assert linhas[0].startswith("2 registros")
+    assert all("PRIME CONSULTORIA" in linha for linha in linhas[1:])
+
+
+def test_soma_pelo_cnpj_do_orgao(base_cnpj):
+    from src.query_analysis import analisar_query
+    pergunta = "Qual o valor total dos contratos do CNPJ 29.131.075/0001-93 em 2025?"
+    consulta = sq.detectar_consulta(pergunta, analisar_query(pergunta).filtros, ESTRUTURADA)
+
+    _, _, linhas = sq.executar_consulta(consulta, base_cnpj["banco"])
+
+    assert "2 registros" in linhas[0] and "R$ 4.000,00" in linhas[0]

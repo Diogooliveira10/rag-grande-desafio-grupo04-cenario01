@@ -143,7 +143,7 @@ _PALAVRAS_GENERICAS = frozenset(
     servico servicos aquisicao aquisicoes fornecimento prestacao especializada especializado
     informacao informacoes detalhe detalhes firmaram firmou celebraram disponiveis disponivel
     comparando publicando assinando somando informando mostrando listando buscando calculando
-    continuacao anterior pergunta
+    continuacao anterior pergunta principal principais
     assinou assinaram contratou contrataram comprou compraram gastou gastaram
     seguem segue seguindo base baseado baseada baseados baseadas fundamentado fundamentada fundamentados
     fundamentadas fundamento amparo amparado amparada amparados amparadas conforme lei leis decreto decretos
@@ -503,7 +503,9 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
     # Contrato conta pela assinatura, salvo quando a pergunta pede a publicação.
     referencia_temporal = filtros.referencia_temporal or ("assinatura" if so_contratos else None)
     termos_objeto = _termos_do_objeto(texto_objeto) if tabela == "contratacoes" else ()
-    if tipo == "listagem" and not termos_objeto and not modalidade_termos and not orgao_termos:
+    # O CNPJ citado também delimita o pedido ("contratos do fornecedor de CNPJ X").
+    if (tipo == "listagem" and not termos_objeto and not modalidade_termos and not orgao_termos
+            and not analiticos.get("cnpj")):
         return None  # "Quais contratos existem?" sem assunto: a busca normal responde
     return Consulta(
         tabela=tabela,
@@ -652,6 +654,12 @@ def _where(consulta: Consulta, termos: Iterable[str], juncao: str = "AND") -> tu
     if consulta.deduplicar and consulta.tabela == "contratacoes":
         condicoes.append(_SEM_DUPLICATA_MODALIDADE if _usa_modalidade(consulta) else _SEM_DUPLICATA)
     for campo, valor in consulta.filtros_analiticos:
+        if campo == "cnpj":
+            # A pergunta cita o CNPJ sem dizer se é do órgão ou do fornecedor.
+            colunas = [c for c in ("orgao_cnpj", "fornecedor_cnpj") if c in structured_db._TABELAS[consulta.tabela]]
+            condicoes.append("(" + " OR ".join(f"{coluna} = ?" for coluna in colunas) + ")")
+            parametros.extend(valor for _ in colunas)
+            continue
         if campo not in structured_db._TABELAS[consulta.tabela]:
             raise ValueError("Campo SQL não permitido")
         if campo in {"orgao_nome", "fornecedor"}:
@@ -783,7 +791,10 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
             colunas = "ano_pca, unidade_nome, quantidade_itens, valor_total AS valor"
         else:
             coluna_data = "data_assinatura" if consulta.referencia_temporal == "assinatura" else "data_publicacao"
-            colunas = f"{coluna_data} AS data_referencia, orgao_nome, esfera, municipio, modalidade, fornecedor, objeto, {coluna_valor} AS valor"
+            if consulta.tipo == "listagem":
+                colunas = f"numero_controle_pncp, {coluna_data} AS data_referencia, orgao_nome, esfera, municipio, modalidade, fornecedor, objeto, {coluna_valor} AS valor"
+            else:
+                colunas = f"{coluna_data} AS data_referencia, orgao_nome, esfera, municipio, modalidade, fornecedor, objeto, {coluna_valor} AS valor"
         ordem = (f"CASE WHEN {coluna_valor} IS NULL THEN 1 ELSE 0 END, {coluna_valor} {consulta.ordem}"
                  if consulta.tipo == "listagem" else f"{coluna_valor} {consulta.ordem}")
         sql = (
@@ -794,7 +805,7 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
         if consulta.tipo == "listagem" and consulta.tabela == "contratacoes":
             total = banco.consultar(f"SELECT COUNT(*) AS n FROM {consulta.tabela}{where}", parametros)[0]["n"]
             return sql, [f"{total} registros atendem aos filtros; os {len(linhas)} de maior valor:"] + [
-                f"{i}. {_brl(l['valor'])} | {l['data_referencia']} | {l['orgao_nome']} ({l['esfera']}, {l['municipio']}) | "
+                f"{i}. PNCP {l['numero_controle_pncp']} | {_brl(l['valor'])} | {l['data_referencia']} | {l['orgao_nome']} ({l['esfera']}, {l['municipio']}) | "
                 f"modalidade: {l['modalidade'] or 'não informada'} | fornecedor: {l['fornecedor'] or 'não informado'} | "
                 f"{_resumir(l['objeto'], 70)}"
                 for i, l in enumerate(linhas, 1)

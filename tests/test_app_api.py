@@ -351,7 +351,7 @@ def test_explore_nao_expoe_erro_interno(monkeypatch) -> None:
 # Histórico temporariamente aberto; trace continua protegido.
 # --------------------------------------------------------------------------
 
-_PROTEGIDOS = ["/api/v1/trace/q_1", "/api/v1/sessions/s_sessao_de_teste_01/trace"]
+_PROTEGIDOS = ["/api/v1/trace/q_1", "/api/v1/sessions/s_sessao_de_teste_01/trace", "/api/v1/history"]
 
 
 @pytest.mark.parametrize("url", _PROTEGIDOS)
@@ -364,18 +364,59 @@ def test_endpoint_protegido_com_chave_errada_e_401(url):
     assert TestClient(app, headers={"X-API-Key": "chave-errada"}).get(url).status_code == 401
 
 
-@pytest.mark.parametrize("server_key", ["", "chave-de-teste"])
-@pytest.mark.parametrize("headers", [{}, {"X-API-Key": "chave-errada"}])
-def test_historico_aberto_sem_autenticacao(monkeypatch, server_key, headers):
-    monkeypatch.setattr(api_module.config, "RAG_API_KEY", server_key)
+def _duas_conversas(monkeypatch):
     monkeypatch.setattr(api_module.pipeline, "responder", _fake_responder)
-    visitante = TestClient(app, headers=headers)
-    query_id = visitante.post("/api/v1/query", json={"query": "Qual e a norma?"}).json()["query_id"]
+    minha = TestClient(app).post("/api/v1/query", json={"query": "Minha pergunta"}).json()
+    TestClient(app).post("/api/v1/query", json={"query": "Pergunta de outra pessoa"})
+    return minha
 
-    response = visitante.get("/api/v1/history")
+
+def test_historico_com_x_session_id_mostra_so_a_propria_conversa(monkeypatch):
+    minha = _duas_conversas(monkeypatch)
+    dono = TestClient(app, headers={"X-Session-Id": minha["session_id"]})
+
+    response = dono.get("/api/v1/history")
 
     assert response.status_code == 200
-    assert response.json()[0]["query_id"] == query_id
+    assert [item["query"] for item in response.json()] == ["Minha pergunta"]
+
+
+def test_historico_nao_aceita_filtro_de_outra_sessao_sem_chave(monkeypatch):
+    minha = _duas_conversas(monkeypatch)
+    dono = TestClient(app, headers={"X-Session-Id": minha["session_id"]})
+
+    response = dono.get("/api/v1/history", params={"session_id": "s_outra_sessao_qualquer"})
+
+    assert response.status_code == 401
+
+
+def test_historico_so_com_filtro_de_sessao_e_401(monkeypatch):
+    # O parâmetro session_id é filtro, não prova de que a conversa é de quem pede.
+    minha = _duas_conversas(monkeypatch)
+
+    response = TestClient(app).get("/api/v1/history", params={"session_id": minha["session_id"]})
+
+    assert response.status_code == 401
+
+
+def test_historico_geral_com_chave(monkeypatch):
+    _duas_conversas(monkeypatch)
+
+    response = client.get("/api/v1/history")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 2
+
+
+@pytest.mark.parametrize("headers", [{}, {"X-API-Key": "chave-errada"}])
+def test_history_public_abre_o_historico_geral_sem_chave(monkeypatch, headers):
+    monkeypatch.setattr(api_module.config, "HISTORY_PUBLIC", True)
+    _duas_conversas(monkeypatch)
+
+    response = TestClient(app, headers=headers).get("/api/v1/history")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 2
 
 
 def test_trace_continua_protegido_sem_chave_configurada(monkeypatch):

@@ -65,6 +65,7 @@ def _historico_da_api_isolado(tmp_path, monkeypatch):
 def _chave_da_api_de_teste(monkeypatch):
     """Histórico e trace exigem X-API-Key; os testes usam esta chave, nunca a do .env."""
     monkeypatch.setattr(config, "RAG_API_KEY", "chave-de-teste")
+    monkeypatch.setattr(config, "HISTORY_PUBLIC", False)
 
 
 @pytest.fixture(autouse=True)

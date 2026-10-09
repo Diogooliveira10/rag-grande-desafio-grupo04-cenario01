@@ -83,10 +83,13 @@ PIPELINE_LOGS_DIR = LOGS_DIR / "pipeline"
 MAINTENANCE_LOGS_DIR = LOGS_DIR / "maintenance"
 BACKUPS_DIR = ROOT_DIR / "data" / "backups"
 TEST_TEMP_DIR = ROOT_DIR / ".tmp" / "tests"
-# API HTTP (app/api.py): chave administrativa para consultar traces de outras
-# sessões. Sem ela, trace exige X-Session-Id do dono. O histórico geral está
-# temporariamente aberto para a demo. Nunca versionar o valor da chave.
+# API HTTP (app/api.py): chave administrativa para consultar histórico e traces
+# de outras sessões. Sem ela, os dois exigem X-Session-Id do dono. Nunca
+# versionar o valor da chave.
 RAG_API_KEY = _env("RAG_API_KEY", "")
+# true = histórico geral (perguntas de todos) aberto sem chave, para uma demo
+# que precise dele. Padrão fechado.
+HISTORY_PUBLIC = _env("HISTORY_PUBLIC", "false").lower() in {"1", "true", "sim", "yes"}
 # Dias que o histórico (src/history_store.py) guarda cada consulta; 0 = sem expurgo.
 HISTORY_RETENTION_DAYS = int(_env("HISTORY_RETENTION_DAYS", "30"))
 # Daily pipeline files follow history retention by default; 0 keeps all files.
