@@ -143,7 +143,7 @@ _PALAVRAS_GENERICAS = frozenset(
     servico servicos aquisicao aquisicoes fornecimento prestacao especializada especializado
     informacao informacoes detalhe detalhes firmaram firmou celebraram disponiveis disponivel
     comparando publicando assinando somando informando mostrando listando buscando calculando
-    continuacao anterior pergunta
+    continuacao anterior pergunta principal principais
     assinou assinaram contratou contrataram comprou compraram gastou gastaram
     seguem segue seguindo base baseado baseada baseados baseadas fundamentado fundamentada fundamentados
     fundamentadas fundamento amparo amparado amparada amparados amparadas conforme lei leis decreto decretos
@@ -791,7 +791,10 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
             colunas = "ano_pca, unidade_nome, quantidade_itens, valor_total AS valor"
         else:
             coluna_data = "data_assinatura" if consulta.referencia_temporal == "assinatura" else "data_publicacao"
-            colunas = f"{coluna_data} AS data_referencia, orgao_nome, esfera, municipio, modalidade, fornecedor, objeto, {coluna_valor} AS valor"
+            if consulta.tipo == "listagem":
+                colunas = f"numero_controle_pncp, {coluna_data} AS data_referencia, orgao_nome, esfera, municipio, modalidade, fornecedor, objeto, {coluna_valor} AS valor"
+            else:
+                colunas = f"{coluna_data} AS data_referencia, orgao_nome, esfera, municipio, modalidade, fornecedor, objeto, {coluna_valor} AS valor"
         ordem = (f"CASE WHEN {coluna_valor} IS NULL THEN 1 ELSE 0 END, {coluna_valor} {consulta.ordem}"
                  if consulta.tipo == "listagem" else f"{coluna_valor} {consulta.ordem}")
         sql = (
@@ -802,7 +805,7 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
         if consulta.tipo == "listagem" and consulta.tabela == "contratacoes":
             total = banco.consultar(f"SELECT COUNT(*) AS n FROM {consulta.tabela}{where}", parametros)[0]["n"]
             return sql, [f"{total} registros atendem aos filtros; os {len(linhas)} de maior valor:"] + [
-                f"{i}. {_brl(l['valor'])} | {l['data_referencia']} | {l['orgao_nome']} ({l['esfera']}, {l['municipio']}) | "
+                f"{i}. PNCP {l['numero_controle_pncp']} | {_brl(l['valor'])} | {l['data_referencia']} | {l['orgao_nome']} ({l['esfera']}, {l['municipio']}) | "
                 f"modalidade: {l['modalidade'] or 'não informada'} | fornecedor: {l['fornecedor'] or 'não informado'} | "
                 f"{_resumir(l['objeto'], 70)}"
                 for i, l in enumerate(linhas, 1)
