@@ -11,9 +11,9 @@ avaliacao a essa consulta e ``GET /api/v1/history`` devolve o historico
 salvo. O estagio ``feedback`` ja existia reservado em ``src/obs.py``
 (Stage.FEEDBACK) mas nao estava integrado a nenhum fluxo ate agora.
 
-Protecao: o historico mostra perguntas de todos os usuarios e exige o header
-``X-API-Key`` igual a ``RAG_API_KEY`` do ``.env`` (``exigir_chave``); sem a
-variavel configurada, fica fechado. O trace aceita a mesma chave (quem opera a
+Acesso temporario da demo: o historico geral esta aberto, sem chave, por
+solicitacao de quem opera. Ele mostra consultas de todos os usuarios; nao
+publique dados sensiveis. O trace aceita ``RAG_API_KEY`` (quem opera a
 demo ve qualquer conversa) ou o header ``X-Session-Id`` igual a sessao da
 pergunta: cada usuario ve so o caminho da propria conversa, sem chave no site.
 ``/query`` e ``/feedback`` continuam abertos: sao o uso normal do chat.
@@ -27,7 +27,7 @@ import secrets
 from pathlib import PurePosixPath
 from typing import Any, Literal, Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Request
+from fastapi import FastAPI, Header, HTTPException, Path, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
@@ -59,17 +59,6 @@ _SESSION_PATTERN = r"^[A-Za-z0-9_-]{16,64}$"
 def _chave_valida(x_api_key: Optional[str]) -> bool:
     chave = config.RAG_API_KEY
     return bool(chave and x_api_key) and secrets.compare_digest(x_api_key.encode(), chave.encode())
-
-
-def exigir_chave(x_api_key: Optional[str] = Header(default=None)) -> None:
-    """Libera o endpoint só para quem envia ``X-API-Key`` igual a ``RAG_API_KEY``."""
-    if not config.RAG_API_KEY:
-        raise HTTPException(
-            status_code=403,
-            detail="Endpoint desabilitado: defina RAG_API_KEY no .env do servidor.",
-        )
-    if not _chave_valida(x_api_key):
-        raise HTTPException(status_code=401, detail="X-API-Key ausente ou invalida.")
 
 
 def _autorizar_trace(
@@ -357,8 +346,9 @@ def enviar_feedback(request: FeedbackRequest) -> dict[str, str]:
     return {"status": "recebido"}
 
 
-@app.get("/api/v1/history", response_model=list[HistoricoItem],
-         dependencies=[Depends(exigir_chave)])
+# Temporariamente público para a demo; o filtro de sessão não é autenticação.
+# Os endpoints de trace abaixo continuam protegidos.
+@app.get("/api/v1/history", response_model=list[HistoricoItem])
 def obter_historico(
     limit: int = Query(default=20, ge=1, le=100),
     session_id: Optional[str] = Query(default=None, pattern=_ID_PATTERN),

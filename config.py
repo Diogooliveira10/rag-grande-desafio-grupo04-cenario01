@@ -83,9 +83,9 @@ PIPELINE_LOGS_DIR = LOGS_DIR / "pipeline"
 MAINTENANCE_LOGS_DIR = LOGS_DIR / "maintenance"
 BACKUPS_DIR = ROOT_DIR / "data" / "backups"
 TEST_TEMP_DIR = ROOT_DIR / ".tmp" / "tests"
-# API HTTP (app/api.py): chave exigida no header X-API-Key pelos endpoints que
-# expõem perguntas de outros usuários (histórico e trace). Vazia = esses
-# endpoints ficam fechados. Nunca versionar o valor.
+# API HTTP (app/api.py): chave administrativa para consultar traces de outras
+# sessões. Sem ela, trace exige X-Session-Id do dono. O histórico geral está
+# temporariamente aberto para a demo. Nunca versionar o valor da chave.
 RAG_API_KEY = _env("RAG_API_KEY", "")
 # Dias que o histórico (src/history_store.py) guarda cada consulta; 0 = sem expurgo.
 HISTORY_RETENTION_DAYS = int(_env("HISTORY_RETENTION_DAYS", "30"))

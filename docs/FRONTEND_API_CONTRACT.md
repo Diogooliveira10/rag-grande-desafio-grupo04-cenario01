@@ -13,7 +13,7 @@ Os tipos correspondentes do frontend ficam em `src/types/api.ts` no repositório
 |---|---|---|---|
 | GET | `/health` | — | `{ "status": "ok" }` |
 | POST | `/api/v1/query` | `{ "query": "...", "top_k": 5, "session_id": "s_...", "historico": [{ "pergunta": "...", "resposta": "..." }] }` | `QueryResponse` |
-| GET | `/api/v1/history` (chave) | `limit` (1–100), `session_id` | `HistoricoItem[]` |
+| GET | `/api/v1/history` (aberto temporariamente) | `limit` (1–100), `session_id` | `HistoricoItem[]` |
 | GET | `/api/v1/trace/{query_id}` (sessão ou chave) | — | `TraceResponse` |
 | GET | `/api/v1/sessions/{session_id}/trace` (sessão ou chave) | — | `SessaoTraceResponse` |
 | POST | `/api/v1/feedback` | `query_id`, `avaliacao`, `comentario` | `{ "status": "recebido" }` |
@@ -151,16 +151,21 @@ reenviando as últimas trocas no campo opcional `historico` de
 - Os dois respondem `404` quando o id não está no log. Dados pessoais (CPF,
   telefone, e-mail) chegam mascarados, como no log.
 
-## Proteção do histórico e do trace
+## Histórico temporariamente aberto e proteção do trace
 
-Dois tipos de acesso:
+**Decisão temporária da demo:** `GET /api/v1/history` não exige chave, inclusive
+quando `RAG_API_KEY` está vazia. Qualquer cliente pode listar as consultas de
+todos os usuários. `session_id` é apenas um filtro, não autenticação. Não
+exponha dados sensíveis nem use essa abertura como política de produção.
+A máscara de dados pessoais não substitui controle de acesso.
+
+O trace mantém dois tipos de acesso:
 
 - **Dono da conversa** (o site público): envia o header `X-Session-Id` com o
   `session_id` que recebeu no `QueryResponse`. Vê o trace das perguntas da
-  própria conversa e o trace da sessão. Não vê conversas de outras pessoas nem
-  o histórico geral.
+  própria conversa e o trace da sessão. Não vê traces de outras pessoas.
 - **Quem opera a demo**: envia `X-API-Key` igual a `RAG_API_KEY` do `.env` do
-  servidor. Vê o histórico geral e o trace de qualquer conversa. A chave nunca
+  servidor. Vê o trace de qualquer conversa. A chave nunca
   vai no código do site: quem tiver o JavaScript teria a chave.
 
 Respostas:
@@ -168,7 +173,7 @@ Respostas:
 - Trace sem `X-Session-Id` da conversa e sem chave válida: `401`, mesmo quando
   o id não existe (não revela quais perguntas estão no log). Com acesso e id
   inexistente: `404`.
-- Histórico sem chave válida: `401`; servidor sem `RAG_API_KEY`: `403`.
+- Histórico: aberto sem `X-API-Key`; não retorna `401`/`403` por falta de chave.
 - `POST /api/v1/query` e `POST /api/v1/feedback` não pedem nada.
 - O CORS libera os headers `X-API-Key` e `X-Session-Id`.
 
