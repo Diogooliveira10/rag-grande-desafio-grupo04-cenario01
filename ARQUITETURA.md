@@ -151,7 +151,7 @@ As tarefas são distribuídas entre os integrantes a cada encontro conforme as n
 - Corrigir a geração: confiança alta junto de "nada encontrado" (P2.1) e resposta sem fonte (F1).
 - Fazer o frontend (repositório separado) consumir `query_id`/`session_id`/`feedback`/`history` e mostrar o trace ao lado da resposta, hoje sem cliente; falta também um backend público em HTTPS para o site apontar.
 - O histórico exige `X-API-Key` (`RAG_API_KEY`) e grava textos mascarados com expurgo após `HISTORY_RETENTION_DAYS` dias; o trace aceita a chave ou o `X-Session-Id` da própria conversa, então o site público não precisa da chave. Falta decidir se o log em `logs/` (também mascarado) precisa de expurgo.
-- Avaliar respostas e guardrails sobre o suplemento `emails_sinteticos`, gerado pelo tutor e integrado ao projeto por João em 2026-10-05: 25 conversas, 20 públicas e 5 restritas ([proveniência e reconstrução](docs/emails_sinteticos.md)).
+- Avaliar respostas e guardrails sobre o suplemento `emails_sinteticos`, gerado pelo tutor e integrado em 2026-10-05: 25 conversas, 20 públicas e 5 restritas ([proveniência e reconstrução](docs/emails_sinteticos.md)).
 - Revisar o casamento de CNPJ sem pontuação nos filtros/consultas.
 - Decidir o tratamento definitivo para os diretórios ignorados pelo `.gitignore` mas versionados via `git add -f` (`index/`, `data/normalized/`, `data/structured/`, `data/embeddings/2026-09-30_12-08-51/`).
 - No `query_analysis`, transformar em filtro o município citado sozinho ("contratos em Volta Redonda") e o fornecedor ("empresa Cristália").
