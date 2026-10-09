@@ -48,6 +48,8 @@ flowchart TD
 
 ### Stages
 
+- `requisicao_inicio`/`requisicao_fim`: envelope do handler API, com resultado HTTP, resposta pública preparada e estado da persistência; `persistencia_historico` registra a tentativa de salvar a consulta. O envelope fecha mesmo em erro, sem depender de logging não estruturado.
+- `pipeline_inicio`/`pipeline_fim`: envelope do processamento, com tempo monotônico, versão/contexto de execução e resposta final. Etapas opcionais puladas e fallbacks ficam explícitos; os eventos trazem `extra.schema_version=2`, origem, sequência e resultado normalizado. O trace não soma durações sobrepostas e diferencia fechamento, erro e execução incompleta. Detalhes e limites em [docs/OBSERVABILIDADE.md](docs/OBSERVABILIDADE.md).
 - `reformulacao`: o backend não guarda memória entre as perguntas; quem dá o contexto é o cliente, que reenvia as últimas trocas em `historico` no `POST /api/v1/query`. Quando a pergunta parece continuação ("considerando os mesmos contratos…", "E em 2024?"), um filtro determinístico a separa das que já se sustentam sozinhas (essas não chamam o modelo) e o LLM a reescreve usando só as 3 trocas mais recentes, com dado pessoal mascarado e o histórico tratado como dado, não como instrução. A pergunta reescrita substitui a original em todas as etapas seguintes, então os guardrails valem sobre o que de fato é consultado; a resposta devolve o texto digitado em `query` e a reescrita em `pergunta_reformulada`. Qualquer falha do modelo, ou saída fora do formato, mantém a pergunta original. Desligável com `REFORMULACAO_MODE=regras`. Ver [src/reformulacao.py](src/reformulacao.py).
 - `interacao`: decide se a mensagem é conversa (saudação, agradecimento, pedido de ajuda, apresentação) ou consulta ao acervo ([src/conversation.py](src/conversation.py)). Conversa é respondida sem consultar o acervo; consulta segue para a `query_analysis`. Tem etapa própria no log para que mensagens de cortesia não apareçam como análise de consulta.
 - `query_analysis`: interpreta a pergunta e extrai filtros de ano (incluindo período `ano`/`ano_final`), valor, órgão, esfera, modalidade, métrica (contagem/soma/média/mediana), agrupamento e qual campo de data usar (assinatura, publicação, resultado ou PCA). O órgão é reconhecido também em minúsculas e por sigla (DPE, SEEDUC etc.) e conferido no catálogo de órgãos do corpus ([data/config/orgaos_corpus.json](data/config/orgaos_corpus.json)); citações de norma ("Lei federal 14.133", "Lei do Pregão") não viram esfera nem modalidade. A extração de período foi corrigida para não confundir valores monetários ("acima de 2000 reais") com ano. Todos os filtros são marcados como opcionais, para não eliminar chunks que não possuem o campo correspondente, e o pipeline refaz a busca sem filtros quando eles zeram o resultado.
@@ -79,7 +81,7 @@ Já estão implementados:
 - guardrails para perguntas fora do escopo e ausência de evidência, com motivo de recusa inferido;
 - política de sensibilidade e mascaramento de dados pessoais;
 - validação da resposta gerada;
-- observabilidade estruturada por `run_id`, `query_id`, `session_id`, stage, latência e uso de tokens, com o resumo SQL/vetorial de cada pergunta (`resumo_consulta`);
+- observabilidade estruturada por `run_id`, `query_id`, `session_id`, origem, sequência e outcome; envelopes API/pipeline com tempo monotônico, persistência do histórico, metadados de versão e resumo SQL/vetorial que distingue tentativa de retorno de evidências (`resumo_consulta`);
 - coleta e versionamento do corpus por manifesto (atualmente na versão v6);
 - preparação de documentos, OCR, embeddings e indexação;
 - API FastAPI com `GET /health`, `POST /api/v1/query`, `POST /api/v1/feedback`, `GET /api/v1/history`, `GET /api/v1/trace/{query_id}` e `GET /api/v1/sessions/{session_id}/trace` (caminho da pergunta e da conversa, [src/trace.py](src/trace.py));
@@ -101,18 +103,16 @@ As bases oficiais definidas no manifesto são:
 
 O inventário vigente é a versão v6, registrada em `data/inventory/v6.json` e resumida em `CORPUS_INVENTORY.md` e `docs/registro_execucao_v6.md`: **1.400 arquivos** no total (contratos_estruturado 625, editais_normativo 13, atas_conversacional 376, pca_agregado 386), distribuídos por esfera em municipal 804, federal 513 e estadual 83, com limite de até 5 documentos por órgão/base. O histórico de reconstrução do inventário entre as versões está documentado em `data/inventory/DIFF_v2_v3.md`, `DIFF_v3_v4.md` e `DIFF_v4_v5.md`.
 
-O índice oficial vigente ([index/manifest.json](index/manifest.json)) usa embeddings `Qwen3-Embedding-0.6B.Q8_0` (dimensão 1024) em índice FAISS (`index/*/vectors.faiss`), gerados a partir de `data/normalized/v6/documents.jsonl`. Depois do controle de qualidade de 2026-10-07 ([src/qualidade_corpus.py](src/qualidade_corpus.py), relatório em [data/inventory/qualidade_v6.json](data/inventory/qualidade_v6.json)), ele tem **4.795 vetores** da v6, mais os 25 das conversas sintéticas:
+O índice oficial vigente ([index/manifest.json](index/manifest.json)) usa embeddings `Qwen3-Embedding-0.6B.Q8_0` (dimensão 1024) em índice FAISS (`index/*/vectors.faiss`), gerados a partir de `data/normalized/v6/documents.jsonl`. Depois da recuperação OCR de 2026-10-07 ([src/qualidade_corpus.py](src/qualidade_corpus.py), relatório em [data/inventory/qualidade_v6.json](data/inventory/qualidade_v6.json)), ele tem **5.090 vetores** da v6, mais os 25 das conversas sintéticas (**5.115 no total**), sem trechos ilegíveis:
 
 - 625 chunks de `contratos_estruturado`;
-- 1.554 chunks de `editais_normativo` (7 ilegíveis fora);
-- 1.705 chunks de `atas_conversacional` (819 ilegíveis fora);
+- 1.557 chunks de `editais_normativo`;
+- 1.997 chunks de `atas_conversacional`;
 - 911 chunks de `pca_agregado`.
 
-Os vetores foram reaproveitados (mesmo texto, mesmo SHA-256); o controle de qualidade muda só status e metadados.
+Foram preservados os vetores dos textos inalterados. A recuperação produziu 305 novos registros vetoriais a partir de 283 textos distintos, com o mesmo checkpoint e configuração do índice. Os 826 chunks anteriormente excluídos foram substituídos por texto legível e nova segmentação: 52 páginas de 3 atas passaram pelo Tesseract (`por`), e os códigos `/U0044` de 7 páginas dos Decretos 48.816 e 48.760 foram decodificados, inclusive nos cabeçalhos de páginas majoritariamente legíveis. Números de página permanecem junto do parágrafo ou seção, sem virar chunks isolados. O manifesto histórico da coleta foi recuperado por hash, sem alterar o manifesto atual ou os arquivos brutos. Detalhes em [eval/runs/v6-ocr-recovery.json](eval/runs/v6-ocr-recovery.json). SQLite e Neon ainda precisam ser remontados pelo responsável pela base estruturada.
 
 **Limitações conhecidas da v6:**
-
-- 819 dos 2.524 chunks de atas (52 páginas de 3 PDFs) e 7 páginas de decretos estaduais saíram da extração como glifos sem mapa de caracteres (`/12 /3 □`) ou códigos (`/U0044`). Estão marcados como `texto_ilegivel` e fora do índice. A extração só mandava para o OCR a página vazia; agora o `prepare_documents` também manda a página com glifos e decodifica os códigos `/U0044`, inclusive em extrações guardadas no cache. Vêm de 5 arquivos: 3 atas que estão em `atas-zip/atas_conversacional-v6.zip` e os Decretos 48.816 e 48.760 (CGE-RJ). Falta extrair esses arquivos de novo (com Tesseract e o idioma `por`) e gerar os vetores dos chunks recuperados com o mesmo modelo do índice;
 - os indicadores do PCA (`pca_agregado`) estão praticamente ausentes do corpus coletado (só um PCA confirmado, da Secretaria de Saúde estadual);
 - 445 dos 448 contratos assinados continuam sem `modalidade`: o PNCP não traz modalidade em contrato assinado, e só 3 deles têm a compra vinculada no corpus (eles herdam a modalidade dela). Preencher os outros exige coletar a compra de cada contrato (`numeroControlePncpCompra`) numa nova versão do corpus. Das 177 publicações de compra, só 2 têm contrato no corpus para herdar o fornecedor;
 - as normas têm início de vigência (`extras.data_vigencia_inicio`, declarado no manifesto ou vindo da publicação da compra no PNCP), mas não fim: nenhuma norma do corpus foi revogada. `data_vigencia` continua vazio nelas, porque no projeto ele é o fim da vigência ("vigente até"). Os textos são compilações atuais: a vigência histórica de cada dispositivo não foi verificada;
@@ -120,7 +120,7 @@ Os vetores foram reaproveitados (mesmo texto, mesmo SHA-256); o controle de qual
 - 21 contratos têm valor R$ 0,00, 6 têm R$ 0,01 e 17 compras têm valor estimado R$ 0,00 (valores simbólicos, marcados com `extras.valor_simbolico`); a `consulta_sql` os deixa fora das contas de valor, e o prompt avisa que esse valor não é o custo real;
 - o amparo legal só vem nas compras publicadas: nos contratos assinados ele é nulo, então não dá para contar contratos por lei.
 
-Os diretórios `index/`, `data/normalized/`, `data/structured/` e `data/embeddings/2026-09-30_12-08-51/` estão no `.gitignore`, mas são versionados via `git add -f` (forçado) para que o time compartilhe o índice e o corpus processado sem reprocessar tudo localmente. Os inventários `data/inventory/*.json` são versionados normalmente, e os dois ZIPs da v6 em `atas-zip/` entram por exceção explícita no `.gitignore`. O `-text` do `.gitattributes` nesses caminhos preserva os bytes exatos (sem conversão CRLF/LF), porque os hashes de proveniência dependem deles. `data/app_state/` (onde fica o histórico de perguntas dos usuários, `src/history_store.py`) **não** está nessa lista e permanece fora do Git. A geração do corpus normalizado depende de OCR local (Tesseract + pacote de idioma português) instalado na máquina de quem roda o `prepare`.
+Os diretórios `index/`, `data/normalized/`, `data/structured/` e `data/embeddings/2026-10-07_21-18-41_ocr-recovery/` estão no `.gitignore`, mas são versionados via `git add -f` (forçado) para que o time compartilhe o índice e o corpus processado sem reprocessar tudo localmente. Os inventários `data/inventory/*.json` são versionados normalmente, e os dois ZIPs da v6 em `atas-zip/` entram por exceção explícita no `.gitignore`. O `-text` do `.gitattributes` nesses caminhos preserva os bytes exatos (sem conversão CRLF/LF), porque os hashes de proveniência dependem deles. `data/app_state/` (onde fica o histórico de perguntas dos usuários, `src/history_store.py`) **não** está nessa lista e permanece fora do Git. A geração do corpus normalizado depende de OCR local (Tesseract + pacote de idioma português) instalado na máquina de quem roda o `prepare`.
 
 ---
 
@@ -137,20 +137,20 @@ As tarefas são distribuídas entre os integrantes a cada encontro conforme as n
 
 ### Frentes atuais
 
-- Qualidade do corpus v6 (OCR das atas, indicadores do PCA, contratos sem modalidade).
+- Qualidade do corpus v6 (indicadores do PCA, contratos sem modalidade); recuperação OCR concluída.
 - Gabarito de conteúdo do golden set.
 - Integração do frontend com `feedback`/`history` e com a tela de rastreabilidade (`session_id` e trace).
 - Preparação para o Demo Day.
 
 ### Pendências em aberto
 
-- Melhorar a qualidade do corpus v6 (OCR das atas, cobertura de indicadores do PCA, contratos sem `modalidade`).
+- Melhorar a cobertura de indicadores do PCA e dos contratos sem `modalidade`; o OCR das atas já foi recuperado. Remontar SQLite e Neon com os dados normalizados atualizados.
 - Criar um gabarito de conteúdo para o golden set: hoje o avaliador confere só rota e recusa, não se a resposta está certa. A conferência contra o SQLite encontrou respostas erradas em P2.1, P4.2, P4.3 e P5.3, e a F1 sai sem fonte; as causas de P4.2, P4.3 e P5.3 foram corrigidas na `consulta_sql` em 2026-10-02, mas o golden set ainda não foi rodado de novo. A validação contra o corpus mostrou que P3.1 e P3.2 são sustentadas só em parte e que a regra da P6.1 (microempresa em pregão eletrônico) não está no corpus.
 - Reescrever as perguntas do golden set que dependem da anterior ("nesses contratos") e incluir casos da base de atas e de identificador (CNPJ, número de controle).
 - Rodar o golden set completo de novo com o pipeline atual e registrar o resultado final.
 - Corrigir a geração: confiança alta junto de "nada encontrado" (P2.1) e resposta sem fonte (F1).
 - Fazer o frontend (repositório separado) consumir `query_id`/`session_id`/`feedback`/`history` e mostrar o trace ao lado da resposta, hoje sem cliente; falta também um backend público em HTTPS para o site apontar.
-- O histórico exige `X-API-Key` (`RAG_API_KEY`) e grava textos mascarados com expurgo após `HISTORY_RETENTION_DAYS` dias; o trace aceita a chave ou o `X-Session-Id` da própria conversa, então o site público não precisa da chave. Falta decidir se o log em `logs/` (também mascarado) precisa de expurgo.
+- O histórico exige `X-API-Key` (`RAG_API_KEY`) e grava textos mascarados com expurgo após `HISTORY_RETENTION_DAYS` dias; o trace aceita a chave ou o `X-Session-Id` da própria conversa, então o site público não precisa da chave. O log mascarado em `logs/pipeline/` segue `LOG_RETENTION_DAYS` (por padrão, a retenção do histórico); diagnósticos em `logs/maintenance/` seguem 14 dias via manutenção explícita, sem expurgar backups.
 - Avaliar respostas e guardrails sobre o suplemento `emails_sinteticos`, recebido e integrado em 2026-10-05: 25 conversas, 20 públicas e 5 restritas ([proveniência e reconstrução](docs/emails_sinteticos.md)).
 - Revisar o casamento de CNPJ sem pontuação nos filtros/consultas.
 - Decidir o tratamento definitivo para os diretórios ignorados pelo `.gitignore` mas versionados via `git add -f` (`index/`, `data/normalized/`, `data/structured/`, `data/embeddings/2026-09-30_12-08-51/`).

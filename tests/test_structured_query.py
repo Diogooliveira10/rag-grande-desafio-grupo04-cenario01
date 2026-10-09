@@ -418,13 +418,14 @@ def test_sem_documents_nao_consulta_nem_loga(tmp_path):
 # --------------------------------------------------------------------------
 
 
-def test_pipeline_poe_resultado_sql_antes_dos_chunks_da_busca(base, monkeypatch):
+def test_pipeline_misto_poe_resultado_sql_antes_dos_chunks_da_busca(base, monkeypatch):
     vistos = {}
+    bases_mistas = ESTRUTURADA + [Natureza.NORMATIVA]
     monkeypatch.setattr(sq, "DOCUMENTS_FILE", base["documents_file"])
     monkeypatch.setattr(sq.structured_db, "banco_padrao", lambda: base["banco"])
     monkeypatch.setattr(
         pipeline, "rotear_pergunta",
-        lambda q, **kw: RouteDecision(bases_selecionadas=ESTRUTURADA, justificativa="t", confidence=0.9),
+        lambda q, **kw: RouteDecision(bases_selecionadas=bases_mistas, justificativa="t", confidence=0.9),
     )
     metadata = ChunkMetadata(source_file="f.json", chunk_id="busca-1", base_id="contratos_estruturado", doc_type="json")
     monkeypatch.setattr(
@@ -795,7 +796,9 @@ def test_valor_simbolico_nao_entra_na_mediana_nem_no_ranking(tmp_path):
         ("2025-03-12", "2025-03-12T00:00:00", 300.0),
     ])
     [chunk] = _consultar("Qual a mediana dos contratos de ambulância em 2025?", base, ano=2025)
-    assert "4 registros no total, 2 sem valor informado (vazio ou abaixo de R$ 1,00)" in chunk.content
+    assert "4 registros no total, 2 com valor abaixo de R$ 1,00" in chunk.content
+    assert "total R$ 400,01" in chunk.content
+    assert "estatísticas sobre 2 valores >= R$ 1,00" in chunk.content
     assert "mediana R$ 200,00" in chunk.content
 
     [chunk] = _consultar("Quais os menores contratos de ambulância em 2025?", base, ano=2025)

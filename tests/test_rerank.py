@@ -289,5 +289,6 @@ def test_retrieve_registra_no_log_qual_backend_deu_as_notas(indice):
     retrieve("microempresa no pregao", {"bases": ["estruturada"]}, top_k=2, reranker=reranker, **indice)
 
     rerank = next(r for r in _registros() if r["stage"] == "rerank")
-    assert rerank["status"] == "ok"
+    assert rerank["status"] == "degradado"
+    assert rerank["extra"]["fallback"] == "reranker_local"
     assert rerank["extra"]["rerank_backend"].startswith("local:modelo-local")

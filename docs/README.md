@@ -8,6 +8,9 @@ Este diretório reúne guias de uso e referências do projeto.
   exemplo e fluxo para preparar uma base local.
 - [Arquitetura atual e alvo](../ARQUITETURA.md): o que já está implementado e o
   que ainda é parte do desenho do Adaptive RAG.
+- [Observabilidade das consultas](OBSERVABILIDADE.md): funcionamento do SQL
+  direto (C), auditoria completa opcional (D), fila e índice de traces (E),
+  configuração, exemplos e limites.
 - [Inventário do corpus](../CORPUS_INVENTORY.md): contagens da v6 oficial.
 - [Registro da v6](registro_execucao_v6.md): distribuição, embeddings, avaliação
   e limitações das respostas.

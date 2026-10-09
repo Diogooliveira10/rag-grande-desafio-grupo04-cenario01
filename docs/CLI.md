@@ -3,11 +3,20 @@
 Os comandos abaixo foram conferidos com as interfaces atuais em `src/`. Para
 consultar todas as opções de um comando, acrescente `--help`.
 
+Coleta, inventário, ingestão/preparação, embeddings e indexação registram o
+contrato comum em `logs/pipeline/pipeline-AAAA-MM-DD.jsonl`, inclusive operações
+dry-run válidas. Cada execução recebe IDs próprios (`query_id` sintético,
+`origem=offline`), sem sessão de chat. Relatórios e logs de coleta em `data/runs/`
+continuam existindo. Lotes de embedding indicam se os tokens foram reportados,
+reutilizados por cache ou não informados. O logging não altera os retornos da
+CLI nem dispara chamadas extras ao modelo. Veja [OBSERVABILIDADE.md](OBSERVABILIDADE.md).
+
 ## Snapshot oficial v6
 
 A v6 é a versão ativa: 1.400 arquivos, cinco arquivos por órgão/base no máximo
-e 5.621 chunks normalizados, dos quais 4.795 indexados (os 826 com texto
-ilegível ficam fora; ver `py -m src.qualidade_corpus` no README). As
+e 5.090 chunks normalizados e indexados após a recuperação OCR de 2026-10-07,
+com zero trechos ilegíveis (ver `py -m src.qualidade_corpus` no README).
+Com os 25 chunks sintéticos, o índice ativo contém 5.115 chunks. As
 referências a v3 nas seções de coleta abaixo são exemplos históricos; para
 consultar o snapshot pronto, use a CLI existente:
 

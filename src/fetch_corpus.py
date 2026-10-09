@@ -50,6 +50,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.obs import Stage, new_query_id, registrar
+from src.log_context import current_execution
+from src.offline_observation import observar_offline
+
 source_check = importlib.import_module("src.source_catalog")  # noqa: E402
 RICH_CONSOLE = Console()
 
@@ -62,6 +66,8 @@ class _RunLogger:
         self.run_id = f"{command}-{timestamp.strftime('%Y%m%dT%H%M%SZ')}-{time.time_ns() % 1_000_000:06d}"
         self.path = RUNS_ROOT / f"{self.run_id}.jsonl"
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.query_id = new_query_id()
+        self._stage_starts: dict[str, float] = {}
 
     def event(self, stage: str, status: str, **fields: Any) -> None:
         record = {
@@ -73,6 +79,18 @@ class _RunLogger:
         }
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+        context = current_execution()
+        started = self._stage_starts.setdefault(stage, time.perf_counter())
+        if status == "started":
+            self._stage_starts[stage] = time.perf_counter()
+        registrar(run_id=context.run_id if context else self.run_id,
+            query_id=context.query_id if context else self.query_id, stage=Stage.COLETA,
+            status={"started": "iniciado", "completed": "ok", "passed": "ok", "failed": "erro",
+                    "reused": "ok"}.get(status, status),
+            latencia_ms=0 if status == "started" else (time.perf_counter() - started) * 1000,
+            input={"etapa_coleta": stage}, output=fields,
+            extra={"tipo_pipeline": "offline", "origem": "offline", "etapa_coleta": stage,
+                   "run_id_legado": self.run_id, "log_legado": str(self.path)})
 
 
 class _VersionLock:
@@ -817,6 +835,7 @@ def _estimate_base_requests(base: dict[str, Any]) -> int:
     return max(1, endpoint_count)
 
 
+@observar_offline(Stage.COLETA)
 def _dry_run_update(manifest_path: Path, *, official: bool = False) -> int:
     """Mostra o plano do update sem criar logs, checkpoints ou arquivos."""
     manifest = _manifest_for_scope(load_manifest(manifest_path), official=official)
@@ -3178,6 +3197,7 @@ def _scan_existing_version(version: int) -> dict[str, Any]:
     return _build_inventory({"scenario_id": None, "bases": bases}, version, "", datetime.now(timezone.utc).isoformat(timespec="seconds"), {record["logical_id"]: record for record in records}, inventory_type="legacy_physical", manifest_bound=False, official=True)
 
 
+@observar_offline(Stage.INVENTARIO)
 def _inventory_for_version(version: int) -> dict[str, Any]:
     inventory = _load_inventory(version)
     legacy_needs_rebuild = bool(
@@ -3315,6 +3335,7 @@ def _find_resumable_version(
     return max(resumable_candidates)[1] if resumable_candidates else None
 
 
+@observar_offline(Stage.COLETA)
 def _run_manifest_command(
     command: str,
     manifest_path: Path,
@@ -3881,6 +3902,7 @@ def _run_manifest_command(
     return 0 if inventory["completo"] else 2
 
 
+@observar_offline(Stage.INVENTARIO)
 def _discovery_report(
     checkpoint_version: str,
     base_id: str,

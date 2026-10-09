@@ -121,9 +121,13 @@ def _analisar_llm(query: str, cliente: Any, span: Any) -> QueryAnalysisResult:
                         continue
                     result = QueryAnalysisResult.model_validate(cached["analysis"])
                     span.extra["cache_hit"] = True
-                    span.extra["llm"] = cached.get("llm", {})
+                    span.extra["llm"] = {**cached.get("llm", {}), "llm_called": False,
+                                         "chamadas_modelo": [], "uso_tokens": {"status": "cache"}}
+                    span.extra["llm_called"] = False
+                    span.extra["uso_tokens"] = {"status": "cache"}
                     span.modelo = cached.get("llm", {}).get("model", config.GENERATION_MODEL)
                     if cached.get("fallback"):
+                        span.status = "degradado"
                         span.extra["fallback"] = cached["fallback"]
                     return result.model_copy(update={"query_original": query})
             except (ValueError, KeyError):
@@ -131,11 +135,13 @@ def _analisar_llm(query: str, cliente: Any, span: Any) -> QueryAnalysisResult:
     span.modelo = config.GENERATION_MODEL
     span.extra["cache_hit"] = False
     chamada = cliente or _cliente_padrao(_schema_analise())
+    span.extra["llm_called"] = True
+    span.extra["uso_tokens"] = {"status": "indisponivel", "fonte": "response.usage"}
     try:
         raw, usage = _texto_e_tokens(chamada([
             {"role": "system", "content": _PROMPT},
             {"role": "user", "content": f"Data da consulta: {date.today().isoformat()}. Corpus: v6, amostra principalmente de 2025.\nPergunta: {query}"},
-        ]))
+        ]), extra=span.extra)
     finally:
         span.extra["llm"] = dict(getattr(chamada, "diagnosticos", {}))
         span.modelo = span.extra["llm"].get("model", config.GENERATION_MODEL)
@@ -1596,6 +1602,8 @@ def analisar_query(
                 return result
             except Exception as error:
                 # A mensagem de erro de validação repete o texto que o LLM devolveu.
+                span.status = "degradado"
+                span.extra["error_type"] = type(error).__name__
                 span.extra["fallback"] = _para_o_log(f"{type(error).__name__}: {error}")
                 if cliente is None and isinstance(error, (ValueError, KeyError)):
                     result = QueryAnalysisResult(query_original=query, filtros=_analisar(query))

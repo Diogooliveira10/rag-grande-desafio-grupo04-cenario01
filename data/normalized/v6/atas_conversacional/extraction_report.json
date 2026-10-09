@@ -1,17 +1,17 @@
 {
-  "gerado_em": "2026-09-30T17:23:13.972623+00:00",
-  "manifest": "corpus_manifest.yaml",
+  "gerado_em": "2026-10-08T02:18:45.166633+00:00",
+  "manifest": "logs/recovery-v6-2026-10-07_21-18-41/corpus_manifest_v6.yaml",
   "manifest_hash": "sha256:26c19ee26dbfcbf9e1e1f5d746bd09f017a980518cb57ec351248a6e8f04094d",
   "base_id": "atas_conversacional",
   "resumo": {
     "arquivos": 376,
     "documentos": 885,
-    "chunks": 2524,
+    "chunks": 1997,
     "ignorados": 0,
     "falhas": 0,
     "status_extracao": {
-      "ok": 877,
-      "ok_ocr": 8
+      "ok": 825,
+      "ok_ocr": 60
     },
     "indicadores_resultados_homologados": 0,
     "base_id": "atas_conversacional",
@@ -30524,9 +30524,10 @@
       "data_vigencia": null,
       "formato": "pdf",
       "sha256": "809e0cd4537bf60823b4ebc3b92c302f0e70ad934fede0ebe3739257626c13b7",
-      "status_extracao": "ok",
-      "chunks": 9,
+      "status_extracao": "ok_ocr",
+      "chunks": 4,
       "extras": {
+        "extracao": "tesseract:por:300",
         "pagina": 1,
         "total_paginas": 5,
         "relacoes_pncp": [
@@ -30574,9 +30575,10 @@
       "data_vigencia": null,
       "formato": "pdf",
       "sha256": "809e0cd4537bf60823b4ebc3b92c302f0e70ad934fede0ebe3739257626c13b7",
-      "status_extracao": "ok",
-      "chunks": 14,
+      "status_extracao": "ok_ocr",
+      "chunks": 4,
       "extras": {
+        "extracao": "tesseract:por:300",
         "pagina": 2,
         "total_paginas": 5,
         "relacoes_pncp": [
@@ -30624,9 +30626,10 @@
       "data_vigencia": null,
       "formato": "pdf",
       "sha256": "809e0cd4537bf60823b4ebc3b92c302f0e70ad934fede0ebe3739257626c13b7",
-      "status_extracao": "ok",
-      "chunks": 17,
+      "status_extracao": "ok_ocr",
+      "chunks": 6,
       "extras": {
+        "extracao": "tesseract:por:300",
         "pagina": 3,
         "total_paginas": 5,
         "relacoes_pncp": [
@@ -30674,9 +30677,10 @@
       "data_vigencia": null,
       "formato": "pdf",
       "sha256": "809e0cd4537bf60823b4ebc3b92c302f0e70ad934fede0ebe3739257626c13b7",
-      "status_extracao": "ok",
-      "chunks": 17,
+      "status_extracao": "ok_ocr",
+      "chunks": 6,
       "extras": {
+        "extracao": "tesseract:por:300",
         "pagina": 4,
         "total_paginas": 5,
         "relacoes_pncp": [
@@ -30724,9 +30728,10 @@
       "data_vigencia": null,
       "formato": "pdf",
       "sha256": "809e0cd4537bf60823b4ebc3b92c302f0e70ad934fede0ebe3739257626c13b7",
-      "status_extracao": "ok",
-      "chunks": 10,
+      "status_extracao": "ok_ocr",
+      "chunks": 3,
       "extras": {
+        "extracao": "tesseract:por:300",
         "pagina": 5,
         "total_paginas": 5,
         "relacoes_pncp": [
@@ -38596,8 +38601,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 12,
+      "status_extracao": "ok_ocr",
+      "chunks": 5,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -38624,6 +38629,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 1,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -38672,8 +38678,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 20,
+      "status_extracao": "ok_ocr",
+      "chunks": 7,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -38700,6 +38706,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 2,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -38748,8 +38755,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 20,
+      "status_extracao": "ok_ocr",
+      "chunks": 7,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -38776,6 +38783,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 3,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -38824,8 +38832,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 19,
+      "status_extracao": "ok_ocr",
+      "chunks": 7,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -38852,6 +38860,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 4,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -38900,8 +38909,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 20,
+      "status_extracao": "ok_ocr",
+      "chunks": 6,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -38928,6 +38937,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 5,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -38976,8 +38986,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 16,
+      "status_extracao": "ok_ocr",
+      "chunks": 7,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -39004,6 +39014,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 6,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -39052,8 +39063,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 19,
+      "status_extracao": "ok_ocr",
+      "chunks": 6,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -39080,6 +39091,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 7,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -39128,8 +39140,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 19,
+      "status_extracao": "ok_ocr",
+      "chunks": 7,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -39156,6 +39168,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 8,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -39204,8 +39217,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 19,
+      "status_extracao": "ok_ocr",
+      "chunks": 6,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -39232,6 +39245,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 9,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -39280,8 +39294,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 19,
+      "status_extracao": "ok_ocr",
+      "chunks": 7,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -39308,6 +39322,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 10,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -39356,8 +39371,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 17,
+      "status_extracao": "ok_ocr",
+      "chunks": 7,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -39384,6 +39399,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 11,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -39432,8 +39448,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 20,
+      "status_extracao": "ok_ocr",
+      "chunks": 8,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -39460,6 +39476,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 12,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -39508,8 +39525,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 19,
+      "status_extracao": "ok_ocr",
+      "chunks": 7,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -39536,6 +39553,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 13,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -39584,8 +39602,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 18,
+      "status_extracao": "ok_ocr",
+      "chunks": 7,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -39612,6 +39630,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 14,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -39660,8 +39679,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 20,
+      "status_extracao": "ok_ocr",
+      "chunks": 7,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -39688,6 +39707,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 15,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -39736,8 +39756,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 18,
+      "status_extracao": "ok_ocr",
+      "chunks": 6,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -39764,6 +39784,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 16,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -39812,8 +39833,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 19,
+      "status_extracao": "ok_ocr",
+      "chunks": 6,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -39840,6 +39861,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 17,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -39888,8 +39910,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 21,
+      "status_extracao": "ok_ocr",
+      "chunks": 7,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -39916,6 +39938,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 18,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -39964,8 +39987,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 19,
+      "status_extracao": "ok_ocr",
+      "chunks": 7,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -39992,6 +40015,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 19,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -40040,8 +40064,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 7,
+      "status_extracao": "ok_ocr",
+      "chunks": 2,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -40068,6 +40092,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 20,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -40116,8 +40141,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 21,
+      "status_extracao": "ok_ocr",
+      "chunks": 6,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -40144,6 +40169,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 21,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -40192,8 +40218,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 19,
+      "status_extracao": "ok_ocr",
+      "chunks": 7,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -40220,6 +40246,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 22,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -40268,8 +40295,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 18,
+      "status_extracao": "ok_ocr",
+      "chunks": 6,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -40296,6 +40323,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 23,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -40344,8 +40372,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 19,
+      "status_extracao": "ok_ocr",
+      "chunks": 6,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -40372,6 +40400,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 24,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -40420,8 +40449,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 18,
+      "status_extracao": "ok_ocr",
+      "chunks": 6,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -40448,6 +40477,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 25,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -40496,8 +40526,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 19,
+      "status_extracao": "ok_ocr",
+      "chunks": 8,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -40524,6 +40554,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 26,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -40572,8 +40603,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 19,
+      "status_extracao": "ok_ocr",
+      "chunks": 7,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -40600,6 +40631,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 27,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -40648,8 +40680,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 20,
+      "status_extracao": "ok_ocr",
+      "chunks": 6,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -40676,6 +40708,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 28,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -40724,8 +40757,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 19,
+      "status_extracao": "ok_ocr",
+      "chunks": 6,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -40752,6 +40785,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 29,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -40800,8 +40834,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 18,
+      "status_extracao": "ok_ocr",
+      "chunks": 6,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -40828,6 +40862,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 30,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -40876,8 +40911,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 19,
+      "status_extracao": "ok_ocr",
+      "chunks": 6,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -40904,6 +40939,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 31,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -40952,8 +40988,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 17,
+      "status_extracao": "ok_ocr",
+      "chunks": 6,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -40980,6 +41016,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 32,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -41028,8 +41065,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 23,
+      "status_extracao": "ok_ocr",
+      "chunks": 7,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -41056,6 +41093,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 33,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -41104,8 +41142,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 29,
+      "status_extracao": "ok_ocr",
+      "chunks": 9,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -41132,6 +41170,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 34,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -41180,8 +41219,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 22,
+      "status_extracao": "ok_ocr",
+      "chunks": 7,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -41208,6 +41247,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 35,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -41256,8 +41296,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 18,
+      "status_extracao": "ok_ocr",
+      "chunks": 6,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -41284,6 +41324,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 36,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -41332,8 +41373,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 1,
+      "status_extracao": "ok_ocr",
+      "chunks": 2,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -41360,6 +41401,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 37,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -41947,8 +41989,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 1,
+      "status_extracao": "ok_ocr",
+      "chunks": 4,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -41975,6 +42017,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 45,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -42100,8 +42143,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 1,
+      "status_extracao": "ok_ocr",
+      "chunks": 4,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -42128,6 +42171,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 47,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -42176,8 +42220,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 2,
+      "status_extracao": "ok_ocr",
+      "chunks": 3,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -42204,6 +42248,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 48,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -42252,8 +42297,8 @@
       "data_vigencia": "2027-05-09",
       "formato": "pdf",
       "sha256": "cb7bc4c66c3684149dacdc323335e24e48d691d9a2ffbe526585f9491b45a5ba",
-      "status_extracao": "ok",
-      "chunks": 3,
+      "status_extracao": "ok_ocr",
+      "chunks": 1,
       "extras": {
         "dataVigenciaFim": "2027-05-09",
         "contratos_vinculados": [
@@ -42280,6 +42325,7 @@
         ],
         "titulo_documento": "Ata de Registro de PreÃ§os nÂº 00014",
         "tipo_documento": "Ata de Registro de Preços",
+        "extracao": "tesseract:por:300",
         "pagina": 49,
         "total_paginas": 49,
         "relacoes_pncp": [
@@ -42733,9 +42779,10 @@
       "data_vigencia": null,
       "formato": "pdf",
       "sha256": "d27cd498708180f1506b8c2e5c8b4e59c38fecd7f068cc6d5d7d216dc0293da2",
-      "status_extracao": "ok",
-      "chunks": 13,
+      "status_extracao": "ok_ocr",
+      "chunks": 5,
       "extras": {
+        "extracao": "tesseract:por:300",
         "pagina": 1,
         "total_paginas": 6,
         "relacoes_pncp": [
@@ -42783,9 +42830,10 @@
       "data_vigencia": null,
       "formato": "pdf",
       "sha256": "d27cd498708180f1506b8c2e5c8b4e59c38fecd7f068cc6d5d7d216dc0293da2",
-      "status_extracao": "ok",
-      "chunks": 9,
+      "status_extracao": "ok_ocr",
+      "chunks": 3,
       "extras": {
+        "extracao": "tesseract:por:300",
         "pagina": 2,
         "total_paginas": 6,
         "relacoes_pncp": [
@@ -42833,9 +42881,10 @@
       "data_vigencia": null,
       "formato": "pdf",
       "sha256": "d27cd498708180f1506b8c2e5c8b4e59c38fecd7f068cc6d5d7d216dc0293da2",
-      "status_extracao": "ok",
-      "chunks": 11,
+      "status_extracao": "ok_ocr",
+      "chunks": 3,
       "extras": {
+        "extracao": "tesseract:por:300",
         "pagina": 3,
         "total_paginas": 6,
         "relacoes_pncp": [
@@ -42883,9 +42932,10 @@
       "data_vigencia": null,
       "formato": "pdf",
       "sha256": "d27cd498708180f1506b8c2e5c8b4e59c38fecd7f068cc6d5d7d216dc0293da2",
-      "status_extracao": "ok",
-      "chunks": 15,
+      "status_extracao": "ok_ocr",
+      "chunks": 5,
       "extras": {
+        "extracao": "tesseract:por:300",
         "pagina": 4,
         "total_paginas": 6,
         "relacoes_pncp": [
@@ -42933,9 +42983,10 @@
       "data_vigencia": null,
       "formato": "pdf",
       "sha256": "d27cd498708180f1506b8c2e5c8b4e59c38fecd7f068cc6d5d7d216dc0293da2",
-      "status_extracao": "ok",
-      "chunks": 14,
+      "status_extracao": "ok_ocr",
+      "chunks": 4,
       "extras": {
+        "extracao": "tesseract:por:300",
         "pagina": 5,
         "total_paginas": 6,
         "relacoes_pncp": [
@@ -42983,9 +43034,10 @@
       "data_vigencia": null,
       "formato": "pdf",
       "sha256": "d27cd498708180f1506b8c2e5c8b4e59c38fecd7f068cc6d5d7d216dc0293da2",
-      "status_extracao": "ok",
-      "chunks": 3,
+      "status_extracao": "ok_ocr",
+      "chunks": 1,
       "extras": {
+        "extracao": "tesseract:por:300",
         "pagina": 6,
         "total_paginas": 6,
         "relacoes_pncp": [

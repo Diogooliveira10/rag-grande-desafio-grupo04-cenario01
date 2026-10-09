@@ -1,12 +1,12 @@
 {
-  "gerado_em": "2026-09-30T17:23:03.489252+00:00",
-  "manifest": "corpus_manifest.yaml",
+  "gerado_em": "2026-10-08T02:18:46.787344+00:00",
+  "manifest": "logs/recovery-v6-2026-10-07_21-18-41/corpus_manifest_v6.yaml",
   "manifest_hash": "sha256:26c19ee26dbfcbf9e1e1f5d746bd09f017a980518cb57ec351248a6e8f04094d",
   "base_id": "editais_normativo",
   "resumo": {
     "arquivos": 13,
     "documentos": 166,
-    "chunks": 1561,
+    "chunks": 1557,
     "ignorados": 0,
     "falhas": 0,
     "status_extracao": {
@@ -82,8 +82,9 @@
       "formato": "pdf",
       "sha256": "13c500a82afb41438e626ed43c697d3001e6fa8d4620d601d88a54fe7e2d7ee4",
       "status_extracao": "ok",
-      "chunks": 26,
+      "chunks": 25,
       "extras": {
+        "extracao": "codigos_unicode_decodificados",
         "pagina": 2,
         "total_paginas": 3,
         "relacoes_pncp": [
@@ -123,6 +124,7 @@
       "status_extracao": "ok",
       "chunks": 20,
       "extras": {
+        "extracao": "codigos_unicode_decodificados",
         "pagina": 3,
         "total_paginas": 3,
         "relacoes_pncp": [
@@ -3401,8 +3403,9 @@
       "formato": "pdf",
       "sha256": "9699114e71c760d91822ae0c2c6c527abdc0f050d302dd5125c789ddb4ecc0b8",
       "status_extracao": "ok",
-      "chunks": 23,
+      "chunks": 22,
       "extras": {
+        "extracao": "codigos_unicode_decodificados",
         "pagina": 1,
         "total_paginas": 5,
         "relacoes_pncp": [
@@ -3442,6 +3445,7 @@
       "status_extracao": "ok",
       "chunks": 23,
       "extras": {
+        "extracao": "codigos_unicode_decodificados",
         "pagina": 2,
         "total_paginas": 5,
         "relacoes_pncp": [
@@ -3479,8 +3483,9 @@
       "formato": "pdf",
       "sha256": "9699114e71c760d91822ae0c2c6c527abdc0f050d302dd5125c789ddb4ecc0b8",
       "status_extracao": "ok",
-      "chunks": 26,
+      "chunks": 25,
       "extras": {
+        "extracao": "codigos_unicode_decodificados",
         "pagina": 3,
         "total_paginas": 5,
         "relacoes_pncp": [
@@ -3520,6 +3525,7 @@
       "status_extracao": "ok",
       "chunks": 29,
       "extras": {
+        "extracao": "codigos_unicode_decodificados",
         "pagina": 4,
         "total_paginas": 5,
         "relacoes_pncp": [
@@ -3557,8 +3563,9 @@
       "formato": "pdf",
       "sha256": "9699114e71c760d91822ae0c2c6c527abdc0f050d302dd5125c789ddb4ecc0b8",
       "status_extracao": "ok",
-      "chunks": 35,
+      "chunks": 34,
       "extras": {
+        "extracao": "codigos_unicode_decodificados",
         "pagina": 5,
         "total_paginas": 5,
         "relacoes_pncp": [

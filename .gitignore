@@ -15,6 +15,7 @@ env/
 
 # Ferramentas de teste e análise
 .pytest_cache/
+.tmp/
 pytest-of-*/
 *.codex-backup
 .mypy_cache/
@@ -26,6 +27,7 @@ pytest-of-*/
 # Data and logs
 index/
 logs/
+data/backups/
 # Snapshots locais: a v6 validada é adicionada explicitamente ao Git.
 data/embeddings/*/
 data/embeddings/query_cache.jsonl

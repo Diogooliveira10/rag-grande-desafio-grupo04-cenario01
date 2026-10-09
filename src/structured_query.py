@@ -23,6 +23,7 @@ import hashlib
 import re
 import statistics
 from dataclasses import dataclass, field, replace
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
@@ -724,10 +725,19 @@ def _tem_valor(valor: Any) -> bool:
 
 def _estatisticas(valores: list[float]) -> str:
     if not valores:
-        return "0 registros com valor"
+        return "0 registros com valor; total não informado"
+    # Somar campos registrados não é imputar valores: zeros/centavos contam
+    # no total literal, mas não na estatística dos valores informativos.
+    total = sum((Decimal(str(v)) for v in valores), Decimal(0))
+    informativos = [v for v in valores if _tem_valor(v)]
+    prefixo = f"{len(valores)} registros; total {_brl(total)}"
+    if len(informativos) != len(valores):
+        prefixo += f"; estatísticas sobre {len(informativos)} valores >= R$ 1,00"
+    if not informativos:
+        return prefixo + "; média, mediana, mínimo e máximo não informados"
     return (
-        f"{len(valores)} registros; total {_brl(sum(valores))}; média {_brl(statistics.fmean(valores))}; "
-        f"mediana {_brl(statistics.median(valores))}; mínimo {_brl(min(valores))}; máximo {_brl(max(valores))}"
+        f"{prefixo}; média {_brl(statistics.fmean(informativos))}; "
+        f"mediana {_brl(statistics.median(informativos))}; mínimo {_brl(min(informativos))}; máximo {_brl(max(informativos))}"
     )
 
 
@@ -818,20 +828,22 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
             for row in banco.consultar(sql, parametros):
                 key = tuple(row[c] for c in campos)
                 contagens[key] = contagens.get(key, 0) + 1
-                if _tem_valor(row["valor"]):
+                if row["valor"] is not None:
                     valores_por_grupo.setdefault(key, []).append(float(row["valor"]))
             items = [(k, v) for k, v in valores_por_grupo.items()
-                     if contagens[k] >= (consulta.minimo_por_grupo or 1)]
-            items.sort(key=lambda kv: statistics.median(kv[1]), reverse=consulta.ordem == "DESC")
+                     if contagens[k] >= (consulta.minimo_por_grupo or 1) and any(_tem_valor(n) for n in v)]
+            items.sort(key=lambda kv: statistics.median([n for n in kv[1] if _tem_valor(n)]),
+                       reverse=consulta.ordem == "DESC")
             grupos = [f"{' / '.join(str(k or 'não informado') for k in key)}: {_estatisticas(values)}"
                       for key, values in items[:consulta.limite]]
         else:
             valor_informado = f"CASE WHEN {coluna_valor} >= {_VALOR_MINIMO_INFORMADO} THEN {coluna_valor} END"
             funcao = {"soma": "SUM", "media": "AVG", "minimo": "MIN", "maximo": "MAX"}.get(consulta.metrica)
-            ordem = (f"{funcao}({valor_informado}) {consulta.ordem}, n DESC"
-                     if funcao else f"n DESC, COALESCE(SUM({valor_informado}), 0) DESC")
+            expressao_ordem = coluna_valor if consulta.metrica == "soma" else valor_informado
+            ordem = (f"{funcao}({expressao_ordem}) {consulta.ordem}, n DESC"
+                     if funcao else f"n DESC, COALESCE(SUM({coluna_valor}), 0) DESC")
             sql = (
-                f"SELECT {coluna}, COUNT(*) AS n, SUM({valor_informado}) AS total, "
+                f"SELECT {coluna}, COUNT(*) AS n, SUM({coluna_valor}) AS total, "
                 f"AVG({valor_informado}) AS media, MIN({valor_informado}) AS minimo, MAX({valor_informado}) AS maximo "
                 f"FROM {consulta.tabela}{where} GROUP BY {coluna}"
             )
@@ -865,15 +877,18 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
         sql = f"SELECT {coluna_periodo} AS periodo, {coluna_valor} AS valor FROM {consulta.tabela}{where}"
         por_periodo: dict[Any, list[float]] = {}
         for l in banco.consultar(sql, parametros):
-            if _tem_valor(l["valor"]):
+            if l["valor"] is not None:
                 por_periodo.setdefault(l["periodo"], []).append(float(l["valor"]))
         conhecidos = sorted((p, v) for p, v in por_periodo.items() if p is not None)
         linhas = [f"{p}: {_estatisticas(v)}" for p, v in conhecidos]
         todos = [v for _, valores in conhecidos for v in valores]
         if todos:
             linhas.insert(0, f"Período observado (média ponderada por registro): {_estatisticas(todos)}")
-        if len(conhecidos) >= 2:
-            inicio, fim = conhecidos[0], conhecidos[-1]
+        periodos_informativos = [(p, [v for v in valores if _tem_valor(v)])
+                                 for p, valores in conhecidos]
+        periodos_informativos = [(p, v) for p, v in periodos_informativos if v]
+        if len(periodos_informativos) >= 2:
+            inicio, fim = periodos_informativos[0], periodos_informativos[-1]
             a, b = statistics.fmean(inicio[1]), statistics.fmean(fim[1])
             delta = b - a
             percentual = f"{100 * delta / a:.2f}%" if a else "percentual indefinido (base zero)"
@@ -894,18 +909,24 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
     coluna_esfera = "esfera" if consulta.tabela == "contratacoes" else "NULL"
     sql = f"SELECT {coluna_esfera} AS esfera, {coluna_valor} AS valor FROM {consulta.tabela}{where}"
     todas = banco.consultar(sql, parametros)
-    linhas = [l for l in todas if _tem_valor(l["valor"])]
-    # A contagem vale para todos os registros; as contas de valor, só para os que
-    # têm valor (R$ 0,00 e R$ 0,01 no PNCP não são o valor e puxariam média e mediana).
-    sem_valor = len(todas) - len(linhas)
-    geral = f"Geral: {_estatisticas([float(l['valor']) for l in linhas])}"
-    if sem_valor:
-        geral = f"Geral: {len(todas)} registros no total, {sem_valor} sem valor informado (vazio ou abaixo de R$ 1,00); valores: " + geral[7:]
+    # Contagem inclui ausentes; soma inclui todo valor registrado. Somente as
+    # demais estatísticas excluem valores simbólicos, sem chamá-los de ausentes.
+    ausentes = sum(l["valor"] is None for l in todas)
+    simbolicos = sum(l["valor"] is not None and not _tem_valor(l["valor"]) for l in todas)
+    geral = f"Geral: {_estatisticas([float(l['valor']) for l in todas if l['valor'] is not None])}"
+    if ausentes or simbolicos:
+        qualificacao = f"{len(todas)} registros no total"
+        if ausentes:
+            qualificacao += f", {ausentes} sem valor informado"
+        if simbolicos:
+            qualificacao += f", {simbolicos} com valor abaixo de R$ 1,00"
+        geral = f"Geral: {qualificacao}; valores registrados: " + geral[7:]
     resultado = [geral]
     if consulta.tabela == "contratacoes":
         por_esfera: dict[str, list[float]] = {}
-        for l in linhas:
-            por_esfera.setdefault(l["esfera"] or "não informada", []).append(float(l["valor"]))
+        for l in todas:
+            if l["valor"] is not None:
+                por_esfera.setdefault(l["esfera"] or "não informada", []).append(float(l["valor"]))
         resultado += [f"Esfera {esfera}: {_estatisticas(v)}" for esfera, v in sorted(por_esfera.items())]
     return sql, resultado
 
@@ -1102,11 +1123,30 @@ def _chunks(consulta: Consulta, sql: str, cabecalho: str, linhas: list[str], ban
                 doc_type="sql",
                 natureza=natureza,
                 chunking_strategy="consulta_sql",
-                extras={"sql": sql, "tipo": consulta.tipo, "parte": indice, "partes": len(partes)},
+                extras={"sql": sql, "tipo": consulta.tipo, "parte": indice, "partes": len(partes),
+                        "resultado_sql": {"cabecalho": cabecalho, "linhas": parte,
+                            "politica": "Totais somam os valores registrados, inclusive zeros/centavos; "
+                            "média, mediana, mínimo e máximo consideram valores >= R$ 1,00. "
+                            "Campos ausentes não são zero. Esta amostra não é um censo do RJ."},
+                        "geracao_deterministica": consulta.tipo in {"estatistica", "ranking", "agrupamento", "evolucao"}
+                        and not consulta.norma_citada},
             ),
         )
         for indice, parte in enumerate(partes, 1)
     ]
+
+
+def pode_consultar_sql_direto(
+    query: str, filtros: QueryFilters, bases: Iterable[Natureza],
+    *, intencao: Optional[QueryIntent] = None,
+) -> bool:
+    """Planejamento sem I/O; só contas que podem dispensar a busca vetorial."""
+    bases = list(bases)
+    if not bases or not set(bases) <= {Natureza.ESTRUTURADA, Natureza.AGREGADA}:
+        return False
+    consulta = consulta_da_intencao(intencao) if intencao is not None else detectar_consulta(query, filtros, bases)
+    return bool(consulta and consulta.tipo in {"estatistica", "ranking", "agrupamento", "evolucao"}
+                and not consulta.norma_citada)
 
 
 # Linhas do resultado SQL gravadas no log da etapa ``consulta_sql``.
@@ -1133,6 +1173,9 @@ def consultar_estruturado(
     consulta = consulta_da_intencao(intencao) if intencao is not None else detectar_consulta(query, filtros, bases)
     documents_file = Path(documents_file or DOCUMENTS_FILE)
     if consulta is None or not documents_file.exists():
+        from src.obs import registrar_pulo
+        registrar_pulo(run_id=run_id, query_id=query_id, stage=Stage.CONSULTA_SQL, query=query,
+                       motivo="nao_aplicavel" if consulta is None else "corpus_ausente")
         return []
     banco = banco or structured_db.banco_padrao()
     try:
@@ -1144,8 +1187,10 @@ def consultar_estruturado(
             extra={"tabela": consulta.tabela, "tipo": consulta.tipo, "banco": banco.rotulo_publico()},
         ) as span:
             structured_db.garantir_banco(documents_file, banco, status=span.extra)
-            with banco.sessao():
-                sql, cabecalho, linhas = executar_consulta(consulta, banco)
+            with structured_db.observar_consultas() as consultas:
+                span.extra["execucao_sql"] = consultas
+                with banco.sessao():
+                    sql, cabecalho, linhas = executar_consulta(consulta, banco)
             chunks = _chunks(consulta, sql, cabecalho, linhas, banco)
             span.extra.update({
                 "sql": sql, "linhas": len(linhas), "chunks": len(chunks),
@@ -1155,6 +1200,12 @@ def consultar_estruturado(
                 "linhas_fora_do_log": max(0, len(linhas) - _LINHAS_NO_LOG),
                 "chunk_ids": [chunk.metadata.chunk_id for chunk in chunks],
             })
+            from src.log_evidence import auditoria_completa
+            if auditoria_completa():
+                span.extra["auditoria_evidencias"] = {
+                    "modo": "completo", "cabecalho": cabecalho,
+                    "resultado_completo": linhas, "chunk_ids": [c.metadata.chunk_id for c in chunks],
+                }
             span.set_result(f"{len(linhas)} linha(s) em {len(chunks)} chunk(s)")
             return chunks
     except Exception:

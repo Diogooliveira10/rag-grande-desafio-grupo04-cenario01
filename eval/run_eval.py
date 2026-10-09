@@ -296,7 +296,9 @@ def _executar_caso(case: EvalCase, pipeline_fn: PipelineFn) -> dict[str, Any]:
     """Roda um caso medindo a latência; exceção vira caso errado, não derruba a rodada."""
     inicio = time.perf_counter()
     try:
-        resposta = pipeline_fn(case.pergunta)
+        from src.log_context import log_origin
+        with log_origin("avaliacao"):
+            resposta = pipeline_fn(case.pergunta)
         erro = None
     except Exception as exc:  # noqa: BLE001 - o relatório precisa registrar qualquer falha
         resposta = {}

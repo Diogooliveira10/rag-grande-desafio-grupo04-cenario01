@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
+import re
 import secrets
 import threading
 import time
@@ -10,11 +13,14 @@ import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field, is_dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from enum import Enum
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, ParamSpec, TypeVar
+
+import config
+from src.log_context import current_details, current_execution, current_origin, stage_outcome
 
 _model_call_lock = threading.Lock()
 _last_model_call = 0.0
@@ -34,6 +40,11 @@ def aguardar_modelo() -> None:
 class Stage(str, Enum):
     """Nomes permitidos para as etapas observáveis do pipeline."""
 
+    REQUISICAO_INICIO = "requisicao_inicio"
+    REQUISICAO_FIM = "requisicao_fim"
+    PIPELINE_INICIO = "pipeline_inicio"
+    PIPELINE_FIM = "pipeline_fim"
+    PERSISTENCIA_HISTORICO = "persistencia_historico"
     # Conversa/cortesia ou consulta ao acervo: decidida antes da query_analysis.
     INTERACAO = "interacao"
     # Pergunta de continuação reescrita com o histórico enviado pelo cliente.
@@ -48,6 +59,13 @@ class Stage(str, Enum):
     GERACAO = "geracao"
     VALIDACAO = "validacao"
     FEEDBACK = "feedback"
+    COLETA = "coleta"
+    INVENTARIO = "inventario"
+    INGESTAO = "ingestao"
+    PREPARACAO = "preparacao"
+    EMBEDDINGS = "embeddings"
+    INDEXACAO = "indexacao"
+    EMBEDDING_LOTE = "embedding_lote"
     # Fecha cada pergunta: bases consultadas (SQL e vetorial), evidências e fontes citadas.
     RESUMO_CONSULTA = "resumo_consulta"
 
@@ -106,11 +124,22 @@ def sessao_atual() -> str | None:
     return _sessao_atual.get()
 
 
-def token_usage_from_response(response: Any) -> TokenUsage:
-    """Extrai tokens de ``response.usage`` ou retorna uma contagem zerada."""
+def token_usage_from_response(response: Any, *, extra: dict[str, Any] | None = None) -> TokenUsage:
+    """Preserva contadores inteiros; metadado distingue zero de uso desconhecido."""
     usage = getattr(response, "usage", None)
     if usage is None and isinstance(response, dict):
         usage = response.get("usage")
+    def informado(key: str) -> bool:
+        value = usage.get(key) if isinstance(usage, Mapping) else getattr(usage, key, None)
+        return value is not None
+    if extra is not None:
+        fields = {key: informado(key + "_tokens") for key in ("prompt", "completion", "total")}
+        embedding = getattr(response, "data", None) is not None or isinstance(response, Mapping) and "data" in response
+        available = usage is not None and any(fields.values())
+        complete = fields["prompt"] and fields["total"] and (fields["completion"] or embedding)
+        extra["uso_tokens"] = {"status": "reportado" if complete else "parcial" if available else "indisponivel",
+                               "fonte": "response.usage", "chamadas_observadas": 1,
+                               "campos_reportados": fields}
     if usage is None:
         return TokenUsage()
 
@@ -165,13 +194,13 @@ class LogRecord:
     def to_dict(self) -> dict[str, Any]:
         """Converte o registro para um dicionário pronto para serialização.
 
-        Os textos de ``input``/``output``, inclusive dentro de dicionários e
+        Os textos de ``input``/``output``/``extra``, inclusive dentro de dicionários e
         listas, passam pelo mascaramento de ``src/sensitivity.py``: CPF,
         telefone e e-mail pessoal da pergunta não ficam gravados no log.
         """
         data = asdict(self)
         data["stage"] = self.stage.value
-        for campo in ("input", "output"):
+        for campo in ("input", "output", "extra"):
             data[campo] = _mascarar_textos(data[campo])
         return data
 
@@ -186,10 +215,43 @@ def _mascarar_textos(valor: Any) -> Any:
 class PipelineLogger:
     """Grava eventos estruturados e correlacionados do pipeline em JSONL."""
 
-    def __init__(self, logs_dir: str | Path = "logs") -> None:
-        """Configura o diretório e o controle de escrita concorrente."""
+    def __init__(self, logs_dir: str | Path = "logs", *, retention_days: int = 0) -> None:
+        """Configura o diretório; zero dias preserva todos os arquivos."""
+        if retention_days < 0:
+            raise ValueError("retention_days deve ser não negativo")
         self.logs_dir = Path(logs_dir)
+        self.retention_days = retention_days
         self._lock = threading.Lock()
+        self._last_cleanup: tuple[Path, date] | None = None
+        self._writer = None
+        self._writer_pid = os.getpid()
+
+    def expired_paths(self, now: datetime | None = None) -> list[Path]:
+        """Somente JSONL diários antigos; nunca diretórios, links ou backups."""
+        if not self.retention_days:
+            return []
+        current = now or datetime.now().astimezone()
+        cutoff = current.date() - timedelta(days=self.retention_days)
+        expired = []
+        for path in sorted(self.logs_dir.glob("pipeline-*.jsonl")):
+            match = re.fullmatch(r"pipeline-(\d{4}-\d{2}-\d{2})\.jsonl", path.name)
+            if not match or not path.is_file() or path.is_symlink():
+                continue
+            try:
+                day = date.fromisoformat(match[1])
+            except ValueError:
+                continue
+            if day < cutoff:
+                expired.append(path)
+        return expired
+
+    def _purge_expired(self, now: datetime) -> None:
+        for path in self.expired_paths(now):
+            try:
+                path.unlink()
+            except OSError:
+                # Retention failure must not turn a successful query into HTTP 500.
+                logging.getLogger(__name__).warning("Não foi possível expurgar %s", path)
 
     def log_path(self, now: datetime | None = None) -> Path:
         """Retorna o caminho diário ``pipeline-AAAA-MM-DD.jsonl``."""
@@ -199,12 +261,76 @@ class PipelineLogger:
     def write(self, record: LogRecord) -> Path:
         """Acrescenta um registro ao JSONL e retorna seu caminho."""
         path = self.log_path(datetime.fromisoformat(record.ts))
-        line = json.dumps(record.to_dict(), ensure_ascii=False, default=_json_default)
-        with self._lock:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("a", encoding="utf-8") as stream:
-                stream.write(line + "\n")
+        data = record.to_dict()
+        context = current_execution()
+        data["extra"] = {**_mascarar_textos(current_details()), **data["extra"],
+                         "schema_version": 2, "origem": data["extra"].get("origem", current_origin())}
+        data["extra"].update({"outcome": stage_outcome(record.status, data["extra"]),
+                              "attempted": record.status != "pulado"})
+        llm = data["extra"].get("llm") or {}
+        if "llm_called" in llm:
+            data["extra"]["llm_called"] = llm["llm_called"]
+        if llm.get("uso_tokens"):
+            data["extra"]["uso_tokens"] = llm["uso_tokens"]
+        if "uso_tokens" not in data["extra"]:
+            data["extra"]["uso_tokens"] = {"status": "reportado" if record.tokens.total else
+                "indisponivel" if data["extra"].get("llm_called") else "nao_aplicavel"}
+        if data["extra"].get("llm_called") or llm.get("llm_called"):
+            data["modelo"] = data["modelo"] or data["extra"].get("model") or llm.get("model")
+        if context and (record.run_id, record.query_id) == (context.run_id, context.query_id):
+            context.sequence += 1
+            data["extra"].update({"schema_version": 2, "origem": context.origin,
+                                  "sequencia": context.sequence})
+            context.events.append({"stage": data["stage"], "status": data["status"],
+                                   "extra": data["extra"], "latencia_ms": data["latencia_ms"],
+                                   "tokens": data["tokens"]})
+        line = json.dumps(data, ensure_ascii=False, default=_json_default)
+        try:
+            from src.log_store import EventStore, QueuedEventWriter
+            if self._writer_pid != os.getpid():
+                # A fork must not reuse a queue whose consumer stayed in the parent.
+                self._writer, self._lock = None, threading.Lock()
+                self._writer_pid = os.getpid()
+            with self._lock:
+                now = datetime.now().astimezone()
+                cleanup_key = (self.logs_dir, now.date())
+                if self._last_cleanup != cleanup_key:
+                    self._purge_expired(now)
+                    self._last_cleanup = cleanup_key
+                if self._writer and self._writer.store.directory != Path(self.logs_dir).resolve():
+                    self._writer.close()
+                    self._writer = None
+                if context:
+                    if self._writer is None:
+                        self._writer = QueuedEventWriter(self.logs_dir)
+                    job = self._writer.submit(path, line, lambda error: self._write_error(error, context))
+                else:
+                    # Isolated module calls promise an immediately readable event.
+                    EventStore(self.logs_dir).append_batch([(path, line)])
+                    job = None
+            if job and record.stage in {Stage.PIPELINE_FIM, Stage.REQUISICAO_FIM}:
+                job.done.wait()  # Trace/history can read the complete execution now.
+        except Exception as error:
+            self._write_error(error, context)
         return path
+
+    @staticmethod
+    def _write_error(error: BaseException, context: Any) -> None:
+        if context:
+            context.logging_errors += 1
+        logging.getLogger(__name__).error("Falha ao gravar evento de observabilidade",
+            exc_info=(type(error), error, error.__traceback__))
+
+    def flush(self) -> None:
+        """Wait for queued events before building an envelope or reading a trace."""
+        if self._writer_pid == os.getpid() and self._writer is not None:
+            self._writer.flush()
+
+    def close(self) -> None:
+        """Flush on orderly shutdown; JSONL and the index stay readable."""
+        if self._writer_pid == os.getpid() and self._writer is not None:
+            self._writer.close()
+            self._writer = None
 
     def span(
         self,
@@ -251,6 +377,7 @@ class LogSpan:
         self.modelo = modelo
         self.extra = extra
         self.output: Any = None
+        self.status = "ok"
         self.tokens = TokenUsage()
         self._started = 0.0
         self._timestamp = ""
@@ -265,7 +392,7 @@ class LogSpan:
         """Define a saída observável e captura tokens opcionais."""
         self.output = output
         if response is not None:
-            self.tokens = token_usage_from_response(response)
+            self.tokens = token_usage_from_response(response, extra=self.extra)
 
     def __exit__(
         self,
@@ -275,11 +402,15 @@ class LogSpan:
     ) -> bool:
         """Persiste o evento e retorna ``False`` para preservar exceções."""
         latency = max(0, round((time.perf_counter() - self._started) * 1000))
-        status = "erro" if exc is not None else "ok"
+        status = "erro" if exc is not None else self.status
+        if status == "ok" and (self.extra.get("fallback_used")
+                               or (self.extra.get("llm") or {}).get("fallback_used")):
+            status = "degradado"
         output = self.output
         extra = dict(self.extra)
         if exc is not None:
-            output = f"{type(exc).__name__}: {exc}"
+            output = (f"{type(exc).__name__}: falha ao salvar histórico"
+                      if self.stage == Stage.PERSISTENCIA_HISTORICO else f"{type(exc).__name__}: {exc}")
             extra["error_type"] = type(exc).__name__
 
         self.logger.write(
@@ -384,6 +515,76 @@ def registrar(
     )
 
 
+def bounded_log_value(value: Any, limit: int = 8000) -> Any:
+    """Mask before truncating so a cut cannot expose half of a personal identifier."""
+    if isinstance(value, str):
+        value = _mascarar_textos(value)
+        return value if len(value) <= limit else value[:limit] + "…"
+    if isinstance(value, Mapping):
+        return {key: bounded_log_value(item, limit) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [bounded_log_value(item, limit) for item in value]
+    return value
+
+
+def registrar_pulo(*, run_id: str, query_id: str, stage: Stage, query: str, motivo: str) -> None:
+    """Explicit skipped stages only inside a complete pipeline/request context."""
+    if current_execution() is not None:
+        registrar(run_id=run_id, query_id=query_id, stage=stage, status="pulado",
+                  latencia_ms=0, input=query, output=None, extra={"motivo": motivo})
+
+
+@dataclass
+class Lifecycle:
+    output: Any = None
+    status: str = "ok"
+    extra: dict[str, Any] = field(default_factory=dict)
+
+
+@contextmanager
+def lifecycle(*, run_id: str, query_id: str, query: str, start: Stage, end: Stage,
+              extra: dict[str, Any] | None = None) -> Iterator[Lifecycle]:
+    """Monotonic wall time and a terminal event even when an exception escapes.
+
+    A process kill still leaves a start without a finish: an incomplete trace,
+    not a false success. No stack trace/error message is exposed to the client.
+    """
+    started = time.perf_counter()
+    timestamp = datetime.now().astimezone().isoformat(timespec="milliseconds")
+    state = Lifecycle()
+    from src.log_context import runtime_context
+    try:
+        snapshot = runtime_context()
+    except Exception as error:
+        snapshot = {"unavailable": True, "error_type": type(error).__name__}
+        logging.getLogger(__name__).warning("Metadados de observabilidade indisponíveis: %s",
+                                            type(error).__name__)
+    metadata = {"contexto_execucao": snapshot, **(extra or {})}
+    default_logger.write(LogRecord(ts=timestamp, run_id=run_id, query_id=query_id, stage=start,
+                                   status="iniciado", latencia_ms=0, input=query, output=None,
+                                   extra=metadata))
+    try:
+        yield state
+    except BaseException as error:
+        state.status = "erro"
+        state.extra.update({"error_type": type(error).__name__, "completed": False})
+        raise
+    finally:
+        default_logger.flush()
+        context = current_execution()
+        state.extra.setdefault("completed", True)
+        if context:
+            state.extra.update({"etapas": context.stages(), "logging_errors": context.logging_errors,
+                                "tokens_reportados": context.reported_tokens(),
+                                "cobertura_tokens": context.token_coverage()})
+        masked_output = _mascarar_textos(state.output)
+        bounded_output = bounded_log_value(masked_output)
+        state.extra.update({"log_text_limit": 8000, "output_truncated": bounded_output != masked_output})
+        registrar(run_id=run_id, query_id=query_id, stage=end, status=state.status,
+                  latencia_ms=(time.perf_counter() - started) * 1000, input=query,
+                  output=bounded_output, extra=state.extra)
+
+
 # Caminho absoluto: o log vai para <repo>/logs independentemente do diretório
 # de onde o pipeline é executado.
-default_logger = PipelineLogger(Path(__file__).resolve().parents[1] / "logs")
+default_logger = PipelineLogger(config.PIPELINE_LOGS_DIR, retention_days=config.LOG_RETENTION_DAYS)

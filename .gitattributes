@@ -1,6 +1,7 @@
 # Os hashes de proveniência dependem dos bytes exatos destes snapshots.
 /data/inventory/*.json -text whitespace=cr-at-eol
 /data/embeddings/2026-09-30_12-08-51/** -text whitespace=cr-at-eol
+/data/embeddings/2026-10-07_21-18-41_ocr-recovery/** -text whitespace=cr-at-eol
 /data/normalized/** -text whitespace=cr-at-eol
 /data/structured/*.sqlite -text
 /index/** -text whitespace=cr-at-eol

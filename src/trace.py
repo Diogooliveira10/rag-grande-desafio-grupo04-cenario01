@@ -1,6 +1,6 @@
 """Monta o caminho de uma pergunta pelo sistema a partir do log estruturado.
 
-Cada etapa do pipeline grava uma linha em ``logs/pipeline-AAAA-MM-DD.jsonl``
+Cada etapa do pipeline grava uma linha em ``logs/pipeline/pipeline-AAAA-MM-DD.jsonl``
 (``src/obs.py``), todas com o mesmo ``query_id``. ``montar_trace`` junta essas
 linhas em ordem e diz, em cada etapa, se ela usou a base SQL ou a base
 vetorial, com input, output e os detalhes que a etapa registrou (trechos com
@@ -16,10 +16,14 @@ Serve o ``GET /api/v1/trace/{query_id}`` e o
 from __future__ import annotations
 
 import json
+import logging
 import re
+import sqlite3
 from pathlib import Path
+from datetime import datetime, timezone
 from typing import Any, Optional
 
+import config
 from src.obs import Stage, default_logger
 
 # Qual base cada etapa consulta. BM25 é busca por palavras sobre os mesmos
@@ -50,22 +54,57 @@ def _sem_endereco_de_banco(valor: Any) -> Any:
 
 
 def _registros(campo: str, valor: str, logs_dir: Path) -> list[dict[str, Any]]:
-    """Linhas do log com ``registro[campo] == valor``, em ordem de horário."""
+    """Indexed lookup; only changed/new JSONL bytes require import."""
+    from src.log_store import EventStore
+    if logs_dir.resolve() == Path(default_logger.logs_dir).resolve():
+        default_logger.flush()
+    legacy = [config.LOGS_DIR] if logs_dir == config.PIPELINE_LOGS_DIR else []
+    try:
+        registros = EventStore(logs_dir).records(campo, valor, legacy)
+        return sorted(registros, key=_timestamp_key)
+    except (OSError, sqlite3.Error):
+        logging.getLogger(__name__).warning("Índice de trace indisponível; leitura JSONL de compatibilidade")
+        return _registros_jsonl(campo, valor, logs_dir)
+
+
+def _registros_jsonl(campo: str, valor: str, logs_dir: Path) -> list[dict[str, Any]]:
+    """Fallback/legacy reader when the derived index cannot be used."""
     registros: list[dict[str, Any]] = []
-    for arquivo in sorted(logs_dir.glob("pipeline-*.jsonl")):
-        with arquivo.open(encoding="utf-8") as linhas:
-            for linha in linhas:
-                # Filtro barato antes do json.loads: o log cresce a cada pergunta.
-                if valor not in linha:
-                    continue
-                try:
-                    registro = json.loads(linha)
-                except json.JSONDecodeError:
-                    continue
-                if registro.get(campo) == valor:
-                    registros.append(registro)
+    # Transitional reader: only the actual configured directory may also read
+    # legacy root files. Isolated test/custom directories never read real logs.
+    diretorios = [logs_dir]
+    if logs_dir == config.PIPELINE_LOGS_DIR:
+        diretorios.append(config.LOGS_DIR)
+    vistos: set[str] = set()
+    for diretorio in diretorios:
+        for arquivo in sorted(diretorio.glob("pipeline-*.jsonl")):
+            if not arquivo.is_file() or arquivo.is_symlink():
+                continue
+            with arquivo.open(encoding="utf-8") as linhas:
+                for linha in linhas:
+                    if valor not in linha:
+                        continue
+                    try:
+                        registro = json.loads(linha)
+                    except json.JSONDecodeError:
+                        continue
+                    if registro.get(campo) == valor:
+                        chave = json.dumps(registro, sort_keys=True, ensure_ascii=False)
+                        if chave not in vistos:
+                            vistos.add(chave)
+                            registros.append(registro)
     # Ordem estável por horário; empates mantêm a ordem de gravação.
-    return sorted(registros, key=lambda registro: str(registro.get("ts", "")))
+    return sorted(registros, key=_timestamp_key)
+
+
+def _timestamp_key(registro: dict[str, Any]) -> float:
+    try:
+        timestamp = datetime.fromisoformat(str(registro.get("ts", "")))
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        return timestamp.timestamp()
+    except ValueError:
+        return 0.0
 
 
 _CHUNKS_NO_OUTPUT = re.compile(r"^(\d+) chunks?\b")
@@ -79,7 +118,7 @@ def _evidencias_vetoriais(etapas: list[dict[str, Any]]) -> dict[str, int] | int 
     output, que não diz a base de cada trecho.
     """
     for etapa in reversed(etapas):
-        if etapa["base"] != "vetorial":
+        if etapa["base"] != "vetorial" or etapa["status"] == "pulado":
             continue
         evidencias = etapa["detalhes"].get("evidencias")
         if isinstance(evidencias, list):
@@ -103,7 +142,7 @@ def _resumo_derivado(etapas: list[dict[str, Any]]) -> dict[str, Any]:
     vetoriais, confiança e recusa. As fontes citadas não estão nesses logs
     (só a contagem, em ``num_fontes``).
     """
-    stages = {etapa["stage"] for etapa in etapas}
+    stages = {etapa["stage"] for etapa in etapas if etapa["status"] != "pulado"}
     resumo: dict[str, Any] = {
         "caminho": None,
         "consultou_sql": Stage.CONSULTA_SQL.value in stages,
@@ -161,15 +200,42 @@ def _trace_dos_registros(query_id: str, registros: list[dict[str, Any]]) -> dict
          if etapa["stage"] == Stage.RESUMO_CONSULTA.value and isinstance(etapa["output"], dict)),
         None,
     ) or _resumo_derivado(etapas)
-    pergunta = next((etapa["input"] for etapa in etapas if isinstance(etapa["input"], str)), None)
+    # Feedback can arrive days later; it is not part of query latency/completion.
+    core = [r for r in registros if r.get("stage") != Stage.FEEDBACK.value] or registros
+    starts = [r for r in core if r.get("stage") == Stage.REQUISICAO_INICIO.value]
+    pipeline_starts = [r for r in core if r.get("stage") == Stage.PIPELINE_INICIO.value]
+    request_end = next((r for r in reversed(core) if r.get("stage") == Stage.REQUISICAO_FIM.value), None)
+    pipeline_end = next((r for r in reversed(core) if r.get("stage") == Stage.PIPELINE_FIM.value), None)
+    terminal = request_end if (starts or request_end) else pipeline_end
+    started = bool(starts or pipeline_starts)
+    if terminal:
+        latency = int(terminal.get("latencia_ms") or 0)
+        method = "requisicao_monotonica" if request_end else "pipeline_monotonico"
+        status, complete = terminal.get("status"), True
+    elif started:
+        latency = max(0, round((_timestamp_key(core[-1]) - _timestamp_key(core[0])) * 1000))
+        method, status, complete = "parcial", "incompleto", False
+    else:
+        latency = sum(int(r.get("latencia_ms") or 0) for r in core)
+        method, status, complete = "soma_etapas_legado", None, None
+    if terminal:
+        details = terminal.get("extra") or {}
+        for key in ("etapas", "history_saved", "http_status", "logging_errors", "tokens_reportados", "cobertura_tokens"):
+            if key in details:
+                resumo[key] = details[key]
+    pergunta = next((r["input"] for r in core if isinstance(r.get("input"), str)), None)
     return {
         "query_id": query_id,
         "session_id": next((r["session_id"] for r in registros if r.get("session_id")), None),
         "run_ids": list(dict.fromkeys(str(registro.get("run_id")) for registro in registros)),
         "pergunta": pergunta,
-        "inicio": etapas[0]["ts"],
-        "fim": etapas[-1]["ts"],
-        "latencia_total_ms": sum(int(etapa["latencia_ms"] or 0) for etapa in etapas),
+        "inicio": core[0]["ts"],
+        "fim": (terminal or core[-1])["ts"],
+        "latencia_total_ms": latency,
+        "latencia_metodo": method,
+        "latencia_pipeline_ms": int(pipeline_end.get("latencia_ms") or 0) if pipeline_end else None,
+        "status": status,
+        "completo": complete,
         "resumo": resumo,
         "etapas": etapas,
     }
@@ -195,13 +261,14 @@ def montar_trace_sessao(session_id: str, logs_dir: Optional[Path] = None) -> Opt
         perguntas.append({
             "ordem": len(perguntas) + 1,
             **{chave: trace[chave] for chave in
-               ("query_id", "pergunta", "inicio", "fim", "latencia_total_ms", "resumo")},
+               ("query_id", "pergunta", "inicio", "fim", "latencia_total_ms", "latencia_metodo",
+                "status", "completo", "resumo")},
             "etapas": [etapa["stage"] for etapa in trace["etapas"]],
         })
     return _sem_endereco_de_banco({
         "session_id": session_id,
         "inicio": perguntas[0]["inicio"],
-        "fim": perguntas[-1]["fim"],
+        "fim": max(perguntas, key=lambda p: _timestamp_key({"ts": p["fim"]}))["fim"],
         "total_perguntas": len(perguntas),
         "consultou_sql": sum(1 for p in perguntas if p["resumo"].get("consultou_sql")),
         "consultou_vetorial": sum(1 for p in perguntas if p["resumo"].get("consultou_vetorial")),

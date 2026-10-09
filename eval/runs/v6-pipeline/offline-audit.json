@@ -74,14 +74,14 @@
     },
     "editais_normativo": {
       "files": 13,
-      "chunks": 1561,
-      "vectors": 1561,
+      "chunks": 1557,
+      "vectors": 1557,
       "encoding_configurations": 1
     },
     "atas_conversacional": {
       "files": 376,
-      "chunks": 2524,
-      "vectors": 2524,
+      "chunks": 1997,
+      "vectors": 1997,
       "encoding_configurations": 1
     },
     "pca_agregado": {
@@ -91,7 +91,7 @@
       "encoding_configurations": 1
     }
   },
-  "embedding_folder": "data/embeddings/2026-09-30_12-08-51",
+  "embedding_folder": "data/embeddings/2026-10-07_21-18-41_ocr-recovery",
   "public_origin_urls": true,
   "source_paths_relative_internal": true,
   "duplicate_source_aliases": false,

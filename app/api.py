@@ -11,9 +11,9 @@ avaliacao a essa consulta e ``GET /api/v1/history`` devolve o historico
 salvo. O estagio ``feedback`` ja existia reservado em ``src/obs.py``
 (Stage.FEEDBACK) mas nao estava integrado a nenhum fluxo ate agora.
 
-Protecao: o historico mostra perguntas de todos os usuarios e exige o header
-``X-API-Key`` igual a ``RAG_API_KEY`` do ``.env`` (``exigir_chave``); sem a
-variavel configurada, fica fechado. O trace aceita a mesma chave (quem opera a
+Acesso temporario da demo: o historico geral esta aberto, sem chave, por
+solicitacao de quem opera. Ele mostra consultas de todos os usuarios; nao
+publique dados sensiveis. O trace aceita ``RAG_API_KEY`` (quem opera a
 demo ve qualquer conversa) ou o header ``X-Session-Id`` igual a sessao da
 pergunta: cada usuario ve so o caminho da propria conversa, sem chave no site.
 ``/query`` e ``/feedback`` continuam abertos: sao o uso normal do chat.
@@ -27,7 +27,9 @@ import secrets
 from pathlib import PurePosixPath
 from typing import Any, Literal, Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query
+from fastapi import FastAPI, Header, HTTPException, Path, Query, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
@@ -36,7 +38,9 @@ from src import pipeline
 from app import catalog
 from app.catalog_models import ContratacaoRecord, DocumentoRecord, OfficialSource, OrgaoRecord, ProjectSummary
 from src.history_store import ConsultaNaoEncontrada, default_store as historico
-from src.obs import Stage, new_query_id, new_run_id, new_session_id
+from src.obs import (Stage, default_logger, lifecycle, new_query_id, new_run_id,
+                     new_session_id, sessao)
+from src.log_context import current_execution, execution
 from src.obs import registrar as obs_registrar
 from src.reformulacao import TurnoAnterior
 from src.schema import RAGResponse
@@ -55,17 +59,6 @@ _SESSION_PATTERN = r"^[A-Za-z0-9_-]{16,64}$"
 def _chave_valida(x_api_key: Optional[str]) -> bool:
     chave = config.RAG_API_KEY
     return bool(chave and x_api_key) and secrets.compare_digest(x_api_key.encode(), chave.encode())
-
-
-def exigir_chave(x_api_key: Optional[str] = Header(default=None)) -> None:
-    """Libera o endpoint só para quem envia ``X-API-Key`` igual a ``RAG_API_KEY``."""
-    if not config.RAG_API_KEY:
-        raise HTTPException(
-            status_code=403,
-            detail="Endpoint desabilitado: defina RAG_API_KEY no .env do servidor.",
-        )
-    if not _chave_valida(x_api_key):
-        raise HTTPException(status_code=401, detail="X-API-Key ausente ou invalida.")
 
 
 def _autorizar_trace(
@@ -202,6 +195,11 @@ class TraceResponse(BaseModel):
     # consultou_sql, consultou_vetorial, evidências de cada base e fontes citadas.
     resumo: dict[str, Any]
     etapas: list[TraceEtapa]
+    # Additive fields; old JSONL remains readable and timing is labelled estimated.
+    status: Optional[str] = None
+    completo: Optional[bool] = None
+    latencia_metodo: str = "soma_etapas_legado"
+    latencia_pipeline_ms: Optional[int] = None
 
 
 class SessaoPergunta(BaseModel):
@@ -214,6 +212,9 @@ class SessaoPergunta(BaseModel):
     resumo: dict[str, Any]
     # Nomes das etapas, em ordem; o detalhe de cada uma está em /trace/{query_id}.
     etapas: list[str]
+    status: Optional[str] = None
+    completo: Optional[bool] = None
+    latencia_metodo: str = "soma_etapas_legado"
 
 
 class SessaoTraceResponse(BaseModel):
@@ -237,6 +238,23 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(RequestValidationError)
+async def query_validation_error(request: Request, error: RequestValidationError):
+    if request.url.path == "/api/v1/query":
+        # No unvalidated body, headers or secrets enter observability.
+        run_id, query_id = new_run_id(), new_query_id()
+        with execution(run_id, query_id, "api"):
+            with lifecycle(run_id=run_id, query_id=query_id, query="",
+                           start=Stage.REQUISICAO_INICIO, end=Stage.REQUISICAO_FIM,
+                           extra={"method": "POST", "path": "/api/v1/query"}) as flow:
+                flow.status = "rejeitado"
+                flow.extra.update({"http_status": 422, "motivo": "entrada_invalida",
+                                   "validation_errors_count": len(error.errors()),
+                                   "errors": [{"loc": list(e["loc"]), "type": e["type"]}
+                                              for e in error.errors()[:20]]})
+    return await request_validation_exception_handler(request, error)
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -249,38 +267,52 @@ def query_rag(request: QueryRequest) -> QueryResponse:
     session_id = request.session_id or new_session_id()
     # So repassa o historico quando ha um: quem chama sem ele fica como antes.
     extras = {"historico": request.historico} if request.historico else {}
-    try:
-        result = pipeline.responder(
-            request.query, top_k=request.top_k, run_id=run_id, query_id=query_id,
-            session_id=session_id, **extras,
-        )
-    except Exception as exc:
-        logger.exception("Falha ao executar o pipeline RAG")
-        raise HTTPException(
-            status_code=500,
-            detail="Nao foi possivel processar a consulta.",
-        ) from exc
+    with sessao(session_id), execution(run_id, query_id, "api"):
+        with lifecycle(run_id=run_id, query_id=query_id, query=request.query,
+                       start=Stage.REQUISICAO_INICIO, end=Stage.REQUISICAO_FIM,
+                       extra={"method": "POST", "path": "/api/v1/query", "top_k": request.top_k,
+                              "historico_turnos": len(request.historico)}) as flow:
+            flow.extra["http_status"] = 500
+            try:
+                result = pipeline.responder(
+                    request.query, top_k=request.top_k, run_id=run_id, query_id=query_id,
+                    session_id=session_id, **extras,
+                )
+            except Exception as exc:
+                flow.extra["pipeline_error_type"] = type(exc).__name__
+                logger.exception("Falha ao executar o pipeline RAG")
+                raise HTTPException(
+                    status_code=500, detail="Nao foi possivel processar a consulta.",
+                ) from exc
 
-    public_result = _public_rag_payload(result)
-    resposta = QueryResponse.model_validate(
-        {**public_result, "query_id": query_id, "session_id": session_id}
-    )
+            public_result = _public_rag_payload(result)
+            resposta = QueryResponse.model_validate(
+                {**public_result, "query_id": query_id, "session_id": session_id}
+            )
+            try:
+                with default_logger.span(run_id=run_id, query_id=query_id,
+                                         stage=Stage.PERSISTENCIA_HISTORICO,
+                                         input={"query_id": query_id}) as span:
+                    historico.registrar_consulta(
+                        query_id=query_id, run_id=run_id, query=request.query,
+                        top_k=request.top_k, resposta=public_result, session_id=session_id,
+                    )
+                    span.set_result({"saved": True})
+                flow.extra["history_saved"] = True
+            except Exception:
+                flow.extra["history_saved"] = False
+                logger.exception("Falha ao salvar historico da consulta %s", query_id)
 
-    try:
-        historico.registrar_consulta(
-            query_id=query_id,
-            run_id=run_id,
-            query=request.query,
-            top_k=request.top_k,
-            resposta=public_result,
-            session_id=session_id,
-        )
-    except Exception:
-        # Historico e' um extra sobre a resposta ja calculada: uma falha ao
-        # salvar nao pode derrubar uma consulta que ja deu certo.
-        logger.exception("Falha ao salvar historico da consulta %s", query_id)
-
-    return resposta
+            flow.extra["http_status"] = 200
+            flow.status = ("degradado" if not flow.extra["history_saved"]
+                           else "erro" if public_result.get("refusal_reason") == "erro_provedor"
+                           else "recusa" if public_result.get("is_refusal")
+                           else "degradado" if any(event["outcome"] in {"erro", "degradado"}
+                                                    for events in current_execution().stages().values()
+                                                    for event in events)
+                           else "ok")
+            flow.output = resposta.model_dump(mode="json")
+            return resposta
 
 
 @app.post("/api/v1/feedback")
@@ -309,12 +341,14 @@ def enviar_feedback(request: FeedbackRequest) -> dict[str, str]:
         input={"comentario": request.comentario},
         output=request.avaliacao,
         session_id=consulta.get("session_id"),
+        extra={"origem": "api"},
     )
     return {"status": "recebido"}
 
 
-@app.get("/api/v1/history", response_model=list[HistoricoItem],
-         dependencies=[Depends(exigir_chave)])
+# Temporariamente público para a demo; o filtro de sessão não é autenticação.
+# Os endpoints de trace abaixo continuam protegidos.
+@app.get("/api/v1/history", response_model=list[HistoricoItem])
 def obter_historico(
     limit: int = Query(default=20, ge=1, le=100),
     session_id: Optional[str] = Query(default=None, pattern=_ID_PATTERN),

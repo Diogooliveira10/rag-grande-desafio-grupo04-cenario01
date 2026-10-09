@@ -348,10 +348,10 @@ def test_explore_nao_expoe_erro_interno(monkeypatch) -> None:
 
 
 # --------------------------------------------------------------------------
-# Proteção: histórico e trace só com X-API-Key
+# Histórico temporariamente aberto; trace continua protegido.
 # --------------------------------------------------------------------------
 
-_PROTEGIDOS = ["/api/v1/history", "/api/v1/trace/q_1", "/api/v1/sessions/s_sessao_de_teste_01/trace"]
+_PROTEGIDOS = ["/api/v1/trace/q_1", "/api/v1/sessions/s_sessao_de_teste_01/trace"]
 
 
 @pytest.mark.parametrize("url", _PROTEGIDOS)
@@ -364,19 +364,24 @@ def test_endpoint_protegido_com_chave_errada_e_401(url):
     assert TestClient(app, headers={"X-API-Key": "chave-errada"}).get(url).status_code == 401
 
 
-def test_historico_fica_fechado_sem_rag_api_key_no_servidor(monkeypatch):
+@pytest.mark.parametrize("server_key", ["", "chave-de-teste"])
+@pytest.mark.parametrize("headers", [{}, {"X-API-Key": "chave-errada"}])
+def test_historico_aberto_sem_autenticacao(monkeypatch, server_key, headers):
+    monkeypatch.setattr(api_module.config, "RAG_API_KEY", server_key)
+    monkeypatch.setattr(api_module.pipeline, "responder", _fake_responder)
+    visitante = TestClient(app, headers=headers)
+    query_id = visitante.post("/api/v1/query", json={"query": "Qual e a norma?"}).json()["query_id"]
+
+    response = visitante.get("/api/v1/history")
+
+    assert response.status_code == 200
+    assert response.json()[0]["query_id"] == query_id
+
+
+def test_trace_continua_protegido_sem_chave_configurada(monkeypatch):
     monkeypatch.setattr(api_module.config, "RAG_API_KEY", "")
-
-    response = client.get("/api/v1/history")
-
-    assert response.status_code == 403
-    assert "RAG_API_KEY" in response.json()["detail"]
-
-
-def test_historico_nao_aceita_session_id_no_lugar_da_chave():
-    response = TestClient(app, headers={"X-Session-Id": "s_sessao_de_teste_01"}).get("/api/v1/history")
-
-    assert response.status_code == 401
+    for url in _PROTEGIDOS:
+        assert TestClient(app).get(url).status_code == 401
 
 
 def test_query_e_feedback_continuam_abertos_sem_chave(monkeypatch):
