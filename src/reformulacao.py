@@ -45,6 +45,10 @@ MAX_CHARS_PERGUNTA_ANTERIOR = 500
 MAX_CHARS_RESPOSTA_ANTERIOR = 600
 # Teto da pergunta reescrita: passou disso, o modelo não reescreveu, despejou texto.
 MAX_CHARS_REFORMULADA = 1200
+# O qwen3 do ECOA raciocina antes do JSON e esses tokens contam no limite: com
+# 300 ele parava em finish_reason=length sem escrever nada, e a continuação
+# seguia sem contexto. Mesmo teto da classificação de conversa (src/conversation.py).
+MAX_TOKENS_REFORMULACAO = 1200
 
 
 class TurnoAnterior(BaseModel):
@@ -186,7 +190,7 @@ def _cliente_padrao(diagnosticos: dict) -> ClienteReformulacao:
 
     def _chamar(mensagens: list[dict[str, str]]) -> Any:
         return completar_chat(
-            mensagens, response_format={"type": "json_object"}, max_tokens=300,
+            mensagens, response_format={"type": "json_object"}, max_tokens=MAX_TOKENS_REFORMULACAO,
             temperature=0, diagnosticos=diagnosticos,
         )
 
