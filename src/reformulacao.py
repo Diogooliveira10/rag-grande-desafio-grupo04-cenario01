@@ -17,8 +17,9 @@ Segurança e custo:
 * o histórico vem do cliente e é tratado como dado: CPF, telefone e e-mail
   pessoal são mascarados antes do prompt e o prompt manda ignorar ordens dentro
   dele;
-* qualquer falha do modelo, ou saída fora do formato, devolve a pergunta
-  original: a reformulação só melhora a busca, nunca derruba a consulta.
+* qualquer falha do modelo, ou saída fora do formato, não derruba a consulta:
+  a pergunta segue com a pergunta anterior anexada (``_com_contexto``), para
+  "e o valor total deles?" não ir à busca sem saber de quem se fala.
 """
 
 from __future__ import annotations
@@ -47,8 +48,9 @@ MAX_CHARS_RESPOSTA_ANTERIOR = 600
 MAX_CHARS_REFORMULADA = 1200
 # O qwen3 do ECOA raciocina antes do JSON e esses tokens contam no limite: com
 # 300 ele parava em finish_reason=length sem escrever nada, e a continuação
-# seguia sem contexto. Mesmo teto da classificação de conversa (src/conversation.py).
-MAX_TOKENS_REFORMULACAO = 1200
+# seguia sem contexto. Com duas trocas no histórico ele já usou 936; o teto só
+# corta, não faz o modelo gastar mais.
+MAX_TOKENS_REFORMULACAO = 2048
 
 
 class TurnoAnterior(BaseModel):
@@ -65,6 +67,7 @@ class Reformulacao:
     pergunta: str
     reescrita: bool
     # sem_historico | modo_desligado | autossuficiente | reescrita | llm_falhou | saida_invalida
+    # Em llm_falhou e saida_invalida a pergunta vem com a anterior anexada.
     motivo: str
 
 
@@ -219,6 +222,25 @@ def _extrair_pergunta(bruto: str) -> str:
     return pergunta
 
 
+_ANO = re.compile(r"\b(?:19|20)\d{2}\b")
+# Ano da pergunta anterior, com a preposição que o introduz ("em 2025").
+_ANO_HERDADO = re.compile(r"(?:\b(?:em|de|no ano de|do ano de)\s+)?\b(?:19|20)\d{2}\b", re.IGNORECASE)
+
+
+def _com_contexto(query: str, turnos: list[tuple[str, str]]) -> str:
+    """Pergunta com a anterior anexada, quando o modelo não reescreveu.
+
+    Leva o ano, o objeto e o órgão da troca anterior para a análise, o
+    roteamento e a busca. A pergunta atual vem primeiro: o que ela diz
+    ("E em 2025?") prevalece sobre o que é herdado. Se ela traz um ano, os anos
+    da anterior saem, senão a análise lê "2024 ... 2025" como um intervalo.
+    """
+    anterior = turnos[-1][0]
+    if _ANO.search(query):
+        anterior = re.sub(r"\s+([?.,;!])", r"\1", " ".join(_ANO_HERDADO.sub("", anterior).split()))
+    return f"{' '.join(query.split())} (continuação da pergunta anterior: {anterior})"
+
+
 def reformular_pergunta(
     query: str,
     historico: Optional[Sequence[Any]],
@@ -251,16 +273,18 @@ def reformular_pergunta(
                 span.tokens = token_usage_from_response(saida)
             reescrita = _extrair_pergunta(_texto(saida))
         except (ValueError, KeyError, TypeError, AttributeError, IndexError) as erro:
-            # Saída fora do formato: segue com a pergunta original.
+            # Saída fora do formato: segue com a pergunta anterior anexada.
             span.extra.update(diagnosticos)
-            span.extra.update({"fallback": "pergunta_original", "error_type": type(erro).__name__})
-            span.set_result({"pergunta": query, "reescrita": False, "motivo": "saida_invalida"})
-            return Reformulacao(query, False, "saida_invalida")
+            span.extra.update({"fallback": "contexto_anexado", "error_type": type(erro).__name__})
+            pergunta = _com_contexto(query, turnos)
+            span.set_result({"pergunta": mascarar(pergunta)[0], "reescrita": True, "motivo": "saida_invalida"})
+            return Reformulacao(pergunta, True, "saida_invalida")
         except Exception as erro:  # noqa: BLE001 - provedor fora do ar não derruba a consulta
             span.extra.update(diagnosticos)
-            span.extra.update({"fallback": "pergunta_original", "error_type": type(erro).__name__})
-            span.set_result({"pergunta": query, "reescrita": False, "motivo": "llm_falhou"})
-            return Reformulacao(query, False, "llm_falhou")
+            span.extra.update({"fallback": "contexto_anexado", "error_type": type(erro).__name__})
+            pergunta = _com_contexto(query, turnos)
+            span.set_result({"pergunta": mascarar(pergunta)[0], "reescrita": True, "motivo": "llm_falhou"})
+            return Reformulacao(pergunta, True, "llm_falhou")
 
         if _sem_acento(reescrita) == _sem_acento(" ".join(query.split())):
             span.set_result({"pergunta": query, "reescrita": False, "motivo": "autossuficiente"})
