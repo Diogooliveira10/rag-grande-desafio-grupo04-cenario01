@@ -795,7 +795,9 @@ def test_valor_simbolico_nao_entra_na_mediana_nem_no_ranking(tmp_path):
         ("2025-03-12", "2025-03-12T00:00:00", 300.0),
     ])
     [chunk] = _consultar("Qual a mediana dos contratos de ambulância em 2025?", base, ano=2025)
-    assert "4 registros no total, 2 sem valor informado (vazio ou abaixo de R$ 1,00)" in chunk.content
+    assert "4 registros no total, 2 com valor abaixo de R$ 1,00" in chunk.content
+    assert "total R$ 400,01" in chunk.content
+    assert "estatísticas sobre 2 valores >= R$ 1,00" in chunk.content
     assert "mediana R$ 200,00" in chunk.content
 
     [chunk] = _consultar("Quais os menores contratos de ambulância em 2025?", base, ano=2025)

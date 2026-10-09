@@ -597,6 +597,57 @@ def _logar_validacao(
 # API pública
 # --------------------------------------------------------------------------
 
+
+def _resposta_sql_deterministica(
+    query: str, chunks: list[Chunk], bases: list[Natureza]
+) -> Optional[RAGResponse]:
+    """Preserva números calculados sem submeter uma conta pronta ao LLM.
+
+    Só atalha operações analíticas explicitamente marcadas pelo executor SQL.
+    Perguntas normativas/conversacionais, listagens e intenções sem cálculo
+    continuam no caminho de geração normal.
+    """
+    if not bases or not set(bases) <= {Natureza.ESTRUTURADA, Natureza.AGREGADA}:
+        return None
+    sql = [c for c in chunks if c.metadata.doc_type == "sql"
+           and c.metadata.extras.get("geracao_deterministica")]
+    if not sql or any(c.metadata.doc_type == "sql" and c not in sql for c in chunks):
+        return None
+    for chunk in chunks:
+        extra = chunk.metadata.extras
+        if extra.get("operacao") == "buscar" or extra.get("calculo_disponivel") is False:
+            return None
+    numero_intencoes = max((c.metadata.extras.get("total_intencoes", 0) for c in chunks), default=0)
+    if numero_intencoes and len({c.metadata.extras.get("intencao") for c in sql}) != numero_intencoes:
+        return None
+
+    partes, fontes = [], []
+    for chunk in sql:
+        resultado = chunk.metadata.extras.get("resultado_sql")
+        if not isinstance(resultado, dict) or "linhas" not in resultado:
+            return None
+        if chunk.metadata.extras.get("parte") == 1:
+            cabecalho = re.sub(r"^Consulta SQL na tabela [a-z_]+:", "Acervo consultado:", resultado["cabecalho"])
+            cabecalho = cabecalho.replace("tipo_registro=contrato_assinado", "somente contratos assinados")
+            cabecalho = cabecalho.replace("campo_valor=valor_contratado", "valor contratado")
+            cabecalho = cabecalho.replace("campo_valor=valor_estimado", "valor estimado")
+            cabecalho = cabecalho.replace("campo_valor=valor_homologado", "valor homologado")
+            partes.append(cabecalho)
+            if resultado.get("politica"):
+                partes.append(resultado["politica"])
+        linhas = resultado["linhas"]
+        if linhas:
+            numero = len(fontes) + 1
+            partes.append("\n".join(f"{linha} [{numero}]" for linha in linhas))
+            fontes.append(SourceRef(chunk_id=chunk.metadata.chunk_id, base_id=chunk.metadata.base_id,
+                                    source_file=chunk.metadata.source_file))
+    if not fontes:
+        return None
+    return RAGResponse(query=query, answer="\n\n".join(partes), bases_consultadas=bases,
+                       sources_used=fontes, confidence_level=ConfidenceLevel.ALTA,
+                       is_refusal=False, refusal_reason=None)
+
+
 def gerar_resposta(
     query: str,
     chunks: list[Chunk],
@@ -635,6 +686,21 @@ def gerar_resposta(
         resposta = _recusa(query, bases_consultadas, refusal_reason_hint or RefusalReason.SEM_EVIDENCIA)
         _logar_evento(run_id, query_id, "sem_chunks", inicio, resposta, **sensibilidade)
         return resposta
+
+    resposta_sql = _resposta_sql_deterministica(query, chunks, bases_consultadas)
+    if resposta_sql is not None:
+        answer, mascaramentos_resposta = mascarar(resposta_sql.answer)
+        resposta_sql = resposta_sql.model_copy(update={"answer": answer})
+        fontes_sql = [source.chunk_id for source in resposta_sql.sources_used]
+        _logar_evento(run_id, query_id, "ok", inicio, resposta_sql,
+                      metodo="sql_deterministico", llm_called=False,
+                      evidencias_usadas=fontes_sql, chunks_no_prompt=0,
+                      chunks_fora_do_orcamento=0, prompt_chunk_ids=[], prompt=[],
+                      **sensibilidade)
+        _logar_validacao(run_id, query_id, time.monotonic(), resposta_sql,
+                        erro_parsing=None, citacoes_descartadas=[], chaves_alias=[],
+                        mascaramentos_resposta=mascaramentos_resposta)
+        return resposta_sql
 
     chunks_prompt = _chunks_no_orcamento(chunks, bases_requeridas=bases_consultadas)
     sensibilidade["chunks_no_prompt"] = len(chunks_prompt)

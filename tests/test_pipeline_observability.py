@@ -79,8 +79,10 @@ def test_factual_api_trace_follows_evidence_to_prompt_to_final_response(local_pi
     assert sql['status'] == 'ok' and sql['extra']['resultado']
     assert sql['extra']['execucao_sql']['consultas'][-1]['sql']
     generation = event('geracao')
-    assert generation['extra']['prompt']
-    assert generation['extra']['prompt_chunk_ids'][0].startswith('sql:')
+    assert generation['extra']['metodo'] == 'sql_deterministico'
+    assert generation['extra']['llm_called'] is False
+    assert generation['extra']['prompt'] == []
+    assert generation['extra']['evidencias_usadas'][0].startswith('sql:')
     assert generation['extra']['resposta']['answer'] == body['answer']
     assert event('persistencia_historico')['output'] == {'saved': True}
     assert events[-1]['output'] == body

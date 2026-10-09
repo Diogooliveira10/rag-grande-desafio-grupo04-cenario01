@@ -240,6 +240,7 @@ def _responder(
             grupo += [_chunk_from_retrieval(item) for item in resultados]
             for chunk in grupo:
                 chunk.metadata.extras = {**chunk.metadata.extras, "intencao": numero,
+                    "total_intencoes": len(analise.intencoes),
                     "subpergunta": intent.pergunta, "operacao": intent.operacao,
                     "tipo_valor_solicitado": intent.filtros.tipo_valor,
                     "calculo_disponivel": calculo_disponivel if intent.operacao != "buscar" else None}
