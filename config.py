@@ -92,3 +92,7 @@ HISTORY_RETENTION_DAYS = int(_env("HISTORY_RETENTION_DAYS", "30"))
 # Daily pipeline files follow history retention by default; 0 keeps all files.
 LOG_RETENTION_DAYS = int(_env("LOG_RETENTION_DAYS", str(HISTORY_RETENTION_DAYS)))
 MAINTENANCE_RETENTION_DAYS = int(_env("MAINTENANCE_RETENTION_DAYS", "14"))
+# Apenas o detalhamento das evidências; não altera o orçamento enviado ao LLM.
+LOG_EVIDENCE_DETAIL = _env("LOG_EVIDENCE_DETAIL", "resumo").lower()
+if LOG_EVIDENCE_DETAIL not in {"resumo", "completo"}:
+    raise ValueError("LOG_EVIDENCE_DETAIL deve ser resumo ou completo")

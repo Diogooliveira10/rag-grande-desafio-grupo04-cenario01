@@ -18,6 +18,7 @@ from src.schema import (
     SourceRef,
 )
 from src.sensitivity import filtrar_chunks_permitidos, mascarar, mascarar_chunks
+from src.log_evidence import auditoria_completa, auditar_geracao
 
 # --------------------------------------------------------------------------
 # Cliente LLM — único ponto de integração real com llm_ecoa.py
@@ -698,6 +699,9 @@ def gerar_resposta(
         answer, mascaramentos_resposta = mascarar(resposta_sql.answer)
         resposta_sql = resposta_sql.model_copy(update={"answer": answer})
         fontes_sql = [source.chunk_id for source in resposta_sql.sources_used]
+        if auditoria_completa():
+            usados = [c for c in chunks if c.metadata.chunk_id in fontes_sql]
+            sensibilidade["auditoria_evidencias"] = auditar_geracao(chunks, usados, metodo="sql_deterministico")
         _logar_evento(run_id, query_id, "ok", inicio, resposta_sql,
                       metodo="sql_deterministico", llm_called=False,
                       evidencias_usadas=fontes_sql, chunks_no_prompt=0,
@@ -721,8 +725,11 @@ def gerar_resposta(
         chunk.metadata.chunk_id for chunk in chunks if chunk.metadata.chunk_id not in selecionados_ids
     ]
     sensibilidade["chunks_excluidos_orcamento"] = sensibilidade["evidencias_fora_do_prompt"]
+    mensagens = _montar_prompt(query, chunks_prompt)
+    if auditoria_completa():
+        sensibilidade["auditoria_evidencias"] = auditar_geracao(
+            chunks, chunks_prompt, metodo="llm", mensagens=mensagens)
     chunks = chunks_prompt
-    mensagens = _montar_prompt(query, chunks)
     sensibilidade["prompt"] = _prompt_para_log(mensagens)
     sensibilidade["prompt_truncated"] = any(
         len(mascarar(str(message.get("content", "")))[0]) > _LIMITE_DE_TEXTO_NO_LOG

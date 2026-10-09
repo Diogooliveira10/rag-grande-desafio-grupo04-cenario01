@@ -1200,6 +1200,12 @@ def consultar_estruturado(
                 "linhas_fora_do_log": max(0, len(linhas) - _LINHAS_NO_LOG),
                 "chunk_ids": [chunk.metadata.chunk_id for chunk in chunks],
             })
+            from src.log_evidence import auditoria_completa
+            if auditoria_completa():
+                span.extra["auditoria_evidencias"] = {
+                    "modo": "completo", "cabecalho": cabecalho,
+                    "resultado_completo": linhas, "chunk_ids": [c.metadata.chunk_id for c in chunks],
+                }
             span.set_result(f"{len(linhas)} linha(s) em {len(chunks)} chunk(s)")
             return chunks
     except Exception:

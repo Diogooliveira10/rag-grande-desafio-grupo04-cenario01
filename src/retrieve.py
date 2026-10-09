@@ -523,6 +523,22 @@ def _promover_identificadores_exatos(
     return ordenados[:limite]
 
 
+def _registrar_evidencias(
+    span: Any, resultados: Sequence[RetrievalResult], *,
+    antes_do_top_k: Sequence[RetrievalResult] | None = None,
+) -> None:
+    from src.log_evidence import auditoria_completa, auditar_candidatos
+    span.extra["evidencias"] = _evidencias(resultados)
+    span.extra["evidencias_fora_do_log"] = max(0, len(resultados) - 10)
+    if auditoria_completa():
+        audit = auditar_candidatos(antes_do_top_k if antes_do_top_k is not None else resultados)
+        if antes_do_top_k is not None:
+            selecionados = {item.chunk_id for item in resultados}
+            for item in audit["candidatos"]:
+                item["selecionado_apos_top_k"] = item["chunk_id"] in selecionados
+        span.extra["auditoria_evidencias"] = audit
+
+
 def _evidencias(resultados: Sequence[RetrievalResult], limite: int = 10) -> list[dict[str, Any]]:
     return [
         {
@@ -969,8 +985,7 @@ def retrieve(
             span.extra.update({"degraded": True, "fallback": "bm25", "error_type": type(error).__name__,
                                "status_code": getattr(error, "status_code", None)})
         span.set_result(_resumo(dense))
-        span.extra["evidencias"] = _evidencias(dense)
-        span.extra["evidencias_fora_do_log"] = max(0, len(dense) - 10)
+        _registrar_evidencias(span, dense)
         span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(query, dense)
         span.extra.update({"query_embedding": estatisticas_embedding})
         if uso_embedding:
@@ -992,8 +1007,7 @@ def retrieve(
             escopos=escopos,
         )
         span.set_result(_resumo(sparse))
-        span.extra["evidencias"] = _evidencias(sparse)
-        span.extra["evidencias_fora_do_log"] = max(0, len(sparse) - 10)
+        _registrar_evidencias(span, sparse)
         span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(query, sparse)
 
     identificadores_exatos: list[RetrievalResult] = []
@@ -1029,8 +1043,7 @@ def retrieve(
                     **item.metadata.get("extras", {}), "filtros_relaxados": ignored,
                 }}
         span.set_result(_resumo(fused))
-        span.extra["evidencias"] = _evidencias(fused)
-        span.extra["evidencias_fora_do_log"] = max(0, len(fused) - 10)
+        _registrar_evidencias(span, fused)
         span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(query, fused)
         span.extra["identificadores_exactos_adicionados"] = [
             item.chunk_id for item in identificadores_exatos
@@ -1065,10 +1078,10 @@ def retrieve(
                         seen.add(item.chunk_id)
                 if not reranked:
                     raise ValueError("Reranker vazio")
+                antes_do_top_k = reranked
                 reranked = _promover_identificadores_exatos(reranked, identificadores_exatos, top_k)
                 span.set_result(_resumo(reranked))
-                span.extra["evidencias"] = _evidencias(reranked)
-                span.extra["evidencias_fora_do_log"] = max(0, len(reranked) - 10)
+                _registrar_evidencias(span, reranked, antes_do_top_k=antes_do_top_k)
                 span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(
                     query, reranked
                 )
