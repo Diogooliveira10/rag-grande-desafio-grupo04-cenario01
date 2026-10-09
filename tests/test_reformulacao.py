@@ -18,6 +18,11 @@ HISTORICO = [
     )
 ]
 
+P43_COM_CONTEXTO = (
+    P43 + " (continuação da pergunta anterior: Quais órgãos do RJ contrataram manutenção de "
+    "computadores em 2025?)"
+)
+
 
 def _cliente(pergunta: str, chamadas: list | None = None):
     def cliente(mensagens):
@@ -132,13 +137,13 @@ def test_dado_pessoal_do_historico_e_da_pergunta_sai_mascarado_do_prompt():
         assert dado not in usuario
 
 
-def test_falha_do_modelo_mantem_a_pergunta_original():
+def test_falha_do_modelo_anexa_a_pergunta_anterior():
     def cliente(mensagens):
         raise ConnectionError("provedor fora do ar")
 
     resultado = reformular_pergunta(P43, HISTORICO, cliente=cliente)
 
-    assert resultado == Reformulacao(P43, False, "llm_falhou")
+    assert resultado == Reformulacao(P43_COM_CONTEXTO, True, "llm_falhou")
 
 
 @pytest.mark.parametrize(
@@ -151,10 +156,22 @@ def test_falha_do_modelo_mantem_a_pergunta_original():
         json.dumps({"pergunta": "x" * (reformulacao.MAX_CHARS_REFORMULADA + 1)}),
     ],
 )
-def test_saida_fora_do_formato_mantem_a_pergunta_original(saida):
+def test_saida_fora_do_formato_anexa_a_pergunta_anterior(saida):
     resultado = reformular_pergunta(P43, HISTORICO, cliente=lambda mensagens: saida)
 
-    assert resultado == Reformulacao(P43, False, "saida_invalida")
+    assert resultado == Reformulacao(P43_COM_CONTEXTO, True, "saida_invalida")
+
+
+def test_falha_com_ano_na_pergunta_tira_o_ano_da_anterior():
+    def cliente(mensagens):
+        raise ConnectionError("provedor fora do ar")
+
+    resultado = reformular_pergunta("E em 2024?", HISTORICO, cliente=cliente)
+
+    assert resultado.pergunta == (
+        "E em 2024? (continuação da pergunta anterior: Quais órgãos do RJ contrataram "
+        "manutenção de computadores?)"
+    )
 
 
 def test_modelo_que_devolve_a_mesma_pergunta_nao_conta_como_reescrita():
