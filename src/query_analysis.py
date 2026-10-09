@@ -1466,6 +1466,26 @@ _VIGENCIA_RE = re.compile(r"\bvigent[es]*\b|\bvigencia\b|\bem vigor\b")
 _REGISTRO_COM_VIGENCIA_RE = re.compile(r"\b(?:contratos?|atas?)\b")
 
 
+# CNPJ com ou sem pontuação. Os 14 dígitos no começo de um número de controle
+# do PNCP ("00394429000100-2-001108/2024") não são CNPJ citado: ficam de fora
+# pelo "-" depois deles.
+_CNPJ_RE = re.compile(
+    r"(?:\bcnpjs?\s*(?:n[o.]?\s*|:\s*)?)?"
+    r"(?<![\d./-])(\d{2})\.?(\d{3})\.?(\d{3})/?(\d{4})-?(\d{2})(?![\d/-])"
+)
+
+
+def _extrair_cnpjs(texto: str) -> tuple[list[str], list[Span]]:
+    """CNPJs citados (só dígitos, sem repetição) e os trechos onde aparecem."""
+    cnpjs, trechos = [], []
+    for match in _CNPJ_RE.finditer(texto):
+        digitos = "".join(match.groups())
+        if digitos not in cnpjs:
+            cnpjs.append(digitos)
+        trechos.append(match.span())
+    return cnpjs, trechos
+
+
 def _analisar_com_trechos(query: str) -> tuple[QueryFilters, str, list[Span]]:
     """Filtros, texto normalizado e os trechos dele que viraram filtro."""
     if not isinstance(query, str) or not query.strip():
@@ -1474,7 +1494,9 @@ def _analisar_com_trechos(query: str) -> tuple[QueryFilters, str, list[Span]]:
     bloqueados = _trechos_bloqueados(texto)
     valores = _extrair_valores(texto, bloqueados)
     periodo, expr_periodo = _extrair_periodo(texto, bloqueados + valores.numeros)
-    trechos = valores.expressoes + expr_periodo
+    cnpjs, expr_cnpj = _extrair_cnpjs(texto)
+    # O CNPJ sai do resto da pergunta: senão vira termo do objeto no SQL.
+    trechos = valores.expressoes + expr_periodo + expr_cnpj
     # Métrica, agrupamento e referência saem do texto sem as expressões que já
     # viraram filtro: em "no máximo 50 mil" o "máximo" é filtro, não métrica.
     resto = _sem_trechos(texto, trechos)
@@ -1521,6 +1543,8 @@ def _analisar_com_trechos(query: str) -> tuple[QueryFilters, str, list[Span]]:
             or (plural and (_PERGUNTA_COM_CONTA_RE.search(sem_sentido_comum) or orgao))
         ):
             analiticos["modalidade"] = nome
+    if len(cnpjs) == 1:  # vários juntos é comparação: sem filtro
+        analiticos["cnpj"] = cnpjs[0]
     if sigla:
         # "contratos da SEEDUC": o órgão vira o nome por extenso, e a sigla sai
         # do texto para não ser lida como objeto do contrato.

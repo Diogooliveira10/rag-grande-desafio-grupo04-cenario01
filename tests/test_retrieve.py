@@ -1191,3 +1191,28 @@ def test_reranker_recebe_candidato_abaixo_do_corte_e_falha_volta_rrf(tmp_path):
         raise RuntimeError('endpoint indisponível')
     fallback = retrieve('ambulancia', index_dir=tmp_path, documents_file=documents, top_k=1, embed_fn=lambda _: [[1.0, 0.0]], reranker=quebrado)
     assert len(fallback) == 1 and fallback[0].chunk_id == 'c0'
+
+
+@pytest.mark.parametrize("pergunta", [
+    "Qual ata tem o fornecedor CNPJ 44292391000130?",
+    "Qual ata tem o fornecedor CNPJ 44.292.391/0001-30?",
+])
+def test_cnpj_da_pergunta_acha_o_trecho_nas_duas_formas(pergunta):
+    ata = {"chunk_id": "ata", "base_id": "atas_conversacional",
+           "text": "Fornecedor: EMPRESA X LTDA, CNPJ 44.292.391/0001-30",
+           "metadata": {"base_id": "atas_conversacional", "source_file": "ata.pdf"}}
+    contrato = {"chunk_id": "contrato", "base_id": "contratos_estruturado",
+                "text": '{"niFornecedor": "44292391000130"}',
+                "metadata": {"base_id": "contratos_estruturado", "source_file": "c.json"}}
+    outro = {"chunk_id": "outro", "base_id": "atas_conversacional", "text": "CNPJ 11.111.111/0001-11",
+             "metadata": {"base_id": "atas_conversacional", "source_file": "o.pdf"}}
+
+    achados = retrieve_module._resultados_identificador_exato(pergunta, [ata, contrato, outro])
+
+    assert [item.chunk_id for item in achados] == ["ata", "contrato"]
+
+
+def test_cnpj_no_comeco_do_numero_de_controle_nao_vira_identificador_proprio():
+    assert retrieve_module._identificadores_pncp("Contrato 00394429000100-2-001108/2024") == [
+        "00394429000100-2-001108/2024"
+    ]

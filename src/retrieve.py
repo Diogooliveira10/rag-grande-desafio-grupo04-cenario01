@@ -22,6 +22,9 @@ DEFAULT_TOP_K = 10
 DEFAULT_FETCH_K = 50
 _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 _PNCP_CONTROL_RE = re.compile(r"(?<!\d)\d{14}-\d-\d{6}/\d{4}(?:-\d{6})?(?!\d)")
+# CNPJ com ou sem pontuação; os 14 dígitos no começo de um número de controle
+# ficam de fora pelo "-" que vem depois deles.
+_CNPJ_RE = re.compile(r"(?<![\d./-])(\d{2})\.?(\d{3})\.?(\d{3})/?(\d{4})-?(\d{2})(?![\d/-])")
 MANIFEST_PATH = config.ROOT_DIR / "corpus_manifest.yaml"
 _NATUREZAS = frozenset(item.value for item in Natureza)
 
@@ -436,16 +439,32 @@ def _result(record: Mapping[str, Any], score: float, content: str = "") -> Retri
 
 
 def _identificadores_pncp(query: str) -> list[str]:
-    return list(dict.fromkeys(_PNCP_CONTROL_RE.findall(query)))
+    """Números de controle do PNCP e CNPJs (só dígitos) citados na pergunta.
+
+    O CNPJ entra pelo mesmo caminho: busca exata no texto e nos metadados, e
+    o trecho que o contém sobe na fusão (marcado ``identificador_pncp_exato``).
+    """
+    cnpjs = ["".join(match.groups()) for match in _CNPJ_RE.finditer(query)]
+    return list(dict.fromkeys(_PNCP_CONTROL_RE.findall(query) + cnpjs))
+
+
+def _variantes(identificador: str) -> tuple[str, ...]:
+    """Formas em que o identificador aparece no corpus.
+
+    O JSON dos contratos traz o CNPJ só com dígitos ("niFornecedor"); o PDF das
+    atas, com pontuação ("44.292.391/0001-30").
+    """
+    if len(identificador) == 14 and identificador.isdigit():
+        d = identificador
+        return d, f"{d[:2]}.{d[2:5]}.{d[5:8]}/{d[8:12]}-{d[12:]}"
+    return (identificador,)
 
 
 def _identificador_em_resultado(identificador: str, item: RetrievalResult) -> bool:
     metadata = item.metadata
     extras = metadata.get("extras")
-    return identificador in item.content or (
-        isinstance(extras, Mapping)
-        and identificador in json.dumps(extras, ensure_ascii=False, default=str)
-    )
+    extras_texto = json.dumps(extras, ensure_ascii=False, default=str) if isinstance(extras, Mapping) else ""
+    return any(forma in item.content or forma in extras_texto for forma in _variantes(identificador))
 
 
 def _diagnostico_identificadores(
@@ -474,7 +493,8 @@ def _resultados_identificador_exato(
     query: str,
     records: Iterable[Mapping[str, Any]],
 ) -> list[RetrievalResult]:
-    identificadores = _identificadores_pncp(query)
+    identificadores = [forma for identificador in _identificadores_pncp(query)
+                       for forma in _variantes(identificador)]
     if not identificadores:
         return []
     resultados: list[RetrievalResult] = []

@@ -1059,3 +1059,43 @@ def test_normaliza_campos_conhecidos_sem_aceitar_filtro_desconhecido():
     raw['intencoes'][0]['filtros']['senha'] = 'não permitido'
     result = qa.analisar_query('contratos', modo='llm', cliente=lambda _: json.dumps(raw))
     assert result.metodo == 'regras'
+
+
+# --------------------------------------------------------------------------
+# CNPJ citado na pergunta
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("pergunta", [
+    "Quais contratos tem o fornecedor de CNPJ 05.340.639/0001-30?",
+    "Quais contratos tem o fornecedor de CNPJ 05340639000130?",
+    "Contratos do cnpj nº 05.340.639/0001-30",
+])
+def test_cnpj_com_ou_sem_pontuacao_vira_o_mesmo_filtro(pergunta):
+    filtros = qa.analisar_query(pergunta).filtros
+
+    assert filtros.filtros_analiticos == {"cnpj": "05340639000130"}
+
+
+def test_cnpj_sai_do_texto_que_descreve_o_objeto():
+    resto = qa.texto_sem_filtros("Quais contratos tem o fornecedor de CNPJ 05.340.639/0001-30?")
+
+    assert "cnpj" not in resto and "05" not in resto
+
+
+def test_numero_de_controle_pncp_nao_e_lido_como_cnpj():
+    filtros = qa.analisar_query("Qual o órgão do contrato 00394429000100-2-001108/2024?").filtros
+
+    assert "cnpj" not in filtros.filtros_analiticos
+
+
+def test_cnpj_convive_com_ano_e_valor():
+    filtros = qa.analisar_query("Contratos do CNPJ 29131075000193 em 2025 acima de 100 mil").filtros
+
+    assert filtros.filtros_analiticos == {"cnpj": "29131075000193"}
+    assert filtros.ano == 2025 and filtros.valor_min == 100_000
+
+
+def test_dois_cnpjs_sao_comparacao_e_nao_filtram():
+    filtros = qa.analisar_query("Compare os CNPJs 05.340.639/0001-30 e 44.292.391/0001-30").filtros
+
+    assert "cnpj" not in filtros.filtros_analiticos

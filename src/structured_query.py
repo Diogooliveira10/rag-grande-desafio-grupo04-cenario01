@@ -503,7 +503,9 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
     # Contrato conta pela assinatura, salvo quando a pergunta pede a publicação.
     referencia_temporal = filtros.referencia_temporal or ("assinatura" if so_contratos else None)
     termos_objeto = _termos_do_objeto(texto_objeto) if tabela == "contratacoes" else ()
-    if tipo == "listagem" and not termos_objeto and not modalidade_termos and not orgao_termos:
+    # O CNPJ citado também delimita o pedido ("contratos do fornecedor de CNPJ X").
+    if (tipo == "listagem" and not termos_objeto and not modalidade_termos and not orgao_termos
+            and not analiticos.get("cnpj")):
         return None  # "Quais contratos existem?" sem assunto: a busca normal responde
     return Consulta(
         tabela=tabela,
@@ -652,6 +654,12 @@ def _where(consulta: Consulta, termos: Iterable[str], juncao: str = "AND") -> tu
     if consulta.deduplicar and consulta.tabela == "contratacoes":
         condicoes.append(_SEM_DUPLICATA_MODALIDADE if _usa_modalidade(consulta) else _SEM_DUPLICATA)
     for campo, valor in consulta.filtros_analiticos:
+        if campo == "cnpj":
+            # A pergunta cita o CNPJ sem dizer se é do órgão ou do fornecedor.
+            colunas = [c for c in ("orgao_cnpj", "fornecedor_cnpj") if c in structured_db._TABELAS[consulta.tabela]]
+            condicoes.append("(" + " OR ".join(f"{coluna} = ?" for coluna in colunas) + ")")
+            parametros.extend(valor for _ in colunas)
+            continue
         if campo not in structured_db._TABELAS[consulta.tabela]:
             raise ValueError("Campo SQL não permitido")
         if campo in {"orgao_nome", "fornecedor"}:

@@ -11,12 +11,12 @@ avaliacao a essa consulta e ``GET /api/v1/history`` devolve o historico
 salvo. O estagio ``feedback`` ja existia reservado em ``src/obs.py``
 (Stage.FEEDBACK) mas nao estava integrado a nenhum fluxo ate agora.
 
-Acesso temporario da demo: o historico geral esta aberto, sem chave, por
-solicitacao de quem opera. Ele mostra consultas de todos os usuarios; nao
-publique dados sensiveis. O trace aceita ``RAG_API_KEY`` (quem opera a
-demo ve qualquer conversa) ou o header ``X-Session-Id`` igual a sessao da
-pergunta: cada usuario ve so o caminho da propria conversa, sem chave no site.
-``/query`` e ``/feedback`` continuam abertos: sao o uso normal do chat.
+Historico e trace seguem a mesma regra: ``RAG_API_KEY`` (quem opera a demo)
+ve qualquer conversa; o header ``X-Session-Id`` da acesso so a propria
+conversa, sem chave no site. ``HISTORY_PUBLIC=true`` no ``.env`` abre o
+historico geral sem chave, para uma demo que precise dele; mostra consultas de
+todos os usuarios, entao fica desligado por padrao. ``/query`` e ``/feedback``
+continuam abertos: sao o uso normal do chat.
 """
 
 from __future__ import annotations
@@ -75,6 +75,27 @@ def _autorizar_trace(
         x_session_id.encode(), sessao_do_trace.encode()
     ):
         return
+    raise HTTPException(
+        status_code=401,
+        detail="Envie X-Session-Id da conversa ou X-API-Key.",
+    )
+
+
+def _sessao_do_historico(
+    x_api_key: Optional[str], x_session_id: Optional[str], session_id: Optional[str]
+) -> Optional[str]:
+    """Sessão a que o histórico fica restrito; ``None`` = histórico geral.
+
+    A chave (ou ``HISTORY_PUBLIC``) libera qualquer sessão. Sem ela, só a do
+    ``X-Session-Id``: o parâmetro ``session_id`` sozinho é filtro, não prova
+    de que a conversa é de quem pede.
+    """
+    if config.HISTORY_PUBLIC or _chave_valida(x_api_key):
+        return session_id
+    if x_session_id and (session_id is None or secrets.compare_digest(
+        x_session_id.encode(), session_id.encode()
+    )):
+        return x_session_id
     raise HTTPException(
         status_code=401,
         detail="Envie X-Session-Id da conversa ou X-API-Key.",
@@ -346,14 +367,15 @@ def enviar_feedback(request: FeedbackRequest) -> dict[str, str]:
     return {"status": "recebido"}
 
 
-# Temporariamente público para a demo; o filtro de sessão não é autenticação.
-# Os endpoints de trace abaixo continuam protegidos.
 @app.get("/api/v1/history", response_model=list[HistoricoItem])
 def obter_historico(
     limit: int = Query(default=20, ge=1, le=100),
     session_id: Optional[str] = Query(default=None, pattern=_ID_PATTERN),
+    x_api_key: Optional[str] = Header(default=None),
+    x_session_id: Optional[str] = Header(default=None),
 ) -> list[dict]:
-    items = historico.obter_historico(limit=limit, session_id=session_id)
+    sessao_permitida = _sessao_do_historico(x_api_key, x_session_id, session_id)
+    items = historico.obter_historico(limit=limit, session_id=sessao_permitida)
     for item in items:
         item["resposta"] = _public_rag_payload(item["resposta"])
     return items
