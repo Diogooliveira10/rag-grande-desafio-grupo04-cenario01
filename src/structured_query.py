@@ -1145,7 +1145,9 @@ def _chunks(consulta: Consulta, sql: str, cabecalho: str, linhas: list[str], ban
                         and not consulta.norma_citada,
                         # Nada atendeu aos filtros: é ausência na amostra, não um número calculado.
                         "sem_registros": not linhas or all(
-                            linha.startswith("Nenhum registro encontrado") for linha in linhas)},
+                            linha.strip().casefold() == "(nenhum registro)"
+                            or linha.strip().casefold().startswith("nenhum registro encontrado")
+                            for linha in linhas)},
             ),
         )
         for indice, parte in enumerate(partes, 1)

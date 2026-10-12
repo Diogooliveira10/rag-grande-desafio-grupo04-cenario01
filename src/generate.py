@@ -378,6 +378,11 @@ _ALIASES_CHAVES: dict[str, tuple[str, ...]] = {
 # Cortes para converter uma confiança numérica (0 a 1) em ConfidenceLevel.
 _CONFIANCA_ALTA = 0.8
 _CONFIANCA_MEDIA = 0.5
+_TEXTO_SQL_SEM_REGISTROS = (
+    "Não foram encontrados registros que atendam aos filtros aplicados nos dados disponíveis. "
+    "A base analisada corresponde a uma amostra de 809 registros do corpus; essa ausência não "
+    "comprova que não existam contratações correspondentes no universo completo do Estado."
+)
 
 
 def _campo(dados: dict, chave: str, alternativas_usadas: list[str]) -> Any:
@@ -390,21 +395,58 @@ def _campo(dados: dict, chave: str, alternativas_usadas: list[str]) -> Any:
     return None
 
 
-def _nivel_de_confianca(valor: Any) -> ConfidenceLevel:
+def _nivel_de_confianca(valor: Any, *, sem_registros: bool = False) -> ConfidenceLevel:
     if isinstance(valor, bool):
-        return ConfidenceLevel.BAIXA
-    try:
-        numero = float(valor)
-    except (TypeError, ValueError):
+        nivel = ConfidenceLevel.BAIXA
+    else:
         try:
-            return ConfidenceLevel(str(valor).lower())
-        except ValueError:
-            return ConfidenceLevel.BAIXA
-    if numero >= _CONFIANCA_ALTA:
-        return ConfidenceLevel.ALTA
-    if numero >= _CONFIANCA_MEDIA:
+            numero = float(valor)
+        except (TypeError, ValueError):
+            try:
+                nivel = ConfidenceLevel(str(valor).lower())
+            except ValueError:
+                nivel = ConfidenceLevel.BAIXA
+        else:
+            if numero >= _CONFIANCA_ALTA:
+                nivel = ConfidenceLevel.ALTA
+            elif numero >= _CONFIANCA_MEDIA:
+                nivel = ConfidenceLevel.MEDIA
+            else:
+                nivel = ConfidenceLevel.BAIXA
+    if sem_registros and nivel is ConfidenceLevel.ALTA:
         return ConfidenceLevel.MEDIA
-    return ConfidenceLevel.BAIXA
+    return nivel
+
+
+def _linhas_sql_reais(chunk: Chunk) -> list[Any]:
+    resultado = chunk.metadata.extras.get("resultado_sql")
+    if not isinstance(resultado, dict):
+        return []
+    linhas = resultado.get("linhas")
+    if not isinstance(linhas, list):
+        return []
+    return [
+        linha for linha in linhas
+        if not (
+            isinstance(linha, str)
+            and (
+                linha.strip().casefold() == "(nenhum registro)"
+                or linha.strip().casefold().startswith("nenhum registro encontrado")
+            )
+        )
+    ]
+
+
+def _sql_sem_registros(chunks: list[Chunk]) -> bool:
+    sql = [chunk for chunk in chunks if chunk.metadata.doc_type == "sql"]
+    if any(chunk.metadata.extras.get("sem_registros") for chunk in sql):
+        return True
+    com_resultado = [
+        chunk for chunk in sql
+        if isinstance(chunk.metadata.extras.get("resultado_sql"), dict)
+        and isinstance(chunk.metadata.extras["resultado_sql"].get("linhas"), list)
+    ]
+    return bool(com_resultado) and all(not _linhas_sql_reais(chunk) for chunk in com_resultado)
 
 
 def _parsear_resposta_llm(
@@ -427,7 +469,11 @@ def _parsear_resposta_llm(
         answer = str(dados["answer"]).strip()
         is_refusal = bool(dados.get("is_refusal", False))
 
-        confidence_level = _nivel_de_confianca(_campo(dados, "confidence_level", alternativas_usadas))
+        sem_registros_sql = _sql_sem_registros(chunks)
+        confidence_level = _nivel_de_confianca(
+            _campo(dados, "confidence_level", alternativas_usadas),
+            sem_registros=sem_registros_sql,
+        )
 
         sources_used: list[SourceRef] = []
         fontes_adicionadas: set[str] = set()
@@ -464,6 +510,8 @@ def _parsear_resposta_llm(
                 answer = _recusa(query, bases_consultadas, refusal_reason).answer
         elif confidence_level == ConfidenceLevel.RECUSADO:
             confidence_level = ConfidenceLevel.BAIXA
+        if not is_refusal and sem_registros_sql and "amostra de 809 registros" not in answer.casefold():
+            answer = f"{answer}\n\n{_TEXTO_SQL_SEM_REGISTROS}"
         if not answer:
             raise ValueError("Resposta sem texto")
 
@@ -617,8 +665,7 @@ def pode_responder_sql(chunks: list[Chunk], bases: list[Natureza]) -> bool:
     if numero_intencoes and len({c.metadata.extras.get("intencao") for c in sql}) != numero_intencoes:
         return False
     return (all(isinstance(c.metadata.extras.get("resultado_sql"), dict)
-                and "linhas" in c.metadata.extras["resultado_sql"] for c in sql)
-            and any(c.metadata.extras["resultado_sql"]["linhas"] for c in sql))
+                and isinstance(c.metadata.extras["resultado_sql"].get("linhas"), list) for c in sql))
 
 
 def _resposta_sql_deterministica(
@@ -630,6 +677,7 @@ def _resposta_sql_deterministica(
     sql = [c for c in chunks if c.metadata.doc_type == "sql"
            and c.metadata.extras.get("geracao_deterministica")]
     partes, fontes = [], []
+    sem_registros = _sql_sem_registros(sql)
     for chunk in sql:
         resultado = chunk.metadata.extras.get("resultado_sql")
         if not isinstance(resultado, dict) or "linhas" not in resultado:
@@ -643,20 +691,25 @@ def _resposta_sql_deterministica(
             partes.append(cabecalho)
             if resultado.get("politica"):
                 partes.append(resultado["politica"])
-        linhas = resultado["linhas"]
+        linhas = _linhas_sql_reais(chunk)
         if linhas:
             numero = len(fontes) + 1
             partes.append("\n".join(f"{linha} [{numero}]" for linha in linhas))
-            fontes.append(SourceRef(chunk_id=chunk.metadata.chunk_id, base_id=chunk.metadata.base_id,
-                                    source_file=chunk.metadata.source_file))
+        else:
+            sem_registros_nesta_parte = chunk.metadata.extras.get("sem_registros") or all(
+                not _linhas_sql_reais(parte) for parte in sql
+            )
+            if not sem_registros_nesta_parte:
+                continue
+            numero = len(fontes) + 1
+            partes.append(f"{_TEXTO_SQL_SEM_REGISTROS} [{numero}]")
+        fontes.append(SourceRef(chunk_id=chunk.metadata.chunk_id, base_id=chunk.metadata.base_id,
+                                source_file=chunk.metadata.source_file))
     if not fontes:
         return None
-    # "Nenhum registro" é ausência na amostra de 809 registros, não no RJ: a
-    # conta está certa, mas não sustenta confiança alta (P2.1 do golden set).
-    sem_registros = all(chunk.metadata.extras.get("sem_registros") for chunk in sql)
     return RAGResponse(query=query, answer="\n\n".join(partes), bases_consultadas=bases,
                        sources_used=fontes,
-                       confidence_level=ConfidenceLevel.MEDIA if sem_registros else ConfidenceLevel.ALTA,
+                       confidence_level=_nivel_de_confianca("alta", sem_registros=sem_registros),
                        is_refusal=False, refusal_reason=None)
 
 
