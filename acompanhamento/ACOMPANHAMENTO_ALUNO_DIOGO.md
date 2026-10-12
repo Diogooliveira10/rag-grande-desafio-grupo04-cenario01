@@ -271,3 +271,35 @@ Próximas etapas:
 - Utilizei assistentes de IA como apoio à análise dos testes existentes, à identificação dos arquivos relevantes e à compreensão do tratamento de resultados SQL vazios.
 
 - As sugestões foram utilizadas para orientar a investigação e definir os próximos passos da implementação. A correção ainda não foi aplicada nem validada por testes nesta etapa.
+
+## Encontro (FERIADO) — 2026-10-12
+
+### Relato individual — Diogo Oliveira
+
+**Tarefa do dia:**
+
+Implementar e validar a correção para respostas de consultas SQL sem registros reais, impedindo confiança `ALTA` e deixando claro que a ausência se refere à amostra analisada de 809 registros, sem concluir que não existam contratações correspondentes em todo o Estado.
+
+**O que fiz hoje:**
+
+- Analisei integralmente `_resposta_sql_deterministica()` e `_nivel_de_confianca()` em `src/generate.py`, suas chamadas e a propagação de `confidence_level` até a resposta final. Também examinei como `src/structured_query.py` constrói os chunks e registra `resultado_sql["linhas"]`.
+
+- Confirmei que uma consulta sem linhas pode ser representada pelo marcador `"(nenhum registro)"`. Ajustei a identificação de resultados reais para que o marcador e as mensagens de ausência não sejam tratados como registros.
+
+- Corrigi o caminho determinístico para responder consultas vazias com uma ressalva explícita: os filtros não encontraram registros nos dados disponíveis, que correspondem a uma amostra de 809 registros do corpus, e isso não comprova inexistência no universo completo do Estado. A fonte SQL é preservada.
+
+- Limitei a confiança `ALTA` a `MEDIA` quando a ausência de resultados está explicitamente identificada, preservando `BAIXA` e a conversão preexistente de valores numéricos e textuais. A mesma proteção foi aplicada ao caminho de geração por LLM que utiliza metadados SQL de ausência.
+
+- Preservei a resposta determinística para consultas com registros reais, incluindo os valores calculados, as fontes e a confiança alta. Também tratei partes SQL vazias de resultados divididos para que não sejam confundidas com uma consulta inteira sem resultados.
+
+- Adicionei testes de regressão em `tests/test_numerical_validation.py` para consultas vazias e com resultados, os dois cenários de perguntas sobre ambulâncias, conversão e limitação da confiança, e o caminho LLM com metadados de ausência.
+
+**Resultado:**
+
+A correção foi implementada e validada. Os testes focados de geração, consulta estruturada e pipeline passaram: **205 aprovados**. A suíte completa passou com **1.416 testes aprovados**. `git diff --check` também foi executado sem apontar problemas.
+
+### Uso de assistentes de IA:
+
+- Utilizei assistentes de IA como apoio à inspeção do fluxo de geração e dos testes, implementação da correção e criação dos testes de regressão.
+
+- Executei e conferi os testes locais focados e a suíte completa. Não foi necessária chamada real ao LLM nem dependência de banco remoto para validar os cenários unitários.
