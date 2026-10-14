@@ -121,7 +121,7 @@ Estágios de consulta (nomes fixos no campo `stage`): `interacao`, `reformulacao
 
 [src/pipeline.py](src/pipeline.py) une as etapas numa única função (`responder`).
 
-`feedback` ([src/history_store.py](src/history_store.py)): toda chamada a `POST /api/v1/query` recebe um `query_id` e é salva (pergunta + resposta completa) num SQLite local (`data/app_state/historico.sqlite`, fora do Git — diferente da base derivada de `structured_db.py`, este é estado da aplicação e não é remontado). `POST /api/v1/feedback` associa uma avaliação (`positivo`/`negativo` + comentário opcional) a um `query_id` já registrado (404 se não existir) e grava o evento no log estruturado com `stage="feedback"`. `GET /api/v1/history?limit=N` devolve as consultas mais recentes com o feedback recebido (`&session_id=...` restringe a uma conversa). O histórico geral está temporariamente aberto para a demo, sem chave, e pode mostrar consultas de todos os usuários; não exponha conteúdo sensível. O filtro `session_id` não é autenticação. O trace continua protegido: aceita `X-API-Key` igual a `RAG_API_KEY` ou o header `X-Session-Id` da própria conversa, para o usuário ver o caminho das suas perguntas sem chave no site; o histórico grava os textos mascarados e apaga consultas com mais de `HISTORY_RETENTION_DAYS` dias (padrão 30). Testes em [tests/test_history_store.py](tests/test_history_store.py) e [tests/test_app_api.py](tests/test_app_api.py).
+`feedback` ([src/history_store.py](src/history_store.py)): toda chamada a `POST /api/v1/query` recebe um `query_id` e é salva (pergunta + resposta completa) num SQLite local (`data/app_state/historico.sqlite`, fora do Git — diferente da base derivada de `structured_db.py`, este é estado da aplicação e não é remontado). `POST /api/v1/feedback` associa uma avaliação (`positivo`/`negativo` + comentário opcional) a um `query_id` já registrado (404 se não existir) e grava o evento no log estruturado com `stage="feedback"`. `GET /api/v1/history?limit=N` devolve as consultas mais recentes com o feedback recebido. O acesso tem dois personas: quem envia `X-API-Key` igual a `RAG_API_KEY` (quem opera a demo) vê o histórico inteiro e pode filtrar por `&session_id=...`; o dono da conversa se identifica pelo header `X-Session-Id` e vê só as consultas dela. Sem nenhuma das duas credenciais, `401` sem revelar o que existe no log. O `session_id` de query param é filtro do operador, não autenticação. O trace usa a mesma autorização: `X-API-Key` ou o header `X-Session-Id` da própria conversa, para o usuário ver o caminho das suas perguntas sem chave no site; o histórico grava os textos mascarados e apaga consultas com mais de `HISTORY_RETENTION_DAYS` dias (padrão 30). Testes em [tests/test_history_store.py](tests/test_history_store.py) e [tests/test_app_api.py](tests/test_app_api.py).
 
 O parsing da geração aceita as variações de chave que o modelo da turma produz na prática (`sources` em vez de `sources_used`, `confidence` numérico em vez de `confidence_level`) e registra no log, em `extra.chaves_fora_do_contrato`, quando isso acontece. Toda etapa registra log estruturado via [src/obs.py](src/obs.py) (JSONL em `logs/pipeline/pipeline-AAAA-MM-DD.jsonl`, com `run_id`, `stage`, latência e tokens). A retenção acompanha `HISTORY_RETENTION_DAYS` por padrão (30 dias); `LOG_RETENTION_DAYS=0` desliga o expurgo. Diagnósticos ficam em `logs/maintenance/`, backups em `data/backups/` e temporários de testes em `.tmp/tests/`. `python -m src.log_maintenance cleanup` mostra o plano de expurgo; somente `--apply` o executa. Diagnósticos concluídos e testes falhos seguem `MAINTENANCE_RETENTION_DAYS` (14 dias); backups nunca são expurgados automaticamente.
 
@@ -202,6 +202,31 @@ A escrita usa fila limitada e lotes, coordenados entre processos por SQLite/WAL 
 O guia visual da interface de coleta, curadoria e busca está em
 [docs/README.md](docs/README.md), com exemplos de comandos e capturas de tela
 da CLI.
+
+**0. Em um comando** (depois de clonar)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1   # Windows
+# ou: bash scripts/setup.sh                                  # Linux/macOS
+```
+
+O script cria o `.venv`, instala o `requirements-lock.txt`, copia
+`.env.example` para `.env` (quando falta) e confere os artefatos versionados
+da v6 (SQLite, índice FAISS, snapshot de embeddings). Como os dados da v6
+estão no Git, **não é preciso recoletar para consultar**:
+
+```powershell
+.venv\Scripts\python -m uvicorn app.api:app --host 127.0.0.1 --port 8080
+```
+
+Modelos externos (reranker ~470 MB + GGUF do Qwen3-Embedding 639 MB, só para
+o modo local de embeddings) têm download em um comando com URL oficial e
+SHA-256 verificado:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\models.ps1
+# ou: bash scripts/models.sh
+```
 
 **1. Configurar ambiente**
 
@@ -550,6 +575,9 @@ O frontend atual tem telas de Consulta, Histórico, Feedback, Explorar e Transpa
 
 ### Endpoint de modelos (compartilhado com toda a turma)
 
+Estes são os **defaults do código**: sem `.env`, o sistema fala com o endpoint
+da turma abaixo (`LLM_PROVIDER_MODE=auto`, `EMBEDDING_PROVIDER=ecoa`).
+
 ```python
 OLLAMA_URL       = "http://ecoa-llm.duckdns.org:11434/v1"
 GENERATION_MODEL = "qcwind/qwen3-8b-instruct-Q4-K-M"
@@ -558,7 +586,25 @@ EMBEDDING_MODEL  = "xagi/qwen3-embedding:0.6b-q4_k_m"
 
 Como o endpoint é compartilhado por toda a turma: cache de embeddings em disco é obrigatório, índices devem ser persistidos e recarregados (nunca reindexados a cada execução), e lotes devem ser pequenos com pausa entre chamadas.
 
-O prompt da geração é limitado para caber na janela do modelo: `GENERATION_CONTEXT_CHARS` (padrão 3500) é o total de caracteres de contexto, e `GENERATION_CHUNK_CHARS` (padrão 900) é o máximo por chunk. Se o prompt passar da janela, o Ollama corta o começo sem avisar. Os dois limites podem ser ajustados no `.env` (ver [.env.example](.env.example)).
+O prompt da geração é limitado para caber na janela do modelo:
+`GENERATION_CONTEXT_CHARS` é o total de caracteres de contexto e
+`GENERATION_CHUNK_CHARS` (padrão 900) é o máximo por chunk. O padrão do
+orçamento **acompanha o provedor de geração**: 3500 na janela curta do
+endpoint da turma (2048 tokens) e 12000 no OpenRouter (janela grande), para o
+top-k inteiro caber. Se o prompt passar da janela, o Ollama corta o começo sem
+avisar. Os dois limites podem ser ajustados no `.env` (ver
+[.env.example](.env.example)).
+
+**Alternativas aos defaults ECOA.** Respostas por OpenRouter:
+`LLM_PROVIDER_MODE=openrouter` + `OPENROUTER_API_KEY` (e opcionalmente
+`OPENROUTER_MODEL`). Embeddings de consulta locais (defesa contra a
+indisponibilidade do endpoint da turma):
+`EMBEDDING_PROVIDER=ollama` + `OLLAMA_LOCAL_URL=http://127.0.0.1:18321/v1`,
+com o `llama-server` e o GGUF preparados por `scripts/models.ps1`. Os vetores
+dos documentos são os do índice versionado e **não** são reembedados ao trocar
+de provedor; só a pergunta muda de encoder (o cache de query separa por
+endpoint e modelo, e a compatibilidade do checkpoint foi medida em
+docs/registro_execucao_v6.md).
 
 Acompanhamento detalhado dia a dia em [acompanhamento/ACOMPANHAMENTO.md](acompanhamento/ACOMPANHAMENTO.md).
 

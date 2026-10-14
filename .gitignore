@@ -13,6 +13,13 @@ env/
 .env.*
 !.env.example
 
+# Modelos baixados por scripts/models.ps1 (reranker via cache HF; GGUF aqui)
+.models/
+
+# Artefatos da construção v7 (modo direto): promovidos só após re-auditoria
+data/v7_direto/
+data/v7_direto_*.log
+
 # Ferramentas de teste e análise
 .pytest_cache/
 .tmp/
