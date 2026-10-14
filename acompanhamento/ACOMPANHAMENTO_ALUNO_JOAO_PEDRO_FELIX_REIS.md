@@ -507,3 +507,70 @@ Frontend (`sevenRevy/frontendRAG`, `main`):
 ### Uso de IA
 
 Utilizei assistentes de IA para análise de logs de pipeline, diagnóstico de queries SQL com resultado incorreto, implementação de correções em stop words e stemmer, criação de scripts de diagnóstico do frontend, e elaboração de documentação de instalação. As correções foram validadas com testes automatizados e consultas reais ao endpoint da API.
+
+## Atualização — 14/10/2026
+
+### Atividades realizadas
+
+Nesta sessão, concluí a política de acesso do histórico, rodei o golden set do Demo Day, coloquei o build do corpus v7 em execução com fallback de embeddings e comecei o censo de atas de registro de preços.
+
+**Histórico — política de dois personas (P8B):**
+
+Substituí a abertura temporária do histórico pela política definitiva de dois personas: administrador (cabeçalho `X-API-Key`) vê todas as conversas e pode filtrar por `session_id`; o usuário comum (`X-Session-Id`) vê apenas a própria conversa. Sem credenciais, a resposta é 401 com instrução de envio, e o parâmetro de consulta nunca autentica. O frontend passou a manter o `session_id` por aba (sessionStorage) e a enviar o cabeçalho nas consultas de histórico.
+
+Gerei a `RAG_API_KEY` do demo (em `.env`, fora do Git) e validei ao vivo: anônimo 401, dono vê 3/3 mensagens, sessão alheia retorna 0 itens, admin vê tudo (20) e filtra (3), chave errada 401, trace 200 para o dono e 401 para sessão alheia. Testei uma conversa de 3 turnos com continuação ("E em 2024?"), feedback positivo e negativo, caso de timeout (o cliente desiste em 1 s, a consulta termina e é registrada como `q_543a46e2`) e os catálogos de contratações, documentos, órgãos e fontes. `check:backend` e `check:query` passaram.
+
+**Golden set — rodada única do Demo Day:**
+
+Rodei o golden (`benchmark-demo-day-2026-10-14`): 23/26, contra 25/26 na véspera. Os casos P2.1 e P4.2 variaram — instabilidade de top-k, já conhecida e registrada. A decisão sobre o número do demo (corrigir o top-k e rodar uma vez, aceitar 23/26 ou adiar para a re-auditoria pós-demo) ficou adiada.
+
+**Corpus v7 — build e fallback de embeddings:**
+
+O censo de contratos e publicações fechou em 272/272 janelas, 168.074 registros e 0 falhas: `documents.jsonl` com 168.051 chunks (110.378 contratos e 57.673 publicações). Começou a build de embeddings na GPU local (llama-server, RTX 3050). Com o ECOA fora do ar, implementei o encadeamento ECOA primário + encoder local como reserva (`embed_fn_com_fallback`), com pausa entre lotes para o endpoint compartilhado, contagem de vetores por origem no inventário e retomada por `chunk_id` (vetores já gravados são reaproveitados). Corrigi um defeito em que a função de lote roubava o decorador de observação da indexação. Testes: `test_embed_fallback` 6, `test_index` 12, `test_build_direto` 5 e `test_projecao` 12 passando.
+
+**Censo de atas de registro de preços:**
+
+Levantei o comportamento da API de atas do PNCP: filtra por período de vigência (não por ano da ata), rejeita períodos maiores que 365 dias (HTTP 422) e responde 429 em HTML a partir de ~15 chamadas em rajada — o ritmo seguro medido é 12 requisições por minuto. Implementei janelas anuais por CNPJ (vigência `ano` e `ano + 1`) com o filtro declarativo `anoAta = 2025` fechando o corte, e o modo `--so-atas` na CLI de coleta, com testes (12 passando).
+
+Derivei a lista de órgãos do RJ do próprio censo: 522 CNPJs com atividade em 2025 (`orgaos_rj_2025.json`), contra os 164 da curadoria v6. A coleta roda em destino separado (`data/v7_direto_atas`), retomável por janela; até o fim da sessão, 11.689 atas únicas de 2025 (100% `anoAta = 2025`, deduplicadas por `chunk_id`).
+
+**Modalidade — o que a API tem e o que não tem:**
+
+Verifiquei os 110.378 registros de contrato do censo: o endpoint `/v1/contratos` não expõe modalidade nenhuma — não é falha de extração. As publicações trazem `modalidadeId`/`modalidadeNome` em 100% (Dispensa 28.610, Pregão Eletrônico 15.643, Inexigibilidade 12.142, Concorrência Eletrônica 964, entre outras). A modalidade do contrato é derivável pela compra vinculada (`numeroControlePncpCompra`): 28.664 por join local, sem chamadas de API. Os contratos citam 276 atas distintas por `numeroControlePncpAta` (400 contratos com o campo) — serão buscadas por fetch direto, sem janelas.
+
+Reformulei a taxonomia planejada ancorada em campos oficiais (modalidade derivada, `categoriaProcesso`, `amparoLegal` como referência, não como assunto) e holdout agrupado por compra, para evitar vazamento entre desenvolvimento e avaliação.
+
+### Resultado da sessão
+
+- Política do histórico validada ao vivo com os dois personas e conversa real de 3 turnos.
+- Golden do Demo Day: 23/26 (variação de 2 casos pela instabilidade de top-k).
+- v7: 168.051 chunks no censo; embeddings em ~41% no fim da sessão (ETA ~8 h).
+- Atas: 11.689 únicas de 2025 em coleta contínua; estimativa de 15–35 mil no total.
+- Modalidade: ausente nos contratos (API), 100% nas publicações, 28.664 deriváveis por join.
+- Testes do backend passando: `test_embed_fallback` 6, `test_index` 12, `test_build_direto` 5, `test_projecao` 12, `test_coletar_direto` 12.
+
+### Commits realizados
+
+Backend (`origin/joao-reis`):
+- `73f2bdb` — `fix(consulta): qualidade das respostas nos defeitos do ensaio P5`
+- `cdd5dc2` — `feat(avaliacao): criterios de conteudo e avaliador sensivel a negacao`
+- `c3d904d` — `feat(corpus): censo v7 em modo direto com DIFF, projecao e regressao`
+- `8432c56` — `feat(api): historico com dois personas, admin e novo usuario`
+- `2642485` — `feat(setup): instalacao e modelos para clonar e rodar o RAG`
+- `046f4e0` — `docs: roteiro do Demo Day, plano de acao e documentos alinhados`
+
+Frontend (`sevenRevy/frontendRAG`, `main`):
+- `0e3ee82` — `feat(historico): dois personas no acesso ao historico`
+### Pendências
+
+- Decidir o número do golden para o Demo Day (corrigir o top-k e rodar uma vez, aceitar 23/26).
+- Fechar o censo de atas pelas janelas e rodar as embeddings delas com o ECOA primário.
+- Buscar por fetch direto as 276 atas citadas pelos contratos do censo, com prioridade.
+- Conferir conflitos do join de modalidade e aplicar o preenchimento com proveniência.
+- Iniciar o taxonomia reformulada (taxonomia ancorada + holdout por compra).
+- Top-k exaustivo (ranking instável entre rodadas) e filtro de fornecedor/município (apelido "Infolog" cai no filtro de termos de objeto).
+- Ao fim das embeddings do v7: regressão (referência `projecao-v6-3modos-2026-10-14/index_completa`) e golden sobre o v7 antes de qualquer promoção.
+
+### Uso de IA
+
+Utilizei assistentes de IA para investigar o comportamento da API de atas do PNCP (parâmetros, limites de período e de taxa), implementar o fallback de embeddings com retomada, analisar a cobertura de modalidade nos registros e preparar os incrementos do censo. As decisões foram validadas com testes automatizados, medições locais e consultas pontuais à API.
