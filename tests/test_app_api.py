@@ -499,6 +499,19 @@ def test_cors_libera_o_header_da_chave():
     assert "x-api-key" in liberados and "x-session-id" in liberados
 
 
+def test_cors_libera_o_header_do_tunel_ngrok():
+    # O site publicado chama o backend por um túnel ngrok gratuito, que exige
+    # este header para não devolver a página de aviso no lugar da resposta.
+    response = TestClient(app).options("/api/v1/query", headers={
+        "Origin": "https://etuarda.github.io",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "Content-Type, X-Session-Id, ngrok-skip-browser-warning",
+    })
+
+    assert response.status_code == 200
+    assert "ngrok-skip-browser-warning" in response.headers["access-control-allow-headers"].lower()
+
+
 def test_query_repassa_o_historico_ao_pipeline_e_devolve_a_pergunta_reformulada(monkeypatch) -> None:
     chamadas = []
 

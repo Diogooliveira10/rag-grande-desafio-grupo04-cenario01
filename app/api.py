@@ -258,7 +258,9 @@ app.add_middleware(
     allow_origins=_cors_origins(),
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "X-API-Key", "X-Session-Id"],
+    # ngrok-skip-browser-warning: o túnel ngrok gratuito põe uma página de aviso
+    # na frente do tráfego de navegador; o site envia este header para pulá-la.
+    allow_headers=["Content-Type", "X-API-Key", "X-Session-Id", "ngrok-skip-browser-warning"],
 )
 
 
