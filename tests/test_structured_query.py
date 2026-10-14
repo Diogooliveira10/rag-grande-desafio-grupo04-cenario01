@@ -1094,6 +1094,34 @@ def test_soma_pelo_cnpj_do_orgao(base_cnpj):
     assert "2 registros" in linhas[0] and "R$ 4.000,00" in linhas[0]
 
 
+@pytest.mark.parametrize("cnpj,valido", [
+    ("05340639000130", True), ("29131075000193", True), ("11222333000181", True),
+    ("11222333000180", False), ("05340639000131", False), ("11111111111111", False), ("1234567800019", False),
+])
+def test_cnpj_valido_confere_os_digitos_verificadores(cnpj, valido):
+    assert structured_db.cnpj_valido(cnpj) is valido
+
+
+def test_cabecalho_avisa_cnpj_com_digito_verificador_invalido(base_cnpj):
+    from src.query_analysis import analisar_query
+    pergunta = "Quais contratos tem o fornecedor de CNPJ 05.340.639/0001-31?"
+    consulta = sq.detectar_consulta(pergunta, analisar_query(pergunta).filtros, ESTRUTURADA)
+
+    _, cabecalho, _ = sq.executar_consulta(consulta, base_cnpj["banco"])
+
+    assert "cnpj=05340639000131 (dígito verificador inválido" in cabecalho
+
+
+def test_cabecalho_nao_avisa_cnpj_valido(base_cnpj):
+    from src.query_analysis import analisar_query
+    pergunta = "Quais contratos tem o fornecedor de CNPJ 05.340.639/0001-30?"
+    consulta = sq.detectar_consulta(pergunta, analisar_query(pergunta).filtros, ESTRUTURADA)
+
+    _, cabecalho, _ = sq.executar_consulta(consulta, base_cnpj["banco"])
+
+    assert "cnpj=05340639000130" in cabecalho and "inválido" not in cabecalho
+
+
 @pytest.mark.parametrize("verbo", ["foram firmados", "firmou", "firmaram"])
 def test_firmar_nao_vira_termo_do_objeto(verbo):
     assert sq._termos_do_objeto(f"quantos contratos de ambulancia {verbo}") == ("ambulancia",)

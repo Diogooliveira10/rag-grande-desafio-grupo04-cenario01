@@ -991,7 +991,11 @@ def _cabecalho(consulta: Consulta, total_tabela: int, termos: tuple[str, ...], j
             f"órgão em {', '.join(consulta.orgaos[:5])}{'…' if len(consulta.orgaos) > 5 else ''}" if consulta.orgaos
             else f"órgão {' '.join(consulta.orgao_termos)} (nenhum órgão do corpus casa com esse nome)"
         )
-    filtros.extend(f"{k}={v}" for k, v in consulta.filtros_analiticos)
+    filtros.extend(
+        f"{k}={v} (dígito verificador inválido: confira o número)"
+        if k == "cnpj" and not structured_db.cnpj_valido(str(v)) else f"{k}={v}"
+        for k, v in consulta.filtros_analiticos
+    )
     if consulta.referencia_temporal:
         filtros.append(f"referência={consulta.referencia_temporal}")
     if consulta.campo:

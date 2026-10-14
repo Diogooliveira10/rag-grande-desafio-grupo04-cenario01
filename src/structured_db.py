@@ -307,6 +307,21 @@ def _registros_json(documents_file: Path, base_id: str) -> Iterator[tuple[Mappin
                 yield chunk, registro
 
 
+_PESOS_CNPJ = (6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2)
+
+
+def cnpj_valido(digitos: str) -> bool:
+    """Confere os dois dígitos verificadores de um CNPJ só com dígitos."""
+    if len(digitos) != 14 or not digitos.isdigit() or len(set(digitos)) == 1:
+        return False
+    for posicao in (12, 13):
+        pesos = _PESOS_CNPJ[13 - posicao:]
+        resto = sum(int(d) * p for d, p in zip(digitos[:posicao], pesos)) % 11
+        if digitos[posicao] != str(0 if resto < 2 else 11 - resto):
+            return False
+    return True
+
+
 def _cnpj(valor: Any) -> str | None:
     """CNPJ só com dígitos; CPF (11 dígitos) e vazio viram None."""
     digitos = re.sub(r"\D", "", str(valor or ""))
