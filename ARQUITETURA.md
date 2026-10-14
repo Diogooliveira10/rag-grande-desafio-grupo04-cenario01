@@ -96,11 +96,11 @@ Já estão implementados:
 - feedback do usuário e histórico de consultas persistidos em SQLite local ([src/history_store.py](src/history_store.py)), com textos mascarados, expurgo após `HISTORY_RETENTION_DAYS` dias e a resposta completa comprimida com zlib (o campo só é lido inteiro, nunca pesquisado);
 - histórico e trace com dois personas: `X-API-Key` igual a `RAG_API_KEY` (quem opera a demo) vê tudo; o header `X-Session-Id` vê só a própria conversa; sem nenhum dos dois, `401`. `HISTORY_PUBLIC=true` abre o histórico geral para uma demo (desligado por padrão);
 - CORS configurado para desenvolvimento local e para a origem `https://etuarda.github.io`;
-- frontend em repositório separado, publicado em [https://etuarda.github.io/frontendRAG/](https://etuarda.github.io/frontendRAG/): consome consulta, feedback, trace da pergunta e da conversa, catálogo e resumo do projeto, e mostra os `avisos` da resposta. Ainda não há backend público em HTTPS para o site apontar;
+- frontend em repositório separado, publicado em [https://etuarda.github.io/frontendRAG/](https://etuarda.github.io/frontendRAG/): consome consulta, feedback, trace da pergunta e da conversa, catálogo e resumo do projeto, e mostra os `avisos` da resposta. Na demo, o backend roda na máquina de quem apresenta e fica público por um túnel ngrok no domínio fixo gratuito (README, seção 9.1); o site ainda precisa ser publicado apontando para ele;
 - suporte a certificados HTTPS com `certifi` sem desabilitar validação SSL;
 - golden set com 29 casos (`E1`–`E3`, dos e-mails sintéticos, entraram em 14/10) e critérios de conteúdo (radicais, teto de confiança, negação), mais um conjunto de busca com 47 perguntas e a ablação do rerank. Última rodada completa: `golden-2026-10-09-cnpj`, 14/26 (rota 24/26, recusa 26/26, citação 25/26), anterior aos critérios de conteúdo;
 - scripts de instalação (`scripts/setup.ps1`/`setup.sh`) e de download dos modelos com hash conferido (`scripts/models.ps1`/`models.sh`);
-- 1.634 testes automatizados passando na verificação realizada em 2026-10-14.
+- 1.653 testes automatizados passando na verificação realizada em 2026-10-14.
 
 ### Corpus e índice
 
@@ -149,27 +149,23 @@ As tarefas são distribuídas entre os integrantes a cada encontro conforme as n
 
 ### Frentes atuais
 
-- Preparação do Demo Day (23/10): formato da demo, roteiro e ensaio.
+- Preparação do Demo Day (23/10): publicação do site, roteiro e ensaio.
 - Avaliação: nova rodada do golden set com os critérios de conteúdo.
-- Frontend: escolher o repositório oficial e publicar a versão com trace e avisos.
 - Corpus v7 (censo de 2025), em construção; a v6 segue como base ativa.
 
 ### Pendências em aberto
 
-Situação conferida em 2026-10-14.
+Situação conferida em 2026-10-14, depois do PR #41.
 
-- **Rodar o golden set de novo.** A última rodada completa (`golden-2026-10-09-cnpj`, 14/26) é anterior aos critérios de conteúdo, ao recorte de confiança e aos filtros de município, fornecedor e CNPJ. Registrar o resultado aqui e em `docs/registro_execucao_v6.md`.
-- **F1:** de "se não houver dados suficientes", o SQL toma "houver" como termo do objeto (`tipo d`, `ambulancia`, `houver`). O gabarito pede que a resposta admita a falta de dados, com confiança no máximo baixa.
-- **Confiança com evidência parcial:** na rodada de 09/10 a P4.2 saiu com confiança alta, e a própria resposta dizia que o objeto não menciona manutenção de computadores. Com execução SQL completa, o recorte pode subir a confiança dada pelo LLM; conferir na nova rodada.
-- **Perguntas do golden set que dependem da anterior** (P1.3, P4.2 e P4.3): avaliar como conversa, enviando `historico`, ou reescrever. Incluir casos de atas e de identificador (CNPJ, número de controle), além da recusa do G2.
-- **Fornecedor por apelido** ("Infolog") ainda não vira filtro. O roteiro do Demo Day usa essa pergunta como exemplo de zero confiável: decidir antes de mexer.
-- **Estabilidade do ranking:** com `top_k` não exaustivo, a mesma pergunta pode recuperar conjuntos diferentes entre execuções (P2.1 e P4.2 oscilam). Antes da demo, repetir as consultas do roteiro e confirmar que a resposta não muda.
-- **Formato da demo e backend:** local, túnel ou hospedagem, ainda não decidido. Não há backend público em HTTPS.
-- **Latência:** o roteiro mede de 55 a 151 s por consulta real no endpoint da turma; decidir quais consultas vão ao vivo e quais ficam em cache.
-- **Frontend:** o repositório `Etuarda/frontendRAG` (com as telas de trace) e o fork `sevenRevy/frontendRAG` (com os dois personas, `check:backend` e o botão do NEXO) divergem, e a branch `feat/melhorias-trace` ainda não entrou na `main` da Eduarda.
-- **Validar frontend e backend juntos de novo**, depois dos merges de 2026-10-14 (personas, recorte, avisos, filtros novos).
-- **Roteiro do Demo Day** (material interno do grupo, fora do repositório): ensaiar cronometrado, marcar o freeze e preparar o checklist do plano B.
+- **Rodar o golden set de novo.** A última rodada completa (`golden-2026-10-09-cnpj`, 14/26) é anterior aos critérios de conteúdo, ao recorte de confiança, aos filtros de município, fornecedor e CNPJ e aos casos `E1`–`E3`. Rodar com a configuração da demo (ECOA com tempo-limite de 60 s e OpenRouter de reserva) e registrar o resultado aqui e em `docs/registro_execucao_v6.md`.
+- **F1 (comparação sem dados suficientes):** o "houver" já não vira termo do objeto, mas a F1 ainda falha. A pergunta vira cálculo SQL de comparação por esfera, o SQL acha 1 registro municipal de R$ 0,00 e nenhum estadual, e o recorte sai como execução completa com cálculo disponível: a resposta vem direto do SQL, com confiança alta e sem dizer que não dá para comparar. O gabarito pede confiança no máximo baixa e uma frase de insuficiência. Numa comparação entre grupos, um grupo sem registros ou só com valores abaixo de R$ 1,00 não sustenta a conta.
+- **Confiança com evidência parcial:** na rodada de 09/10 a P4.2 saiu com confiança alta, e a própria resposta dizia que o objeto não menciona manutenção de computadores. Com execução SQL completa, o recorte pode subir a confiança dada pelo LLM; mesma raiz da F1. Conferir na nova rodada.
+- **Perguntas do golden set que dependem da anterior** (P1.3, P4.2 e P4.3): avaliar como conversa, enviando `historico`, ou reescrever. Incluir casos de atas e de identificador (CNPJ, número de controle).
+- **Publicar o site apontando para o backend:** o site publicado (09/10) tem as telas de trace, mas foi gerado com o `VITE_API_BASE_URL` vazio. Falta enviar o header `ngrok-skip-browser-warning` nas chamadas, configurar a variável com o domínio do túnel e publicar. Os repositórios `Etuarda/frontendRAG` (com as telas de trace) e `sevenRevy/frontendRAG` (com os dois personas, `check:backend` e o botão do NEXO) divergem, e a branch `feat/melhorias-trace` ainda não entrou na `main` da Eduarda.
+- **Validar frontend e backend juntos de novo**, pelo túnel, depois dos merges de 2026-10-14 (personas, recorte, avisos, filtros novos).
+- **Roteiro do Demo Day** (material interno do grupo, fora do repositório): já leva ao vivo só as consultas estáveis e rápidas (medidas três vezes no ECOA, todas abaixo de 5 s); falta o ensaio cronometrado, marcar o freeze e preparar o checklist do plano B.
 - **Cobertura do PCA e da modalidade dos contratos:** limitação da fonte, documentada; depende do censo v7.
+- **Depois do Demo Day:** fornecedor por apelido (a Infolog do roteiro não existe no corpus, então o zero da consulta é real) e a promoção do corpus v7.
 
 ---
 
