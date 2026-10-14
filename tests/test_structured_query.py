@@ -1127,6 +1127,24 @@ def test_firmar_nao_vira_termo_do_objeto(verbo):
     assert sq._termos_do_objeto(f"quantos contratos de ambulancia {verbo}") == ("ambulancia",)
 
 
+@pytest.mark.parametrize("verbo", ["se houver", "se houve", "havendo", "havia", "haja", "se houvesse"])
+def test_haver_nao_vira_termo_do_objeto(verbo):
+    assert sq._termos_do_objeto(f"contratos de ambulancia {verbo}") == ("ambulancia",)
+
+
+def test_pergunta_da_f1_nao_traz_houver_como_termo_do_objeto():
+    pergunta = (
+        "Em 2025, órgãos estaduais do Rio de Janeiro pagaram mais por ambulâncias tipo D do que os "
+        "municípios fluminenses? Compare apenas os registros tecnicamente equivalentes disponíveis "
+        "no corpus; se não houver dados suficientes, reconheça a insuficiência de evidência."
+    )
+
+    termos = sq._termos_do_objeto(structured_db.normalizar(pergunta))
+
+    assert "houver" not in termos
+    assert "ambulancia" in termos
+
+
 def test_resultado_sql_vazio_e_marcado_sem_registros(base):
     chunks = _consultar("Quantos contratos de helicóptero existem?", base, metrica="contagem")
 

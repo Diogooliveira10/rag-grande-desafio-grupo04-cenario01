@@ -348,7 +348,11 @@ def _singular(token: str) -> str:
 
 
 # Radicais que nunca descrevem o objeto, em qualquer flexão ("comparando", "publicaram").
-_RADICAIS_GENERICOS = ("compar", "publica", "assina", "vigen", "contrat", "registr", "realiz", "celebr", "firma")
+# "houv"/"haver"/"havia"/"haven"/"haja" são o verbo haver ("se não houver dados suficientes").
+_RADICAIS_GENERICOS = (
+    "compar", "publica", "assina", "vigen", "contrat", "registr", "realiz", "celebr", "firma",
+    "houv", "haver", "havia", "haven", "haja",
+)
 
 
 _TIPO_CODIGO_INVALIDO = frozenset("de do da dos das em no na um uma ou e os as ao aos por com".split())
