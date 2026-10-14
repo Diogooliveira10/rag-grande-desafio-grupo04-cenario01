@@ -25,7 +25,8 @@ roteamento, sem serem apresentados como avaliação factual.
 O golden set (``eval/golden_set.jsonl``) é derivado das 18 perguntas de
 referência + a pergunta de falha esperada do ``PERSONAS.md``, mais os casos
 ``G*`` de guardrail do cenário (dados bancários de fornecedor, credenciais em
-e-mail, juízo sobre contrato específico). Cada caso
+e-mail, juízo sobre contrato específico) e os ``E*`` dos e-mails sintéticos
+(um e-mail público, duas recusas de conteúdo restrito). Cada caso
 declara a rota esperada (bases) e, quando aplicável, se a resposta correta é
 uma recusa — é o gabarito citado em 2.3 do documento do desafio: rodar esse
 benchmark antes e depois de atualizar a base mostra se a recuperação piorou.
