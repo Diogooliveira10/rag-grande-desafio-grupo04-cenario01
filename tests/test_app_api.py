@@ -499,6 +499,19 @@ def test_cors_libera_o_header_da_chave():
     assert "x-api-key" in liberados and "x-session-id" in liberados
 
 
+def test_cors_libera_o_header_do_tunel_ngrok():
+    # O site publicado chama o backend por um túnel ngrok gratuito, que exige
+    # este header para não devolver a página de aviso no lugar da resposta.
+    response = TestClient(app).options("/api/v1/query", headers={
+        "Origin": "https://etuarda.github.io",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "Content-Type, X-Session-Id, ngrok-skip-browser-warning",
+    })
+
+    assert response.status_code == 200
+    assert "ngrok-skip-browser-warning" in response.headers["access-control-allow-headers"].lower()
+
+
 def test_query_repassa_o_historico_ao_pipeline_e_devolve_a_pergunta_reformulada(monkeypatch) -> None:
     chamadas = []
 
@@ -549,3 +562,22 @@ def test_query_rejeita_historico_malformado(historico) -> None:
     response = client.post("/api/v1/query", json={"query": "E em 2024?", "historico": historico})
 
     assert response.status_code == 422
+
+
+def test_api_pre_carrega_o_rerank_ao_subir(monkeypatch):
+    import threading
+    chamou = threading.Event()
+    monkeypatch.setattr(api_module.config, "RERANK_ENABLED", True)
+    monkeypatch.setattr(api_module.config, "RERANK_PRELOAD", True)
+    monkeypatch.setattr(api_module.rerank, "pre_carregar", chamou.set)
+
+    with TestClient(app):
+        assert chamou.wait(timeout=5)
+
+
+def test_api_sem_pre_carregamento_nao_carrega_o_rerank(monkeypatch):
+    monkeypatch.setattr(api_module.config, "RERANK_PRELOAD", False)
+    monkeypatch.setattr(api_module.rerank, "pre_carregar", lambda: pytest.fail("não deveria pré-carregar"))
+
+    with TestClient(app) as cliente:
+        assert cliente.get("/health").status_code == 200
