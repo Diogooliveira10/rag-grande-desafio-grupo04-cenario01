@@ -192,6 +192,8 @@ class TipoResultado(str, Enum):
     SEM_CORRESPONDENCIA = "sem_correspondencia"
     SOMA_ZERO = "soma_zero"
     CALCULO_INDISPONIVEL = "calculo_indisponivel"
+    # Comparação entre esferas pedida, mas menos de duas têm valor informativo.
+    COMPARACAO_INSUFICIENTE = "comparacao_insuficiente"
 
 
 class RecorteConsulta(BaseModel):

@@ -753,6 +753,10 @@ def _confianca_do_recorte(recorte: dict[str, Any]) -> tuple[ConfidenceLevel, lis
         avisos.append("Execução parcial (" + "; ".join(motivos) + "): a conta não cobre "
                       "exatamente o que foi perguntado.")
         return ConfidenceLevel.MEDIA, avisos
+    if recorte.get("tipo_resultado") == "comparacao_insuficiente":
+        avisos.append(recorte.get("calculo_motivo")
+                      or "Comparação entre esferas sem dados suficientes: menos de duas têm valor informativo.")
+        return ConfidenceLevel.BAIXA, avisos
     if recorte.get("tipo_resultado") == "calculo_indisponivel":
         avisos.append(recorte.get("calculo_motivo")
                       or "Cálculo indisponível: não há campo de valor conhecido no recorte.")
@@ -792,7 +796,8 @@ def _aplicar_recorte(resposta: RAGResponse, chunks: list[Chunk]) -> RAGResponse:
     atual = resposta.confidence_level
     if atual == ConfidenceLevel.RECUSADO:
         return resposta
-    solido = recorte.get("execucao") == "completa" and recorte.get("calculo_disponivel") is not False
+    solido = (recorte.get("execucao") == "completa" and recorte.get("calculo_disponivel") is not False
+              and recorte.get("tipo_resultado") != "comparacao_insuficiente")
     nivel = max(atual, nivel_recorte, key=lambda n: _NIVEIS.get(n, 0)) if solido else min(
         atual, nivel_recorte, key=lambda n: _NIVEIS.get(n, 0))
     return resposta.model_copy(update={
