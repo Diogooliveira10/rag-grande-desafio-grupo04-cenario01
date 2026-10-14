@@ -475,6 +475,8 @@ Onde a base fica depende de `DATABASE_URL` no `.env` — o mesmo código e o mes
 
 Tabelas: `contratacoes` e `pca_planos`. Em `contratacoes`, cada linha é uma compra publicada ou um contrato assinado do PNCP: órgão, esfera, município, objeto, modalidade (só as compras trazem), fornecedor (só os contratos trazem) e valor (`valorGlobal` no contrato; homologado, ou estimado, na compra). O contrato guarda o número da compra que o originou (`numero_controle_compra`), e as perguntas sobre "contratações" contam uma vez a contratação que tem os dois registros. Valores abaixo de R$ 1,00 (R$ 0,00 e R$ 0,01 simbólicos do PNCP) ficam fora de média, mediana e ranking. `pca_planos` tem um plano de contratações anual por unidade, com valor total e quantidade de itens. Só entram registros da base agregada cujo número de controle PNCP é de plano (`CNPJ-0-…/ano`): a base traz também compras (`-1-`) e contratos (`-2-`) ligados aos planos, que não são planos (na v6, 1 plano entre 377 registros). Essas compras e contratos vão para `contratacoes` quando a base de contratos não os tem, são do RJ e foram publicados num ano que ela já cobre: na v6, 184 registros, e a tabela passa de 625 para 809 linhas, todas do RJ publicadas em 2025. São só os planos presentes no corpus — o total oficial do PCA do Estado está nos indicadores da base agregada, e o resultado SQL avisa isso.
 
+Cobertura de cada campo (o que o PNCP traz em contratos e em compras), lacunas, validação de CNPJ e onde a compressão foi aplicada: [docs/QUALIDADE_DOS_DADOS.md](docs/QUALIDADE_DOS_DADOS.md).
+
 **5. Testar o endpoint de LLM/embeddings compartilhado**
 
 ```bash
