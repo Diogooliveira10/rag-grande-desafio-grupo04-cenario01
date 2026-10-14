@@ -112,7 +112,7 @@ def test_sql_sem_registros_responde_com_confianca_media():
     response = generate.gerar_resposta("Quantos contratos de ambulância em 2024?", [vazio],
         [Natureza.ESTRUTURADA], cliente=lambda _: pytest.fail("cálculo pronto não chama o LLM"))
     assert response.confidence_level.value in {"media", "baixa"}
-    assert "amostra de 809 registros" in response.answer
+    assert "amostra do corpus" in response.answer
     assert "não comprova" in response.answer
     assert "universo completo do Estado" in response.answer
     assert "(nenhum registro)" not in response.answer
@@ -191,6 +191,40 @@ def test_resposta_llm_com_sql_vazio_tambem_limita_confianca():
         }),
     )
     assert response.confidence_level.value == "media"
-    assert "amostra de 809 registros" in response.answer
+    assert "amostra do corpus" in response.answer
     assert "não comprova" in response.answer
     assert "(nenhum registro)" not in response.answer
+
+
+def _intencao(chunk, intencao, *, sem_registros):
+    chunk.metadata.extras.update({"intencao": intencao, "total_intencoes": 2, "sem_registros": sem_registros})
+    return chunk
+
+
+def test_intencao_vazia_nao_rebaixa_a_outra_com_resultado():
+    chunks = [
+        _intencao(sql_chunk(1, ["Geral: 13 registros; total R$ 8.266.940,37"]), 1, sem_registros=False),
+        _intencao(sql_chunk(1, ["(nenhum registro)"], kind="ranking"), 2, sem_registros=True),
+    ]
+    response = generate.gerar_resposta("Quantos contratos de ambulância em 2025 e quem mais vendeu?", chunks,
+        [Natureza.ESTRUTURADA], cliente=lambda _: pytest.fail("cálculo pronto não chama o LLM"))
+    assert response.confidence_level.value == "alta"
+    assert "R$ 8.266.940,37" in response.answer
+    # A ressalva fica só na intenção que não achou nada.
+    assert response.answer.count("não comprova") == 1
+
+
+def test_resposta_llm_com_uma_intencao_vazia_nao_ganha_ressalva_de_ausencia():
+    chunks = [
+        _intencao(sql_chunk(1, ["Geral: 13 registros; total R$ 8.266.940,37"]), 1, sem_registros=False),
+        _intencao(sql_chunk(1, ["(nenhum registro)"], kind="ranking"), 2, sem_registros=True),
+    ]
+    for chunk in chunks:
+        chunk.metadata.extras["geracao_deterministica"] = False
+    response = generate.gerar_resposta(
+        "Quantos contratos de ambulância em 2025 e quem mais vendeu?", chunks, [Natureza.ESTRUTURADA],
+        cliente=lambda _: json.dumps({"answer": "Foram 13 contratos, R$ 8.266.940,37 [E1].",
+                                      "is_refusal": False, "confidence_level": "alta", "sources_used": ["E1"]}),
+    )
+    assert response.confidence_level.value == "alta"
+    assert "não comprova" not in response.answer

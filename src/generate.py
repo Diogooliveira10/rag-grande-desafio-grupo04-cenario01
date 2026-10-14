@@ -380,9 +380,11 @@ _CONFIANCA_ALTA = 0.8
 _CONFIANCA_MEDIA = 0.5
 _TEXTO_SQL_SEM_REGISTROS = (
     "Não foram encontrados registros que atendam aos filtros aplicados nos dados disponíveis. "
-    "A base analisada corresponde a uma amostra de 809 registros do corpus; essa ausência não "
+    "A base analisada é uma amostra do corpus, não um censo; essa ausência não "
     "comprova que não existam contratações correspondentes no universo completo do Estado."
 )
+# Trecho usado para não repetir a ressalva quando o LLM já a escreveu.
+_MARCA_SQL_SEM_REGISTROS = "não comprova que não existam"
 
 
 def _campo(dados: dict, chave: str, alternativas_usadas: list[str]) -> Any:
@@ -438,15 +440,19 @@ def _linhas_sql_reais(chunk: Chunk) -> list[Any]:
 
 
 def _sql_sem_registros(chunks: list[Chunk]) -> bool:
-    sql = [chunk for chunk in chunks if chunk.metadata.doc_type == "sql"]
-    if any(chunk.metadata.extras.get("sem_registros") for chunk in sql):
-        return True
+    """Toda a parte SQL veio vazia. Basta uma intenção ou parte com linhas
+    reais para a resposta ter um número calculado, que não vira ausência."""
     com_resultado = [
-        chunk for chunk in sql
-        if isinstance(chunk.metadata.extras.get("resultado_sql"), dict)
-        and isinstance(chunk.metadata.extras["resultado_sql"].get("linhas"), list)
+        chunk for chunk in chunks
+        if chunk.metadata.doc_type == "sql"
+        and (chunk.metadata.extras.get("sem_registros")
+             or (isinstance(chunk.metadata.extras.get("resultado_sql"), dict)
+                 and isinstance(chunk.metadata.extras["resultado_sql"].get("linhas"), list)))
     ]
-    return bool(com_resultado) and all(not _linhas_sql_reais(chunk) for chunk in com_resultado)
+    return bool(com_resultado) and all(
+        chunk.metadata.extras.get("sem_registros") or not _linhas_sql_reais(chunk)
+        for chunk in com_resultado
+    )
 
 
 def _parsear_resposta_llm(
@@ -510,7 +516,7 @@ def _parsear_resposta_llm(
                 answer = _recusa(query, bases_consultadas, refusal_reason).answer
         elif confidence_level == ConfidenceLevel.RECUSADO:
             confidence_level = ConfidenceLevel.BAIXA
-        if not is_refusal and sem_registros_sql and "amostra de 809 registros" not in answer.casefold():
+        if not is_refusal and sem_registros_sql and _MARCA_SQL_SEM_REGISTROS not in answer.casefold():
             answer = f"{answer}\n\n{_TEXTO_SQL_SEM_REGISTROS}"
         if not answer:
             raise ValueError("Resposta sem texto")
