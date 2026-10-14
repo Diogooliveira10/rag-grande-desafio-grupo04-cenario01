@@ -1124,3 +1124,108 @@ def test_dois_cnpjs_sao_comparacao_e_nao_filtram():
     filtros = qa.analisar_query("Compare os CNPJs 05.340.639/0001-30 e 44.292.391/0001-30").filtros
 
     assert "cnpj" not in filtros.filtros_analiticos
+# Município e fornecedor canônicos (catálogo do snapshot)
+# --------------------------------------------------------------------------
+
+
+def test_municipio_vira_filtro_canonico():
+    filtros = qa.analisar_query("Contratos de Volta Redonda", modo="regras").filtros
+    assert filtros.filtros_analiticos.get("municipio") == "Volta Redonda"
+
+
+def test_fornecedor_por_nome_parcial_com_gatilho():
+    filtros = qa.analisar_query("Contratos com a empresa Cristália", modo="regras").filtros
+    assert filtros.filtros_analiticos.get("fornecedor") == (
+        "CRISTALIA PRODUTOS QUIMICOS FARMACEUTICOS LTDA"
+    )
+
+
+def test_fornecedor_por_nome_de_duas_palavras_sem_gatilho():
+    filtros = qa.analisar_query(
+        "Contratos com a Cristalia Produtos Quimicos", modo="regras"
+    ).filtros
+    assert filtros.filtros_analiticos.get("fornecedor") == (
+        "CRISTALIA PRODUTOS QUIMICOS FARMACEUTICOS LTDA"
+    )
+
+
+def test_prefeitura_fica_no_orgao_e_nao_repete_o_municipio():
+    """8 da prefeitura não são os 23 de todos os órgãos de Maricá."""
+    filtros = qa.analisar_query("Quantos contratos da Prefeitura de Maricá?", modo="regras").filtros
+    # O órgão sai com o nome do PNCP (correção da prefeitura → MUNICIPIO DE X).
+    assert filtros.orgao == "MUNICIPIO DE MARICA"
+    assert "municipio" not in filtros.filtros_analiticos
+
+
+def test_municipio_com_gatilho_tambem_nao_vira_fornecedor():
+    filtros = qa.analisar_query("Contratos do Município de Maricá", modo="regras").filtros
+    assert filtros.filtros_analiticos == {}
+
+
+def test_nome_ambiguo_nao_escolhe_o_primeiro():
+    """"Rio" casa mais de um município: nenhum filtro, em vez do primeiro."""
+    filtros = qa.analisar_query("Contratos do Rio", modo="regras").filtros
+    assert "municipio" not in filtros.filtros_analiticos
+
+
+@pytest.mark.parametrize("pergunta", [
+    "Quantas contratações por municípios?",
+    "Quais modalidades apareceram com mais frequência?",
+    "O que estabelece a Lei 14.133/2021?",
+])
+def test_palavra_comum_nao_vira_fornecedor(pergunta):
+    filtros = qa.analisar_query(pergunta, modo="regras").filtros
+    assert "fornecedor" not in filtros.filtros_analiticos
+
+
+def test_valor_do_catalogo_exige_todos_os_tokens():
+    opcoes = ["Rio de Janeiro", "Rio das Ostras", "Cabo Frio"]
+    assert qa._valor_do_catalogo(opcoes, ["cabo", "frio"]) == "Cabo Frio"
+    assert qa._valor_do_catalogo(opcoes, ["rio"]) is None        # ambíguo
+    assert qa._valor_do_catalogo(opcoes, ["rio", "ostras"]) == "Rio das Ostras"
+    assert qa._valor_do_catalogo(opcoes, ["das"]) is None       # palavra vazia não é token
+    assert qa._valor_do_catalogo(opcoes, []) is None
+
+
+def test_trecho_do_municipio_sai_dos_termos_de_objeto():
+    """O nome reconhecido não pode reaproveitar como objeto do contrato."""
+    _filtros, _texto, trechos = qa._analisar_com_trechos("Contratos de Volta Redonda")
+    assert trechos, "o município reconhecido precisa registrar o trecho"
+    inicio, fim = trechos[-1]
+    assert "volta redonda" in qa._normalize("Contratos de Volta Redonda")[inicio:fim]
+
+
+# --------------------------------------------------------------------------
+# Estado x cidade: "Rio de Janeiro" é o nome dos dois
+# --------------------------------------------------------------------------
+
+
+def test_orgaos_publicos_do_rio_de_janeiro_nao_filtra_pela_cidade():
+    """"Órgãos públicos do Rio de Janeiro" é recorte estadual, não a capital."""
+    filtros = qa.analisar_query(
+        "Quais contratações de ambulâncias tipo D foram publicadas por órgãos públicos do Rio de Janeiro em 2025?",
+        modo="regras").filtros
+    assert "municipio" not in filtros.filtros_analiticos
+
+
+def test_orgaos_estaduais_do_rio_de_janeiro_e_escopo_estadual():
+    filtros = qa.analisar_query(
+        "órgãos estaduais do Rio de Janeiro pagaram mais por ambulâncias do que os municípios fluminenses?",
+        modo="regras").filtros
+    assert "municipio" not in filtros.filtros_analiticos
+
+
+def test_marcador_de_cidade_fecha_o_recorte_na_capital():
+    filtros = qa.analisar_query("Contratos da cidade do Rio de Janeiro", modo="regras").filtros
+    assert filtros.filtros_analiticos.get("municipio") == "Rio de Janeiro"
+
+
+def test_nome_sem_marcador_nao_estreita_o_recorte():
+    """"Contratos do Rio de Janeiro" é ambíguo: não se escolhe a cidade em silêncio."""
+    filtros = qa.analisar_query("Contratos do Rio de Janeiro", modo="regras").filtros
+    assert "municipio" not in filtros.filtros_analiticos
+
+
+def test_outros_municipios_continuam_sendo_municipio():
+    filtros = qa.analisar_query("Contratos de Volta Redonda", modo="regras").filtros
+    assert filtros.filtros_analiticos.get("municipio") == "Volta Redonda"

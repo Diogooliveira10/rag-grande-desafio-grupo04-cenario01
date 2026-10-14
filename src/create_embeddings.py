@@ -22,20 +22,7 @@ from typing import Any, Callable
 from src.obs import Stage
 from src.offline_observation import observar_offline, observar_lote_embedding
 
-from config import (
-    EMBEDDING_MODEL,
-    CUSTOM_API_KEY,
-    CUSTOM_API_URL,
-    CUSTOM_EMBEDDING_MODEL,
-    OPENAI_API_KEY,
-    OPENAI_API_URL,
-    OPENAI_EMBEDDING_MODEL,
-    OLLAMA_API_KEY,
-    OLLAMA_LOCAL_API_KEY,
-    OLLAMA_LOCAL_EMBEDDING_MODEL,
-    OLLAMA_LOCAL_URL,
-    OLLAMA_URL,
-)
+import config
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -202,17 +189,12 @@ def _remote_embed_batch(texts: list[str]) -> list[list[float]]:
 
 
 def _provider_defaults(provider: str) -> tuple[str, str, str]:
-    presets = {
-        "ecoa": (OLLAMA_URL, OLLAMA_API_KEY, EMBEDDING_MODEL),
-        "ollama": (OLLAMA_LOCAL_URL, OLLAMA_LOCAL_API_KEY, OLLAMA_LOCAL_EMBEDDING_MODEL),
-        "openai": (OPENAI_API_URL, OPENAI_API_KEY, OPENAI_EMBEDDING_MODEL),
-        "custom": (CUSTOM_API_URL, CUSTOM_API_KEY, CUSTOM_EMBEDDING_MODEL),
-    }
-    if provider == "shared":
-        provider = "ecoa"
-    if provider in presets:
-        return presets[provider]
-    raise ValueError("provider deve ser ecoa, ollama, openai ou custom")
+    """Fonte única dos presets de provedor: ``config.embedding_endpoint``.
+
+    Aqui e em ``src/retrieve.py`` (embeddings de consulta) precisam resolver
+    endpoint/chave/modelo do mesmo jeito, então a tabela vive em ``config``.
+    """
+    return config.embedding_endpoint(provider)
 
 
 def _normalize_endpoint(endpoint: str) -> str:

@@ -164,6 +164,7 @@ def test_feedback_rejeita_avaliacao_fora_do_vocabulario(monkeypatch) -> None:
 
 
 def test_history_retorna_consultas_recentes_com_feedback(monkeypatch) -> None:
+    monkeypatch.setattr(api_module.config, "RAG_API_KEY", "chave-de-teste")
     monkeypatch.setattr(api_module.pipeline, "responder", _fake_responder)
     query_id = client.post("/api/v1/query", json={"query": "Pergunta 1"}).json()["query_id"]
     client.post("/api/v1/query", json={"query": "Pergunta 2"})
@@ -183,6 +184,7 @@ def test_history_retorna_consultas_recentes_com_feedback(monkeypatch) -> None:
 
 
 def test_history_respeita_o_parametro_limit(monkeypatch) -> None:
+    monkeypatch.setattr(api_module.config, "RAG_API_KEY", "chave-de-teste")
     monkeypatch.setattr(api_module.pipeline, "responder", _fake_responder)
     for i in range(3):
         client.post("/api/v1/query", json={"query": f"Pergunta {i}"})
@@ -194,6 +196,7 @@ def test_history_respeita_o_parametro_limit(monkeypatch) -> None:
 
 
 def test_history_sanitiza_registro_legado_com_caminho_interno(monkeypatch, historico) -> None:
+    monkeypatch.setattr(api_module.config, "RAG_API_KEY", "chave-de-teste")
     result = _response("Pergunta antiga")
     result["sources_used"][0]["source_file"] = "C:\\dados\\privados\\documento.pdf"
     historico.registrar_consulta(
@@ -381,15 +384,6 @@ def test_historico_com_x_session_id_mostra_so_a_propria_conversa(monkeypatch):
     assert [item["query"] for item in response.json()] == ["Minha pergunta"]
 
 
-def test_historico_nao_aceita_filtro_de_outra_sessao_sem_chave(monkeypatch):
-    minha = _duas_conversas(monkeypatch)
-    dono = TestClient(app, headers={"X-Session-Id": minha["session_id"]})
-
-    response = dono.get("/api/v1/history", params={"session_id": "s_outra_sessao_qualquer"})
-
-    assert response.status_code == 401
-
-
 def test_historico_so_com_filtro_de_sessao_e_401(monkeypatch):
     # O parâmetro session_id é filtro, não prova de que a conversa é de quem pede.
     minha = _duas_conversas(monkeypatch)
@@ -417,6 +411,64 @@ def test_history_public_abre_o_historico_geral_sem_chave(monkeypatch, headers):
 
     assert response.status_code == 200
     assert len(response.json()) == 2
+@pytest.mark.parametrize("server_key", ["", "chave-de-teste"])
+@pytest.mark.parametrize("headers", [{}, {"X-API-Key": "chave-errada"}])
+def test_historico_sem_credencial_e_401(monkeypatch, server_key, headers):
+    '''Dois personas: sem dono (X-Session-Id) e sem chave válida, nada se lista.'''
+    monkeypatch.setattr(api_module.config, "RAG_API_KEY", server_key)
+    visitante = TestClient(app, headers=headers)
+    assert visitante.get("/api/v1/history").status_code == 401
+
+
+def test_historico_admin_com_chave_ve_todas_as_sessoes(monkeypatch) -> None:
+    monkeypatch.setattr(api_module.config, "RAG_API_KEY", "chave-de-teste")
+    monkeypatch.setattr(api_module.pipeline, "responder", _fake_responder)
+    dono_a = TestClient(app, headers={"X-Session-Id": "sessao_do_usuario_a_001"})
+    dono_b = TestClient(app, headers={"X-Session-Id": "sessao_do_usuario_b_002"})
+    dono_a.post("/api/v1/query", json={"query": "Pergunta do A",
+                                       "session_id": "sessao_do_usuario_a_001"})
+    dono_b.post("/api/v1/query", json={"query": "Pergunta do B",
+                                       "session_id": "sessao_do_usuario_b_002"})
+
+    admin = TestClient(app, headers={"X-API-Key": "chave-de-teste"})
+    resposta = admin.get("/api/v1/history")
+
+    assert resposta.status_code == 200
+    assert {item["query"] for item in resposta.json()} == {"Pergunta do A", "Pergunta do B"}
+
+
+def test_historico_novo_usuario_ve_so_a_propria_sessao(monkeypatch) -> None:
+    monkeypatch.setattr(api_module.config, "RAG_API_KEY", "chave-de-teste")
+    monkeypatch.setattr(api_module.pipeline, "responder", _fake_responder)
+    dono_a = TestClient(app, headers={"X-Session-Id": "sessao_do_usuario_a_001"})
+    dono_b = TestClient(app, headers={"X-Session-Id": "sessao_do_usuario_b_002"})
+    dono_a.post("/api/v1/query", json={"query": "Pergunta do A",
+                                       "session_id": "sessao_do_usuario_a_001"})
+    dono_b.post("/api/v1/query", json={"query": "Pergunta do B",
+                                       "session_id": "sessao_do_usuario_b_002"})
+
+    resposta = dono_a.get("/api/v1/history")
+
+    assert resposta.status_code == 200
+    assert [item["query"] for item in resposta.json()] == ["Pergunta do A"]
+
+
+def test_historico_query_param_nao_autentica_o_novo_usuario(monkeypatch) -> None:
+    '''session_id de query é filtro do operador: pedir a sessão de outra pessoa
+    não devolve as consultas dela.'''
+    monkeypatch.setattr(api_module.config, "RAG_API_KEY", "chave-de-teste")
+    monkeypatch.setattr(api_module.pipeline, "responder", _fake_responder)
+    dono_a = TestClient(app, headers={"X-Session-Id": "sessao_do_usuario_a_001"})
+    dono_b = TestClient(app, headers={"X-Session-Id": "sessao_do_usuario_b_002"})
+    dono_a.post("/api/v1/query", json={"query": "Pergunta do A",
+                                       "session_id": "sessao_do_usuario_a_001"})
+    dono_b.post("/api/v1/query", json={"query": "Pergunta do B",
+                                       "session_id": "sessao_do_usuario_b_002"})
+
+    resposta = dono_a.get("/api/v1/history", params={"session_id": "sessao_do_usuario_b_002"})
+
+    assert resposta.status_code == 200
+    assert [item["query"] for item in resposta.json()] == ["Pergunta do A"]
 
 
 def test_trace_continua_protegido_sem_chave_configurada(monkeypatch):

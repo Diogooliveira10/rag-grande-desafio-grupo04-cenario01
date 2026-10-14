@@ -74,8 +74,11 @@ limitação da fonte, não falha da busca.
   conferem, o cabeçalho do resultado SQL avisa ("dígito verificador inválido:
   confira o número"), para a resposta "nenhum registro" não parecer uma
   ausência real.
-- **Resultado vazio:** sai com confiança no máximo média e a ressalva de que a
-  ausência vale para a amostra, não para o universo do Estado.
+- **Resultado vazio:** a confiança vem do recorte da consulta. Um zero de
+  execução completa sustenta "não há registros" na amostra; execução parcial
+  limita a média e cálculo indisponível a baixa. O escopo vai em `avisos` e,
+  no texto da resposta, a ressalva de que a ausência vale para a amostra, não
+  para o universo do Estado.
 
 ## Compressão
 

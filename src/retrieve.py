@@ -601,7 +601,8 @@ def _embed_fn_com_uso(uso: list[TokenUsage], estatisticas: dict[str, int] | None
     """
     def embed(texts: list[str]) -> list[list[float]]:
         encoded = [embedding_query_text(text) for text in texts]
-        chave = {"endpoint": config.OLLAMA_URL, "model": config.EMBEDDING_MODEL, "texts": encoded}
+        endpoint, chave_api, modelo = config.embedding_endpoint()
+        chave = {"endpoint": endpoint, "model": modelo, "texts": encoded}
         for record in _read_jsonl(QUERY_CACHE_PATH):
             if record.get("key") == chave:
                 vectors = record["vectors"]
@@ -618,12 +619,12 @@ def _embed_fn_com_uso(uso: list[TokenUsage], estatisticas: dict[str, int] | None
         from src.obs import aguardar_modelo
 
         aguardar_modelo()
-        client = OpenAI(base_url=config.OLLAMA_URL, api_key=config.OLLAMA_API_KEY, timeout=60.0, max_retries=0)
+        client = OpenAI(base_url=endpoint, api_key=chave_api, timeout=60.0, max_retries=0)
         from src.model_observation import observar_chamada
         diagnostics: dict = {}
         try:
-            response = observar_chamada(lambda: client.embeddings.create(model=config.EMBEDDING_MODEL, input=encoded),
-                provider="ecoa", model=config.EMBEDDING_MODEL, sdk_max_retries=0, diagnosticos=diagnostics)
+            response = observar_chamada(lambda: client.embeddings.create(model=modelo, input=encoded),
+                provider=config.EMBEDDING_PROVIDER, model=modelo, sdk_max_retries=0, diagnosticos=diagnostics)
         finally:
             if observacoes is not None:
                 observacoes.extend(diagnostics.get("chamadas_modelo", []))
@@ -632,7 +633,7 @@ def _embed_fn_com_uso(uso: list[TokenUsage], estatisticas: dict[str, int] | None
         if len(vectors) != len(texts) or not all(
             vector and all(math.isfinite(v) for v in vector) and any(vector) for vector in vectors
         ):
-            raise ValueError("ECOA retornou embeddings de query inválidos")
+            raise ValueError(f"{config.EMBEDDING_PROVIDER} retornou embeddings de query inválidos")
         QUERY_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
         with QUERY_CACHE_PATH.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps({"key": chave, "vectors": vectors}, ensure_ascii=False) + "\n")

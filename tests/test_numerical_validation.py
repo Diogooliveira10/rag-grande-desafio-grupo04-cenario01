@@ -56,11 +56,16 @@ def test_literal_totals_preserve_cents_and_zero_and_qualify_statistics(tmp_path,
 
 
 def sql_chunk(part, lines, *, kind="estatistica"):
+    # Recorte de uma execução completa, como structured_query grava em toda consulta.
+    vazio = all(linha == "(nenhum registro)" for linha in lines)
+    recorte = {"execucao": "completa", "filtros_relaxados": [], "calculo_disponivel": True,
+               "tipo_resultado": "sem_correspondencia" if vazio else "registros"}
     return Chunk(content="not parsed for numerical rendering", metadata=ChunkMetadata(
         source_file="sqlite", chunk_id=f"sql:contratacoes:{kind}:hash:{part}",
         base_id="contratos_estruturado", doc_type="sql", natureza=Natureza.ESTRUTURADA,
         extras={"parte": part, "geracao_deterministica": True,
-                "resultado_sql": {"cabecalho": "Consulta SQL na tabela contratacoes: amostra do corpus.", "linhas": lines}}))
+                "resultado_sql": {"cabecalho": "Consulta SQL na tabela contratacoes: amostra do corpus.",
+                                  "linhas": lines, "recorte": recorte}}))
 
 
 def test_deterministic_answer_keeps_all_sql_parts_outside_llm_budget(monkeypatch):
@@ -107,11 +112,14 @@ def test_symbolic_only_is_zero_total_not_missing_statistics():
     assert "total não informado" in structured_query._estatisticas([])
 
 
-def test_sql_sem_registros_responde_com_confianca_media():
+def test_sql_sem_registros_e_conclusao_no_recorte_com_ressalva_de_escopo():
+    # Zero de uma consulta completa sustenta "não há registros" na amostra
+    # (confiança do recorte); o escopo fica no texto e nos avisos.
     vazio = sql_chunk(1, ["(nenhum registro)"])
     response = generate.gerar_resposta("Quantos contratos de ambulância em 2024?", [vazio],
         [Natureza.ESTRUTURADA], cliente=lambda _: pytest.fail("cálculo pronto não chama o LLM"))
-    assert response.confidence_level.value in {"media", "baixa"}
+    assert response.confidence_level.value == "alta"
+    assert any(aviso.startswith("Escopo") for aviso in response.avisos)
     assert "amostra do corpus" in response.answer
     assert "não comprova" in response.answer
     assert "universo completo do Estado" in response.answer
@@ -145,18 +153,12 @@ def test_parte_sql_vazia_nao_rebaixa_outras_partes_com_resultados():
 
 
 @pytest.mark.parametrize(
-    "valor,sem_registros,esperado",
-    [
-        ("alta", False, "alta"),
-        ("alta", True, "media"),
-        (0.95, True, "media"),
-        ("media", True, "media"),
-        ("baixa", True, "baixa"),
-        ("invalida", True, "baixa"),
-    ],
+    "valor,esperado",
+    [("alta", "alta"), (0.95, "alta"), (0.6, "media"), ("media", "media"), ("baixa", "baixa"),
+     ("invalida", "baixa"), (True, "baixa")],
 )
-def test_nivel_de_confianca_limita_ausencia_sem_alterar_conversoes(valor, sem_registros, esperado):
-    assert generate._nivel_de_confianca(valor, sem_registros=sem_registros).value == esperado
+def test_nivel_de_confianca_converte_valores_do_llm(valor, esperado):
+    assert generate._nivel_de_confianca(valor).value == esperado
 
 
 @pytest.mark.parametrize(
@@ -166,17 +168,17 @@ def test_nivel_de_confianca_limita_ausencia_sem_alterar_conversoes(valor, sem_re
         "Quantos contratos de ambulância em 2024?",
     ],
 )
-def test_perguntas_p21_sem_resultados_nao_recebem_confianca_alta(pergunta):
+def test_perguntas_p21_sem_resultados_trazem_a_ressalva_da_amostra(pergunta):
     response = generate.gerar_resposta(
         pergunta,
         [sql_chunk(1, ["(nenhum registro)"])],
         [Natureza.ESTRUTURADA],
         cliente=lambda _: pytest.fail("consulta vazia determinística não chama o LLM"),
     )
-    assert response.confidence_level.value in {"media", "baixa"}
+    assert "não comprova" in response.answer
 
 
-def test_resposta_llm_com_sql_vazio_tambem_limita_confianca():
+def test_resposta_llm_com_sql_vazio_ganha_a_ressalva_da_amostra():
     chunk = sql_chunk(1, ["(nenhum registro)"])
     chunk.metadata.extras["geracao_deterministica"] = False
     response = generate.gerar_resposta(
@@ -190,7 +192,7 @@ def test_resposta_llm_com_sql_vazio_tambem_limita_confianca():
             "sources_used": ["E1"],
         }),
     )
-    assert response.confidence_level.value == "media"
+    assert response.confidence_level.value == "alta"  # recorte completo sustenta o zero
     assert "amostra do corpus" in response.answer
     assert "não comprova" in response.answer
     assert "(nenhum registro)" not in response.answer

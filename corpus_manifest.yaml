@@ -1,6 +1,6 @@
 scenario_id: contratacoes-rj
-version: "2026-09-25"
-description: "Contratações públicas do Estado do RJ, ano-base 2025"
+version: "2026-10-13"
+description: "Contratações públicas do Estado do RJ, ano-base 2025 — censo v7 de contratos assinados e publicações (docs/PLANO_POSSIVEL_CORPUS_V7.md); bases normativas/conversacionais herdadas da v6"
 
 coleta:
   ferramenta: "src/fetch_corpus.py"
@@ -36,7 +36,8 @@ bases:
         - resource_type: contrato_assinado
           censo: true
           censo_nacional: true
-          volume_alvo: 1200
+          # Censo v7: sem teto de coleta por population (era 1200 na amostra v6).
+          volume_alvo: null
           params:
             anoAssinatura: 2025
             dataInicial: "2025-01-01"
@@ -61,10 +62,15 @@ bases:
     selecao_deterministica: true
     selecao:
       deterministica: true
-      limite: 1200
+      # Censo v7: "censo" seleciona TODOS os elegíveis da janela em ordem
+      # estável (sem o teto de 1.200 da amostra v6).
+      modo: censo
       chave: "numeroControlePNCP"
       max_paginas: 100000
-    volume_alvo: 625
+    # Piso declarado da estimativa medida (25–35 mil para os 164 órgãos
+    # amostrados; ver PLANO_POSSIVEL_CORPUS_V7.md §3). volume_regra=minimo:
+    # o censo pode ultrapassar; o inventário reporta o divergente.
+    volume_alvo: 25000
     volume_regra: minimo
     formato: json
     licenca: "Dados abertos gov.br - atribuição"
@@ -393,8 +399,12 @@ bases:
       - "Regime"
       - "Data_extracao"
 
-curadoria_v6:
-  limite_por_orgao_por_base: 5
+# Curadoria v7 (censo) — substitui o bloco curadoria_v6 (amostra de 5 por
+# órgão por base), arquivado em archive/corpus_manifest_v6.yaml.
+curadoria_v7:
+  selecao: censo_contratos_e_publicacoes_2025_rj
   identificador_orgao: cnpj
-  alvo_arquivos_total: 1400
-  selecao: amostra_intencional_personas_nao_censo
+  limite_por_orgao_por_base: null   # censo: sem limite por órgão
+  alvo_arquivos_total: null         # censo: sem teto fixo (estimativa medida na §3 do plano v7)
+  bases_censitarias: [contratos_estruturado]
+  bases_herdadas_v6: [editais_normativo, atas_conversacional, pca_agregado, emails_sinteticos]

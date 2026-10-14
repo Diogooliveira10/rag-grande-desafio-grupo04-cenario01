@@ -45,7 +45,8 @@ _MAX_CHARS_ECOA = 2000
 _PAR_JSON_RE = re.compile(r'"(\w+)":\s*(?:"((?:[^"\\]|\\.)*)"|(-?\d+(?:\.\d+)?))')
 # Campos que dizem do que o registro trata vêm primeiro; o resto segue na ordem original.
 _CAMPOS_PRIORITARIOS = (
-    "objeto", "titulo", "descricao", "razaosocial", "nomefornecedor", "nomeunidade", "nomerazaosocial",
+    "objeto", "titulo", "descricao", "razaosocial", "nomefornecedor", "nomeunidade", "nomeorgao",
+    "nomerazaosocial",
     "modalidadenome", "valor", "municipio", "ufsigla", "situacao", "tipodocumentonome",
 )
 

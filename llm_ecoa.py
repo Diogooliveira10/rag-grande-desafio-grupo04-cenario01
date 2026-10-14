@@ -44,21 +44,35 @@ def completar_chat(mensagens: list[dict], *, response_format: dict | None = None
     def _openrouter():
         if not config.OPENROUTER_API_KEY:
             raise ValueError("OPENROUTER_API_KEY não configurada")
-        info.update({"provider": "openrouter", "model_requested": config.OPENROUTER_MODEL_FALLBACK,
-                     "model": config.OPENROUTER_MODEL_FALLBACK})
-        aguardar_modelo()
         fallback = OpenAI(base_url=config.OPENROUTER_BASE_URL, api_key=config.OPENROUTER_API_KEY,
                           timeout=60.0, max_retries=0)
         fallback_arguments = {**arguments, "max_tokens": min(arguments.get("max_tokens", config.OPENROUTER_MAX_TOKENS), config.OPENROUTER_MAX_TOKENS),
                               "extra_body": {"provider": {"require_parameters": True}}}
-        try:
-            return observar_chamada(
-                lambda: fallback.chat.completions.create(model=config.OPENROUTER_MODEL_FALLBACK, **fallback_arguments),
-                provider="openrouter", model=config.OPENROUTER_MODEL_FALLBACK,
-                sdk_max_retries=0, diagnosticos=info)
-        except Exception as fallback_error:
-            info["fallback_error_type"] = type(fallback_error).__name__
-            raise
+        # Modelo preferido e, só se ele estiver indisponível, a reserva. Quando
+        # forem o mesmo, uma única chamada; a ordem e o modelo efetivo ficam em
+        # chamadas_modelo, para a proveniência não depender do nome pedido.
+        modelos = [config.OPENROUTER_MODEL]
+        if config.OPENROUTER_MODEL_FALLBACK != config.OPENROUTER_MODEL:
+            modelos.append(config.OPENROUTER_MODEL_FALLBACK)
+        ultimo_erro: Exception | None = None
+        for indice, modelo in enumerate(modelos):
+            info.update({"provider": "openrouter", "model_requested": modelo, "model": modelo})
+            if indice:
+                info["fallback_used"] = True
+            aguardar_modelo()
+            try:
+                return observar_chamada(
+                    lambda modelo=modelo: fallback.chat.completions.create(model=modelo, **fallback_arguments),
+                    provider="openrouter", model=modelo,
+                    sdk_max_retries=0, diagnosticos=info)
+            except Exception as fallback_error:
+                ultimo_erro = fallback_error
+                info["fallback_error_type"] = type(fallback_error).__name__
+                # Mesma regra do caminho ECOA: só indisponibilidade troca de
+                # modelo, e nunca se já estivermos na reserva.
+                if not erro_de_disponibilidade(fallback_error) or indice == len(modelos) - 1:
+                    raise
+        raise ultimo_erro  # inalcançável: o laço sempre retorna ou relança
     if config.LLM_PROVIDER_MODE == "openrouter":
         response = _openrouter()
     elif config.LLM_PROVIDER_MODE == "auto":

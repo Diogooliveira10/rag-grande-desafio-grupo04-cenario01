@@ -11,11 +11,14 @@ avaliacao a essa consulta e ``GET /api/v1/history`` devolve o historico
 salvo. O estagio ``feedback`` ja existia reservado em ``src/obs.py``
 (Stage.FEEDBACK) mas nao estava integrado a nenhum fluxo ate agora.
 
-Historico e trace seguem a mesma regra: ``RAG_API_KEY`` (quem opera a demo)
-ve qualquer conversa; o header ``X-Session-Id`` da acesso so a propria
-conversa, sem chave no site. ``HISTORY_PUBLIC=true`` no ``.env`` abre o
-historico geral sem chave, para uma demo que precise dele; mostra consultas de
-todos os usuarios, entao fica desligado por padrao. ``/query`` e ``/feedback``
+Acesso ao historico com dois personas (decisao de 2026-10-14): quem tem a
+``RAG_API_KEY`` (operador) ve o historico inteiro e pode filtrar por
+``session_id``; o dono da conversa se identifica pelo header ``X-Session-Id``
+e ve so as suas consultas. O query param ``session_id`` e filtro do operador,
+nao autenticacao. O trace segue a mesma autorizacao. ``HISTORY_PUBLIC=true``
+no ``.env`` abre o historico geral sem chave, para uma demo que precise dele;
+mostra consultas de todos os usuarios, entao fica desligado por padrao.
+``/query`` e ``/feedback``
 continuam abertos: sao o uso normal do chat.
 """
 
@@ -86,15 +89,15 @@ def _sessao_do_historico(
 ) -> Optional[str]:
     """Sessão a que o histórico fica restrito; ``None`` = histórico geral.
 
-    A chave (ou ``HISTORY_PUBLIC``) libera qualquer sessão. Sem ela, só a do
-    ``X-Session-Id``: o parâmetro ``session_id`` sozinho é filtro, não prova
-    de que a conversa é de quem pede.
+    Dois personas: o operador com chave (ou ``HISTORY_PUBLIC``) vê tudo e
+    filtra por ``session_id``; o dono se identifica pelo ``X-Session-Id`` e vê
+    só a sua conversa. Para o dono o ``session_id`` de query não autentica: o
+    escopo vem do header. Sem nenhuma das duas credenciais, 401 sem revelar o
+    que existe no histórico.
     """
     if config.HISTORY_PUBLIC or _chave_valida(x_api_key):
         return session_id
-    if x_session_id and (session_id is None or secrets.compare_digest(
-        x_session_id.encode(), session_id.encode()
-    )):
+    if x_session_id:
         return x_session_id
     raise HTTPException(
         status_code=401,
