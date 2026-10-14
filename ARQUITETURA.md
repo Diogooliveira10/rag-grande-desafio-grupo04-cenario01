@@ -98,9 +98,9 @@ Já estão implementados:
 - CORS configurado para desenvolvimento local e para a origem `https://etuarda.github.io`;
 - frontend em repositório separado, publicado em [https://etuarda.github.io/frontendRAG/](https://etuarda.github.io/frontendRAG/): consome consulta, feedback, trace da pergunta e da conversa, catálogo e resumo do projeto, e mostra os `avisos` da resposta. Ainda não há backend público em HTTPS para o site apontar;
 - suporte a certificados HTTPS com `certifi` sem desabilitar validação SSL;
-- golden set com 26 casos e critérios de conteúdo (radicais, teto de confiança, negação), mais um conjunto de busca com 47 perguntas e a ablação do rerank. Última rodada completa: `golden-2026-10-09-cnpj`, 14/26 (rota 24/26, recusa 26/26, citação 25/26), anterior aos critérios de conteúdo;
+- golden set com 29 casos (`E1`–`E3`, dos e-mails sintéticos, entraram em 14/10) e critérios de conteúdo (radicais, teto de confiança, negação), mais um conjunto de busca com 47 perguntas e a ablação do rerank. Última rodada completa: `golden-2026-10-09-cnpj`, 14/26 (rota 24/26, recusa 26/26, citação 25/26), anterior aos critérios de conteúdo;
 - scripts de instalação (`scripts/setup.ps1`/`setup.sh`) e de download dos modelos com hash conferido (`scripts/models.ps1`/`models.sh`);
-- 1.591 testes automatizados passando na verificação realizada em 2026-10-14.
+- 1.634 testes automatizados passando na verificação realizada em 2026-10-14.
 
 ### Corpus e índice
 
@@ -161,7 +161,7 @@ Situação conferida em 2026-10-14.
 - **Rodar o golden set de novo.** A última rodada completa (`golden-2026-10-09-cnpj`, 14/26) é anterior aos critérios de conteúdo, ao recorte de confiança e aos filtros de município, fornecedor e CNPJ. Registrar o resultado aqui e em `docs/registro_execucao_v6.md`.
 - **F1:** de "se não houver dados suficientes", o SQL toma "houver" como termo do objeto (`tipo d`, `ambulancia`, `houver`). O gabarito pede que a resposta admita a falta de dados, com confiança no máximo baixa.
 - **Confiança com evidência parcial:** na rodada de 09/10 a P4.2 saiu com confiança alta, e a própria resposta dizia que o objeto não menciona manutenção de computadores. Com execução SQL completa, o recorte pode subir a confiança dada pelo LLM; conferir na nova rodada.
-- **Perguntas do golden set que dependem da anterior** (P1.3, P4.2 e P4.3): avaliar como conversa, enviando `historico`, ou reescrever. Incluir casos de atas, de identificador (CNPJ, número de controle) e de conteúdo dos e-mails sintéticos, além da recusa do G2.
+- **Perguntas do golden set que dependem da anterior** (P1.3, P4.2 e P4.3): avaliar como conversa, enviando `historico`, ou reescrever. Incluir casos de atas e de identificador (CNPJ, número de controle), além da recusa do G2.
 - **Fornecedor por apelido** ("Infolog") ainda não vira filtro. O roteiro do Demo Day usa essa pergunta como exemplo de zero confiável: decidir antes de mexer.
 - **Estabilidade do ranking:** com `top_k` não exaustivo, a mesma pergunta pode recuperar conjuntos diferentes entre execuções (P2.1 e P4.2 oscilam). Antes da demo, repetir as consultas do roteiro e confirmar que a resposta não muda.
 - **Formato da demo e backend:** local, túnel ou hospedagem, ainda não decidido. Não há backend público em HTTPS.
