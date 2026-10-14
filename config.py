@@ -65,6 +65,10 @@ RERANK_TIMEOUT = float(_env("RERANK_TIMEOUT", "30"))
 RERANK_MODEL = _env("RERANK_MODEL", "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1")
 RERANK_CANDIDATES = int(_env("RERANK_CANDIDATES", "10"))
 RERANK_MAX_LENGTH = int(_env("RERANK_MAX_LENGTH", "512"))
+# Carregar o cross-encoder quando a API sobe, e não na primeira pergunta:
+# o carregamento leva ~15 s (69 s se ainda precisar baixar o modelo) e o
+# rerank em si menos de 1 s (medido em 2026-10-14).
+RERANK_PRELOAD = _env("RERANK_PRELOAD", "true").lower() in {"1", "true", "sim", "yes"}
 OLLAMA_LOCAL_URL = _env("OLLAMA_LOCAL_URL", "http://localhost:11434/v1")
 OLLAMA_LOCAL_API_KEY = _env("OLLAMA_LOCAL_API_KEY", "ollama")
 OLLAMA_LOCAL_EMBEDDING_MODEL = _env("OLLAMA_LOCAL_EMBEDDING_MODEL", EMBEDDING_MODEL)

@@ -27,6 +27,8 @@ from __future__ import annotations
 import logging
 import os
 import secrets
+import threading
+from contextlib import asynccontextmanager
 from pathlib import PurePosixPath
 from typing import Any, Literal, Optional
 
@@ -37,7 +39,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
 import config
-from src import pipeline
+from src import pipeline, rerank
 from app import catalog
 from app.catalog_models import ContratacaoRecord, DocumentoRecord, OfficialSource, OrgaoRecord, ProjectSummary
 from src.history_store import ConsultaNaoEncontrada, default_store as historico
@@ -252,7 +254,16 @@ class SessaoTraceResponse(BaseModel):
     perguntas: list[SessaoPergunta]
 
 
-app = FastAPI(title="Adaptive RAG API", version="1.0.0")
+@asynccontextmanager
+async def _ciclo_de_vida(_app: FastAPI):
+    # O cross-encoder leva ~15 s para carregar: numa thread, para o servidor
+    # já aceitar requisições, e antes da primeira pergunta de verdade.
+    if config.RERANK_ENABLED and config.RERANK_PRELOAD:
+        threading.Thread(target=rerank.pre_carregar, name="rerank-preload", daemon=True).start()
+    yield
+
+
+app = FastAPI(title="Adaptive RAG API", version="1.0.0", lifespan=_ciclo_de_vida)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),

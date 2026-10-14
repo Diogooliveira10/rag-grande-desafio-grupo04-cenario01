@@ -1239,3 +1239,25 @@ def test_especificacao_de_tipo_e_preservada():
 def test_qual_tipo_de_contrato_nao_gera_termo():
     """"tipo" sozinho é palavra genérica; só a especificação conta."""
     assert sq._termos_do_objeto("qual tipo de contrato") == ()
+
+
+@pytest.mark.parametrize("pergunta", [
+    "Qual foi o valor pago pelas ambulâncias?",
+    "Quanto foi pago pelas ambulâncias?",
+])
+def test_pagamento_vira_soma_com_aviso_de_que_nao_e_o_pago(pergunta, base):
+    consulta = sq.detectar_consulta(pergunta, QueryFilters(), ESTRUTURADA)
+
+    _, cabecalho, _ = sq.executar_consulta(consulta, base["banco"])
+
+    assert consulta.tipo == "estatistica" and consulta.pagamento_citado
+    assert "o PNCP não registra pagamentos" in cabecalho
+
+
+def test_valor_total_sem_pagamento_nao_ganha_o_aviso(base):
+    consulta = sq.detectar_consulta("Qual o valor total das ambulâncias?", QueryFilters(), ESTRUTURADA)
+
+    _, cabecalho, _ = sq.executar_consulta(consulta, base["banco"])
+
+    assert not consulta.pagamento_citado
+    assert "não registra pagamentos" not in cabecalho

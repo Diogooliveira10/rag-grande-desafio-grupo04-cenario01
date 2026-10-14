@@ -292,3 +292,33 @@ def test_retrieve_registra_no_log_qual_backend_deu_as_notas(indice):
     assert rerank["status"] == "degradado"
     assert rerank["extra"]["fallback"] == "reranker_local"
     assert rerank["extra"]["rerank_backend"].startswith("local:modelo-local")
+
+
+def test_pre_carregar_carrega_o_modelo_configurado(monkeypatch):
+    from src import rerank
+    carregados = []
+    monkeypatch.setattr(config, "RERANK_ENABLED", True)
+    monkeypatch.setattr(rerank, "_carregar_cross_encoder", lambda nome, tamanho: carregados.append((nome, tamanho)))
+
+    assert rerank.pre_carregar() is True
+    assert carregados == [(config.RERANK_MODEL, config.RERANK_MAX_LENGTH)]
+
+
+def test_pre_carregar_nao_faz_nada_com_rerank_desligado(monkeypatch):
+    from src import rerank
+    monkeypatch.setattr(config, "RERANK_ENABLED", False)
+    monkeypatch.setattr(rerank, "_carregar_cross_encoder", lambda *_: pytest.fail("não deveria carregar"))
+
+    assert rerank.pre_carregar() is False
+
+
+def test_pre_carregar_que_falha_nao_derruba_a_api(monkeypatch):
+    from src import rerank
+
+    def falha(*_):
+        raise OSError("sem rede para baixar o modelo")
+
+    monkeypatch.setattr(config, "RERANK_ENABLED", True)
+    monkeypatch.setattr(rerank, "_carregar_cross_encoder", falha)
+
+    assert rerank.pre_carregar() is False
