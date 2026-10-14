@@ -1,5 +1,13 @@
 # Inventário do corpus
 
+> Este inventário cobre a base ativa **v6** (1.400 arquivos de 2026-09-30),
+> vinculada ao manifesto [`archive/corpus_manifest_v6.yaml`](archive/corpus_manifest_v6.yaml)
+> (sha256 `2df44cd1…582057`). O censo **v7** (contratos e publicações de 2025)
+> é construído em paralelo, tem inventário próprio em
+> `data/v7_direto/inventario_direto.json` e entra no lugar da v6 apenas após
+> regressão e re-auditoria do golden set
+> ([`docs/PLANO_POSSIVEL_CORPUS_V7.md`](docs/PLANO_POSSIVEL_CORPUS_V7.md)).
+
 - Tipo: `manifest`
 - Oficial: `True`
 - Vinculado ao manifesto: `True`
