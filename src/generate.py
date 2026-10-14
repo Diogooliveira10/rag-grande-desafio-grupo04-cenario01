@@ -158,7 +158,9 @@ Comparação primeiro/último mês não prova crescimento monotônico. Não extr
 para todas as contratações do RJ. Ausência na amostra não prova inexistência no universo.
 Evidência com filtros relaxados é contextual: não comprova atendimento ao recorte original.
 Vigência histórica não verificada não prova que a norma estava vigente no ano solicitado.
-Trechos com sintetico=true são cenários fictícios: identifique-os como sintéticos na resposta.
+Trechos com sintetico=true são e-mails e conversas fictícios. Pergunta sobre o que um
+e-mail ou conversa diz se responde com o trecho sintético: relate o conteúdo, cite o
+evidence_id e avise que o cenário é fictício; recusar ou dizer que falta evidência é erro.
 Não use conteúdo sintético para comprovar fatos reais, pagamentos ou ocorrências do PNCP.
 Em conversas, a data do e-mail, mensagem ou cabeçalho "Data da conversa" é a data
 DA COMUNICAÇÃO, não a data da entrega, pagamento ou execução mencionada no texto.
@@ -272,13 +274,80 @@ def _representar_registro(conteudo: str) -> str:
     return json.dumps(view, ensure_ascii=False, separators=(",", ":")) if view else conteudo
 
 
+# Conversa sintética (texto de src/synthetic_conversations.py). Inteira, ela
+# passa do limite do trecho (941 a 1.803 caracteres contra os 900 de
+# GENERATION_CHUNK_CHARS), e o corte comia a mensagem: a resposta do órgão, na
+# segunda, nunca chegava ao LLM. Saem o aviso (o cabeçalho já diz
+# sintetico=true), o id interno, o canal, a data da conversa (cada mensagem tem a
+# sua) e os endereços; os identificadores vão para depois das mensagens. Se
+# ainda passar do limite, o espaço é dividido entre as mensagens.
+_CONVERSA_DESCARTADOS = frozenset({"Conversa", "Canal", "Data da conversa", "E-mail", "Para"})
+_CONVERSA_NO_FIM = ("Processo", "ARP", "CNPJ")
+_CONVERSA_ROTULOS_DA_MENSAGEM = frozenset({"Data", "De", "Função", "E-mail", "Para"})
+_DATA_E_HORA_RE = re.compile(r"(\d{4}-\d{2}-\d{2})T[\d:.]+(?:[+-]\d{2}:\d{2}|Z)?")
+_CORTE = " [...]"
+
+
+def _dividir_entre_mensagens(mensagens: list[str], espaco: int) -> list[str]:
+    """Cada mensagem ganha uma fatia igual do espaço, e a que não usa a fatia
+    inteira deixa a sobra para as outras. Quem passa da fatia perde o fim."""
+    cortadas = list(mensagens)
+    da_menor_para_maior = sorted(range(len(mensagens)), key=lambda i: len(mensagens[i]))
+    for posicao, i in enumerate(da_menor_para_maior):
+        fatia = espaco // (len(mensagens) - posicao)
+        if len(mensagens[i]) > fatia:
+            cortadas[i] = mensagens[i][:max(0, fatia - len(_CORTE))].rstrip() + _CORTE
+        espaco -= len(cortadas[i])
+    return cortadas
+
+
+def _representar_conversa(conteudo: str, limite: int) -> str | None:
+    """Visão compacta da conversa sintética, sem alterar o documento original.
+    Fora do formato esperado, devolve None e o trecho segue o caminho comum."""
+    blocos = [bloco for bloco in conteudo.split("\n\n") if bloco.strip()]
+    if len(blocos) < 2 or not blocos[0].lstrip().startswith("[CONTEÚDO SINTÉTICO"):
+        return None
+    cabecalho, fim = [], []
+    for linha in blocos[0].splitlines()[1:]:
+        rotulo, _, valor = linha.partition(": ")
+        if rotulo in _CONVERSA_DESCARTADOS or not valor.strip():
+            continue
+        (fim if rotulo in _CONVERSA_NO_FIM else cabecalho).append(f"{rotulo}: {valor.strip()}")
+    mensagens: list[str] = []
+    for bloco in blocos[1:]:
+        campos: dict[str, str] = {}
+        texto: list[str] = []
+        for linha in bloco.splitlines():
+            rotulo, _, valor = linha.partition(": ")
+            if not texto and rotulo in _CONVERSA_ROTULOS_DA_MENSAGEM and valor.strip():
+                campos[rotulo] = valor.strip()
+            else:
+                texto.append(linha)
+        corpo = " ".join(" ".join(texto).split())
+        if not campos and mensagens:
+            mensagens[-1] += " " + corpo  # parágrafo seguinte da mesma mensagem
+            continue
+        autor = ", ".join(valor for valor in (
+            _DATA_E_HORA_RE.sub(r"\1", campos.get("Data", "")), campos.get("De"), campos.get("Função"),
+        ) if valor)
+        mensagens.append(f"Mensagem ({autor}): {corpo}" if autor else f"Mensagem: {corpo}")
+    partes = cabecalho + mensagens + fim
+    if len(" | ".join(partes)) > limite:
+        fixo = sum(len(parte) for parte in cabecalho + fim) + len(" | ") * (len(partes) - 1)
+        mensagens = _dividir_entre_mensagens(mensagens, limite - fixo)
+    return " | ".join(cabecalho + mensagens + fim)
+
+
 def _chunks_no_orcamento(
     chunks: list[Chunk], bases_requeridas: list[Natureza] | None = None,
 ) -> list[Chunk]:
     """Limita contexto preservando candidatos por intenção, base e natureza."""
     preparados = []
     for chunk in chunks:
-        conteudo = _representar_registro(_compactar(chunk.content))
+        conteudo = (_representar_conversa(chunk.content, config.GENERATION_CHUNK_CHARS)
+                    if chunk.metadata.extras.get("sintetico") else None)
+        if conteudo is None:
+            conteudo = _representar_registro(_compactar(chunk.content))
         if len(conteudo) > config.GENERATION_CHUNK_CHARS:
             conteudo = conteudo[:config.GENERATION_CHUNK_CHARS].rstrip() + " [...]"
         preparados.append(chunk.model_copy(update={"content": conteudo}))
@@ -801,6 +870,21 @@ def _aplicar_recorte(resposta: RAGResponse, chunks: list[Chunk]) -> RAGResponse:
     })
 
 
+_AVISO_FONTE_SINTETICA = ("Fonte sintética: a resposta usa conversa fictícia criada para testes, "
+                          "que não comprova fatos reais.")
+
+
+def _avisar_fonte_sintetica(resposta: RAGResponse, chunks: list[Chunk]) -> RAGResponse:
+    """Aviso fixo quando uma conversa sintética é citada: o prompt pede que o
+    LLM diga que o cenário é fictício, mas ele nem sempre diz."""
+    sinteticos = {chunk.metadata.chunk_id for chunk in chunks if chunk.metadata.extras.get("sintetico")}
+    if not any(fonte.chunk_id in sinteticos for fonte in resposta.sources_used):
+        return resposta
+    return resposta.model_copy(update={
+        "avisos": list(dict.fromkeys([*resposta.avisos, _AVISO_FONTE_SINTETICA])),
+    })
+
+
 def gerar_resposta(
     query: str,
     chunks: list[Chunk],
@@ -914,6 +998,7 @@ def gerar_resposta(
     if ids_no_texto:
         sensibilidade["ids_internos_no_texto"] = ids_no_texto
     resposta = _aplicar_recorte(resposta, chunks)
+    resposta = _avisar_fonte_sintetica(resposta, chunks)
     # Defesa em profundidade: o dado pode ter vindo da própria pergunta.
     answer_mascarada, mascaramentos_resposta = mascarar(resposta.answer)
     if mascaramentos_resposta:

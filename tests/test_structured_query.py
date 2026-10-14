@@ -1127,6 +1127,24 @@ def test_firmar_nao_vira_termo_do_objeto(verbo):
     assert sq._termos_do_objeto(f"quantos contratos de ambulancia {verbo}") == ("ambulancia",)
 
 
+@pytest.mark.parametrize("verbo", ["se houver", "se houve", "havendo", "havia", "haja", "se houvesse"])
+def test_haver_nao_vira_termo_do_objeto(verbo):
+    assert sq._termos_do_objeto(f"contratos de ambulancia {verbo}") == ("ambulancia",)
+
+
+def test_pergunta_da_f1_nao_traz_houver_como_termo_do_objeto():
+    pergunta = (
+        "Em 2025, órgãos estaduais do Rio de Janeiro pagaram mais por ambulâncias tipo D do que os "
+        "municípios fluminenses? Compare apenas os registros tecnicamente equivalentes disponíveis "
+        "no corpus; se não houver dados suficientes, reconheça a insuficiência de evidência."
+    )
+
+    termos = sq._termos_do_objeto(structured_db.normalizar(pergunta))
+
+    assert "houver" not in termos
+    assert "ambulancia" in termos
+
+
 def test_resultado_sql_vazio_e_marcado_sem_registros(base):
     chunks = _consultar("Quantos contratos de helicóptero existem?", base, metrica="contagem")
 
@@ -1239,3 +1257,25 @@ def test_especificacao_de_tipo_e_preservada():
 def test_qual_tipo_de_contrato_nao_gera_termo():
     """"tipo" sozinho é palavra genérica; só a especificação conta."""
     assert sq._termos_do_objeto("qual tipo de contrato") == ()
+
+
+@pytest.mark.parametrize("pergunta", [
+    "Qual foi o valor pago pelas ambulâncias?",
+    "Quanto foi pago pelas ambulâncias?",
+])
+def test_pagamento_vira_soma_com_aviso_de_que_nao_e_o_pago(pergunta, base):
+    consulta = sq.detectar_consulta(pergunta, QueryFilters(), ESTRUTURADA)
+
+    _, cabecalho, _ = sq.executar_consulta(consulta, base["banco"])
+
+    assert consulta.tipo == "estatistica" and consulta.pagamento_citado
+    assert "o PNCP não registra pagamentos" in cabecalho
+
+
+def test_valor_total_sem_pagamento_nao_ganha_o_aviso(base):
+    consulta = sq.detectar_consulta("Qual o valor total das ambulâncias?", QueryFilters(), ESTRUTURADA)
+
+    _, cabecalho, _ = sq.executar_consulta(consulta, base["banco"])
+
+    assert not consulta.pagamento_citado
+    assert "não registra pagamentos" not in cabecalho
