@@ -170,3 +170,17 @@ A data de entrega (05/10/2026) vem do registro do João no acompanhamento dele, 
 Situação dos meus itens da lista de correções: o item 9 (erro de provedor aparecendo como "sem evidência") está concluído e mergeado na main; o item 11 (contexto entre perguntas) está concluído e mergeado, com o commit ea66a22; o item 13 (proveniência da base sintética) está concluído, com o commit 1a05b92 na branch marco/proveniencia-base-sintetica, aguardando revisão no PR.
 
 Uso de IA: usei o Claude pra localizar as ocorrências de "fornecida pelo grupo" no repositório e aplicar as edições nos arquivos. Fiz o commit e o push.
+
+## Encontro 13 — 14/10/2026
+
+Contexto: com a lista de pendências até o Demo Day (23/10), escolhi o item 8 da parte de qualidade, a falha da pergunta F1 do golden set. A pergunta compara os valores de contratação entre órgãos estaduais e municipais, e a resposta saía com confiança alta, mesmo tendo só um registro municipal de R$ 0,00 como base.
+
+O que fiz:
+
+Atualizei a main, criei a branch marco/f1-termo-houver e rodei o F1 pra reproduzir. Achei duas causas. A primeira: o "houver" de "se não houver dados suficientes" entrava como termo do objeto em src/structured_query.py e virava filtro no SQL. Resolvi colocando as formas do verbo haver (houv, haver, havia, haven, haja) nos radicais genéricos, com testes novos pra "se houver", "havendo", "haja" e outras flexões. Isso fez o F1 deixar de filtrar por "houver", mas ele ainda falhava: a consulta caía no atalho do SQL e respondia com confiança alta, comparando uma esfera que só tinha um valor zerado.
+
+Como isso era uma decisão de regra, decidi que: quando a pergunta compara esferas e menos de duas têm registros com valor maior ou igual a R$ 1,00, a resposta deve dizer que os dados são insuficientes pra comparar, com confiança baixa. Implementei com uma flag comparacao_esferas na Consulta, um tipo novo de resultado (comparacao_insuficiente) no schema.py, a verificação em structured_query.py e o tratamento no generate.py, pra confiança baixa valer também quando a resposta vem do LLM. Escrevi testes pros dois lados (dados insuficientes e dados suficientes) e pra uma pergunta que não é comparação. A suíte completa passou com 1607 testes e o F1 passou (OK, run 20261014T181928Z). O primeiro commit foi o 446bcb7, e abri o PR da branch marco/f1-termo-houver pro Renato revisar e fazer o merge.
+
+Depois do merge, o Diogo roda o golden set completo (item 4) com essa correção.
+
+Uso de IA: usei o Claude pra investigar a causa do F1 e propor uma correção. Rodei a suíte e o F1, fiz os commits e os pushes e abri o PR.
