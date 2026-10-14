@@ -11,12 +11,12 @@ avaliacao a essa consulta e ``GET /api/v1/history`` devolve o historico
 salvo. O estagio ``feedback`` ja existia reservado em ``src/obs.py``
 (Stage.FEEDBACK) mas nao estava integrado a nenhum fluxo ate agora.
 
-Acesso temporario da demo: o historico geral esta aberto, sem chave, por
-solicitacao de quem opera. Ele mostra consultas de todos os usuarios; nao
-publique dados sensiveis. O trace aceita ``RAG_API_KEY`` (quem opera a
-demo ve qualquer conversa) ou o header ``X-Session-Id`` igual a sessao da
-pergunta: cada usuario ve so o caminho da propria conversa, sem chave no site.
-``/query`` e ``/feedback`` continuam abertos: sao o uso normal do chat.
+Acesso ao historico com dois personas (decisao de 2026-10-14, substituindo a
+abertura temporaria): quem tem a ``RAG_API_KEY`` (operador) ve o historico
+inteiro; o dono da conversa se identifica pelo header ``X-Session-Id`` e ve
+so as suas consultas. O query param ``session_id`` e filtro do operador, nao
+autenticacao. O trace segue a mesma autorizacao. ``/query`` e ``/feedback``
+continuam abertos: sao o uso normal do chat.
 """
 
 from __future__ import annotations
@@ -352,7 +352,22 @@ def enviar_feedback(request: FeedbackRequest) -> dict[str, str]:
 def obter_historico(
     limit: int = Query(default=20, ge=1, le=100),
     session_id: Optional[str] = Query(default=None, pattern=_ID_PATTERN),
+    x_api_key: Optional[str] = Header(default=None),
+    x_session_id: Optional[str] = Header(default=None),
 ) -> list[dict]:
+    """Dois personas: o operador com chave ve tudo; o dono ve a sua conversa.
+
+    O dono se identifica pelo ``X-Session-Id`` — a mesma autorizacao do trace.
+    O ``session_id`` de query e filtro de quem tem a chave; para o novo
+    usuario ele nao autentica (o escopo vem do header). Sem nenhuma das duas
+    credenciais, 401 sem revelar o que existe no historico.
+    """
+    if not _chave_valida(x_api_key):
+        if not x_session_id:
+            raise HTTPException(
+                status_code=401, detail="Envie X-Session-Id da conversa ou X-API-Key."
+            )
+        session_id = x_session_id
     items = historico.obter_historico(limit=limit, session_id=session_id)
     for item in items:
         item["resposta"] = _public_rag_payload(item["resposta"])
