@@ -168,7 +168,7 @@ Situação conferida em 2026-10-14.
 - **Latência:** o roteiro mede de 55 a 151 s por consulta real no endpoint da turma; decidir quais consultas vão ao vivo e quais ficam em cache.
 - **Frontend:** o repositório `Etuarda/frontendRAG` (com as telas de trace) e o fork `sevenRevy/frontendRAG` (com os dois personas, `check:backend` e o botão do NEXO) divergem, e a branch `feat/melhorias-trace` ainda não entrou na `main` da Eduarda.
 - **Validar frontend e backend juntos de novo**, depois dos merges de 2026-10-14 (personas, recorte, avisos, filtros novos).
-- **Roteiro do Demo Day** ([docs/ROTEIRO_DEMO_DAY.md](docs/ROTEIRO_DEMO_DAY.md)): atualizar o estado do histórico e o commit do backend, ensaiar cronometrado, marcar o freeze e preparar o checklist do plano B.
+- **Roteiro do Demo Day** (material interno do grupo, fora do repositório): ensaiar cronometrado, marcar o freeze e preparar o checklist do plano B.
 - **Cobertura do PCA e da modalidade dos contratos:** limitação da fonte, documentada; depende do censo v7.
 
 ---
