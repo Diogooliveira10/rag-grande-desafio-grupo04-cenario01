@@ -263,11 +263,38 @@ def test_analysis_cache_does_not_replay_old_llm_usage(tmp_path, monkeypatch):
     assert event["extra"]["llm"]["chamadas_modelo"] == []
 
 
-def test_reformulation_logs_effective_model(monkeypatch):
+def test_reformulation_troca_de_ano_logs_sem_modelo(monkeypatch):
+    """"E em 2024?" vira `troca_de_ano` por regra: modelo ausente e tokens zero.
+
+    O atalho determinístico não pode chamar o modelo só para satisfazer o log.
+    """
     from src import reformulacao
     monkeypatch.setattr(reformulacao, "REFORMULACAO_MODE", "llm")
-    response = sdk_response(text='{"pergunta":"Qual o total dos contratos de 2024?"}', model="actual-reformulation")
-    reformulacao.reformular_pergunta("E em 2024?", [{"pergunta": "Total de contratos de 2025?", "resposta": "R$ 100"}],
-                                     cliente=lambda messages: response)
+
+    def nao_chamar(_):
+        raise AssertionError("o atalho troca_de_ano não pode chamar o modelo")
+
+    resultado = reformulacao.reformular_pergunta(
+        "E em 2024?", [{"pergunta": "Total de contratos de 2025?", "resposta": "R$ 100"}],
+        cliente=nao_chamar)
+    assert resultado.motivo == "troca_de_ano" and resultado.reescrita
+    event = next(e for e in records() if e["stage"] == "reformulacao")
+    assert event["modelo"] is None
+    assert event["tokens"]["total"] == 0
+    assert event["extra"]["llm_called"] is False and event["extra"]["metodo"] == "regras"
+
+
+def test_reformulation_logs_effective_model(monkeypatch):
+    """Continuação que exige modelo registra o modelo efetivo e o uso de tokens."""
+    from src import reformulacao
+    monkeypatch.setattr(reformulacao, "REFORMULACAO_MODE", "llm")
+    response = sdk_response(text='{"pergunta":"Quem foi o fornecedor dos contratos de 2024?"}',
+                            model="actual-reformulation")
+    resultado = reformulacao.reformular_pergunta(
+        "E qual fornecedor aparece nesses contratos?",
+        [{"pergunta": "Total de contratos de 2025?", "resposta": "R$ 100"}],
+        cliente=lambda messages: response)
+    # Continuação real (não é só troca de ano): o modelo foi chamado e reescreveu.
+    assert resultado.motivo == "reescrita" and resultado.reescrita
     event = next(e for e in records() if e["stage"] == "reformulacao")
     assert event["modelo"] == "actual-reformulation" and event["tokens"]["total"] == 12

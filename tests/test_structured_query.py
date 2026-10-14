@@ -1030,3 +1030,114 @@ def test_mediana_por_veiculo_nao_compila_calculo_sobre_global():
     filters = analisar_query(question, modo='regras').filtros
     assert filters.tipo_valor == 'unitario'
     assert sq.detectar_consulta(question, filters, ESTRUTURADA + AGREGADA) is None
+
+
+# --------------------------------------------------------------------------
+# P3: recorte da consulta — confiabilidade, completude e cobertura separadas
+# --------------------------------------------------------------------------
+
+
+def _banco_com(tmp_path, contratacoes):
+    documents = escrever_documents(tmp_path / "documents.jsonl", contratacoes=contratacoes)
+    banco = Banco(sqlite_path=tmp_path / "base.sqlite")
+    structured_db.construir_banco(documents, banco)
+    return banco
+
+
+def _consulta_soma(**mudancas):
+    from dataclasses import replace
+    base = sq.Consulta(tabela="contratacoes", tipo="estatistica", limite=10,
+                       metrica="soma", campo="valor_contratado", so_contratos=True,
+                       referencia_temporal="assinatura")
+    return replace(base, **mudancas)
+
+
+def test_zero_confiavel_no_snapshot_e_conclusao_nao_falha(tmp_path):
+    """Execução completa e zero correspondências: é uma conclusão, não erro."""
+    banco = _banco_com(tmp_path, [_contratacao("111-2-000001/2025")])
+    recorte = {}
+    _sql, _cab, _linhas = sq.executar_consulta(
+        _consulta_soma(orgaos=("ORGAO QUE NAO EXISTE",)), banco, recorte)
+    assert recorte["tipo_resultado"] == "sem_correspondencia"
+    assert recorte["execucao"] == "completa" and recorte["filtros_relaxados"] == []
+    assert recorte["registros_correspondentes"] == 0
+    assert recorte["registros_no_snapshot"] == 1  # denominador continua visível
+
+
+def test_recorte_traz_snapshot_versao_e_hash(tmp_path):
+    banco = _banco_com(tmp_path, [_contratacao("111-2-000001/2025")])
+    recorte = {}
+    sq.executar_consulta(_consulta_soma(), banco, recorte)
+    assert recorte["snapshot_versao"] == "6"
+    assert recorte["snapshot_hash"]  # proveniência da base, sem ler o texto
+
+
+def test_campo_desconhecido_entra_na_completude_nao_como_nao_correspondente(tmp_path):
+    com_valor = _contratacao("111-2-000001/2025")
+    com_valor.update(valorGlobal=100, dataAssinatura="2024-12-20")
+    sem_valor = _contratacao("111-2-000002/2025")
+    sem_valor.update(valorGlobal=None, dataAssinatura="2024-12-20")
+    banco = _banco_com(tmp_path, [com_valor, sem_valor])
+    recorte = {}
+    sq.executar_consulta(_consulta_soma(), banco, recorte)
+    completude = {c["campo"]: c for c in recorte["completude"]}
+    assert completude["valor_contratado"]["conhecidos"] == 1
+    assert completude["valor_contratado"]["desconhecidos"] == 1
+    assert recorte["registros_correspondentes"] == 2  # os dois continuam no recorte
+
+
+def test_calculo_indisponivel_quando_nenhum_valor_e_conhecido(tmp_path):
+    vazio = _contratacao("111-2-000001/2025")
+    vazio.update(valorGlobal=None, dataAssinatura="2024-12-20")
+    banco = _banco_com(tmp_path, [vazio])
+    recorte = {}
+    sq.executar_consulta(_consulta_soma(), banco, recorte)
+    assert recorte["tipo_resultado"] == "calculo_indisponivel"
+    assert recorte["calculo_disponivel"] is False
+    assert "campo de valor" in recorte["calculo_motivo"]
+
+
+def test_soma_zero_e_distinta_de_sem_correspondencia(tmp_path):
+    zero = _contratacao("111-2-000001/2025")
+    zero.update(valorGlobal=0, dataAssinatura="2024-12-20")
+    banco = _banco_com(tmp_path, [zero])
+    recorte = {}
+    sq.executar_consulta(_consulta_soma(), banco, recorte)
+    assert recorte["tipo_resultado"] == "soma_zero"
+    assert recorte["registros_correspondentes"] == 1  # há registro; a soma é que é zero
+
+
+def test_execucao_parcial_registra_o_que_foi_relaxado(tmp_path):
+    """Termo de objeto que não casa força relaxamento: não é execução completa."""
+    ambulancia = _contratacao("111-2-000001/2025")
+    ambulancia.update(objeto="aquisicao de ambulancia", valorGlobal=100, dataAssinatura="2024-12-20")
+    banco = _banco_com(tmp_path, [ambulancia])
+    recorte = {}
+    sq.executar_consulta(_consulta_soma(termos_objeto=("ambulancia", "pavimentacao")), banco, recorte)
+    assert recorte["execucao"] == "parcial"
+    assert recorte["filtros_relaxados"]
+    assert recorte["registros_correspondentes"] == 1
+
+
+def test_recorte_nao_extrapola_para_o_estado(tmp_path):
+    banco = _banco_com(tmp_path, [_contratacao("111-2-000001/2025")])
+    recorte = {}
+    sq.executar_consulta(_consulta_soma(), banco, recorte)
+    # Cobertura declarada como amostra, com o denominador do snapshot.
+    assert recorte["cobertura"] == "amostra"
+    assert recorte["registros_no_snapshot"] == 1
+
+
+def test_instrucao_da_pergunta_nao_vira_termo_de_objeto():
+    """"Reconheça a insuficiência de evidência" é instrução, não objeto."""
+    assert sq._termos_do_objeto("ambulancias tipo d reconheca a insuficiencia de evidencia") == (
+        "tipo d", "ambulancia")
+
+
+def test_especificacao_de_tipo_e_preservada():
+    assert sq._termos_do_objeto("contratacoes de ambulancias tipo d") == ("tipo d", "ambulancia")
+
+
+def test_qual_tipo_de_contrato_nao_gera_termo():
+    """"tipo" sozinho é palavra genérica; só a especificação conta."""
+    assert sq._termos_do_objeto("qual tipo de contrato") == ()

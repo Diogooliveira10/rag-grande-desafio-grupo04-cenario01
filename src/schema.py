@@ -174,6 +174,73 @@ class SourceRef(BaseModel):
         return resultado
 
 
+class CampoCompletude(BaseModel):
+    """Quantos registros do recorte têm o campo preenchido.
+
+    Campo ausente não é zero: os ``desconhecidos`` ficam à parte e não entram
+    como "não correspondentes".
+    """
+
+    model_config = {"extra": "forbid"}
+    campo: str = Field(min_length=1)
+    conhecidos: int = Field(ge=0)
+    desconhecidos: int = Field(ge=0)
+
+
+class TipoResultado(str, Enum):
+    REGISTROS = "registros"
+    SEM_CORRESPONDENCIA = "sem_correspondencia"
+    SOMA_ZERO = "soma_zero"
+    CALCULO_INDISPONIVEL = "calculo_indisponivel"
+
+
+class RecorteConsulta(BaseModel):
+    """Condições da evidência estruturada, lidas do dado e não do texto gerado.
+
+    Separa três dimensões que a resposta não deve misturar:
+
+    - ``execucao``/``tipo_resultado``/``registros_correspondentes`` respondem
+      pela **confiabilidade da afirmação no recorte**;
+    - ``completude`` diz quais campos têm valor conhecido, com denominador;
+    - ``cobertura`` declara que o snapshot é amostra, não censo do Estado.
+
+    Zero correspondências pode ser uma conclusão confiável quando a execução é
+    completa; isso é medido aqui, não deduzido do texto da resposta.
+    """
+
+    model_config = {"extra": "forbid"}
+    tabela: str = Field(min_length=1)
+    snapshot_versao: Optional[str] = None
+    snapshot_hash: Optional[str] = None
+    registros_no_snapshot: int = Field(ge=0)
+    registros_correspondentes: int = Field(ge=0)
+    execucao: Literal["completa", "parcial"] = "completa"
+    filtros_relaxados: list[str] = Field(default_factory=list)
+    calculo: str = Field(min_length=1)
+    calculo_disponivel: bool = True
+    calculo_motivo: Optional[str] = None
+    tipo_resultado: TipoResultado = TipoResultado.REGISTROS
+    completude: list[CampoCompletude] = Field(default_factory=list)
+    cobertura: str = "amostra"
+
+    @model_validator(mode="after")
+    def _conferir(self) -> "RecorteConsulta":
+        if self.registros_correspondentes > self.registros_no_snapshot:
+            raise ValueError("mais correspondências que registros no snapshot")
+        if self.tipo_resultado == TipoResultado.SEM_CORRESPONDENCIA and self.registros_correspondentes:
+            raise ValueError("sem_correspondencia exige zero correspondências")
+        if self.tipo_resultado == TipoResultado.CALCULO_INDISPONIVEL and self.calculo_disponivel:
+            raise ValueError("calculo_indisponivel exige calculo_disponivel=False")
+        if self.tipo_resultado != TipoResultado.CALCULO_INDISPONIVEL and not self.calculo_disponivel:
+            raise ValueError("calculo_disponivel=False só com calculo_indisponivel")
+        if self.execucao == "completa" and self.filtros_relaxados:
+            raise ValueError("execução completa não pode ter filtros relaxados")
+        for campo in self.completude:
+            if campo.conhecidos > self.registros_correspondentes:
+                raise ValueError(f"completude de {campo.campo} maior que as correspondências")
+        return self
+
+
 class RAGResponse(BaseModel):
     """Resposta final do pipeline."""
 

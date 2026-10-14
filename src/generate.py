@@ -255,8 +255,14 @@ def _representar_registro(conteudo: str) -> str:
         return conteudo
     campos = ("numeroControlePNCP", "numeroControlePNCPAta", "objetoContrato", "objetoCompra",
         "objetoContratacao", "descricao", "descricaoResumida", "nomeRazaoSocialFornecedor",
+        # Registros de ATA do PNCP identificam órgão/unidade e vigência com
+        # outros nomes de campo (nomeOrgao/nomeUnidadeOrgao/vigencia*). Sem
+        # eles, a evidência do prompt ficava sem órgão nem vigência e a
+        # resposta honesta era "não consta" (defeito #18).
+        "nomeOrgao", "nomeUnidadeOrgao", "cnpjOrgao", "numeroAtaRegistroPreco",
         "dataAssinatura", "dataPublicacaoPncp", "dataAberturaProposta", "dataEncerramentoProposta",
-        "dataVigenciaInicio", "dataVigenciaFim", "anoPca", "valorGlobal", "valorInicial",
+        "dataVigenciaInicio", "dataVigenciaFim", "vigenciaInicio", "vigenciaFim",
+        "anoPca", "valorGlobal", "valorInicial",
         "valorTotalHomologado", "valorTotalEstimado", "valorUnitarioHomologado", "valorUnitarioEstimado",
         "valorTotal", "valor", "quantidade", "quantidadeHomologada", "unidadeMedida", "amparoLegal",
         "orgaoEntidade", "unidadeOrgao", "municipio", "uf", "esfera", "categoriaProcesso", "tipoContrato", "modalidadeNome")
@@ -651,9 +657,93 @@ def _resposta_sql_deterministica(
                                     source_file=chunk.metadata.source_file))
     if not fontes:
         return None
+    recorte = next((c.metadata.extras["resultado_sql"].get("recorte")
+                    for c in sql if c.metadata.extras.get("resultado_sql", {}).get("recorte")), {})
+    confianca, avisos = _confianca_do_recorte(recorte)
     return RAGResponse(query=query, answer="\n\n".join(partes), bases_consultadas=bases,
-                       sources_used=fontes, confidence_level=ConfidenceLevel.ALTA,
-                       is_refusal=False, refusal_reason=None)
+                       sources_used=fontes, confidence_level=confianca,
+                       is_refusal=False, refusal_reason=None, avisos=avisos)
+
+
+def _confianca_do_recorte(recorte: dict[str, Any]) -> tuple[ConfidenceLevel, list[str]]:
+    """Confiabilidade da afirmação NO RECORTE, sem misturar completude/cobertura.
+
+    Zero correspondências **não** reduz confiança sozinho: uma consulta válida e
+    exaustiva sobre o snapshot sustenta "não há registros correspondentes". O
+    que limita confiança são execução parcial ou cálculo não verificável — cada
+    um pela sua própria razão. Completude e cobertura viram avisos à parte, para
+    não parecerem dúvida sobre a conta.
+    """
+    avisos: list[str] = []
+    if not recorte:
+        return ConfidenceLevel.MEDIA, avisos
+
+    # Cobertura é declaração de escopo, não mérito da afirmação: vai sempre e
+    # não mexe na confiança.
+    avisos.append("Escopo: amostra do PNCP/RJ registrada neste snapshot, não o "
+                  "universo de contratações do Estado.")
+    if recorte.get("snapshot_versao"):
+        avisos.append(f"Snapshot: esquema v{recorte['snapshot_versao']}, "
+                      f"{recorte.get('registros_no_snapshot', 0)} registros.")
+
+    # Completude: campos sem valor conhecido ficam fora da conclusão, à mostra.
+    for campo in recorte.get("completude") or []:
+        if campo.get("desconhecidos"):
+            avisos.append(f"Completude: {campo['campo']} desconhecido em "
+                          f"{campo['desconhecidos']} de {campo['conhecidos'] + campo['desconhecidos']} "
+                          "registros do recorte; a conclusão vale para os que têm o campo.")
+
+    if recorte.get("execucao") == "parcial":
+        motivos = recorte.get("filtros_relaxados") or ["filtros relaxados"]
+        avisos.append("Execução parcial (" + "; ".join(motivos) + "): a conta não cobre "
+                      "exatamente o que foi perguntado.")
+        return ConfidenceLevel.MEDIA, avisos
+    if recorte.get("tipo_resultado") == "calculo_indisponivel":
+        avisos.append(recorte.get("calculo_motivo")
+                      or "Cálculo indisponível: não há campo de valor conhecido no recorte.")
+        return ConfidenceLevel.BAIXA, avisos
+
+    # Registros, soma zero ou zero correspondências, todos com execução
+    # completa: confiáveis no recorte.
+    return ConfidenceLevel.ALTA, avisos
+
+
+# Ordem do menor para o maior; a enumeração é str e não compara por mérito.
+_NIVEIS = {ConfidenceLevel.BAIXA: 1, ConfidenceLevel.MEDIA: 2, ConfidenceLevel.ALTA: 3}
+
+
+def _recorte_dos_chunks(chunks: list[Chunk]) -> dict[str, Any]:
+    for chunk in chunks:
+        resultado = chunk.metadata.extras.get("resultado_sql")
+        if isinstance(resultado, dict) and resultado.get("recorte"):
+            return resultado["recorte"]
+    return {}
+
+
+def _aplicar_recorte(resposta: RAGResponse, chunks: list[Chunk]) -> RAGResponse:
+    """Mesma política de confiança da resposta determinística, no caminho do LLM.
+
+    O recorte **limita** o nível por razão própria (execução parcial, cálculo não
+    verificável) e **sustenta** o que é exaustivo: uma consulta completa que
+    deu zero não é rebaixada só por dar zero. Recusa não ganha confiança e o
+    texto do LLM não é alterado.
+    """
+    if resposta.is_refusal:
+        return resposta
+    recorte = _recorte_dos_chunks(chunks)
+    if not recorte:
+        return resposta
+    nivel_recorte, avisos = _confianca_do_recorte(recorte)
+    atual = resposta.confidence_level
+    if atual == ConfidenceLevel.RECUSADO:
+        return resposta
+    solido = recorte.get("execucao") == "completa" and recorte.get("calculo_disponivel") is not False
+    nivel = max(atual, nivel_recorte, key=lambda n: _NIVEIS.get(n, 0)) if solido else min(
+        atual, nivel_recorte, key=lambda n: _NIVEIS.get(n, 0))
+    return resposta.model_copy(update={
+        "confidence_level": nivel,
+        "avisos": list(dict.fromkeys([*resposta.avisos, *avisos])),
+    })
 
 
 def gerar_resposta(
@@ -768,6 +858,7 @@ def gerar_resposta(
     resposta, ids_no_texto = _numerar_citacoes(resposta, chunks)
     if ids_no_texto:
         sensibilidade["ids_internos_no_texto"] = ids_no_texto
+    resposta = _aplicar_recorte(resposta, chunks)
     # Defesa em profundidade: o dado pode ter vindo da própria pergunta.
     answer_mascarada, mascaramentos_resposta = mascarar(resposta.answer)
     if mascaramentos_resposta:

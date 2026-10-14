@@ -7,7 +7,7 @@ import pytest
 
 from src import generate as gen
 from src import obs
-from src.schema import Chunk, ChunkMetadata, ConfidenceLevel, Natureza, RefusalReason
+from src.schema import Chunk, ChunkMetadata, ConfidenceLevel, Natureza, RAGResponse, RefusalReason
 
 
 def _chunk(chunk_id="c1", base_id="contratos_estruturado", conteudo="texto do chunk"):
@@ -727,3 +727,192 @@ def test_troca_de_ids_fica_registrada_no_log():
 def test_prompt_pede_evidence_id_entre_colchetes_e_nada_de_chunk_id():
     assert "[E1]" in gen._SYSTEM_PROMPT
     assert "não escreva chunk_id" in gen._SYSTEM_PROMPT
+
+
+# --------------------------------------------------------------------------
+# P3: confiabilidade no recorte, completude e cobertura separadas
+# --------------------------------------------------------------------------
+
+
+def _recorte(**mudancas):
+    base = {
+        "tabela": "contratacoes", "snapshot_versao": "6", "snapshot_hash": "abc",
+        "registros_no_snapshot": 810, "registros_correspondentes": 4,
+        "execucao": "completa", "filtros_relaxados": [], "calculo": "estatistica",
+        "calculo_disponivel": True, "calculo_motivo": None,
+        "tipo_resultado": "registros", "completude": [], "cobertura": "amostra",
+    }
+    base.update(mudancas)
+    return base
+
+
+def test_zero_confiavel_no_snapshot_nao_perde_confianca():
+    """Zero correspondências com execução completa é conclusão, não falha."""
+    nivel, avisos = gen._confianca_do_recorte(
+        _recorte(registros_correspondentes=0, tipo_resultado="sem_correspondencia"))
+    assert nivel == ConfidenceLevel.ALTA
+    assert any("Escopo" in a for a in avisos)
+
+
+def test_execucao_parcial_limita_confianca_pela_sua_propria_razao():
+    nivel, avisos = gen._confianca_do_recorte(
+        _recorte(execucao="parcial", filtros_relaxados=["termos de objeto unidos com OU em vez de E"]))
+    assert nivel == ConfidenceLevel.MEDIA
+    assert any("Execução parcial" in a and "OU" in a for a in avisos)
+
+
+def test_calculo_indisponivel_nao_vira_zero():
+    nivel, avisos = gen._confianca_do_recorte(
+        _recorte(tipo_resultado="calculo_indisponivel", calculo_disponivel=False,
+                 calculo_motivo="nenhum registro do recorte tem o campo de valor preenchido"))
+    assert nivel == ConfidenceLevel.BAIXA
+    assert any("campo de valor preenchido" in a for a in avisos)
+
+
+def test_soma_zero_e_diferente_de_sem_correspondencia():
+    soma_zero = gen._confianca_do_recorte(_recorte(tipo_resultado="soma_zero"))[0]
+    sem_registros = gen._confianca_do_recorte(
+        _recorte(tipo_resultado="sem_correspondencia", registros_correspondentes=0))[0]
+    assert soma_zero == ConfidenceLevel.ALTA and sem_registros == ConfidenceLevel.ALTA
+
+
+def test_completude_vira_aviso_e_nao_baixa_a_confianca():
+    """Campo ausente não é zero; a limitação é declarada à parte."""
+    nivel, avisos = gen._confianca_do_recorte(
+        _recorte(completude=[{"campo": "modalidade", "conhecidos": 2, "desconhecidos": 5}]))
+    assert nivel == ConfidenceLevel.ALTA
+    assert any("Completude" in a and "modalidade" in a for a in avisos)
+
+
+def test_cobertura_declarada_sem_extrapolacao_estadual():
+    _nivel, avisos = gen._confianca_do_recorte(_recorte())
+    escopo = next(a for a in avisos if a.startswith("Escopo"))
+    assert "não o universo de contratações do Estado" in escopo
+
+
+def test_sem_recorte_nao_inventa_alta_confianca():
+    nivel, avisos = gen._confianca_do_recorte({})
+    assert nivel == ConfidenceLevel.MEDIA and avisos == []
+
+
+def _chunk_com_recorte(recorte):
+    return Chunk(
+        content="Consulta SQL na tabela contratacoes: 1 registros",
+        metadata=ChunkMetadata(
+            source_file="base_estruturada.sqlite", chunk_id="sql:contratacoes:estatistica:x:1",
+            base_id="contratos_estruturado", doc_type="sql", natureza=Natureza.ESTRUTURADA,
+            chunking_strategy="consulta_sql",
+            extras={"resultado_sql": {"cabecalho": "c", "linhas": [], "recorte": recorte}},
+        ),
+    )
+
+
+def _resposta_llm(nivel, avisos=()):
+    return RAGResponse(query="q", answer="a", bases_consultadas=[Natureza.ESTRUTURADA],
+                       sources_used=[], confidence_level=nivel, is_refusal=False,
+                       refusal_reason=None, avisos=list(avisos))
+
+
+def test_zero_exaustivo_nao_e_rebaixado_por_ser_zero():
+    """O LLM pode dar 'baixa' para um zero; o recorte completo sustenta 'alta'."""
+    chunk = _chunk_com_recorte(_recorte(registros_correspondentes=0,
+                                        tipo_resultado="sem_correspondencia"))
+    saida = gen._aplicar_recorte(_resposta_llm(ConfidenceLevel.BAIXA), [chunk])
+    assert saida.confidence_level == ConfidenceLevel.ALTA
+
+
+def test_execucao_parcial_limita_o_que_o_llm_afirmar():
+    chunk = _chunk_com_recorte(_recorte(execucao="parcial", filtros_relaxados=["termos relaxados"]))
+    saida = gen._aplicar_recorte(_resposta_llm(ConfidenceLevel.ALTA), [chunk])
+    assert saida.confidence_level == ConfidenceLevel.MEDIA
+
+
+def test_calculo_indisponivel_limita_para_baixa():
+    chunk = _chunk_com_recorte(_recorte(tipo_resultado="calculo_indisponivel",
+                                        calculo_disponivel=False, calculo_motivo="sem campo de valor"))
+    saida = gen._aplicar_recorte(_resposta_llm(ConfidenceLevel.ALTA), [chunk])
+    assert saida.confidence_level == ConfidenceLevel.BAIXA
+
+
+def test_recusa_nao_ganha_confianca_nem_avisos():
+    recusa = RAGResponse(query="q", answer="a", bases_consultadas=[Natureza.ESTRUTURADA],
+                         sources_used=[], confidence_level=ConfidenceLevel.RECUSADO,
+                         is_refusal=True, refusal_reason=RefusalReason.SEM_EVIDENCIA)
+    chunk = _chunk_com_recorte(_recorte())
+    assert gen._aplicar_recorte(recusa, [chunk]) is recusa
+
+
+def test_sem_recorte_o_llm_fica_com_o_que_disse():
+    saida = gen._aplicar_recorte(_resposta_llm(ConfidenceLevel.MEDIA), [])
+    assert saida.confidence_level == ConfidenceLevel.MEDIA
+
+
+def test_avisos_do_recorte_somam_sem_duplicar():
+    chunk = _chunk_com_recorte(_recorte())
+    ja = ["Escopo: amostra do PNCP/RJ registrada neste snapshot, não o universo de contratações do Estado."]
+    saida = gen._aplicar_recorte(_resposta_llm(ConfidenceLevel.ALTA, avisos=ja), [chunk])
+    assert len(saida.avisos) == len(set(saida.avisos))
+    assert any(a.startswith("Snapshot") for a in saida.avisos)
+
+
+# --------------------------------------------------------------------------
+# Orçamento do contexto: o top-k recuperado não pode sumir do prompt
+# --------------------------------------------------------------------------
+
+def test_orcamento_do_openrouter_cabe_o_top_k_inteiro(monkeypatch):
+    """Defeito achado na P2.2: com 3500 chars, 7 dos 10 chunks do top-k eram
+    descartados e o modelo declarava 'ausente' o que estava no topo do ranking.
+    O orçamento do provedor de janela grande precisa comportar o top-k inteiro."""
+    monkeypatch.setattr(gen.config, "GENERATION_CONTEXT_CHARS", gen.config.ORCAMENTO_CONTEXTO_OPENROUTER)
+    monkeypatch.setattr(gen.config, "GENERATION_CHUNK_CHARS", 900)
+    chunks = [_chunk(chunk_id=f"c{i}", conteudo=f"registro {i} " + "x" * 850) for i in range(10)]
+
+    selecionados = gen._chunks_no_orcamento(chunks)
+
+    assert len(selecionados) == 10
+
+
+def test_orcamento_janela_curta_fica_no_valor_do_endpoint_da_turma():
+    """O endpoint da turma tem janela de 2048 tokens: o orçamento curto (3500
+    chars, ~1.500 tokens com o system prompt) não pode subir junto."""
+    assert gen.config.ORCAMENTO_CONTEXTO_JANELA_CURTA == 3500
+    assert gen.config.ORCAMENTO_CONTEXTO_OPENROUTER == 12000
+
+
+def test_representar_registro_de_ata_mantem_orgao_e_vigencia():
+    '''Defeito #18: o registro de ata do PNCP identifica órgão/unidade e
+    vigência como nomeOrgao/nomeUnidadeOrgao/vigencia*. Fora da lista de
+    campos, a evidência do prompt ficava sem eles e a resposta honesta era
+    "não consta", com o dado existindo no registro.'''
+    from src.generate import _representar_registro
+
+    registro = {
+        "numeroControlePNCPAta": "28741080000155-1-000001/2023-000001",
+        "objetoContratacao": "REGISTRO DE PREÇOS PARA AQUISIÇÃO DE APARELHOS DE AR CONDICIONADO.",
+        "nomeOrgao": "MUNICIPIO DE ITABORAI",
+        "nomeUnidadeOrgao": "PREFEITURA MUNICIPAL DE ITABORAI - RJ",
+        "dataAssinatura": "2024-12-16",
+        "dataPublicacaoPncp": "2025-02-12",
+        "vigenciaInicio": "2025-02-13",
+        "vigenciaFim": "2026-02-13",
+    }
+    saida = _representar_registro(json.dumps(registro, ensure_ascii=False))
+    for campo in ("nomeOrgao", "nomeUnidadeOrgao", "vigenciaInicio", "vigenciaFim"):
+        assert campo in saida, f"{campo} sumiu da evidência"
+    # Os termos que o caso A1 exige ficam alcançáveis na evidência compactada.
+    assert "MUNICIPIO DE ITABORAI" in saida
+    assert "REGISTRO DE PREÇOS" in saida
+    assert " - RJ" in saida
+
+
+def test_representar_registro_continua_compactando_campos_desnecessarios():
+    from src.generate import _representar_registro
+
+    registro = {
+        "numeroControlePNCP": "x", "objetoCompra": "Compra de teste",
+        "linkSistemaOrigem": "https://exemplo.com", "chaveSemUso": "qualquer",
+    }
+    saida = _representar_registro(json.dumps(registro, ensure_ascii=False))
+    assert "linkSistemaOrigem" not in saida
+    assert "chaveSemUso" not in saida
+    assert "Compra de teste" in saida

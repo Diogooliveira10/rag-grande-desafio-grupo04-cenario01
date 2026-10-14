@@ -1055,6 +1055,10 @@ class _Catalogo:
     nomes: tuple[str, ...]
     tokens: tuple[tuple[str, ...], ...]
     siglas: dict[str, str]  # sigla normalizada -> nome do órgão
+    # Listas canônicas do snapshot, para o mesmo valor escrito de outro jeito
+    # virar o mesmo filtro ("Volta Redonda", "empresa Cristália").
+    municipios: tuple[str, ...] = ()
+    fornecedores: tuple[str, ...] = ()
 
 
 def _tokens_de_nome(texto: str) -> list[str]:
@@ -1067,7 +1071,10 @@ def _catalogo_de_orgaos() -> Optional[_Catalogo]:
         return None
     dados = json.loads(ORGAOS_CORPUS_PATH.read_text(encoding="utf-8"))
     nomes = tuple(dados.get("nomes", []))
-    return _Catalogo(nomes, tuple(tuple(_tokens_de_nome(n)) for n in nomes), dict(dados.get("siglas", {})))
+    return _Catalogo(
+        nomes, tuple(tuple(_tokens_de_nome(n)) for n in nomes), dict(dados.get("siglas", {})),
+        tuple(dados.get("municipios", ())), tuple(dados.get("fornecedores", ())),
+    )
 
 
 def _token_casa(da_pergunta: str, do_nome: str) -> bool:
@@ -1093,8 +1100,177 @@ def _orgao_do_catalogo(chaves: Sequence[str], exigir_algum: Sequence[str] = ()) 
     return None
 
 
+# Palavras que acompanham o nome do fornecedor mas não o identificam: fora
+# delas, "empresa Cristália" acha "CRISTALIA PRODUTOS QUIMICOS FARMACEUTICOS
+# LTDA" sem precisar citar o nome inteiro.
+_GENERICAS_DE_FORNECEDOR = frozenset(
+    "ltda epp eireli sa me comercio industria produtos servicos assessoria "
+    "representacoes distribuicao importacao exportacao consultoria engenharia "
+    "construcoes equipamentos sistemas solucoes participacoes empreendimentos "
+    "negocios grupo empresa fornecedor".split()
+)
+
+# Palavra que anuncia que o que vem depois é o nome de um fornecedor. Sem uma
+# delas (ou sem nome de duas palavras), não vira filtro: senão "com mais
+# frequência" acharia "MED MAIS SOLUCOES..." por causa do "mais".
+_GATILHOS_DE_FORNECEDOR = frozenset(
+    "empresa fornecedor fornecedora firma comercial companhia sociedade "
+    "industria laboratorio clinica hospital cooperativa associacao fundacao "
+    "construtora transportadora distribuidora representante orgao".split()
+)
+
+
+def _valor_do_catalogo(opcoes: Sequence[str], mencionados: Sequence[str]) -> Optional[str]:
+    """Único valor do catálogo que contém todos os tokens citados.
+
+    Token compara por igualdade depois de normalizar ("Cristália" ==
+    "CRISTALIA"), não por prefixo: "contratos" não pode casar com "CONTRA".
+    Empate entre valores diferentes ("Rio" casa "Rio de Janeiro" e "Rio das
+    Ostras") devolve ``None``: não se escolhe o primeiro arbitrariamente.
+    """
+    if not mencionados:
+        return None
+    pedidos = [_normalize(m) for m in mencionados]
+    casados = [valor for valor in opcoes
+               if all(pedido in _tokens_de_nome(valor) for pedido in pedidos)]
+    return casados[0] if len(casados) == 1 else None
+
+
+# Palavras que só introduzem o nome do município/órgão: vão junto do trecho
+# para não sobrarem soltas e virarem outro filtro ("do Município de Maricá"
+# não pode achar um fornecedor que também é município).
+_INTRODUTORES_DE_NOME = frozenset(
+    "de do da dos das em no na nos nas municipio cidade prefeitura estado".split()
+)
+
+
+def _estender_para_tras(texto: str, span: Span) -> Span:
+    """Puxa o início do trecho para trás enquanto a palavra anterior introduz nome."""
+    inicio, fim = span
+    for achado in reversed(list(re.finditer(r"\w+", texto[:inicio]))):
+        palavra = _normalize(achado.group())
+        if palavra not in _INTRODUTORES_DE_NOME:
+            break
+        inicio = achado.start()
+    return (inicio, fim)
+
+
+# Palavras que indicam que a menção é ao ESTADO, não ao município: "órgãos
+# estaduais do Rio de Janeiro" é recorte estadual, e "Rio de Janeiro" é o nome
+# dos dois. Sem isso, o filtro municipal apaga contratos de outros municípios
+# fluminenses (os de ambulância, por exemplo, são de Paraty).
+_ESCOPO_ESTADUAL = frozenset(
+    "estado estadual estaduais estadualmente fluminense fluminenses "
+    "poder governos governo".split()
+)
+
+# "Rio de Janeiro" é o nome do Estado e da capital. Sem um marcador de cidade,
+# a menção é ao Estado ("órgãos públicos do Rio de Janeiro"); tratar como
+# município recortaria o Estado inteiro para uma cidade e apagaria contratos de
+# outros municípios fluminenses. Só o marcador explícito fecha o recorte.
+_MARCADOR_DE_CIDADE = frozenset(
+    "municipio municipio cidade prefeitura camara capital bairro municipais".split()
+)
+_NOME_DUPLICADO_ESTADO_CIDADE = frozenset({"rio de janeiro"})
+
+
+def _em_escopo_estadual(texto: str, span: Span) -> bool:
+    """True quando a menção ao município está num contexto de Estado."""
+    palavras_antes = texto[:span[0]].split()[-4:]
+    palavras_depois = texto[span[1]:].split()[:3]
+    return any(_normalize(p) in _ESCOPO_ESTADUAL for p in palavras_antes + palavras_depois)
+
+
+def _sem_marcador_de_cidade(texto: str, span: Span, valor: str) -> bool:
+    """True quando "Rio de Janeiro" é citado sem sinal de que é a cidade."""
+    if _normalize(valor) not in _NOME_DUPLICADO_ESTADO_CIDADE:
+        return False
+    janela = texto[max(0, span[0] - 12):span[1] + 4]
+    return not any(_normalize(p) in _MARCADOR_DE_CIDADE for p in janela.split())
+
+
+def _extrair_municipio(texto: str) -> tuple[Optional[str], Optional[Span]]:
+    """Município do snapshot citado na pergunta, e o trecho que o citou.
+
+    ``texto`` vem normalizado, então os nomes do catálogo também são
+    normalizados antes de virar regex ("Maricá" casa com "marica"). Casa a
+    sequência de palavras inteiras e fica com o mais longo quando um nome é
+    parte do outro. Empate entre municípios diferentes não vira filtro.
+    """
+    catalogo = _catalogo_de_orgaos()
+    if not catalogo or not texto:
+        return None, None
+    achados: list[tuple[str, Span]] = []
+    for municipio in catalogo.municipios:
+        palavras = [_normalize(p) for p in municipio.split()]
+        padrao = r"(?<!\w)" + r"\W+".join(re.escape(p) for p in palavras) + r"(?!\w)"
+        encontrado = re.search(padrao, texto)
+        if encontrado:
+            achados.append((municipio, encontrado.span()))
+    if not achados:
+        return None, None
+    mais_longo = max(len(_tokens_de_nome(m)) for m, _ in achados)
+    finalistas = [(m, s) for m, s in achados if len(_tokens_de_nome(m)) == mais_longo]
+    if len({m for m, _ in finalistas}) != 1:
+        return None, None  # empate: não escolhe o primeiro
+    valor, span = finalistas[0]
+    if _em_escopo_estadual(texto, span) or _sem_marcador_de_cidade(texto, span, valor):
+        # Menção ao Estado ("órgãos estaduais do Rio de Janeiro"), ou nome
+        # duplicado Estado/cidade sem marcador: não se recorta pela cidade.
+        return None, None
+    return valor, _estender_para_tras(texto, span)
+
+
+def _extrair_fornecedor(texto: str, bloqueados: Sequence[Span] = ()) -> tuple[Optional[str], Optional[Span]]:
+    """Fornecedor do snapshot citado na pergunta, e o trecho que o citou.
+
+    Aceita nome parcial sem as palavras genéricas ("empresa Cristália"). Se
+    vários fornecedores casam, não vira filtro. ``bloqueados`` são trechos já
+    reconhecidos como outra coisa (o município, por exemplo): sem isso, "do
+    Município de Maricá" acharia um fornecedor que também é município.
+    """
+    catalogo = _catalogo_de_orgaos()
+    if not catalogo or not texto:
+        return None, None
+
+    def _livre(inicio: int, fim: int) -> bool:
+        return not any(comeca < fim and inicio < termina for comeca, termina in bloqueados)
+
+    todas = [(palavra, achado.start(), achado.end()) for achado in re.finditer(r"\w+", texto)
+             if (palavra := _normalize(achado.group()))]
+    palavras = [(p, i, f) for p, i, f in todas if _livre(i, f)]
+    # Só vira filtro com gatilho antes do nome ("empresa Cristália") ou com
+    # nome de duas palavras ou mais ("Cristalia Produtos Quimicos").
+    for inicio_palavra, (primeira, comeca, termina) in enumerate(palavras):
+        if primeira in _GENERICAS_DE_FORNECEDOR or len(primeira) < 4:
+            continue
+        anteriores = [p for p, i, f in todas if f <= comeca]
+        tem_gatilho = bool(anteriores) and anteriores[-1] in _GATILHOS_DE_FORNECEDOR
+        citados = [primeira]
+        span: Span = (comeca, termina)
+        for palavra, pos_inicio, pos_fim in palavras[inicio_palavra + 1: inicio_palavra + 6]:
+            if palavra in _GENERICAS_DE_FORNECEDOR:
+                continue
+            if _valor_do_catalogo(catalogo.fornecedores, citados + [palavra]) is None:
+                break
+            citados.append(palavra)
+            span = (span[0], pos_fim)
+        if len(citados) < 2 and not tem_gatilho:
+            continue
+        valor = _valor_do_catalogo(catalogo.fornecedores, citados)
+        if valor is not None:
+            return valor, span
+    return None, None
+
+
 def gerar_catalogo_de_orgaos(destino: Path = ORGAOS_CORPUS_PATH) -> dict[str, Any]:
-    """Grava o catálogo de órgãos a partir da base SQL do corpus."""
+    """Grava o catálogo de órgãos, municípios e fornecedores da base SQL.
+
+    As listas antigas (``nomes``/``siglas``) continuam com o mesmo formato; as
+    novas (``municipios``/``fornecedores``) são derivadas do snapshot e trazem
+    ``versao``/``fonte_sha256`` para o cache de análise ser invalidado quando a
+    base mudar. Só valores não vazios entram.
+    """
     from datetime import datetime, timezone
 
     from src import structured_db
@@ -1115,11 +1291,31 @@ def gerar_catalogo_de_orgaos(destino: Path = ORGAOS_CORPUS_PATH) -> dict[str, An
             sigla = _normalize(achado.group(1) or achado.group(2))
             if sigla not in ("rj", "pr") and sigla not in siglas:
                 siglas[sigla] = nome
+    # Municípios e fornecedores vêm da mesma base, já normalizados de espaço,
+    # preservando a caixa original do valor (o SQL compara por igualdade).
+    def _distintos(coluna: str) -> list[str]:
+        valores = {" ".join(str(linha["v"]).split())
+                   for linha in banco.consultar(
+                       f"SELECT DISTINCT {coluna} AS v FROM contratacoes WHERE {coluna} IS NOT NULL")}
+        return sorted(v for v in valores if v)
+
+    municipios = _distintos("municipio")
+    fornecedores = _distintos("fornecedor")
+    # Hash do conteúdo que define os valores: muda o snapshot, muda o hash, e
+    # quem guarda cache de análise consegue descartar a versão antiga.
+    resumo = hashlib.sha256(
+        json.dumps({"nomes": sorted(nomes), "municipios": municipios, "fornecedores": fornecedores},
+                   ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
     dados = {
         "gerado_em": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "fonte": "nomes de órgão e unidade da base SQL (src/structured_db.py) do corpus",
+        "fonte": "nomes de órgão e unidade, municípios e fornecedores da base SQL (src/structured_db.py) do corpus",
+        "versao": 2,
+        "fonte_sha256": resumo,
         "nomes": sorted(nomes),
         "siglas": dict(sorted(siglas.items())),
+        "municipios": municipios,
+        "fornecedores": fornecedores,
     }
     destino.parent.mkdir(parents=True, exist_ok=True)
     destino.write_text(json.dumps(dados, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -1512,6 +1708,19 @@ def _analisar_com_trechos(query: str) -> tuple[QueryFilters, str, list[Span]]:
     achadas = [(m, nome) for padrao, nome in _MODALIDADES if (m := re.search(padrao, sem_sentido_comum))]
     familias = {nome.split()[0] for _, nome in achadas}
     orgao, sigla = _extrair_orgao(query)
+    # Município e fornecedor viram o valor canônico do snapshot ("Volta
+    # Redonda", "empresa Cristália"), e o trecho que os citou sai dos termos de
+    # objeto. O fornecedor não olha dentro do que já é município/órgão.
+    municipio, trecho_municipio = _extrair_municipio(texto)
+    fornecedor, trecho_fornecedor = _extrair_fornecedor(
+        texto, [s for s in (trecho_municipio,) if s])
+    if municipio and not (orgao and _normalize(municipio) in _normalize(orgao)):
+        # "Prefeitura de Maricá" já prende no órgão: não repetir o município,
+        # que sozinho traria os 23 órgãos da cidade em vez da prefeitura.
+        analiticos["municipio"] = municipio
+    if fornecedor:
+        analiticos["fornecedor"] = fornecedor
+    trechos = trechos + [s for s in (trecho_municipio, trecho_fornecedor) if s]
     if len(familias) == 1:  # "pregões e dispensas" juntos é comparação: sem filtro
         achada, nome = achadas[0]
         plural = achada.group().split()[0].endswith("s")

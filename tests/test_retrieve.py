@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+import config
 import src.retrieve as retrieve_module
 from src.pipeline import _chunk_from_retrieval
 from src.retrieve import (
@@ -1191,3 +1192,103 @@ def test_reranker_recebe_candidato_abaixo_do_corte_e_falha_volta_rrf(tmp_path):
         raise RuntimeError('endpoint indisponível')
     fallback = retrieve('ambulancia', index_dir=tmp_path, documents_file=documents, top_k=1, embed_fn=lambda _: [[1.0, 0.0]], reranker=quebrado)
     assert len(fallback) == 1 and fallback[0].chunk_id == 'c0'
+
+
+# --------------------------------------------------------------------------
+# Embeddings de consulta por provedor (config.embedding_endpoint)
+# --------------------------------------------------------------------------
+
+
+def test_embedding_endpoint_resolve_cada_provedor(monkeypatch):
+    monkeypatch.setattr(config, "OLLAMA_LOCAL_URL", "http://127.0.0.1:18321/v1")
+    monkeypatch.setattr(config, "OLLAMA_LOCAL_EMBEDDING_MODEL", "Qwen3-Embedding-0.6B.Q8_0")
+    assert config.embedding_endpoint("ollama")[0] == "http://127.0.0.1:18321/v1"
+    assert config.embedding_endpoint("ollama")[2] == "Qwen3-Embedding-0.6B.Q8_0"
+    # "shared" é apelido do ECOA, como já era em create_embeddings.
+    assert config.embedding_endpoint("shared") == config.embedding_endpoint("ecoa")
+
+
+def test_embedding_endpoint_padrao_continua_ecoa(monkeypatch):
+    """Sem configurar, nada muda: quem embeda a pergunta segue no ECOA."""
+    monkeypatch.setattr(config, "EMBEDDING_PROVIDER", "ecoa")
+    endpoint, _chave, modelo = config.embedding_endpoint()
+    assert endpoint == config.OLLAMA_URL and modelo == config.EMBEDDING_MODEL
+
+
+def test_embedding_endpoint_rejeita_provedor_desconhecido():
+    with pytest.raises(ValueError, match="EMBEDDING_PROVIDER"):
+        config.embedding_endpoint("inexistente")
+
+
+def _resposta_de_embedding(vetores):
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        model="fake", choices=[],
+        data=[SimpleNamespace(embedding=v, index=i) for i, v in enumerate(vetores)],
+        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=0, total_tokens=1),
+    )
+
+
+def test_embed_de_consulta_usa_o_provedor_configurado(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from src import retrieve
+
+    monkeypatch.setattr(config, "EMBEDDING_PROVIDER", "ollama")
+    monkeypatch.setattr(config, "OLLAMA_LOCAL_URL", "http://127.0.0.1:18321/v1")
+    monkeypatch.setattr(config, "OLLAMA_LOCAL_EMBEDDING_MODEL", "Qwen3-Embedding-0.6B.Q8_0")
+    monkeypatch.setattr(retrieve, "QUERY_CACHE_PATH", tmp_path / "query_cache.jsonl")
+
+    visto = {}
+
+    def fake_openai(**opcoes):
+        visto["base_url"] = opcoes["base_url"]
+
+        def create(**argumentos):
+            visto["model"] = argumentos["model"]
+            visto["input"] = argumentos["input"]
+            return _resposta_de_embedding([[1.0, 0.0]])
+
+        return SimpleNamespace(embeddings=SimpleNamespace(create=create))
+
+    import openai
+    monkeypatch.setattr(openai, "OpenAI", fake_openai)
+
+    vetores = retrieve._embed_fn_com_uso([])(["contratos de ambulância"])
+    assert vetores == [[1.0, 0.0]]
+    assert visto["base_url"] == "http://127.0.0.1:18321/v1"
+    assert visto["model"] == "Qwen3-Embedding-0.6B.Q8_0"
+    # A instrução Qwen é exclusiva da busca densa e vai junto do texto.
+    assert visto["input"] == [retrieve.embedding_query_text("contratos de ambulância")]
+
+
+def test_cache_de_query_separa_por_provedor(tmp_path, monkeypatch):
+    """Vetor do ECOA não pode valer para a pergunta quando se pede o local."""
+    from types import SimpleNamespace
+    from src import retrieve
+
+    monkeypatch.setattr(retrieve, "QUERY_CACHE_PATH", tmp_path / "query_cache.jsonl")
+    chamadas = []
+
+    def fake_openai(**opcoes):
+        def create(**argumentos):
+            chamadas.append((opcoes["base_url"], argumentos["model"]))
+            return _resposta_de_embedding([[1.0, 0.0]])
+        return SimpleNamespace(embeddings=SimpleNamespace(create=create))
+
+    import openai
+    monkeypatch.setattr(openai, "OpenAI", fake_openai)
+
+    monkeypatch.setattr(config, "EMBEDDING_PROVIDER", "ecoa")
+    retrieve._embed_fn_com_uso([])(["uma pergunta"])
+    monkeypatch.setattr(config, "EMBEDDING_PROVIDER", "ollama")
+    monkeypatch.setattr(config, "OLLAMA_LOCAL_URL", "http://127.0.0.1:18321/v1")
+    retrieve._embed_fn_com_uso([])(["uma pergunta"])
+
+    # Duas chamadas: o mesmo texto, num provedor diferente, não vem do cache.
+    assert len(chamadas) == 2
+    assert chamadas[0][0] != chamadas[1][0]
+
+    # E o mesmo provedor, mesma pergunta, aí sim vem do cache (uma chamada só).
+    chamadas.clear()
+    retrieve._embed_fn_com_uso([])(["uma pergunta"])
+    assert chamadas == []

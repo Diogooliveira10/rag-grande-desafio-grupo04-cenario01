@@ -25,15 +25,30 @@ GENERATION_MODEL = _env("GENERATION_MODEL", "qcwind/qwen3-8b-instruct-Q4-K-M")
 MODEL_MIN_INTERVAL_SECONDS = float(_env("MODEL_MIN_INTERVAL_SECONDS", "10"))
 OPENROUTER_API_KEY = _env("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-OPENROUTER_MODEL_FALLBACK = "openrouter/free"
+# Modelo preferido das chamadas OpenRouter (geração/reformulação). O padrão
+# preserva o comportamento anterior: sem configurar, só o "openrouter/free" é
+# usado. A demo define explicitamente um modelo nomeado (ex. MiMo-V2.6-Flash) e
+# mantém o free como reserva quando ele estiver indisponível.
+OPENROUTER_MODEL = _env("OPENROUTER_MODEL", "openrouter/free")
+# Reserva usada somente quando o modelo preferido está indisponível (rede,
+# timeout, 404/408/429/5xx). Erros de entrada não trocam de modelo.
+OPENROUTER_MODEL_FALLBACK = _env("OPENROUTER_MODEL_FALLBACK", "openrouter/free")
 OPENROUTER_MAX_TOKENS = int(_env("OPENROUTER_MAX_TOKENS", "4096"))
 LLM_PROVIDER_MODE = _env("LLM_PROVIDER_MODE", "auto")
 EMBEDDING_MODEL = _env("EMBEDDING_MODEL", "xagi/qwen3-embedding:0.6b-q4_k_m")
 # Orçamento do contexto da geração (src/generate.py). O Ollama da turma usa
 # janela de 2048 tokens e corta o INÍCIO do prompt que passar disso, levando
-# junto a instrução de responder em JSON. Os padrões deixam o prompt em torno
-# de 1.500 tokens, com folga para a resposta.
-GENERATION_CONTEXT_CHARS = int(_env("GENERATION_CONTEXT_CHARS", "3500"))
+# junto a instrução de responder em JSON; para essa janela curta, 3500 chars
+# deixam o prompt em torno de 1.500 tokens, com folga para a resposta. O
+# OpenRouter tem janela grande e o orçamento precisa comportar o top-k inteiro:
+# 3500 chars descartavam 7 dos 10 chunks recuperados e o modelo declarava
+# "ausente" o que estava no topo do ranking (defeito achado na P2.2).
+ORCAMENTO_CONTEXTO_JANELA_CURTA = 3500
+ORCAMENTO_CONTEXTO_OPENROUTER = 12000
+GENERATION_CONTEXT_CHARS = int(_env(
+    "GENERATION_CONTEXT_CHARS",
+    str(ORCAMENTO_CONTEXTO_OPENROUTER if LLM_PROVIDER_MODE == "openrouter"
+        else ORCAMENTO_CONTEXTO_JANELA_CURTA)))
 GENERATION_CHUNK_CHARS = int(_env("GENERATION_CHUNK_CHARS", "900"))
 # Tempo máximo (s) de cada chamada de geração e quantas vezes tentar de novo.
 # A geração normal leva de 20 a 90 s no servidor da turma.
@@ -62,6 +77,30 @@ OPENAI_EMBEDDING_MODEL = _env("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"
 CUSTOM_API_URL = _env("CUSTOM_API_URL", "")
 CUSTOM_API_KEY = _env("CUSTOM_API_KEY", "")
 CUSTOM_EMBEDDING_MODEL = _env("CUSTOM_EMBEDDING_MODEL", EMBEDDING_MODEL)
+
+# Provedor dos embeddings de CONSULTA (src/retrieve.py). Vale os mesmos nomes
+# de src.create_embeddings._provider_defaults: ecoa (padrão, endpoint
+# compartilhado da turma), ollama (llama.cpp/Ollama local), openai e custom.
+# Só muda quem embeda a PERGUNTA; os vetores dos documentos são os do índice e
+# não são reembedados por causa disso. A chave do cache de query inclui endpoint
+# e modelo, então vetores de um provedor não valem para o outro.
+EMBEDDING_PROVIDER = _env("EMBEDDING_PROVIDER", "ecoa").lower()
+
+
+def embedding_endpoint(provider: str | None = None) -> tuple[str, str, str]:
+    """``(base_url, api_key, model)`` do provedor pedido ou do configurado."""
+    nome = (provider or EMBEDDING_PROVIDER).lower()
+    if nome == "shared":
+        nome = "ecoa"
+    presets = {
+        "ecoa": (OLLAMA_URL, OLLAMA_API_KEY, EMBEDDING_MODEL),
+        "ollama": (OLLAMA_LOCAL_URL, OLLAMA_LOCAL_API_KEY, OLLAMA_LOCAL_EMBEDDING_MODEL),
+        "openai": (OPENAI_API_URL, OPENAI_API_KEY, OPENAI_EMBEDDING_MODEL),
+        "custom": (CUSTOM_API_URL, CUSTOM_API_KEY, CUSTOM_EMBEDDING_MODEL),
+    }
+    if nome not in presets:
+        raise ValueError("EMBEDDING_PROVIDER deve ser ecoa, ollama, openai ou custom")
+    return presets[nome]
 
 # Parâmetros de rede e armazenamento usados pela coleta e ingestão.
 REQUEST_TIMEOUT = float(_env("REQUEST_TIMEOUT", "30"))
