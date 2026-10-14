@@ -461,3 +461,41 @@ João Pedro Félix Reis e Eduarda não participaram deste encontro por questões
 ### Uso de assistentes de IA:
 
 - Utilizei assistentes de IA como apoio na inspeção do evaluator e dos testes, implementação da correção, execução dos testes e análise do relatório oficial.
+
+## Encontro 12 — 2026-10-09
+
+## **Entregamos hoje:**
+
+- Corrigimos a rastreabilidade do pipeline após o merge das alterações da Eduarda. Subimos backend e frontend em conjunto e validamos uma conversa real com três perguntas, confirmando o funcionamento das duas telas de trace, do `session_id` e dos mecanismos de proteção. Também corrigimos erros HTTP 500 em 70 dos 169 logs consultados, causados por valores de latência com casas decimais gravados em 21 e 23/09. Para registros anteriores a 05/10, ajustamos o trace para recuperar as evidências SQL e vetoriais, a confiança e a recusa a partir das etapas já registradas nos logs.
+
+- Corrigimos a extração de órgãos em `src/query_analysis.py` para compatibilizar expressões como “Prefeitura de Maricá” com a nomenclatura oficial do PNCP, utilizando o catálogo de órgãos do corpus. A normalização também contempla variações como “Prefeitura Municipal de X”, “Prefeitura da Cidade do X”, “Município de X” e “Prefeitura do Rio”. A consulta sobre Maricá passou a retornar apenas contratos do `MUNICIPIO DE MARICA`, sem ampliar a busca para outros órgãos, que antes resultava em 625 trechos. O resultado SQL permaneceu inalterado.
+
+- Corrigimos bugs na interpretação de consultas SQL, incluindo a identificação indevida de palavras como “somando”, “celebrado” e “principais” como termos de objeto contratado. Ajustamos o stemmer para reconhecer gerúndios, adicionamos stop words, melhoramos a extração de órgãos pelo catálogo do corpus e corrigimos a detecção de métricas para reconhecer “valor” como indicador de soma. Com isso, a pergunta “Qual o valor de todos os contratos de 2025?” passou a retornar o total determinístico de **R$ 2.546.786.958,21**, em vez de aproximadamente R$ 673 milhões calculados pelo LLM a partir de apenas três contratos recuperados pela busca vetorial.
+
+- Preparamos o frontend para novos clones do repositório, adicionando os scripts de diagnóstico `npm run check:backend` e `npm run check:query` e documentação de instalação. Também implementamos o envio de `session_id` e histórico nas consultas de continuação, permitindo reformular perguntas como “E em 2024?” com base no contexto anterior. Corrigimos ainda o botão “Consultar no NEXO”, na página de Contratações, para utilizar o identificador de controle PNCP, em vez de `numero_contrato`, que não existe no banco de dados.
+
+- Finalizamos o item 13, referente à proveniência da base sintética. Corrigimos as informações de fonte e licença em `corpus_manifest.yaml`, `CORPUS_INVENTORY.md` e `docs/emails_sinteticos.md`, registrando que a base foi gerada pelo tutor e integrada pelo João em 05/10, com referência aos commits. Corrigimos também as informações divergentes no `README.md`, na tabela de bases, no `ARQUITETURA.md` e no docstring de `src/synthetic_conversations.py`.
+
+- Validamos as alterações de proveniência com a suíte completa do backend, que passou com **1.261 testes aprovados**. As correções de rastreabilidade, consultas SQL e frontend também tiveram validações específicas: foram registrados **590 testes de backend e 36 de frontend aprovados**. As alterações correspondentes foram commitadas nas branches `origin/joao-reis` (backend) e `sevenRevy/frontendRAG/main` (frontend). A correção de proveniência foi enviada na branch `marco/proveniencia-base-sintetica`, no commit `1a05b92`.
+
+- Iniciamos a investigação de um problema na geração de respostas SQL sem resultados. Inspecionamos `tests/test_numerical_validation.py`, `tests/test_pipeline.py` e `tests/test_structured_query.py`, identificando os testes e auxiliares relevantes. Confirmamos que `src/structured_query.py` representa consultas vazias com o marcador textual `"(nenhum registro)"`, o que exige distinguir esse marcador de resultados reais antes de definir a resposta e o nível de confiança.
+
+## **Ficou pendente:**
+
+- Concluir a correção em `src/generate.py` para tratar explicitamente consultas SQL sem resultados, informando que nenhum registro foi encontrado na amostra analisada de 809 registros, sem afirmar que não existem contratações em todo o estado do Rio de Janeiro.
+
+- Garantir que respostas sem resultados tenham confiança limitada a `MEDIA`, sem alterar o comportamento determinístico atual quando houver registros.
+
+- Criar testes de regressão para a resposta vazia e para o limite de confiança. Depois, executar os testes focados, a suíte completa e `git diff --check`, registrando os resultados efetivamente obtidos.
+
+- Verificar se as alterações de backend e frontend estão integradas à branch de referência do projeto, distinguindo os commits enviados às branches de trabalho daqueles efetivamente incorporados ao `main`.
+
+## **Bloqueios em aberto:**
+
+- A correção do tratamento de consultas sem resultados depende da inspeção do fluxo de `_nivel_de_confianca` e `_resposta_sql_deterministica` em `src/generate.py`. A implementação e os testes de regressão ainda não foram concluídos.
+
+## **### Uso de assistentes de IA:**
+
+- Utilizei assistentes de IA como apoio à investigação de bugs, análise do pipeline SQL, normalização de órgãos, correção da rastreabilidade, preparação do frontend, documentação da proveniência da base sintética e inspeção dos testes.
+
+- As sugestões foram utilizadas como apoio à implementação e à validação. Os resultados foram conferidos por meio de conversas reais, consultas ao corpus, traces, testes automatizados e registros de commits. A tarefa de tratamento de consultas SQL sem resultados permanece em andamento.

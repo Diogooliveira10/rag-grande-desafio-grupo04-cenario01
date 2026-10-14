@@ -229,3 +229,77 @@ A correção genérica do matching e a representação explícita da ausência d
 - Utilizei assistentes de IA como apoio na inspeção do evaluator e dos testes, implementação da correção, execução dos testes e análise do relatório oficial.
 
 - Conferi os resultados com o Golden Set, o relatório gerado, os hashes dos artefatos e os testes locais. O Golden Set e o pipeline de RAG não foram alterados.
+
+## Encontro 12 — 2026-10-09
+
+### Relato individual — Diogo Oliveira
+
+Tarefa do dia:
+
+Investigar e preparar a correção do tratamento de consultas SQL sem resultados em `src/generate.py`, garantindo que o sistema informe corretamente a ausência de registros na amostra analisada de 809 registros, sem generalizar a conclusão para todas as contratações do estado do Rio de Janeiro, e que a confiança da resposta não seja classificada como `ALTA` nesse cenário.
+
+O que fiz até o momento:
+
+- Inspecionei o conteúdo de `tests/test_numerical_validation.py`, identificando a função auxiliar `sql_chunk()`, que permite construir chunks SQL para testar a geração determinística de respostas. O arquivo já contém testes para totais, estatísticas e situações em que as evidências SQL são insuficientes para dispensar a geração pelo modelo.
+
+- Analisei um trecho de `tests/test_pipeline.py` para compreender como os testes existentes verificam a confiança da resposta e a integração entre a consulta estruturada, a recuperação de informações e a geração.
+
+- Inspecionei um trecho de `tests/test_structured_query.py`, identificando os testes de falha na consulta ao banco, ausência do arquivo de documentos e integração entre resultados SQL e evidências recuperadas de outras bases.
+
+- Investiguei `src/structured_query.py` e confirmei que a função `\_chunks()` utiliza o marcador `"(nenhum registro)"` quando a consulta não retorna linhas. Esse detalhe exige cuidado, pois a lista `resultado_sql["linhas"]` pode conter esse marcador mesmo quando nenhum registro real foi encontrado.
+
+- Identifiquei que a implementação já possui um mecanismo para gerar respostas determinísticas a partir de resultados SQL. A próxima etapa é verificar como `src/generate.py` identifica esses resultados e calcula o nível de confiança, para implementar a correção sem comprometer os cenários que já funcionam.
+
+**Resultado:**
+
+A investigação inicial identificou os testes mais relevantes e esclareceu um detalhe importante da representação de consultas vazias: a ausência de resultados reais pode estar representada por um marcador textual, e não por uma lista vazia. A implementação da correção ainda está pendente, assim como a criação dos testes de regressão e a execução da suíte de testes.
+
+Próximas etapas:
+
+- Inspecionar as chamadas de `\_nivel_de_confianca` e `\_resposta_sql_deterministica` em `src/generate.py`.
+
+- Implementar o tratamento explícito de consultas sem resultados, mantendo as respostas determinísticas atuais quando houver registros.
+
+- Garantir que o sistema informe a ausência de registros na amostra analisada de 809 registros e limite a confiança a MEDIA nesse cenário.
+
+- Criar testes de regressão para a resposta sem resultados e para o limite de confiança.
+
+- Executar os testes focados, a suíte completa e `git diff --check`, registrando os resultados efetivamente obtidos.
+
+### Uso de assistentes de IA:
+
+- Utilizei assistentes de IA como apoio à análise dos testes existentes, à identificação dos arquivos relevantes e à compreensão do tratamento de resultados SQL vazios.
+
+- As sugestões foram utilizadas para orientar a investigação e definir os próximos passos da implementação. A correção ainda não foi aplicada nem validada por testes nesta etapa.
+
+## Encontro (FERIADO) — 2026-10-12
+
+### Relato individual — Diogo Oliveira
+
+**Tarefa do dia:**
+
+Implementar e validar a correção para respostas de consultas SQL sem registros reais, impedindo confiança `ALTA` e deixando claro que a ausência se refere à amostra analisada de 809 registros, sem concluir que não existam contratações correspondentes em todo o Estado.
+
+**O que fiz hoje:**
+
+- Analisei integralmente `_resposta_sql_deterministica()` e `_nivel_de_confianca()` em `src/generate.py`, suas chamadas e a propagação de `confidence_level` até a resposta final. Também examinei como `src/structured_query.py` constrói os chunks e registra `resultado_sql["linhas"]`.
+
+- Confirmei que uma consulta sem linhas pode ser representada pelo marcador `"(nenhum registro)"`. Ajustei a identificação de resultados reais para que o marcador e as mensagens de ausência não sejam tratados como registros.
+
+- Corrigi o caminho determinístico para responder consultas vazias com uma ressalva explícita: os filtros não encontraram registros nos dados disponíveis, que correspondem a uma amostra de 809 registros do corpus, e isso não comprova inexistência no universo completo do Estado. A fonte SQL é preservada.
+
+- Limitei a confiança `ALTA` a `MEDIA` quando a ausência de resultados está explicitamente identificada, preservando `BAIXA` e a conversão preexistente de valores numéricos e textuais. A mesma proteção foi aplicada ao caminho de geração por LLM que utiliza metadados SQL de ausência.
+
+- Preservei a resposta determinística para consultas com registros reais, incluindo os valores calculados, as fontes e a confiança alta. Também tratei partes SQL vazias de resultados divididos para que não sejam confundidas com uma consulta inteira sem resultados.
+
+- Adicionei testes de regressão em `tests/test_numerical_validation.py` para consultas vazias e com resultados, os dois cenários de perguntas sobre ambulâncias, conversão e limitação da confiança, e o caminho LLM com metadados de ausência.
+
+**Resultado:**
+
+A correção foi implementada e validada. Os testes focados de geração, consulta estruturada e pipeline passaram: **205 aprovados**. A suíte completa passou com **1.416 testes aprovados**. `git diff --check` também foi executado sem apontar problemas.
+
+### Uso de assistentes de IA:
+
+- Utilizei assistentes de IA como apoio à inspeção do fluxo de geração e dos testes, implementação da correção e criação dos testes de regressão.
+
+- Executei e conferi os testes locais focados e a suíte completa. Não foi necessária chamada real ao LLM nem dependência de banco remoto para validar os cenários unitários.
