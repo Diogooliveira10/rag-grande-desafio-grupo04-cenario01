@@ -108,13 +108,15 @@ def test_symbolic_only_is_zero_total_not_missing_statistics():
 
 
 def test_sql_sem_registros_responde_com_confianca_media():
-    # P2.1: "nenhum registro" é ausência na amostra, não um número calculado.
-    vazio = sql_chunk(1, ["Nenhum registro encontrado com os filtros aplicados e os termos de objeto: ambulancia."])
-    vazio.metadata.extras["sem_registros"] = True
+    vazio = sql_chunk(1, ["(nenhum registro)"])
     response = generate.gerar_resposta("Quantos contratos de ambulância em 2024?", [vazio],
         [Natureza.ESTRUTURADA], cliente=lambda _: pytest.fail("cálculo pronto não chama o LLM"))
-    assert response.confidence_level.value == "media"
-    assert "Nenhum registro encontrado" in response.answer
+    assert response.confidence_level.value in {"media", "baixa"}
+    assert "amostra de 809 registros" in response.answer
+    assert "não comprova" in response.answer
+    assert "universo completo do Estado" in response.answer
+    assert "(nenhum registro)" not in response.answer
+    assert response.sources_used[0].chunk_id == vazio.metadata.chunk_id
 
 
 def test_sql_com_registros_continua_com_confianca_alta():
@@ -122,3 +124,73 @@ def test_sql_com_registros_continua_com_confianca_alta():
         [sql_chunk(1, ["Geral: 13 registros; total R$ 8.266.940,37"])],
         [Natureza.ESTRUTURADA], cliente=lambda _: pytest.fail("cálculo pronto não chama o LLM"))
     assert response.confidence_level.value == "alta"
+    assert "13 registros" in response.answer
+    assert "R$ 8.266.940,37" in response.answer
+    assert response.sources_used[0].chunk_id.endswith(":1")
+
+
+def test_parte_sql_vazia_nao_rebaixa_outras_partes_com_resultados():
+    response = generate.gerar_resposta(
+        "Quantos contratos de 2025?",
+        [
+            sql_chunk(1, []),
+            sql_chunk(2, ["Geral: 13 registros; total R$ 8.266.940,37"]),
+        ],
+        [Natureza.ESTRUTURADA],
+        cliente=lambda _: pytest.fail("resultado SQL pronto não chama o LLM"),
+    )
+    assert response.confidence_level.value == "alta"
+    assert "R$ 8.266.940,37" in response.answer
+    assert "(nenhum registro)" not in response.answer
+
+
+@pytest.mark.parametrize(
+    "valor,sem_registros,esperado",
+    [
+        ("alta", False, "alta"),
+        ("alta", True, "media"),
+        (0.95, True, "media"),
+        ("media", True, "media"),
+        ("baixa", True, "baixa"),
+        ("invalida", True, "baixa"),
+    ],
+)
+def test_nivel_de_confianca_limita_ausencia_sem_alterar_conversoes(valor, sem_registros, esperado):
+    assert generate._nivel_de_confianca(valor, sem_registros=sem_registros).value == esperado
+
+
+@pytest.mark.parametrize(
+    "pergunta",
+    [
+        "Quais contratações de ambulâncias tipo D foram publicadas?",
+        "Quantos contratos de ambulância em 2024?",
+    ],
+)
+def test_perguntas_p21_sem_resultados_nao_recebem_confianca_alta(pergunta):
+    response = generate.gerar_resposta(
+        pergunta,
+        [sql_chunk(1, ["(nenhum registro)"])],
+        [Natureza.ESTRUTURADA],
+        cliente=lambda _: pytest.fail("consulta vazia determinística não chama o LLM"),
+    )
+    assert response.confidence_level.value in {"media", "baixa"}
+
+
+def test_resposta_llm_com_sql_vazio_tambem_limita_confianca():
+    chunk = sql_chunk(1, ["(nenhum registro)"])
+    chunk.metadata.extras["geracao_deterministica"] = False
+    response = generate.gerar_resposta(
+        "Quantos contratos de ambulância em 2024?",
+        [chunk],
+        [Natureza.ESTRUTURADA],
+        cliente=lambda _: json.dumps({
+            "answer": "Nenhum registro encontrado.",
+            "is_refusal": False,
+            "confidence_level": "alta",
+            "sources_used": ["E1"],
+        }),
+    )
+    assert response.confidence_level.value == "media"
+    assert "amostra de 809 registros" in response.answer
+    assert "não comprova" in response.answer
+    assert "(nenhum registro)" not in response.answer
