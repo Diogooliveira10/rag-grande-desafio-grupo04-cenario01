@@ -36,14 +36,17 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import os
 import re
 import statistics
 import sys
+import threading
 import time
 import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -82,8 +85,31 @@ class EvalCase:
     comportamento_esperado: Optional[str] = None
     deve_conter: list[str] = field(default_factory=list)
     nao_deve_conter: list[str] = field(default_factory=list)
+    # Cada grupo é uma alternativa: basta UM dos sinônimos aparecer. Não se deve
+    # exigir todas as frases equivalentes ao mesmo tempo.
+    deve_conter_qualquer: list[list[str]] = field(default_factory=list)
+    # Critérios numéricos tipados, com tolerância por caso e valor já canônico.
+    criterios_numericos: list["CriterioNumerico"] = field(default_factory=list)
     fontes_esperadas_prefixo: list[str] = field(default_factory=list)
     confianca_maxima: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class CriterioNumerico:
+    """Um número que a resposta precisa trazer, comparado em valor não em texto.
+
+    ``esperado`` é o valor canônico (``1196949440.00``), nunca a string
+    ``R$ 1.196.949.440,00``: a comparação normaliza monetário via
+    ``src.retrieve._parse_number``. A tolerância é por caso, absoluta e/ou
+    relativa, e vale a mais permissiva das duas.
+    """
+
+    campo: str
+    esperado: float
+    unidade: str = "BRL"
+    tolerancia: Optional[float] = None
+    tolerancia_relativa: float = 0.0
+    rotulo: Optional[str] = None
 
 
 def load_golden_set(path: Path) -> list[EvalCase]:
@@ -109,6 +135,17 @@ def load_golden_set(path: Path) -> list[EvalCase]:
                     comportamento_esperado=record.get("comportamento_esperado"),
                     deve_conter=list(record.get("deve_conter") or []),
                     nao_deve_conter=list(record.get("nao_deve_conter") or []),
+                    deve_conter_qualquer=[list(g) for g in (record.get("deve_conter_qualquer") or [])],
+                    criterios_numericos=[
+                        CriterioNumerico(
+                            campo=c["campo"], esperado=float(c["esperado"]),
+                            unidade=c.get("unidade", "BRL"),
+                            tolerancia=(None if c.get("tolerancia") is None else float(c["tolerancia"])),
+                            tolerancia_relativa=float(c.get("tolerancia_relativa", 0.0)),
+                            rotulo=c.get("rotulo"),
+                        )
+                        for c in (record.get("criterios_numericos") or [])
+                    ],
                     fontes_esperadas_prefixo=list(record.get("fontes_esperadas_prefixo") or []),
                     confianca_maxima=record.get("confianca_maxima"),
                 )
@@ -133,8 +170,181 @@ def _contains_content_term(term: str, text: str) -> bool:
     return term_norm in text_norm
 
 
+# Palavras que negam o que vem depois: "não é tecnologia da informação" não
+# afirma "tecnologia da informação". Mesma ideia da janela de negação de
+# src/query_analysis, aqui aplicada à RESPOSTA e não à pergunta.
+_NEGACAO_RE = re.compile(r"\b(?:n[aã]o|nunca|jamais|nem|diferente|distinto|improcedente)\b")
+# Negadores do lado do TERMO: termos como "não há dados suficientes" ou
+# "modalidade não informada" afirmam justamente uma negação.
+_NEGACAO_TERMO_RE = re.compile(
+    r"\b(?:n[aã]o|nunca|jamais|nem|sem|nenhum|nenhuma|nada)\b"
+)
+# "não se trata de", "não significa", "não corresponde a": a negação pode estar
+# mais longe quando vem com verbo de ligação.
+_NEGACAO_LONGA_RE = re.compile(
+    r"\bn[aã]o\s+(?:\w+\s+){0,2}(?:e|se\s+trata|significa|quer\s+dizer|corresponde|refere|confundir)\b",
+    re.IGNORECASE,
+)
+_JANELA_DE_NEGACAO = 6  # palavras antes do termo
+
+
+def _termo_afirmado(term: str, text: str) -> bool:
+    """True quando ``term`` aparece no texto **sem** negação à esquerda.
+
+    Serve ao ``nao_deve_conter``: pune quem afirma "é tecnologia da informação",
+    mas não quem esclarece "não é tecnologia da informação". Sem isso, o gabarito
+    puniria a retificação correta, que é justamente o que queremos ver.
+
+    Termos que já afirmam uma negação ("não há dados suficientes", "modalidade
+    não consta") não sofrem o veto externo: o fato que eles afirmam é a própria
+    ausência, e uma negação vizinha ("a modalidade não consta ..., não há dados
+    suficientes") não cancela o reconhecimento da lacuna — reprovar isso puniria
+    a resposta certa (defeito #17).
+    """
+    term_norm = _normalizar_texto(term)
+    text_norm = _normalizar_texto(text)
+    if not term_norm:
+        return False
+    nega_o_fato = bool(_NEGACAO_TERMO_RE.search(term_norm))
+    if re.fullmatch(r"[a-z0-9]+", term_norm):
+        # O plural simples em português não pode reprovar a resposta certa:
+        # "microempresa" precisa casar "microempresas". Siglas continuam exatas
+        # ("TI" não vira "tis") e termos curtos também, para não casar ruído.
+        sufixo = r"s?" if len(term_norm) >= 4 and not term.isupper() else ""
+        padrao = rf"(?<!\w){re.escape(term_norm)}{sufixo}(?!\w)"
+    else:
+        padrao = re.escape(term_norm)
+    for achado in re.finditer(padrao, text_norm):
+        if nega_o_fato:
+            return True
+        antes = text_norm[:achado.start()]
+        # A negação não atravessa fronteira de frase. Sem isso, "Campos ausentes
+        # não são zero. Nenhum fornecedor tem 3" seria lido como negado — o "não"
+        # pertence à frase anterior. Reproduzido no teste de regressão.
+        fim_de_frase = max(antes.rfind("."), antes.rfind(";"), antes.rfind("?"),
+                           antes.rfind("!"), antes.rfind("\n"))
+        if fim_de_frase >= 0:
+            antes = antes[fim_de_frase + 1:]
+        janela = " ".join(antes.split()[-_JANELA_DE_NEGACAO:])
+        if not janela:
+            return True
+        if _NEGACAO_LONGA_RE.search(janela) or _NEGACAO_RE.search(janela):
+            continue
+        return True
+    return False
+
+
+# --------------------------------------------------------------------------
+# Afirmação com cascata: modelo quando há margem, lexical quando não.
+#
+# O Laya (checkpoint multilíngue) responde "o texto afirma X?" com probabilidade.
+# Ele é OPCIONAL e só entra com EVAL_LAYA=on: carregar o modelo custa ~45 s e
+# não pode pesar a suíte de testes nem tornar o eval dependente dele.
+#
+# A cascata cobre o que cada caminho faz de melhor: o modelo resolve paráfrase
+# ("cessão de know-how" sem a expressão literal) e o lexical resolve negação de
+# forma auditável e determinística. Margem fraca não decide sozinha.
+# --------------------------------------------------------------------------
+
+LIMIAR_MARGEM = float(os.getenv("EVAL_LAYA_LIMIAR", "0.25"))
+_EVAL_LAYA = os.getenv("EVAL_LAYA", "off").lower()
+_agente_laya = None
+_trava_laya = threading.Lock()
+_QUESTAO_AFIRMA = {
+    "afirma": {
+        "type": "choice",
+        # Pergunta de percepção ("o que o texto diz?"), não de ação.
+        "instructions": "O texto afirma que o critério a seguir é verdadeiro?",
+        "criteria": {"A": "sim, o texto afirma isso", "B": "não, o texto não afirma isso"},
+    }
+}
+
+
+def _carregar_laya():
+    """Carrega o checkpoint multilíngue uma vez; None quando indisponível."""
+    global _agente_laya
+    if _EVAL_LAYA not in {"on", "auto"}:
+        return None
+    if _agente_laya is not None:
+        return _agente_laya
+    with _trava_laya:
+        if _agente_laya is not None:
+            return _agente_laya
+        try:
+            import laya
+            agente = laya.load("convaiinnovations/laya-multilingual")
+            agente.predict("aquecimento", _QUESTAO_AFIRMA, lang="pt")  # warm-up
+            _agente_laya = agente
+        except Exception:
+            _agente_laya = False  # não tenta de novo; segue só lexical
+            return None
+    return _agente_laya or None
+
+
+def _probabilidade_de_afirmacao(term: str, text: str) -> Optional[float]:
+    """P(texto afirma ``term``) pelo Laya, ou None se ele não estiver ativo."""
+    agente = _carregar_laya()
+    if agente is None:
+        return None
+    try:
+        with _trava_laya:
+            res = agente.predict({"texto": text, "criterio": term}, _QUESTAO_AFIRMA, lang="pt")
+        return float(res["answers"]["afirma"]["probabilities"].get("A", 0.0))
+    except Exception:
+        return None
+
+
+def _afirmacao(term: str, text: str) -> dict[str, Any]:
+    """Se a resposta afirma ``term`` — ``None`` quando não dá para decidir.
+
+    Cascata: com margem suficiente o modelo decide (resolve paráfrase); sem
+    margem o lexical decide quando **confirma** (auditável, consciente de
+    negação). Modelo incerto + lexical negado é caso indecidível aqui:
+    paráfrase e negação difícil têm o mesmo lexical e precisam de resultados
+    opostos, então não se escolhe — vai para revisão em vez de reprovar.
+    """
+    prob = _probabilidade_de_afirmacao(term, text)
+    if prob is None:
+        return {"afirmado": _termo_afirmado(term, text), "origem": "lexical", "probabilidade": None}
+    if abs(prob - 0.5) >= LIMIAR_MARGEM:
+        return {"afirmado": prob >= 0.5, "origem": "laya", "probabilidade": prob}
+    if _termo_afirmado(term, text):
+        return {"afirmado": True, "origem": "laya+lexical", "probabilidade": prob}
+    return {"afirmado": None, "origem": "incerto", "probabilidade": prob}
+
+
 def _has_content_criteria(case: EvalCase) -> bool:
-    return bool(case.deve_conter or case.nao_deve_conter or case.confianca_maxima is not None)
+    return bool(case.deve_conter or case.nao_deve_conter or case.deve_conter_qualquer
+                or case.criterios_numericos or case.confianca_maxima is not None)
+
+
+# Números como aparecem no texto: monetário com R$, ou numeral com separadores.
+_NUMERO_NO_TEXTO_RE = re.compile(r"R\$\s*[+-]?[\d.,]+|[+-]?\d[\d.,]*")
+
+
+def _numeros_do_texto(texto: str) -> list[Decimal]:
+    """Números do texto já normalizados; id/data/formato inválido não vira número."""
+    from src.retrieve import _parse_number
+
+    valores: list[Decimal] = []
+    for trecho in _NUMERO_NO_TEXTO_RE.findall(texto):
+        # O ponto final da frase entra no casamento ([\d.,] é guloso); sem
+        # tirá-lo, "R$ 500,00." não viraria número nenhum.
+        numero = _parse_number(trecho.rstrip(".,"))
+        if numero is not None:
+            valores.append(numero)
+    return valores
+
+
+def _numero_confere(criterio: CriterioNumerico, valores: list[Decimal]) -> bool:
+    """Algum número da resposta bate com o esperado dentro da tolerância do caso."""
+    esperado = Decimal(str(criterio.esperado))
+    tolerancia = Decimal("0")
+    if criterio.tolerancia is not None:
+        tolerancia = max(tolerancia, Decimal(str(criterio.tolerancia)))
+    if criterio.tolerancia_relativa:
+        tolerancia = max(tolerancia, abs(esperado) * Decimal(str(criterio.tolerancia_relativa)))
+    return any(abs(valor - esperado) <= tolerancia for valor in valores)
 
 
 def source_base_matches(expected_prefix: str, actual_base_id: str) -> bool:
@@ -153,12 +363,33 @@ def _content_ok(case: EvalCase, response: dict[str, Any]) -> Optional[bool]:
     answer = str(response.get("answer") or "")
 
     for item in case.deve_conter:
-        if not _contains_content_term(item, answer):
+        # Cascata: paráfrase o modelo resolve, negação o lexical segura, e o
+        # indecidível não reprova a resposta certa — vira "não avaliado".
+        afirmado = _afirmacao(item, answer)["afirmado"]
+        if afirmado is None:
+            return None
+        if not afirmado:
             return False
 
+    # Alternativas equivalentes: basta um sinônimo por grupo.
+    for grupo in case.deve_conter_qualquer:
+        votos = [_afirmacao(item, answer)["afirmado"] for item in grupo]
+        if any(v is True for v in votos):
+            continue
+        if all(v is None for v in votos):
+            return None
+        return False
+
     for item in case.nao_deve_conter:
-        if _contains_content_term(item, answer):
+        # Só a AFIRMAÇÃO é punida; "não é X" é retificação correta e passa.
+        if _afirmacao(item, answer)["afirmado"] is True:
             return False
+
+    if case.criterios_numericos:
+        valores = _numeros_do_texto(answer)
+        for criterio in case.criterios_numericos:
+            if not _numero_confere(criterio, valores):
+                return False
 
     if case.confianca_maxima is not None:
         ordem = {"baixa": 0, "media": 1, "alta": 2, "recusado": 0}
@@ -244,11 +475,17 @@ def evaluate_case(case: EvalCase, response: dict[str, Any]) -> dict[str, Any]:
     content_validation = _content_validation_status(case, response, content_ok)
     expected_source_ok = _expected_source_ok(case, response)
     escopo_avaliacao = "resposta_completa" if "answer" in response else "roteamento"
+    # Um caso de falha esperada tem como resposta correta "não dá para comparar":
+    # o que se avalia é o conteúdo (admitir a insuficiência), não a rota. Exigir
+    # as bases puniria a resposta honesta, que é justamente a esperada.
+    rota_requerida = not case.e_pergunta_de_falha_esperada
     if escopo_avaliacao == "roteamento":
+        # Sem conteúdo não há o que avaliar como "admitir insuficiência": a rota
+        # continua obrigatória, senão o caso passaria sem demonstrar nada.
         acertou = rota_ok and refusal_ok
     else:
         acertou = (
-            rota_ok
+            (rota_ok or not rota_requerida)
             and refusal_ok
             and content_ok is True
             and citacao_ok is True
@@ -277,6 +514,8 @@ def evaluate_case(case: EvalCase, response: dict[str, Any]) -> dict[str, Any]:
         "refusal_reason_esperado": case.refusal_reason_esperado,
         "refusal_reason_obtido": refusal_reason_obtido,
         "rota_ok": rota_ok,
+        "rota_requerida": rota_requerida,
+        "e_pergunta_de_falha_esperada": case.e_pergunta_de_falha_esperada,
         "refusal_ok": refusal_ok,
         "erro_provedor": erro_provedor,
         "content_ok": content_ok,

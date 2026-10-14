@@ -13,7 +13,7 @@ Os tipos correspondentes do frontend ficam em `src/types/api.ts` no repositório
 |---|---|---|---|
 | GET | `/health` | — | `{ "status": "ok" }` |
 | POST | `/api/v1/query` | `{ "query": "...", "top_k": 5, "session_id": "s_...", "historico": [{ "pergunta": "...", "resposta": "..." }] }` | `QueryResponse` |
-| GET | `/api/v1/history` (`X-Session-Id` ou `X-API-Key`) | `limit` (1–100), `session_id` | `HistoricoItem[]` |
+| GET | `/api/v1/history` (X-Session-Id do dono ou X-API-Key) | `limit` (1–100), `session_id` (filtro do admin) | `HistoricoItem[]` |
 | GET | `/api/v1/trace/{query_id}` (sessão ou chave) | — | `TraceResponse` |
 | GET | `/api/v1/sessions/{session_id}/trace` (sessão ou chave) | — | `SessaoTraceResponse` |
 | POST | `/api/v1/feedback` | `query_id`, `avaliacao`, `comentario` | `{ "status": "recebido" }` |
@@ -154,9 +154,20 @@ reenviando as últimas trocas no campo opcional `historico` de
 - Os dois respondem `404` quando o id não está no log. Dados pessoais (CPF,
   telefone, e-mail) chegam mascarados, como no log.
 
-## Proteção do histórico e do trace
+## Dois personas: admin e novo usuário (histórico) e proteção do trace
 
-Histórico e trace têm os mesmos dois tipos de acesso:
+O acesso ao histórico usa a mesma autorização do trace, com dois personas:
+
+- **Dono da conversa** ("novo usuário"): envia o header `X-Session-Id` com o
+  `session_id` que recebeu no `QueryResponse`. `GET /api/v1/history` devolve
+  **só as consultas da própria conversa**. O `session_id` de query param não
+  autentica ninguém: para o novo usuário, o escopo vem do header.
+- **Quem opera a demo** ("admin"): envia `X-API-Key` igual à `RAG_API_KEY` do
+  `.env` do servidor. Vê o histórico inteiro e pode filtrar por `session_id`
+  (query param). A chave nunca vai no código do site: quem tiver o JavaScript
+  teria a chave.
+
+O trace mantém os mesmos dois tipos de acesso:
 
 - **Dono da conversa** (o site público): envia o header `X-Session-Id` com o
   `session_id` que recebeu no `QueryResponse`. Vê o histórico, o trace das
@@ -164,8 +175,7 @@ Histórico e trace têm os mesmos dois tipos de acesso:
   pessoas. No histórico, o parâmetro `session_id` é só filtro: sem chave, ele
   precisa ser igual ao `X-Session-Id` (ou ficar vazio).
 - **Quem opera a demo**: envia `X-API-Key` igual a `RAG_API_KEY` do `.env` do
-  servidor. Vê o histórico geral e o trace de qualquer conversa. A chave nunca
-  vai no código do site: quem tiver o JavaScript teria a chave.
+  servidor. Vê o trace de qualquer conversa.
 
 `HISTORY_PUBLIC=true` no `.env` do servidor abre o histórico geral sem chave,
 para uma demo que precise mostrá-lo. Ele lista as consultas de todos os
@@ -174,11 +184,13 @@ substitui controle de acesso. Os traces continuam protegidos mesmo assim.
 
 Respostas:
 
+- Histórico sem `X-Session-Id` e sem chave válida: `401`, sem revelar o que
+  existe no log (mesma mensagem do trace).
 - Trace sem `X-Session-Id` da conversa e sem chave válida: `401`, mesmo quando
   o id não existe (não revela quais perguntas estão no log). Com acesso e id
   inexistente: `404`.
-- Histórico sem `X-Session-Id` e sem chave válida, ou com `session_id` de outra
-  conversa: `401` (exceto com `HISTORY_PUBLIC=true`).
+- Histórico sem `X-Session-Id` e sem chave válida: `401` (exceto com
+  `HISTORY_PUBLIC=true`, que abre o histórico geral para uma demo).
 - `POST /api/v1/query` e `POST /api/v1/feedback` não pedem nada.
 - O CORS libera os headers `X-API-Key` e `X-Session-Id`.
 

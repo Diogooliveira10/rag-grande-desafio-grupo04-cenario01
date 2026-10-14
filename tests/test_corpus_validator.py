@@ -141,3 +141,45 @@ def test_manifesto_e_inventario_v5_do_repositorio_continuam_validos():
 
     assert validate_manifest_contract(manifesto).ok
     assert validate_inventory_contract(manifesto, inventario).ok
+
+
+def test_curadoria_v7_censo_valida_sem_volumes_fixos():
+    '''Censo v7: volumes podem ser ausentes e o limite por órgão é nulo.'''
+    manifesto = _manifesto_oficial()
+    for base in manifesto["bases"]:
+        if base["base_id"] == "contratos_estruturado":
+            base["volume_alvo"] = None
+    manifesto["curadoria_v7"] = {
+        "selecao": "censo_contratos_e_publicacoes_2025_rj",
+        "limite_por_orgao_por_base": None,
+        "alvo_arquivos_total": None,
+    }
+    result = validate_manifest_contract(manifesto)
+    assert result.ok
+
+
+def test_curadoria_v7_rejeita_limite_invalido():
+    manifesto = _manifesto_oficial()
+    manifesto["curadoria_v7"] = {"selecao": "censo", "limite_por_orgao_por_base": 0}
+    result = validate_manifest_contract(manifesto)
+    assert not result.ok
+    assert any("curadoria_v7: limite" in error for error in result.errors)
+
+
+def test_curadoria_v7_rejeita_selecao_ausente():
+    manifesto = _manifesto_oficial()
+    manifesto["curadoria_v7"] = {}
+    result = validate_manifest_contract(manifesto)
+    assert not result.ok
+    assert any("curadoria_v7: selecao ausente" in error for error in result.errors)
+
+
+def test_manifesto_v6_arquivado_continua_valido():
+    '''Regressão: o contrato v6 segue íntegro no manifesto arquivado.'''
+    manifesto = load_manifest(ROOT / "archive" / "corpus_manifest_v6.yaml")
+    assert validate_manifest_contract(manifesto).ok
+
+
+def test_manifesto_atual_e_valido_com_curadoria_v7():
+    manifesto = load_manifest(ROOT / "corpus_manifest.yaml")
+    assert validate_manifest_contract(manifesto).ok

@@ -25,7 +25,7 @@ import statistics
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Optional, Sequence
 
 import config
 from src import structured_db
@@ -87,7 +87,11 @@ _RE_AGRUPAMENTO = re.compile(
     r"\bmais frequen|\bmais usad|\bmais comu|\bpor modalidades?\b|\bpor orgaos?\b|\bpor municipios?\b|\bpor esferas?\b"
 )
 _RE_COMPARACAO = re.compile(r"\bmais car[oa]s?\b|\bmais barat|\bpag(?:ou|aram|am|a) mais\b|\bcompar")
-_RE_ESTATISTICA = re.compile(r"\bmedia\b|\bmedio\b|\bmediana\b|\btotal\b|\bsoma\b|\bquant[oa]s?\b|\bquantidade\b|\bvalor\b")
+# Sem "\bvalor\b": pedir para *informar* um valor ("informe o valor contratado")
+# é listar, não calcular. Só conta como cálculo a palavra que declara a conta
+# (média, mediana, total, soma, quanto, quantidade). Métrica sem a pergunta
+# pedir é extrapolação — ver P4 do plano.
+_RE_ESTATISTICA = re.compile(r"\bmedia\b|\bmedio\b|\bmediana\b|\btotal\b|\bsoma\b|\bquant[oa]s?\b|\bquantidade\b|\bmaior(es)?\b|\bmenor(es)?\b")
 _RE_CONTAGEM_CONTRATOS = re.compile(
     r"\b(?:(?P<numero>\d+|um|dois|tres|quatro|cinco)\s+ou\s+mais|"
     r"(?:pelo\s+menos|no\s+minimo)\s+(?P<minimo>\d+|um|dois|tres|quatro|cinco))"
@@ -144,6 +148,9 @@ _PALAVRAS_GENERICAS = frozenset(
     informacao informacoes detalhe detalhes firmaram firmou celebraram disponiveis disponivel
     comparando publicando assinando somando informando mostrando listando buscando calculando
     continuacao anterior pergunta principal principais
+    evidencia evidencias insuficiencia suficiencia reconheca reconhecido reconhecimento
+    suficiente suficientes tecnica tecnicas equivalente equivalentes tecnicamente
+    disponivel disponiveis apenas comprovem comprovado comprovada
     assinou assinaram contratou contrataram comprou compraram gastou gastaram
     seguem segue seguindo base baseado baseada baseados baseadas fundamentado fundamentada fundamentados
     fundamentadas fundamento amparo amparado amparada amparados amparadas conforme lei leis decreto decretos
@@ -338,8 +345,22 @@ def _singular(token: str) -> str:
 _RADICAIS_GENERICOS = ("compar", "publica", "assina", "vigen", "contrat", "registr", "realiz", "celebr", "firma")
 
 
+_TIPO_CODIGO_INVALIDO = frozenset("de do da dos das em no na um uma ou e os as ao aos por com".split())
+
+
 def _termos_do_objeto(texto: str) -> tuple[str, ...]:
     termos: list[str] = []
+    # "tipo D", "tipo B", "tipo 3": a especificação faz parte do objeto.
+    # Sem isso, "ambulancias tipo d" perde o "d" (1 caractere) e casa qualquer
+    # ambulância. "Qual tipo de contrato" não gera termo: "de" é palavra.
+    codigos = re.findall(r"\btipo\s+([a-z0-9]{1,2})\b", texto)
+    texto = re.sub(r"\btipo\s+[a-z0-9]{1,2}\b", " ", texto)
+    for codigo in codigos:
+        if codigo in _TIPO_CODIGO_INVALIDO:
+            continue
+        termo = f"tipo {codigo}"
+        if termo not in termos:
+            termos.append(termo)
     for token in re.findall(r"[a-z]{4,}", texto):
         if (token in _PALAVRAS_GENERICAS or token.rstrip("s") in _PALAVRAS_GENERICAS
                 or token in _NUMEROS_POR_EXTENSO or token.startswith(_RADICAIS_GENERICOS)):
@@ -991,7 +1012,11 @@ def _cabecalho(consulta: Consulta, total_tabela: int, termos: tuple[str, ...], j
             f"órgão em {', '.join(consulta.orgaos[:5])}{'…' if len(consulta.orgaos) > 5 else ''}" if consulta.orgaos
             else f"órgão {' '.join(consulta.orgao_termos)} (nenhum órgão do corpus casa com esse nome)"
         )
-    filtros.extend(f"{k}={v}" for k, v in consulta.filtros_analiticos)
+    filtros.extend(
+        f"{k}={v} (dígito verificador inválido: confira o número)"
+        if k == "cnpj" and not structured_db.cnpj_valido(str(v)) else f"{k}={v}"
+        for k, v in consulta.filtros_analiticos
+    )
     if consulta.referencia_temporal:
         filtros.append(f"referência={consulta.referencia_temporal}")
     if consulta.campo:
@@ -1073,8 +1098,13 @@ def _resolver_valores(consulta: Consulta, banco: Banco) -> Consulta:
     return replace(consulta, **mudancas) if mudancas else consulta
 
 
-def executar_consulta(consulta: Consulta, banco: Banco) -> tuple[str, str, list[str]]:
+def executar_consulta(consulta: Consulta, banco: Banco, recorte: Optional[dict] = None) -> tuple[str, str, list[str]]:
     """Roda a consulta e devolve (sql, cabeçalho, linhas de resultado).
+
+    Com ``recorte`` (dict vazio), preenche as condições da evidência —
+    snapshot, denominador, correspondências, execução completa/parcial,
+    filtros relaxados, completude por campo e tipo de resultado — para quem
+    montar a resposta não precisar deduzir nada lendo o texto gerado.
 
     Termos do objeto são tentados todos com E. Se nada casa, ficam só os termos
     que casam com algum registro (com os demais filtros), de novo com E; se
@@ -1098,11 +1128,19 @@ def executar_consulta(consulta: Consulta, banco: Banco) -> tuple[str, str, list[
             tentativas.append((uteis, "AND"))
         if len(uteis) > 1:
             tentativas.append((uteis, "OR"))
-    for termos, juncao in tentativas:
+    for indice, (termos, juncao) in enumerate(tentativas):
         if not termos or contagem(termos, juncao):
             sql, linhas = _executar(banco, consulta, termos, juncao)
+            if recorte is not None:
+                _preencher_recorte(recorte, consulta, banco, total, contagem(termos, juncao),
+                                   termos, juncao, relaxados=_relaxamentos(indice, consulta, termos, juncao))
             return sql, _cabecalho(consulta, total, termos, juncao), linhas
     where, _ = _where(consulta, consulta.termos_objeto, "OR")
+    if recorte is not None:
+        # Nada casou, mesmo com os termos relaxados: é uma conclusão exaustiva
+        # sobre o recorte, não uma falha de execução.
+        _preencher_recorte(recorte, consulta, banco, total, 0,
+                           consulta.termos_objeto, "OR", relaxados=_relaxamentos(len(tentativas), consulta, consulta.termos_objeto, "OR"))
     return (
         f"SELECT 1 FROM {consulta.tabela}{where}",
         _cabecalho(consulta, total, consulta.termos_objeto, "OR"),
@@ -1110,7 +1148,112 @@ def executar_consulta(consulta: Consulta, banco: Banco) -> tuple[str, str, list[
     )
 
 
-def _chunks(consulta: Consulta, sql: str, cabecalho: str, linhas: list[str], banco: Banco) -> list[Chunk]:
+# Campos numéricos: ausente é NULL. Nos de texto, string vazia também é ausente.
+_CAMPOS_NUMERICOS = frozenset({
+    "valor", "valor_estimado", "valor_homologado", "valor_contratado", "valor_total", "quantidade_itens",
+})
+
+
+def _relaxamentos(tentativa: int, consulta: Consulta, termos: tuple[str, ...], juncao: str) -> list[str]:
+    """O que foi afrouxado para chegar a este resultado; vazio = execução completa."""
+    if tentativa <= 0:
+        return []
+    motivos = []
+    if termos != consulta.termos_objeto:
+        fora = [t for t in consulta.termos_objeto if t not in termos]
+        if fora:
+            motivos.append("termos de objeto ignorados: " + ", ".join(fora))
+    if juncao != "AND" and len(termos) > 1:
+        motivos.append("termos de objeto unidos com OU em vez de E")
+    return motivos or ["termos de objeto relaxados"]
+
+
+def _snapshot_do_banco(banco: Banco) -> tuple[Optional[str], Optional[str]]:
+    """(versão do esquema, hash da origem) registrados na tabela ``meta``."""
+    try:
+        linhas = banco.consultar("SELECT chave, valor FROM meta")
+    except Exception:
+        return None, None
+    valores = {str(l["chave"]): l["valor"] for l in linhas}
+    return valores.get("schema_version"), valores.get("source_sha256")
+
+
+def _completude(banco: Banco, tabela: str, where: str, parametros: list[Any],
+                campos: Sequence[str]) -> list[dict[str, Any]]:
+    """Conhecidos/desconhecidos por campo, sobre o recorte já filtrado."""
+    saida: list[dict[str, Any]] = []
+    for campo in campos:
+        vazio = f"{campo} IS NULL" if campo in _CAMPOS_NUMERICOS else f"({campo} IS NULL OR {campo} = '')"
+        linha = banco.consultar(
+            f"SELECT COUNT(*) AS n, SUM(CASE WHEN {vazio} THEN 1 ELSE 0 END) AS d FROM {tabela}{where}",
+            parametros)[0]
+        total_campo = int(linha["n"] or 0)
+        desconhecidos = int(linha["d"] or 0)
+        saida.append({"campo": campo, "conhecidos": total_campo - desconhecidos, "desconhecidos": desconhecidos})
+    return saida
+
+
+def _preencher_recorte(recorte: dict[str, Any], consulta: Consulta, banco: Banco, total: int,
+                       correspondentes: int, termos: tuple[str, ...], juncao: str,
+                       relaxados: list[str]) -> None:
+    """Preenche o recorte em ``recorte``, validando campo contra as colunas reais."""
+    from src.schema import CampoCompletude, RecorteConsulta, TipoResultado
+
+    where, parametros = _where(consulta, termos, juncao)
+    colunas = set(structured_db._TABELAS[consulta.tabela])
+    campos = [c for c in dict(consulta.filtros_analiticos) if c in colunas]
+    # O campo de valor é o que a conta realmente usa (_coluna_valor), não só o
+    # pedido explicitamente: senão a completude fica vazia em conta padrão.
+    valor_col = _coluna_valor(consulta)
+    if valor_col in colunas and valor_col not in campos:
+        campos.append(valor_col)
+    completude = _completude(banco, consulta.tabela, where, parametros, campos)
+
+    # Tipo de resultado: zero registros, soma zero e cálculo indisponível são
+    # coisas diferentes e não podem virar o mesmo texto.
+    tipo = TipoResultado.REGISTROS
+    motivo: Optional[str] = None
+    disponivel = True
+    if not correspondentes:
+        tipo = TipoResultado.SEM_CORRESPONDENCIA
+    elif consulta.tipo in {"estatistica", "agrupamento", "evolucao"} and consulta.metrica in {
+        "soma", "media", "mediana", "minimo", "maximo",
+    }:
+        valor_col = _coluna_valor(consulta) if consulta.tabela == "contratacoes" else "valor_total"
+        if valor_col not in colunas:
+            disponivel, tipo = False, TipoResultado.CALCULO_INDISPONIVEL
+            motivo = f"coluna de valor {valor_col} fora do esquema"
+        else:
+            linha = banco.consultar(
+                f"SELECT COUNT({valor_col}) AS conhecidos FROM {consulta.tabela}{where}", parametros)[0]
+            if not int(linha["conhecidos"] or 0):
+                disponivel, tipo = False, TipoResultado.CALCULO_INDISPONIVEL
+                motivo = "nenhum registro do recorte tem o campo de valor preenchido"
+            elif consulta.metrica == "soma":
+                soma = banco.consultar(f"SELECT SUM({valor_col}) AS s FROM {consulta.tabela}{where}", parametros)[0]["s"]
+                if float(soma or 0) == 0.0:
+                    tipo = TipoResultado.SOMA_ZERO
+
+    versao, hash_origem = _snapshot_do_banco(banco)
+    modelo = RecorteConsulta(
+        tabela=consulta.tabela,
+        snapshot_versao=versao,
+        snapshot_hash=hash_origem,
+        registros_no_snapshot=int(total),
+        registros_correspondentes=int(correspondentes),
+        execucao="parcial" if relaxados else "completa",
+        filtros_relaxados=list(relaxados),
+        calculo=consulta.tipo,
+        calculo_disponivel=disponivel,
+        calculo_motivo=motivo,
+        tipo_resultado=tipo,
+        completude=[CampoCompletude(**c) for c in completude],
+    )
+    recorte.update(modelo.model_dump(mode="json"))
+
+
+def _chunks(consulta: Consulta, sql: str, cabecalho: str, linhas: list[str], banco: Banco,
+            recorte: Optional[dict[str, Any]] = None) -> list[Chunk]:
     """Resultado em um ou mais chunks que cabem em ``GENERATION_CHUNK_CHARS``
     (a geração corta o que passar disso); o cabeçalho se repete em cada parte."""
     limite = max(300, config.GENERATION_CHUNK_CHARS - 40)
@@ -1140,7 +1283,8 @@ def _chunks(consulta: Consulta, sql: str, cabecalho: str, linhas: list[str], ban
                         "resultado_sql": {"cabecalho": cabecalho, "linhas": parte,
                             "politica": "Totais somam os valores registrados, inclusive zeros/centavos; "
                             "média, mediana, mínimo e máximo consideram valores >= R$ 1,00. "
-                            "Campos ausentes não são zero. Esta amostra não é um censo do RJ."},
+                            "Campos ausentes não são zero. Esta amostra não é um censo do RJ.",
+                            "recorte": recorte},
                         "geracao_deterministica": consulta.tipo in {"estatistica", "ranking", "agrupamento", "evolucao"}
                         and not consulta.norma_citada,
                         # Nada atendeu aos filtros: é ausência na amostra, não um número calculado.
@@ -1207,9 +1351,10 @@ def consultar_estruturado(
             structured_db.garantir_banco(documents_file, banco, status=span.extra)
             with structured_db.observar_consultas() as consultas:
                 span.extra["execucao_sql"] = consultas
+                recorte: dict[str, Any] = {}
                 with banco.sessao():
-                    sql, cabecalho, linhas = executar_consulta(consulta, banco)
-            chunks = _chunks(consulta, sql, cabecalho, linhas, banco)
+                    sql, cabecalho, linhas = executar_consulta(consulta, banco, recorte)
+            chunks = _chunks(consulta, sql, cabecalho, linhas, banco, recorte)
             span.extra.update({
                 "sql": sql, "linhas": len(linhas), "chunks": len(chunks),
                 # O que a consulta devolveu, para acompanhar o dado até a resposta.
@@ -1217,6 +1362,9 @@ def consultar_estruturado(
                 "resultado": linhas[:_LINHAS_NO_LOG],
                 "linhas_fora_do_log": max(0, len(linhas) - _LINHAS_NO_LOG),
                 "chunk_ids": [chunk.metadata.chunk_id for chunk in chunks],
+                # Confiabilidade no recorte, completude e cobertura separadas:
+                # não se deduz isso lendo o texto da resposta.
+                "recorte": recorte,
             })
             from src.log_evidence import auditoria_completa
             if auditoria_completa():

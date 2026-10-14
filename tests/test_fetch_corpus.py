@@ -50,14 +50,28 @@ def test_manifest_declares_real_bases_and_official_pdf_target():
         "contratacao",
     ]
     assert structured["volume_alvo"] > 0
-    assert sum(base["volume_alvo"] for base in bases.values()
-               if base.get("escopo") == "oficial" and not base.get("dados_sinteticos")) == manifest["curadoria_v6"]["alvo_arquivos_total"]
-    assert manifest["curadoria_v6"]["limite_por_orgao_por_base"] == 5
+    # Censo v7 (2026-10-13): o manifesto único declara o censo; a amostra v6
+    # foi arquivada byte a byte em archive/corpus_manifest_v6.yaml.
+    assert "curadoria_v6" not in manifest
+    curadoria = manifest["curadoria_v7"]
+    assert curadoria["selecao"] == "censo_contratos_e_publicacoes_2025_rj"
+    assert curadoria["limite_por_orgao_por_base"] is None
     assert structured["volume_regra"] == "minimo"
-    assert structured["selecao"]["limite"] == 1200
+    assert structured["selecao"]["modo"] == "censo"
+    assert "limite" not in structured["selecao"]
     assert structured["acesso"]["populations"][0]["censo"] is True
     assert structured["acesso"]["populations"][0]["censo_nacional"] is True
     assert "exigir_cadastro_completo" not in structured["acesso"]["populations"][0]
+
+
+def test_manifesto_v6_arquivado_preserva_o_contrato_da_amostra():
+    manifest = fetch_corpus.load_manifest(Path("archive/corpus_manifest_v6.yaml"))
+    bases = {base["base_id"]: base for base in manifest["bases"]}
+    structured = bases["contratos_estruturado"]
+    assert sum(base["volume_alvo"] for base in bases.values()
+               if base.get("escopo") == "oficial" and not base.get("dados_sinteticos")) == manifest["curadoria_v6"]["alvo_arquivos_total"]
+    assert manifest["curadoria_v6"]["limite_por_orgao_por_base"] == 5
+    assert structured["selecao"]["limite"] == 1200
     assert structured["acesso"]["populations"][1]["params"]["tamanhoPagina"] == 50
     assert bases["pca_agregado"]["acesso"]["tipo"] == "provider"
     assert bases["pca_agregado"]["acesso"]["provider"] == "pncp"
@@ -103,7 +117,10 @@ def test_manifest_and_inventory_contract_accept_contract_census_above_minimum():
             {
                 "base_id": base["base_id"],
                 "status": "complete",
-                "volume_obtido": 1201 if base["base_id"] == "contratos_estruturado" else base["volume_alvo"],
+                "volume_obtido": (
+                    base["volume_alvo"] + 1 if base["base_id"] == "contratos_estruturado"
+                    else base["volume_alvo"]
+                ),
             }
             for base in manifest["bases"]
             if base.get("escopo") == "oficial"

@@ -64,8 +64,28 @@ def validate_manifest_contract(manifest: dict[str, Any], *, official: bool = Tru
             errors.append(
                 f"bases oficiais divergentes: esperadas={sorted(expected)} obtidas={sorted(actual)}"
             )
+        curation_v7 = manifest.get("curadoria_v7")
         curation = manifest.get("curadoria_v6")
-        if curation is None:
+        if curation_v7 is not None:
+            # Censo v7: volumes podem ser ausentes e o limite por órgão é nulo.
+            # O contrato v6 (volumes fixos + soma) segue valendo para
+            # manifestos sem curadoria_v7.
+            if not isinstance(curation_v7, dict):
+                errors.append("curadoria_v7 deve ser um objeto")
+            else:
+                if not curation_v7.get("selecao"):
+                    errors.append("curadoria_v7: selecao ausente")
+                limit = curation_v7.get("limite_por_orgao_por_base")
+                if limit is not None and (type(limit) is not int or limit < 1):
+                    errors.append(
+                        "curadoria_v7: limite_por_orgao_por_base deve ser inteiro positivo ou null"
+                    )
+                target = curation_v7.get("alvo_arquivos_total")
+                if target is not None and (type(target) is not int or target < 1):
+                    errors.append(
+                        "curadoria_v7: alvo_arquivos_total deve ser inteiro positivo ou null"
+                    )
+        elif curation is None:
             for base_id, target in OFFICIAL_BASE_TARGETS.items():
                 base = bases.get(base_id)
                 if base is None:

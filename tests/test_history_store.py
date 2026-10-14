@@ -1,5 +1,7 @@
 """Histórico de consultas e feedback do usuário (src/history_store.py)."""
 
+from contextlib import closing
+
 import pytest
 
 from src.history_store import ConsultaNaoEncontrada, HistoricoStore
@@ -178,3 +180,37 @@ def test_retencao_zero_nao_expurga(tmp_path):
     store.registrar_consulta(query_id="q_nova", run_id="r", query="p", top_k=5, resposta=_resposta())
 
     assert {c["query_id"] for c in store.obter_historico()} == {"q_antiga", "q_nova"}
+
+
+def test_resposta_e_gravada_comprimida_e_lida_de_volta(tmp_path):
+    import sqlite3
+    import zlib
+
+    db = tmp_path / "historico.sqlite"
+    store = HistoricoStore(db_path=db)
+    resposta = _resposta(answer="Contratos de ambulância em 2025. " * 40)
+    store.registrar_consulta(query_id="q_1", run_id="r", query="p", top_k=5, resposta=resposta)
+
+    with closing(sqlite3.connect(db)) as conexao:
+        gravado = conexao.execute("SELECT resposta_json FROM consultas").fetchone()[0]
+
+    assert isinstance(gravado, bytes)
+    assert len(gravado) < len(zlib.decompress(gravado))
+    assert store.obter_consulta("q_1")["resposta"] == resposta
+
+
+def test_resposta_curta_fica_em_texto():
+    from src.history_store import _comprimir_json, _ler_json
+
+    assert _comprimir_json({"a": 1}) == '{"a": 1}'
+    assert _ler_json(_comprimir_json({"a": 1})) == {"a": 1}
+
+
+def test_resposta_antiga_em_texto_continua_legivel(tmp_path):
+    import json
+
+    db = tmp_path / "historico.sqlite"
+    HistoricoStore(db_path=db).obter_historico()  # cria o schema
+    _consulta_com_data(db, "q_texto", "2999-01-01T00:00:00+00:00")
+
+    assert HistoricoStore(db_path=db).obter_consulta("q_texto")["resposta"] == json.loads(json.dumps(_resposta()))

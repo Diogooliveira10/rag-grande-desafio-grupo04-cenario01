@@ -1031,10 +1031,14 @@ def _seed_discovered_contract_selection(
         contracts_by_id.setdefault(contract_id, source_ref.to_dict())
 
     selection = base.get("selecao") or {}
-    target = max(
-        int(base.get("volume_alvo") or 1),
-        int(selection.get("limite") or selection.get("limit") or 1),
-    )
+    if str(selection.get("modo") or "").casefold() == "censo":
+        # Censo: todos os elegíveis da janela, em ordem estável — sem teto.
+        target = len(contracts_by_id)
+    else:
+        target = max(
+            int(base.get("volume_alvo") or 1),
+            int(selection.get("limite") or selection.get("limit") or 1),
+        )
     if len(contracts_by_id) < target:
         raise RuntimeError(
             f"checkpoint tem {len(contracts_by_id)} contratos elegíveis em unidades RJ verificadas; "
