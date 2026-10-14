@@ -568,13 +568,74 @@ com origem, a configuração usa `https://etuarda.github.io`, sem o caminho
 `/frontendRAG/`.
 
 No projeto do frontend, configure `VITE_API_BASE_URL` com a URL pública HTTPS
-deste backend, sem `/api/v1/query` no final:
+deste backend, sem `/api/v1/query` no final (na demo, o domínio do túnel ngrok;
+ver 9.1):
 
 ```env
 VITE_API_BASE_URL=https://rag-api.exemplo.com
 ```
 
 O frontend atual tem telas de Consulta, Histórico, Feedback, Explorar e Transparência, sem mocks. Localmente, `.env.development` aponta para `http://localhost:8080`; o site publicado exige backend HTTPS público. Saudações e conversas recebem respostas sem consulta ao acervo; pedidos factuais seguem pelo RAG com fontes e guardrails ativos. O frontend deve consumir apenas os contratos HTTP, sem catálogos mockados nem armazenamento paralelo. O passo a passo da integração local está em [docs/GUIA_INTEGRACAO_LOCAL_FRONTEND_BACKEND.md](docs/GUIA_INTEGRACAO_LOCAL_FRONTEND_BACKEND.md).
+
+**9.1 Expor o backend para o site publicado (demo)**
+
+O backend roda na máquina de quem apresenta e fica público por um túnel do
+[ngrok](https://ngrok.com) no plano gratuito, que dá um domínio HTTPS fixo por
+conta. Não há deploy em nuvem: a Vercel não serve (função Python de até 500 MB,
+300 s de duração e disco temporário, e o trace lê os logs gravados no disco do
+próprio servidor), e o plano gratuito do Render (512 MB) não carrega o rerank.
+
+1. Instalar o agente e gravar o authtoken (copiado de *Your Authtoken* no painel
+   do ngrok, depois de clicar em *Show authtoken*):
+
+   ```powershell
+   winget install --id Ngrok.Ngrok --exact
+   ngrok update                      # o pacote do winget vem com uma versão antiga
+   ngrok config add-authtoken <authtoken>
+   ```
+
+   Num terminal aberto antes da instalação o comando `ngrok` ainda não existe;
+   use o caminho completo `& "$env:LOCALAPPDATA\Microsoft\WinGet\Links\ngrok.exe"`.
+
+2. Subir o backend e, em outro terminal, o túnel no domínio fixo da conta
+   (menu *Domains* do painel):
+
+   ```powershell
+   python -m uvicorn app.api:app --host 127.0.0.1 --port 8080
+   ngrok http --url=https://<dominio>.ngrok-free.dev 8080
+   ```
+
+   O modelo de rerank carrega quando a API sobe, em segundo plano (cerca de
+   15 s; `RERANK_PRELOAD=false` desliga). Faça uma pergunta de aquecimento antes
+   de abrir para o público.
+
+3. No frontend, `VITE_API_BASE_URL` recebe esse domínio, e toda chamada envia o
+   header `ngrok-skip-browser-warning`: sem ele, o ngrok responde ao navegador
+   com uma página de aviso em HTML no lugar do JSON. O backend já libera esse
+   header no CORS.
+
+4. Conferir de fora:
+
+   ```bash
+   curl -H "ngrok-skip-browser-warning: 1" https://<dominio>.ngrok-free.dev/health
+   ```
+
+O site só funciona enquanto a máquina estiver com o backend e o túnel ligados.
+Como o domínio é fixo, reiniciar não muda o endereço nem exige publicar o
+frontend de novo.
+
+Configuração do `.env` usada na demo (ECOA como modelo principal, OpenRouter de
+reserva). Medido em 2026-10-14: com o padrão de 180 s e uma nova tentativa, uma
+consulta esperou até 400 s no ECOA; com o limite de 60 s, as consultas lentas
+ficaram entre 69 e 101 s, abaixo do limite de 240 s do site:
+
+```env
+GENERATION_TIMEOUT=60
+GENERATION_MAX_RETRIES=0
+OPENROUTER_API_KEY=<chave>
+OPENROUTER_MODEL=nvidia/nemotron-3-super-120b-a12b:free
+OPENROUTER_MODEL_FALLBACK=google/gemma-4-31b-it:free
+```
 
 ### Endpoint de modelos (compartilhado com toda a turma)
 
