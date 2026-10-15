@@ -1,7 +1,9 @@
 # Embeddings versionados
 
-A versão oficial ativa é a **v6**, na pasta `2026-09-30_12-08-51/`, com quatro
-subpastas por base e 5.621 vetores de 1.024 dimensões. Cada base contém os vetores,
+A versão oficial ativa é a **v6 após a recuperação OCR**, na pasta
+`2026-10-07_21-18-41_ocr-recovery/`, com quatro subpastas por base e 5.090 vetores
+de 1.024 dimensões. A geração original da v6 (5.621 vetores, antes do OCR) fica em
+`2026-09-30_12-08-51/` como histórico. Cada base contém os vetores,
 o relatório de geração e o resultado da validação de tokens. O arquivo
 `embeddings.jsonl` na raiz deste diretório é uma materialização histórica e não
 deve substituir os índices ativos da v6.

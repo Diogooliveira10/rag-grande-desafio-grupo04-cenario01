@@ -98,3 +98,25 @@
 - Desenvolvi as telas "Ver caminho" e "Caminho da conversa", exibindo as bases consultadas, evidências, etapas do pipeline, tempo de execução e detalhes do trace.
 - Corrigi a segurança do frontend, removendo o uso de `X-API-Key` e o histórico geral do site público, além de adicionar tratamentos para erros de sessão, trace antigo e falhas de rede.
 - Melhorei o indicador de carregamento e validei a implementação com testes automatizados, build do frontend e chamadas reais aos endpoints de trace.
+
+## Encontro 12 - 2026-10-09
+
+### Relato individual - Eduarda
+
+- Finalizei a integração do frontend com o fluxo de conversas do backend, armazenando o `session_id` em `sessionStorage`, enviando o histórico recente para manter o contexto e recuperando automaticamente sessões inválidas.
+- Implementei a rastreabilidade das respostas e da conversa, com resumos das bases SQL e vetorial, evidências, fontes citadas, confiança, tempo de execução e linha do tempo das etapas do pipeline.
+- Adicionei detalhes de auditoria ao trace, incluindo scores, movimentação no rerank, consultas SQL, resultados, entradas, saídas e prompts recolhíveis.
+- Ajustei os estados de carregamento e erro para uma experiência mais clara e amigável, com tempo decorrido, previsão aproximada, nova tentativa e mensagens específicas para traces indisponíveis ou pertencentes a outra conversa.
+- Reforcei a segurança do site ao remover a chave administrativa e o histórico geral do frontend público, utilizando apenas `X-Session-Id` para acessar os traces da própria conversa.
+- Atualizei os tipos, serviços, documentação, testes automatizados e arquivos do GitHub Pages, validando o funcionamento integrado com a API real.
+
+## Encontro 13 - 2026-10-14
+
+### Relato individual - Eduarda
+
+- Finalizei a integração do frontend para a demonstração, ajustando as telas e os serviços para utilizar o contrato atual da API e a URL do backend configurada por `VITE_API_BASE_URL`.
+- Implementei a página de histórico da conversa atual, com estados de carregamento, vazio e erro, enviando o `X-Session-Id` para mostrar somente as consultas da própria sessão e sem expor a chave administrativa no site público.
+- Ajustei o envio de feedback para utilizar a sessão do usuário e melhorei a experiência em consultas demoradas, exibindo uma mensagem amigável de timeout e a opção de tentar novamente.
+- Adicionei comandos de diagnóstico para verificar a saúde do backend e executar uma consulta real no pipeline, além do suporte centralizado ao header necessário para acesso por túnel ngrok.
+- Ampliei os testes automatizados do histórico, feedback, serviços de exploração, timeout e nova tentativa, e corrigi a sincronização dos arquivos gerados para o GitHub Pages no Windows.
+- Atualizei a documentação de integração e o build publicado, registrando que uma demonstração pública precisa de um backend HTTPS e validando localmente o frontend integrado ao backend real.

@@ -461,3 +461,113 @@ João Pedro Félix Reis e Eduarda não participaram deste encontro por questões
 ### Uso de assistentes de IA:
 
 - Utilizei assistentes de IA como apoio na inspeção do evaluator e dos testes, implementação da correção, execução dos testes e análise do relatório oficial.
+
+## Encontro 12 — 2026-10-09
+
+## **Entregamos hoje:**
+
+- Corrigimos a rastreabilidade do pipeline após o merge das alterações da Eduarda. Subimos backend e frontend em conjunto e validamos uma conversa real com três perguntas, confirmando o funcionamento das duas telas de trace, do `session_id` e dos mecanismos de proteção. Também corrigimos erros HTTP 500 em 70 dos 169 logs consultados, causados por valores de latência com casas decimais gravados em 21 e 23/09. Para registros anteriores a 05/10, ajustamos o trace para recuperar as evidências SQL e vetoriais, a confiança e a recusa a partir das etapas já registradas nos logs.
+
+- Corrigimos a extração de órgãos em `src/query_analysis.py` para compatibilizar expressões como “Prefeitura de Maricá” com a nomenclatura oficial do PNCP, utilizando o catálogo de órgãos do corpus. A normalização também contempla variações como “Prefeitura Municipal de X”, “Prefeitura da Cidade do X”, “Município de X” e “Prefeitura do Rio”. A consulta sobre Maricá passou a retornar apenas contratos do `MUNICIPIO DE MARICA`, sem ampliar a busca para outros órgãos, que antes resultava em 625 trechos. O resultado SQL permaneceu inalterado.
+
+- Corrigimos bugs na interpretação de consultas SQL, incluindo a identificação indevida de palavras como “somando”, “celebrado” e “principais” como termos de objeto contratado. Ajustamos o stemmer para reconhecer gerúndios, adicionamos stop words, melhoramos a extração de órgãos pelo catálogo do corpus e corrigimos a detecção de métricas para reconhecer “valor” como indicador de soma. Com isso, a pergunta “Qual o valor de todos os contratos de 2025?” passou a retornar o total determinístico de **R$ 2.546.786.958,21**, em vez de aproximadamente R$ 673 milhões calculados pelo LLM a partir de apenas três contratos recuperados pela busca vetorial.
+
+- Preparamos o frontend para novos clones do repositório, adicionando os scripts de diagnóstico `npm run check:backend` e `npm run check:query` e documentação de instalação. Também implementamos o envio de `session_id` e histórico nas consultas de continuação, permitindo reformular perguntas como “E em 2024?” com base no contexto anterior. Corrigimos ainda o botão “Consultar no NEXO”, na página de Contratações, para utilizar o identificador de controle PNCP, em vez de `numero_contrato`, que não existe no banco de dados.
+
+- Finalizamos o item 13, referente à proveniência da base sintética. Corrigimos as informações de fonte e licença em `corpus_manifest.yaml`, `CORPUS_INVENTORY.md` e `docs/emails_sinteticos.md`, registrando que a base foi gerada pelo tutor e integrada pelo João em 05/10, com referência aos commits. Corrigimos também as informações divergentes no `README.md`, na tabela de bases, no `ARQUITETURA.md` e no docstring de `src/synthetic_conversations.py`.
+
+- Validamos as alterações de proveniência com a suíte completa do backend, que passou com **1.261 testes aprovados**. As correções de rastreabilidade, consultas SQL e frontend também tiveram validações específicas: foram registrados **590 testes de backend e 36 de frontend aprovados**. As alterações correspondentes foram commitadas nas branches `origin/joao-reis` (backend) e `sevenRevy/frontendRAG/main` (frontend). A correção de proveniência foi enviada na branch `marco/proveniencia-base-sintetica`, no commit `1a05b92`.
+
+- Iniciamos a investigação de um problema na geração de respostas SQL sem resultados. Inspecionamos `tests/test_numerical_validation.py`, `tests/test_pipeline.py` e `tests/test_structured_query.py`, identificando os testes e auxiliares relevantes. Confirmamos que `src/structured_query.py` representa consultas vazias com o marcador textual `"(nenhum registro)"`, o que exige distinguir esse marcador de resultados reais antes de definir a resposta e o nível de confiança.
+
+## **Ficou pendente:**
+
+- Concluir a correção em `src/generate.py` para tratar explicitamente consultas SQL sem resultados, informando que nenhum registro foi encontrado na amostra analisada de 809 registros, sem afirmar que não existem contratações em todo o estado do Rio de Janeiro.
+
+- Garantir que respostas sem resultados tenham confiança limitada a `MEDIA`, sem alterar o comportamento determinístico atual quando houver registros.
+
+- Criar testes de regressão para a resposta vazia e para o limite de confiança. Depois, executar os testes focados, a suíte completa e `git diff --check`, registrando os resultados efetivamente obtidos.
+
+- Verificar se as alterações de backend e frontend estão integradas à branch de referência do projeto, distinguindo os commits enviados às branches de trabalho daqueles efetivamente incorporados ao `main`.
+
+## **Bloqueios em aberto:**
+
+- A correção do tratamento de consultas sem resultados depende da inspeção do fluxo de `_nivel_de_confianca` e `_resposta_sql_deterministica` em `src/generate.py`. A implementação e os testes de regressão ainda não foram concluídos.
+
+## **### Uso de assistentes de IA:**
+
+- Utilizei assistentes de IA como apoio à investigação de bugs, análise do pipeline SQL, normalização de órgãos, correção da rastreabilidade, preparação do frontend, documentação da proveniência da base sintética e inspeção dos testes.
+
+- As sugestões foram utilizadas como apoio à implementação e à validação. Os resultados foram conferidos por meio de conversas reais, consultas ao corpus, traces, testes automatizados e registros de commits. A tarefa de tratamento de consultas SQL sem resultados permanece em andamento.
+
+## Encontro 13 — 2026-10-14
+
+## **Entregamos hoje:**
+
+- Integramos à `main` as contribuições de Diogo, João, Marco e Pâmela, por meio dos PRs #36 a #41. Resolvi conflitos de merge, conferi as alterações contra as branches originais e preservei as correções de normalização de órgãos, os filtros de município e fornecedor e as opções de controle de acesso ao histórico. Durante a integração, ajustei o teste de query analysis que ainda esperava a nomenclatura antiga do órgão.
+
+- Corrigi dois problemas na regra de confiança para consultas SQL vazias: a referência à amostra foi atualizada de 809 para **810 registros**, conforme o schema 7, e a verificação passou a considerar todas as partes da consulta. Assim, uma consulta com uma parte vazia e outra com resultados não recebe indevidamente confiança reduzida nem informa que não foram encontrados registros quando há resultados válidos. Na integração, prevaleceu a regra de confiança baseada no recorte da consulta, com a ressalva de que a ausência de resultados se refere à amostra analisada.
+
+- Finalizei e validei o controle de acesso ao histórico de conversas, separando as permissões de administradores e usuários. Mantive os dois personas e a opção `HISTORY_PUBLIC`, com testes em conversas reais.
+
+- Rodei novamente o benchmark do Demo Day, com **23/26 acertos**. Dois casos apresentaram oscilações associadas à instabilidade na recuperação de documentos (_top-k_), indicando que ainda é necessário investigar a reprodutibilidade desses resultados.
+
+- Avancei na qualidade dos dados e na documentação técnica. Comparei o projeto com o ETL do DUOPEN, incorporei a validação dos dígitos verificadores dos CNPJs mencionados nas perguntas e confirmei que os 810 CNPJs de órgãos e os 432 de fornecedores da base passam nessa validação. Criei `docs/QUALIDADE_DOS_DADOS.md`, documentando a cobertura dos campos, as limitações identificadas e os riscos. A modalidade está preenchida em 3 dos 455 contratos, e o fornecedor, em 1 das 355 compras. Decidi não derivar a modalidade da compra, pois apenas seis contratos seriam beneficiados. Também incorporei a compressão zlib somente às respostas armazenadas no histórico, reduzindo seu tamanho em 46%, sem comprometer as buscas textuais no banco.
+
+- Revisei `ARQUITETURA.md` em relação ao código, conferindo a ordem das etapas do pipeline, os filtros, o recorte de confiança, as 11 rotas da API, o estado do frontend, os números do corpus e do Golden Set e as pendências. Atualizei o `README.md` e removi do repositório o roteiro interno do Demo Day. Os commits `0ebae73` e `86c10f7` registram essas alterações, embora suas mensagens tenham ficado associadas às mudanças na ordem inversa.
+
+- Consolidei as pendências até o Demo Day em um documento de 14/10, nos formatos Word e PDF, reunindo as pendências anteriores e as novas, com indicação do que já foi concluído. Distribuí as tarefas entre João (corpus v7), Diogo (nova rodada do Golden Set), Marco (F1), Pâmela (Golden Set dos e-mails sintéticos) e Eduarda (frontend oficial e publicação). Também preparei e compartilhei o roteiro de estudo para o Demo Day.
+
+- Medi a latência das consultas previstas no roteiro. No ECOA, respostas produzidas por SQL ou regras levaram de 0,1 a 7,7 segundos, enquanto as que dependiam do LLM levaram de 44 a 400 segundos. A pergunta de continuação sobre fornecedores chegou a 330 segundos, acima do limite de 240 segundos do site. Para a reserva, configurei um modelo gratuito específico no OpenRouter com saída JSON, evitando a seleção aleatória de modelos do `openrouter/free`. Mantive o ECOA como provedor principal, com timeout de 60 segundos e OpenRouter como alternativa; as consultas lentas passaram a levar de 69 a 101 segundos.
+
+- Executei três rodadas das consultas do roteiro no ECOA. As respostas baseadas em SQL ou regras permaneceram estáveis em texto, fontes e confiança, todas abaixo de cinco segundos. As respostas sobre a Lei 14.133 e a Infolog variaram entre execuções. O roteiro ao vivo passou a priorizar as cinco consultas estáveis, deixando as duas instáveis para demonstração com capturas prévias. Também confirmei que a Infolog não consta no corpus e que o resultado vazio da consulta é real.
+
+- Corrigi o tratamento da pergunta “Qual foi o valor pago à empresa X?”. Ela era recusada por não corresponder ao roteador e passou a utilizar o SQL, informando que o PNCP não registra pagamentos. O tempo caiu de aproximadamente 68 segundos para 3,5 a 4,3 segundos. Também ajustei o carregamento do rerank na inicialização da API: o atraso inicial era causado pelo carregamento do modelo, e não pelo rerank em si, que leva aproximadamente 0,9 segundo.
+
+- Publiquei o backend para acesso pelo site utilizando um túnel ngrok com domínio fixo gratuito, após avaliar alternativas como Vercel, Render e Hugging Face. A Vercel foi descartada pelas limitações de armazenamento temporário, tamanho e tempo de execução, incompatíveis com o trace. Validei externamente o endpoint `/health`, o CORS a partir do site da Eduarda e uma consulta real, que retornou HTTP 200 em 4,8 segundos. Ajustei a liberação do header exigido pelo ngrok e documentei o procedimento de inicialização na seção 9.1 do `README.md`. O site publicado ainda precisa ser configurado com o endereço do backend; encaminhei à Eduarda as instruções para isso.
+
+- Validei as entregas de Marco e Pâmela com o avaliador e o LLM real. O item 15, referente aos e-mails sintéticos, foi concluído: E1, E2 e E3 passaram, e a suíte contém um teste que garante que as cinco conversas restritas nunca sejam incluídas como fontes ou enviadas ao prompt. No item 8, a correção de Marco para o termo “houver” foi integrada, mas a F1 ainda precisava da regra geral de insuficiência de dados para comparações entre grupos.
+
+- Concluí a investigação e a correção da F1 na branch `marco/f1-termo-houver`. Após remover “houver” e suas flexões da extração de termos de objeto, identifiquei que a resposta ainda era produzida pelo atalho SQL com confiança alta, mesmo quando apenas uma esfera possuía registros com valores válidos para comparação. Implementei uma regra para que comparações entre esferas com menos de duas esferas contendo registros de valor igual ou superior a R$ 1,00 sejam classificadas como insuficientes, com confiança baixa. A regra foi implementada em `structured_query.py`, `schema.py` e `generate.py`, com testes para dados insuficientes, suficientes e perguntas que não envolvem comparação.
+
+- Validei a correção da F1 em duas execuções: a primeira, `20261014T181928Z`, passou na branch de trabalho; após atualizar a branch com a `main`, a segunda, `20261014T204357Z`, também passou. A suíte passou com 1.607 testes na primeira validação e 1.662 na segunda. O commit `446bcb7`, referente à extração de “houver”, entrou na `main` pelo PR #41. A regra de comparação insuficiente, commit `64404cd`, foi enviada em um segundo PR para revisão do Renato, pois a alteração afeta a regra de confiança definida por João. Após o merge dessa regra, ficou prevista uma nova execução do Golden Set completo por Diogo.
+
+- Finalizei o item 13, referente à proveniência da base sintética, iniciado no encontro anterior. Corrigi as informações de autoria e licença em `corpus_manifest.yaml`, `CORPUS_INVENTORY.md`, `docs/emails_sinteticos.md`, `src/synthetic_conversations.py`, `README.md` e `ARQUITETURA.md`. A documentação passou a registrar que a base foi gerada pelo tutor e integrada por João em 05/10/2026, com referência aos commits `d31925f` e `146ceea`. A suíte passou com 1.261 testes, e o commit `1a05b92` foi enviado na branch `marco/proveniencia-base-sintetica` para revisão do grupo.
+
+- No corpus v7, o censo de mais de 168 mil registros foi concluído sem falhas. Como o ECOA estava indisponível, foi implementado um mecanismo de fallback para gerar embeddings localmente. O processamento continuava em execução, com aproximadamente 41% concluído no momento do relato. Também foi ampliada a coleta de atas de registro de preços para 522 órgãos/CNPJs do RJ, totalizando 11.689 atas únicas de 2025. Para recuperar modalidades de contratação diante das limitações da API do PNCP, foi desenvolvida uma estratégia de cruzamento entre contratos e publicações, permitindo classificar 28.664 registros. A taxonomia foi ajustada com base nos campos oficiais e validada por testes automatizados, todos aprovados.
+
+- A suíte completa do projeto terminou com **1.653 testes aprovados** na validação geral registrada após as integrações. Esse resultado é distinto das execuções específicas da F1, que terminaram com 1.607 e 1.662 testes, e da validação anterior do item 13, com 1.261 testes.
+
+## **Ficou pendente:**
+
+- Executar o Golden Set completo após o merge da regra de comparação insuficiente, verificando o impacto da correção sobre os 29 casos e registrando o novo resultado oficial.
+
+- Acompanhar a revisão e o merge do PR que contém o commit `64404cd`, garantindo que a regra geral de insuficiência de dados para comparações seja integrada à `main`.
+
+- Concluir o processamento de embeddings locais do corpus v7 e validar o resultado final, pois o processamento estava em aproximadamente 41% no momento do acompanhamento.
+
+- Configurar e republicar o frontend com o endereço correto do backend, conforme as instruções encaminhadas à Eduarda.
+
+- Investigar as oscilações de dois casos do benchmark do Demo Day e a variação das respostas sobre a Lei 14.133 e a Infolog.
+
+- Continuar o acompanhamento da latência das consultas que dependem do LLM, especialmente das perguntas de continuação, para garantir que o fluxo de demonstração respeite os limites de execução do site.
+
+- Corrigir a F1 no sentido funcional e validar a nova regra de confiança em cenários gerais de comparação, além do caso específico que motivou a implementação.
+
+## **Bloqueios em aberto:**
+
+- A conclusão do corpus v7 depende do término do processamento local de embeddings e da validação do resultado final.
+
+- A publicação definitiva do frontend depende da configuração do endereço do backend pela responsável pela interface.
+
+- A consolidação da correção geral de confiança depende da revisão e do merge do segundo PR da F1, seguido da nova execução do Golden Set completo.
+
+- A estabilidade de algumas consultas do Demo Day ainda depende da investigação das variações observadas na recuperação e nas respostas do LLM.
+
+## **Uso de assistentes de IA:**
+
+- Utilizei o Claude Code como apoio à resolução de conflitos de merge, comparação das contribuições entre branches, implementação da validação de CNPJ, compressão do histórico, correção do tratamento de pagamentos, carregamento antecipado do rerank, configuração do CORS para o ngrok, medição de latência e estabilidade com o LLM real, revisão da documentação, organização das pendências e preparação do roteiro de estudo.
+
+- Também utilizei assistência de IA na investigação da F1, na implementação e nos testes da regra de insuficiência de dados, na preparação da documentação de qualidade dos dados e na revisão das alterações do corpus.
+
+- As decisões de integração, as regras de confiança, a escolha do provedor principal e da alternativa, a retirada do roteiro interno do repositório público e a distribuição das tarefas foram revisadas e decididas por mim. Executei os commits, merges, pushes e testes correspondentes, conferindo os resultados antes de registrar as entregas.

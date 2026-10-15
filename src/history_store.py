@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import zlib
 from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -12,6 +13,25 @@ import config
 from src.sensitivity import mascarar, mascarar_valores
 
 DB_PATH = config.ROOT_DIR / "data" / "app_state" / "historico.sqlite"
+
+# A resposta completa é guardada comprimida (zlib nível 6, a partir de 64 bytes),
+# a mesma regra do compressor do DUOPEN: só é lida inteira, nunca pesquisada
+# por SQL, então a compressão não atrapalha nenhuma consulta. Linhas antigas,
+# gravadas como texto, continuam legíveis.
+NIVEL_COMPRESSAO = 6
+MIN_BYTES_COMPRESSAO = 64
+
+
+def _comprimir_json(dados: Any) -> str | bytes:
+    texto = json.dumps(dados, ensure_ascii=False)
+    bruto = texto.encode("utf-8")
+    return zlib.compress(bruto, NIVEL_COMPRESSAO) if len(bruto) >= MIN_BYTES_COMPRESSAO else texto
+
+
+def _ler_json(valor: str | bytes) -> Any:
+    if isinstance(valor, (bytes, bytearray, memoryview)):
+        valor = zlib.decompress(bytes(valor)).decode("utf-8")
+    return json.loads(valor)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS consultas (
@@ -97,7 +117,7 @@ class HistoricoStore:
                     _agora(),
                     mascarar(query)[0],
                     top_k,
-                    json.dumps(mascarar_valores(resposta), ensure_ascii=False),
+                    _comprimir_json(mascarar_valores(resposta)),
                     resposta.get("confidence_level"),
                     int(bool(resposta.get("is_refusal"))),
                     session_id,
@@ -174,7 +194,7 @@ class HistoricoStore:
             "session_id": linha["session_id"],
             "ts": linha["ts"],
             "query": linha["query"],
-            "resposta": json.loads(linha["resposta_json"]),
+            "resposta": _ler_json(linha["resposta_json"]),
             "feedback": [dict(f) for f in feedbacks],
         }
 

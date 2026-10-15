@@ -1100,6 +1100,16 @@ def _orgao_do_catalogo(chaves: Sequence[str], exigir_algum: Sequence[str] = ()) 
     return None
 
 
+def _orgao_do_municipio(cidade: Sequence[str]) -> str:
+    """Nome com que o PNCP grava a prefeitura: "MUNICIPIO DE MARICA" é a razão
+    social do órgão ("PREFEITURA MUNICIPAL DE MARICA" é o nome da unidade). Vem
+    do catálogo quando a cidade está nele; senão, "Município de <cidade>"."""
+    chaves = _tokens_de_nome(" ".join(cidade))
+    catalogo = _catalogo_de_orgaos()
+    for nome, tokens in (zip(catalogo.nomes, catalogo.tokens) if catalogo else ()):
+        if tokens[:1] == ("municipio",) and list(tokens[1:]) == chaves:
+            return nome
+    return "Município de " + " ".join(cidade)
 # Palavras que acompanham o nome do fornecedor mas não o identificam: fora
 # delas, "empresa Cristália" acha "CRISTALIA PRODUTOS QUIMICOS FARMACEUTICOS
 # LTDA" sem precisar citar o nome inteiro.
@@ -1370,6 +1380,7 @@ def _nome_a_partir_do_gatilho(tokens: Sequence[str], indice: int, sem_caixa: boo
     com_maiuscula: list[bool] = []
     parou_em_palavra_colada = False
     antes_do_municipio: Optional[list[str]] = None
+    cidade: Optional[list[str]] = None
     while cursor < len(tokens):
         if tokens[cursor - 1][-1:] in _PONTUACAO or tokens[cursor][:1] in "(\"'“‘":
             break  # vírgula, ponto, aspas ou "(SES)" encerram o nome
@@ -1381,6 +1392,7 @@ def _nome_a_partir_do_gatilho(tokens: Sequence[str], indice: int, sem_caixa: boo
             # Município do RJ: entra inteiro e confirmado ("de são gonçalo", "de maricá").
             if antes_do_municipio is None:
                 antes_do_municipio = list(chaves[inicio_do_nome:])
+                cidade = [limpa(i) for i in range(cursor + 1, cursor + 1 + tamanho)]
             palavras += [palavra] + [limpa(i) for i in range(cursor + 1, cursor + 1 + tamanho)]
             chaves += [_normalize(limpa(i)) for i in range(cursor + 1, cursor + 1 + tamanho)]
             com_maiuscula.append(True)
@@ -1421,7 +1433,14 @@ def _nome_a_partir_do_gatilho(tokens: Sequence[str], indice: int, sem_caixa: boo
         chaves += novas_chaves
         com_maiuscula.append(nome_proprio(novas_palavras[-1]))
         cursor = fim
+    if gatilho in ("prefeitura", "municipio") and antes_do_municipio is None and chaves[inicio_do_nome:] == ["rio"]:
+        return _orgao_do_municipio(["Rio", "de", "Janeiro"])  # "Prefeitura do Rio"
     if antes_do_municipio is not None:
+        # "Prefeitura (Municipal) de X", "Prefeitura da Cidade do X", "Município
+        # de X": o órgão é gravado como "MUNICIPIO DE X", e o filtro "contém"
+        # não casaria "Prefeitura de Maricá" com ele.
+        if gatilho in ("prefeitura", "municipio") and antes_do_municipio in ([], ["cidade"]) and cidade:
+            return _orgao_do_municipio(cidade)
         # Com município: vale para prefeitura/câmara/cabeça forte, ou se o que
         # vem antes da cidade existe no corpus ("fundo municipal de saúde").
         # "banco de sangue de niterói" não.
@@ -1662,6 +1681,26 @@ _VIGENCIA_RE = re.compile(r"\bvigent[es]*\b|\bvigencia\b|\bem vigor\b")
 _REGISTRO_COM_VIGENCIA_RE = re.compile(r"\b(?:contratos?|atas?)\b")
 
 
+# CNPJ com ou sem pontuação. Os 14 dígitos no começo de um número de controle
+# do PNCP ("00394429000100-2-001108/2024") não são CNPJ citado: ficam de fora
+# pelo "-" depois deles.
+_CNPJ_RE = re.compile(
+    r"(?:\bcnpjs?\s*(?:n[o.]?\s*|:\s*)?)?"
+    r"(?<![\d./-])(\d{2})\.?(\d{3})\.?(\d{3})/?(\d{4})-?(\d{2})(?![\d/-])"
+)
+
+
+def _extrair_cnpjs(texto: str) -> tuple[list[str], list[Span]]:
+    """CNPJs citados (só dígitos, sem repetição) e os trechos onde aparecem."""
+    cnpjs, trechos = [], []
+    for match in _CNPJ_RE.finditer(texto):
+        digitos = "".join(match.groups())
+        if digitos not in cnpjs:
+            cnpjs.append(digitos)
+        trechos.append(match.span())
+    return cnpjs, trechos
+
+
 def _analisar_com_trechos(query: str) -> tuple[QueryFilters, str, list[Span]]:
     """Filtros, texto normalizado e os trechos dele que viraram filtro."""
     if not isinstance(query, str) or not query.strip():
@@ -1670,7 +1709,9 @@ def _analisar_com_trechos(query: str) -> tuple[QueryFilters, str, list[Span]]:
     bloqueados = _trechos_bloqueados(texto)
     valores = _extrair_valores(texto, bloqueados)
     periodo, expr_periodo = _extrair_periodo(texto, bloqueados + valores.numeros)
-    trechos = valores.expressoes + expr_periodo
+    cnpjs, expr_cnpj = _extrair_cnpjs(texto)
+    # O CNPJ sai do resto da pergunta: senão vira termo do objeto no SQL.
+    trechos = valores.expressoes + expr_periodo + expr_cnpj
     # Métrica, agrupamento e referência saem do texto sem as expressões que já
     # viraram filtro: em "no máximo 50 mil" o "máximo" é filtro, não métrica.
     resto = _sem_trechos(texto, trechos)
@@ -1730,6 +1771,8 @@ def _analisar_com_trechos(query: str) -> tuple[QueryFilters, str, list[Span]]:
             or (plural and (_PERGUNTA_COM_CONTA_RE.search(sem_sentido_comum) or orgao))
         ):
             analiticos["modalidade"] = nome
+    if len(cnpjs) == 1:  # vários juntos é comparação: sem filtro
+        analiticos["cnpj"] = cnpjs[0]
     if sigla:
         # "contratos da SEEDUC": o órgão vira o nome por extenso, e a sigla sai
         # do texto para não ser lida como objeto do contrato.

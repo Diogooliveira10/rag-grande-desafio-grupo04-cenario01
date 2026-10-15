@@ -89,6 +89,9 @@ _STRUCTURED_PATTERNS = (
     r"\bprocesso[s]?\b",
     r"\bpublicad[ao]s?\b",
     r"\babert[ao]s?\b",
+    # "Qual foi o valor pago à empresa X?": o PNCP não registra pagamento, mas a
+    # base de contratos responde com o valor contratado e diz que não é o pago.
+    r"\bpag(?:o|os|a|as|ou|aram|amentos?)\b",
 )
 
 _CONVERSATIONAL_PATTERNS = (

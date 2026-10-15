@@ -229,3 +229,132 @@ A correção genérica do matching e a representação explícita da ausência d
 - Utilizei assistentes de IA como apoio na inspeção do evaluator e dos testes, implementação da correção, execução dos testes e análise do relatório oficial.
 
 - Conferi os resultados com o Golden Set, o relatório gerado, os hashes dos artefatos e os testes locais. O Golden Set e o pipeline de RAG não foram alterados.
+
+## Encontro 12 — 2026-10-09
+
+### Relato individual — Diogo Oliveira
+
+Tarefa do dia:
+
+Investigar e preparar a correção do tratamento de consultas SQL sem resultados em `src/generate.py`, garantindo que o sistema informe corretamente a ausência de registros na amostra analisada de 809 registros, sem generalizar a conclusão para todas as contratações do estado do Rio de Janeiro, e que a confiança da resposta não seja classificada como `ALTA` nesse cenário.
+
+O que fiz até o momento:
+
+- Inspecionei o conteúdo de `tests/test_numerical_validation.py`, identificando a função auxiliar `sql_chunk()`, que permite construir chunks SQL para testar a geração determinística de respostas. O arquivo já contém testes para totais, estatísticas e situações em que as evidências SQL são insuficientes para dispensar a geração pelo modelo.
+
+- Analisei um trecho de `tests/test_pipeline.py` para compreender como os testes existentes verificam a confiança da resposta e a integração entre a consulta estruturada, a recuperação de informações e a geração.
+
+- Inspecionei um trecho de `tests/test_structured_query.py`, identificando os testes de falha na consulta ao banco, ausência do arquivo de documentos e integração entre resultados SQL e evidências recuperadas de outras bases.
+
+- Investiguei `src/structured_query.py` e confirmei que a função `\_chunks()` utiliza o marcador `"(nenhum registro)"` quando a consulta não retorna linhas. Esse detalhe exige cuidado, pois a lista `resultado_sql["linhas"]` pode conter esse marcador mesmo quando nenhum registro real foi encontrado.
+
+- Identifiquei que a implementação já possui um mecanismo para gerar respostas determinísticas a partir de resultados SQL. A próxima etapa é verificar como `src/generate.py` identifica esses resultados e calcula o nível de confiança, para implementar a correção sem comprometer os cenários que já funcionam.
+
+**Resultado:**
+
+A investigação inicial identificou os testes mais relevantes e esclareceu um detalhe importante da representação de consultas vazias: a ausência de resultados reais pode estar representada por um marcador textual, e não por uma lista vazia. A implementação da correção ainda está pendente, assim como a criação dos testes de regressão e a execução da suíte de testes.
+
+Próximas etapas:
+
+- Inspecionar as chamadas de `\_nivel_de_confianca` e `\_resposta_sql_deterministica` em `src/generate.py`.
+
+- Implementar o tratamento explícito de consultas sem resultados, mantendo as respostas determinísticas atuais quando houver registros.
+
+- Garantir que o sistema informe a ausência de registros na amostra analisada de 809 registros e limite a confiança a MEDIA nesse cenário.
+
+- Criar testes de regressão para a resposta sem resultados e para o limite de confiança.
+
+- Executar os testes focados, a suíte completa e `git diff --check`, registrando os resultados efetivamente obtidos.
+
+### Uso de assistentes de IA:
+
+- Utilizei assistentes de IA como apoio à análise dos testes existentes, à identificação dos arquivos relevantes e à compreensão do tratamento de resultados SQL vazios.
+
+- As sugestões foram utilizadas para orientar a investigação e definir os próximos passos da implementação. A correção ainda não foi aplicada nem validada por testes nesta etapa.
+
+## Encontro (FERIADO) — 2026-10-12
+
+### Relato individual — Diogo Oliveira
+
+**Tarefa do dia:**
+
+Implementar e validar a correção para respostas de consultas SQL sem registros reais, impedindo confiança `ALTA` e deixando claro que a ausência se refere à amostra analisada de 809 registros, sem concluir que não existam contratações correspondentes em todo o Estado.
+
+**O que fiz hoje:**
+
+- Analisei integralmente `_resposta_sql_deterministica()` e `_nivel_de_confianca()` em `src/generate.py`, suas chamadas e a propagação de `confidence_level` até a resposta final. Também examinei como `src/structured_query.py` constrói os chunks e registra `resultado_sql["linhas"]`.
+
+- Confirmei que uma consulta sem linhas pode ser representada pelo marcador `"(nenhum registro)"`. Ajustei a identificação de resultados reais para que o marcador e as mensagens de ausência não sejam tratados como registros.
+
+- Corrigi o caminho determinístico para responder consultas vazias com uma ressalva explícita: os filtros não encontraram registros nos dados disponíveis, que correspondem a uma amostra de 809 registros do corpus, e isso não comprova inexistência no universo completo do Estado. A fonte SQL é preservada.
+
+- Limitei a confiança `ALTA` a `MEDIA` quando a ausência de resultados está explicitamente identificada, preservando `BAIXA` e a conversão preexistente de valores numéricos e textuais. A mesma proteção foi aplicada ao caminho de geração por LLM que utiliza metadados SQL de ausência.
+
+- Preservei a resposta determinística para consultas com registros reais, incluindo os valores calculados, as fontes e a confiança alta. Também tratei partes SQL vazias de resultados divididos para que não sejam confundidas com uma consulta inteira sem resultados.
+
+- Adicionei testes de regressão em `tests/test_numerical_validation.py` para consultas vazias e com resultados, os dois cenários de perguntas sobre ambulâncias, conversão e limitação da confiança, e o caminho LLM com metadados de ausência.
+
+**Resultado:**
+
+A correção foi implementada e validada. Os testes focados de geração, consulta estruturada e pipeline passaram: **205 aprovados**. A suíte completa passou com **1.416 testes aprovados**. `git diff --check` também foi executado sem apontar problemas.
+
+### Uso de assistentes de IA:
+
+- Utilizei assistentes de IA como apoio à inspeção do fluxo de geração e dos testes, implementação da correção e criação dos testes de regressão.
+
+- Executei e conferi os testes locais focados e a suíte completa. Não foi necessária chamada real ao LLM nem dependência de banco remoto para validar os cenários unitários.
+
+## Encontro 13 — 2026-10-14
+
+### Relato individual — Diogo Oliveira
+
+**Tarefa do dia:**
+
+Executar novamente o Golden Set completo no estado atual do repositório, registrar o resultado oficial atualizado e analisar as falhas com base nos critérios do benchmark, sem alterar código de produção, o Golden Set ou os critérios de avaliação.
+
+**O que fiz hoje:**
+
+- Verifiquei o estado do repositório com `git status --short --branch`, `git branch --show-current` e `git log -5 --oneline`, confirmando que a branch ativa era `main` e que a mesma estava sincronizada com `origin/main` por atualização segura.
+
+- Inspecionei os commits recentes para confirmar que a base avaliada incorporava as alterações implementadas desde a rodada de 09/10, incluindo filtros por município e fornecedor, validação de CNPJ, ajustes no pipeline, refinamentos de recorte e correções de SQL.
+
+- Confirmei que o Golden Set continha as 26 perguntas esperadas, validando a contagem do arquivo `eval/golden_set.jsonl` e o ambiente Python do projeto.
+
+- Ajustei o ambiente do projeto no virtualenv para garantir que as dependências necessárias estivessem disponíveis para a execução do benchmark, resolvendo a ausência de bibliotecas e a mensagem de `python-dotenv` observada durante a primeira tentativa.
+
+- Executei o comando oficial solicitado pelo projeto:
+  `py .\eval\run_eval.py run --pipeline eval.adapters:pipeline_completo`
+  usando o ambiente do repositório, preservando o Golden Set e os artefatos produzidos.
+
+- Registrei a execução real do benchmark: `run_id = 20261014T191537Z`, data `2026-10-14T19:15:37+00:00`, commit `0e4cd73` e relatório gerado em `eval/runs/20261014T191537Z/REPORT.md`.
+
+- Examinei o relatório oficial e os resultados detalhados do JSON de execução para validar o total de perguntas, as métricas por critério e as falhas individuais.
+
+- Classifiquei as falhas conforme o padrão do acompanhamento: identifiquei casos de problema do avaliador, ausência de dados no corpus e erros de geração, além de registrar também os casos de erro do provedor de LLM e as falhas por incompletude de resposta.
+
+- Concluí a análise comparando o resultado atual com a rodada anterior citada no material: o sistema atual apresentou **13/26 (50%)**, a rota manteve-se estável em **25/26 (96,15%)**, mas o conteúdo ainda roda com instabilidade e há falhas relevantes em casos de insuficiência de dados, comparação temporal e composição final das respostas.
+
+**Resultado:**
+
+A execução do Golden Set atual foi concluída e documentada com resultados oficiais. O benchmark mostrou:
+
+- **13/26** acertos (50%)
+- **25/26** de roteamento correto
+- **24/26** de recusa correta
+- **22/24** citações corretas avaliadas
+- **conteúdo em 15/26** por validação do relatório gerado
+
+Os principais pontos observados foram:
+
+- manutenção da estabilidade do roteamento;
+- quedas em casos de comparação técnica/estatística e de insuficiência de evidência;
+- falhas de composição em respostas que exigem campos obrigatórios ou comparação de múltiplos valores;
+- dois casos de erro do provedor de geração (`A1` e `A2`), sem alteração do código de produção.
+
+A rodada foi registrada e preservada em artefatos do projeto, sem alteração de produção, dos critérios ou do Golden Set.
+
+### Uso de assistentes de IA:
+
+- Utilizei assistentes de IA como apoio na verificação do estado do repositório, validação dos artefatos do benchmark, leitura do relatório, análise das falhas e organização do resumo de acompanhamento.
+
+- As conclusões finais foram conferidas contra o relatório oficial gerado pelo próprio runner do Golden Set e contra o estado atual do repositório, sem modificar a lógica produzida ou o benchmark avaliado.

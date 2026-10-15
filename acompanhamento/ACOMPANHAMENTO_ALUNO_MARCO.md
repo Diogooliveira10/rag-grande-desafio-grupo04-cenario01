@@ -155,4 +155,34 @@ O que falta do item 11 é no frontend: a Eduarda precisa enviar o historico e ex
 
 Item 13 (em andamento): comecei hoje, mas ainda não terminei. O escopo é corrigir a proveniência em quatro pontos: o campo fonte e o campo licenca do corpus_manifest.yaml (linhas 315 e 323), a linha do CORPUS_INVENTORY.md que diz "conversacional_sintetica.zip fornecido pelo grupo" (linha 33) e o docs/emails_sinteticos.md, que diz só "arquivo fornecido", sem autor. Em todos eles o registro deve passar a dizer que a base foi gerada pelo tutor e integrada ao projeto pelo João, com a data de entrega e as condições de uso combinadas com o tutor.
 
-Uso de IA: usei o Claude pra implementar os testes a partir da decisão que tomei (reescrever a pergunta, com o cliente mandando o histórico), e pra ler o item 13 e levantar quais arquivos precisam mudar. fiz o commit e o push; 
+Uso de IA: usei o Claude pra implementar os testes a partir da decisão que tomei (reescrever a pergunta, com o cliente mandando o histórico), e pra ler o item 13 e levantar quais arquivos precisam mudar. fiz o commit e o push;
+
+## Encontro 12 — 09/10/2026
+
+Contexto: terminei o item 13 da lista de correções (documento Correcoes_Grupo04_2026-10-05), proveniência da base sintética, que tinha começado no encontro anterior. O repositório dizia que a base sintética conversacional foi "fornecida pelo grupo", mas ela foi gerada pelo tutor e integrada ao projeto pelo João (commits d31925f e 146ceea).
+
+O que fiz:
+
+Atualizei a main, criei a branch marco/proveniencia-base-sintetica e corrigi o registro de autoria em seis arquivos: o campo fonte e o campo licenca da base emails_sinteticos no corpus_manifest.yaml, a linha de Fonte do CORPUS_INVENTORY.md, o docs/emails_sinteticos.md (ganhou um item de Autoria com a data e os dois commits, e "arquivo fornecido" virou "arquivo recebido do tutor"), o docstring de src/synthetic_conversations.py, que também dizia "fornecidas pelo grupo", e, depois do retorno do grupo, a tabela de bases do README.md e uma frase do ARQUITETURA.md, que tinham o mesmo erro.
+
+A data de entrega (05/10/2026) vem do registro do João no acompanhamento dele, e as condições de uso foram combinadas com o tutor e passadas pelo grupo: a base é usada na apresentação, pode ficar no repositório, não tem licença nem restrição e não precisa citar autoria. Registrei isso no campo licenca do corpus_manifest.yaml e no docs/emails_sinteticos.md. Rodei a suíte (pytest -m "not llm") e passaram 1261 testes. O commit principal é o 1a05b92, com push da branch para revisão do grupo no PR.
+
+Situação dos meus itens da lista de correções: o item 9 (erro de provedor aparecendo como "sem evidência") está concluído e mergeado na main; o item 11 (contexto entre perguntas) está concluído e mergeado, com o commit ea66a22; o item 13 (proveniência da base sintética) está concluído, com o commit 1a05b92 na branch marco/proveniencia-base-sintetica, aguardando revisão no PR.
+
+Uso de IA: usei o Claude pra localizar as ocorrências de "fornecida pelo grupo" no repositório e aplicar as edições nos arquivos. Fiz o commit e o push.
+
+## Encontro 13 — 14/10/2026
+
+Contexto: com a lista de pendências até o Demo Day (23/10), escolhi o item 8 da parte de qualidade, a falha da pergunta F1 do golden set. A pergunta compara os valores de contratação entre órgãos estaduais e municipais, e a resposta saía com confiança alta, mesmo tendo só um registro municipal de R$ 0,00 como base.
+
+O que fiz:
+
+Atualizei a main, criei a branch marco/f1-termo-houver e rodei o F1 pra reproduzir. Achei duas causas. A primeira: o "houver" de "se não houver dados suficientes" entrava como termo do objeto em src/structured_query.py e virava filtro no SQL. Resolvi colocando as formas do verbo haver (houv, haver, havia, haven, haja) nos radicais genéricos, com testes novos pra "se houver", "havendo", "haja" e outras flexões. Isso fez o F1 deixar de filtrar por "houver", mas ele ainda falhava: a consulta caía no atalho do SQL e respondia com confiança alta, comparando uma esfera que só tinha um valor zerado.
+
+Como isso era uma decisão de regra, decidi que: quando a pergunta compara esferas e menos de duas têm registros com valor maior ou igual a R$ 1,00, a resposta deve dizer que os dados são insuficientes pra comparar, com confiança baixa. Implementei com uma flag comparacao_esferas na Consulta, um tipo novo de resultado (comparacao_insuficiente) no schema.py, a verificação em structured_query.py e o tratamento no generate.py, pra confiança baixa valer também quando a resposta vem do LLM. Escrevi testes pros dois lados (dados insuficientes e dados suficientes) e pra uma pergunta que não é comparação. A suíte completa passou com 1607 testes e o F1 passou (OK, run 20261014T181928Z). O conserto do "houver" foi o commit 446bcb7, e a regra de comparação foi o 64404cd, os dois na branch marco/f1-termo-houver.
+
+Só o 446bcb7 entrou na main (PR #41), porque o merge do PR foi feito antes do push do 64404cd. Quando o Renato rodou a F1 com o LLM real na main, ela continuou falhando, com confiança alta e sem nenhuma frase de insuficiência, e o feedback dele descreveu o mesmo problema que a regra de comparação resolve. Ele também pediu que a correção valesse pra qualquer comparação com um grupo vazio, e não só pra F1, com teste numa base montada no próprio teste, e que eu combinasse com o João antes, porque a mudança mexe na regra de confiança do recorte que ele escreveu. Atualizei a branch com a main (merge sem conflito), a suíte completa passou com 1662 testes e a F1 passou de novo (OK, run 20261014T204357Z). Abri um segundo PR só com o 64404cd, pro Renato revisar e fazer o merge.
+
+Depois do merge, o Diogo roda o golden set completo (item 4) com essa correção.
+
+Uso de IA: usei o Claude pra investigar a causa do F1 e propor uma correção. Rodei a suíte e o F1, fiz os commits e os pushes e abri o PR.

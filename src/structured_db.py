@@ -49,7 +49,8 @@ BASE_PCA = "pca_agregado"
 # (SQLite ou Postgres) na próxima consulta. "4": pca_planos só com PCA.
 # "5": compras e contratos da base agregada entram em contratacoes.
 # "6": contratos da agregada entram também pelo ano de assinatura.
-SCHEMA_VERSION = "6"
+# "7": fornecedor_cnpj, para filtrar pelo CNPJ do fornecedor.
+SCHEMA_VERSION = "7"
 
 # numeroControlePNCP = CNPJ-<tipo>-<sequencial>/<ano>; tipo 0 = PCA, 1 = compra,
 # 2 = contrato. A base agregada traz também compras e contratos ligados aos
@@ -76,6 +77,8 @@ _COLUNAS_CONTRATACOES = {
     # permite contar uma vez só.
     "numero_controle_compra": "TEXT",
     "fornecedor": "TEXT",
+    # Só dígitos, como orgao_cnpj; vazio quando o fornecedor é pessoa física.
+    "fornecedor_cnpj": "TEXT",
     "modalidade": "TEXT",
     "modo_disputa": "TEXT",
     "situacao": "TEXT",
@@ -304,6 +307,27 @@ def _registros_json(documents_file: Path, base_id: str) -> Iterator[tuple[Mappin
                 yield chunk, registro
 
 
+_PESOS_CNPJ = (6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2)
+
+
+def cnpj_valido(digitos: str) -> bool:
+    """Confere os dois dígitos verificadores de um CNPJ só com dígitos."""
+    if len(digitos) != 14 or not digitos.isdigit() or len(set(digitos)) == 1:
+        return False
+    for posicao in (12, 13):
+        pesos = _PESOS_CNPJ[13 - posicao:]
+        resto = sum(int(d) * p for d, p in zip(digitos[:posicao], pesos)) % 11
+        if digitos[posicao] != str(0 if resto < 2 else 11 - resto):
+            return False
+    return True
+
+
+def _cnpj(valor: Any) -> str | None:
+    """CNPJ só com dígitos; CPF (11 dígitos) e vazio viram None."""
+    digitos = re.sub(r"\D", "", str(valor or ""))
+    return digitos if len(digitos) == 14 else None
+
+
 def _linha_contratacao(chunk: Mapping[str, Any], registro: dict[str, Any]) -> dict[str, Any] | None:
     numero_controle = registro.get("numeroControlePNCP")
     if not numero_controle:
@@ -331,6 +355,7 @@ def _linha_contratacao(chunk: Mapping[str, Any], registro: dict[str, Any]) -> di
         "tipo_registro": "contrato_assinado" if contrato_assinado else "publicacao_compra",
         "numero_controle_compra": registro.get("numeroControlePncpCompra") if contrato_assinado else None,
         "fornecedor": registro.get("nomeRazaoSocialFornecedor") or (chunk.get("extras") or {}).get("fornecedor"),
+        "fornecedor_cnpj": _cnpj(registro.get("niFornecedor")),
         "modalidade": registro.get("modalidadeNome") or (chunk.get("extras") or {}).get("modalidade"),
         "modo_disputa": registro.get("modoDisputaNome"),
         "situacao": registro.get("situacaoCompraNome"),

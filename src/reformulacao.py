@@ -309,16 +309,16 @@ def reformular_pergunta(
             # Saída fora do formato: segue com a pergunta anterior anexada.
             span.extra.update(diagnosticos)
             span.modelo = diagnosticos.get("model")
-            span.status = "degradado"
             span.extra.update({"fallback": "contexto_anexado", "error_type": type(erro).__name__})
+            span.status = "degradado"
             pergunta = _com_contexto(query, turnos)
             span.set_result({"pergunta": mascarar(pergunta)[0], "reescrita": True, "motivo": "saida_invalida"})
             return Reformulacao(pergunta, True, "saida_invalida")
         except Exception as erro:  # noqa: BLE001 - provedor fora do ar não derruba a consulta
             span.extra.update(diagnosticos)
             span.modelo = diagnosticos.get("model")
-            span.status = "degradado"
             span.extra.update({"fallback": "contexto_anexado", "error_type": type(erro).__name__})
+            span.status = "degradado"
             pergunta = _com_contexto(query, turnos)
             span.set_result({"pergunta": mascarar(pergunta)[0], "reescrita": True, "motivo": "llm_falhou"})
             return Reformulacao(pergunta, True, "llm_falhou")

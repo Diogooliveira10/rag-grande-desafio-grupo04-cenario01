@@ -354,7 +354,7 @@ def test_explore_nao_expoe_erro_interno(monkeypatch) -> None:
 # Histórico temporariamente aberto; trace continua protegido.
 # --------------------------------------------------------------------------
 
-_PROTEGIDOS = ["/api/v1/trace/q_1", "/api/v1/sessions/s_sessao_de_teste_01/trace"]
+_PROTEGIDOS = ["/api/v1/trace/q_1", "/api/v1/sessions/s_sessao_de_teste_01/trace", "/api/v1/history"]
 
 
 @pytest.mark.parametrize("url", _PROTEGIDOS)
@@ -367,6 +367,50 @@ def test_endpoint_protegido_com_chave_errada_e_401(url):
     assert TestClient(app, headers={"X-API-Key": "chave-errada"}).get(url).status_code == 401
 
 
+def _duas_conversas(monkeypatch):
+    monkeypatch.setattr(api_module.pipeline, "responder", _fake_responder)
+    minha = TestClient(app).post("/api/v1/query", json={"query": "Minha pergunta"}).json()
+    TestClient(app).post("/api/v1/query", json={"query": "Pergunta de outra pessoa"})
+    return minha
+
+
+def test_historico_com_x_session_id_mostra_so_a_propria_conversa(monkeypatch):
+    minha = _duas_conversas(monkeypatch)
+    dono = TestClient(app, headers={"X-Session-Id": minha["session_id"]})
+
+    response = dono.get("/api/v1/history")
+
+    assert response.status_code == 200
+    assert [item["query"] for item in response.json()] == ["Minha pergunta"]
+
+
+def test_historico_so_com_filtro_de_sessao_e_401(monkeypatch):
+    # O parâmetro session_id é filtro, não prova de que a conversa é de quem pede.
+    minha = _duas_conversas(monkeypatch)
+
+    response = TestClient(app).get("/api/v1/history", params={"session_id": minha["session_id"]})
+
+    assert response.status_code == 401
+
+
+def test_historico_geral_com_chave(monkeypatch):
+    _duas_conversas(monkeypatch)
+
+    response = client.get("/api/v1/history")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 2
+
+
+@pytest.mark.parametrize("headers", [{}, {"X-API-Key": "chave-errada"}])
+def test_history_public_abre_o_historico_geral_sem_chave(monkeypatch, headers):
+    monkeypatch.setattr(api_module.config, "HISTORY_PUBLIC", True)
+    _duas_conversas(monkeypatch)
+
+    response = TestClient(app, headers=headers).get("/api/v1/history")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 2
 @pytest.mark.parametrize("server_key", ["", "chave-de-teste"])
 @pytest.mark.parametrize("headers", [{}, {"X-API-Key": "chave-errada"}])
 def test_historico_sem_credencial_e_401(monkeypatch, server_key, headers):
@@ -455,6 +499,19 @@ def test_cors_libera_o_header_da_chave():
     assert "x-api-key" in liberados and "x-session-id" in liberados
 
 
+def test_cors_libera_o_header_do_tunel_ngrok():
+    # O site publicado chama o backend por um túnel ngrok gratuito, que exige
+    # este header para não devolver a página de aviso no lugar da resposta.
+    response = TestClient(app).options("/api/v1/query", headers={
+        "Origin": "https://etuarda.github.io",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "Content-Type, X-Session-Id, ngrok-skip-browser-warning",
+    })
+
+    assert response.status_code == 200
+    assert "ngrok-skip-browser-warning" in response.headers["access-control-allow-headers"].lower()
+
+
 def test_query_repassa_o_historico_ao_pipeline_e_devolve_a_pergunta_reformulada(monkeypatch) -> None:
     chamadas = []
 
@@ -505,3 +562,22 @@ def test_query_rejeita_historico_malformado(historico) -> None:
     response = client.post("/api/v1/query", json={"query": "E em 2024?", "historico": historico})
 
     assert response.status_code == 422
+
+
+def test_api_pre_carrega_o_rerank_ao_subir(monkeypatch):
+    import threading
+    chamou = threading.Event()
+    monkeypatch.setattr(api_module.config, "RERANK_ENABLED", True)
+    monkeypatch.setattr(api_module.config, "RERANK_PRELOAD", True)
+    monkeypatch.setattr(api_module.rerank, "pre_carregar", chamou.set)
+
+    with TestClient(app):
+        assert chamou.wait(timeout=5)
+
+
+def test_api_sem_pre_carregamento_nao_carrega_o_rerank(monkeypatch):
+    monkeypatch.setattr(api_module.config, "RERANK_PRELOAD", False)
+    monkeypatch.setattr(api_module.rerank, "pre_carregar", lambda: pytest.fail("não deveria pré-carregar"))
+
+    with TestClient(app) as cliente:
+        assert cliente.get("/health").status_code == 200

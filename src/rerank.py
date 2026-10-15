@@ -200,6 +200,23 @@ class EcoaReranker(CrossEncoderReranker):
         return notas
 
 
+def pre_carregar() -> bool:
+    """Carrega o cross-encoder local antes da primeira pergunta.
+
+    Vale para os dois provedores: no ``ecoa`` o modelo local é o fallback.
+    Devolve se carregou; falha só vira aviso, porque a primeira pergunta
+    tenta de novo pelo caminho normal.
+    """
+    if not config.RERANK_ENABLED:
+        return False
+    try:
+        _carregar_cross_encoder(config.RERANK_MODEL, config.RERANK_MAX_LENGTH)
+    except Exception as erro:  # sem sentence-transformers, sem rede para baixar etc.
+        logger.warning("Pré-carregamento do rerank falhou (%s); carrega na primeira pergunta", type(erro).__name__)
+        return False
+    return True
+
+
 def reranker_padrao() -> Optional[CrossEncoderReranker]:
     """Reranker usado pelo pipeline, ou ``None`` com ``RERANK_ENABLED=false``."""
     if not config.RERANK_ENABLED:
@@ -209,4 +226,4 @@ def reranker_padrao() -> Optional[CrossEncoderReranker]:
     return EcoaReranker(fallback=CrossEncoderReranker())
 
 
-__all__ = ["CrossEncoderReranker", "EcoaReranker", "reranker_padrao"]
+__all__ = ["CrossEncoderReranker", "EcoaReranker", "pre_carregar", "reranker_padrao"]

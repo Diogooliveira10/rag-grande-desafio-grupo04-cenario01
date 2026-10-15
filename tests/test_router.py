@@ -153,3 +153,14 @@ def test_verbo_contratar_ou_comprar_vai_para_a_estruturada(pergunta):
 
 def test_modalidade_no_singular_continua_pergunta_de_regra():
     assert rotear_pergunta("Uma microempresa pode participar de pregão eletrônico?").bases_selecionadas == [Natureza.NORMATIVA]
+
+
+@pytest.mark.parametrize("pergunta", [
+    "Qual foi o valor pago à empresa Cristália?",
+    "Quanto o Estado pagou à empresa Cristália?",
+    "Quais pagamentos foram feitos aos fornecedores de ambulância?",
+])
+def test_pergunta_sobre_pagamento_vai_para_a_base_de_contratos(pergunta):
+    # O PNCP não registra pagamento, mas a base de contratos responde com o
+    # valor contratado e avisa que não é o pago; recusar seria pior.
+    assert Natureza.ESTRUTURADA in rotear_pergunta(pergunta).bases_selecionadas

@@ -1033,6 +1033,122 @@ def test_mediana_por_veiculo_nao_compila_calculo_sobre_global():
 
 
 # --------------------------------------------------------------------------
+# Filtro por CNPJ (do órgão ou do fornecedor)
+# --------------------------------------------------------------------------
+
+def _contrato(numero, ni_fornecedor, fornecedor, valor, cnpj_orgao="29131075000193"):
+    return {
+        "numeroControlePNCP": numero, "anoContrato": 2025, "dataAssinatura": "2025-05-10",
+        "dataPublicacaoPncp": "2025-05-12T00:00:00", "objetoContrato": "Serviços de consultoria",
+        "valorGlobal": valor, "niFornecedor": ni_fornecedor, "nomeRazaoSocialFornecedor": fornecedor,
+        "orgaoEntidade": {"cnpj": cnpj_orgao, "razaoSocial": "MUNICIPIO DE MARICA", "esferaId": "M"},
+        "unidadeOrgao": {"ufSigla": "RJ", "municipioNome": "Maricá", "nomeUnidade": "U"},
+    }
+
+
+@pytest.fixture
+def base_cnpj(tmp_path):
+    documents = escrever_documents(tmp_path / "documents.jsonl", contratacoes=[
+        _contrato("29131075000193-2-000001/2025", "05340639000130", "PRIME CONSULTORIA", 1000.0),
+        _contrato("29131075000193-2-000002/2025", "05340639000130", "PRIME CONSULTORIA", 3000.0),
+        _contrato("30381552000158-2-000003/2025", "15064270000133", "OUTRA LTDA", 500.0,
+                  cnpj_orgao="30381552000158"),
+        _contrato("30381552000158-2-000004/2025", "12345678901", "PESSOA FISICA", 100.0,
+                  cnpj_orgao="30381552000158"),
+    ])
+    banco = Banco(sqlite_path=tmp_path / "base.sqlite")
+    structured_db.construir_banco(documents, banco)
+    return {"banco": banco, "documents_file": documents}
+
+
+def test_fornecedor_cnpj_vem_do_ni_fornecedor_e_cpf_fica_vazio(base_cnpj):
+    linhas = base_cnpj["banco"].consultar(
+        "SELECT numero_controle_pncp, fornecedor_cnpj FROM contratacoes ORDER BY numero_controle_pncp")
+
+    assert [linha["fornecedor_cnpj"] for linha in linhas] == [
+        "05340639000130", "05340639000130", "15064270000133", None]
+
+
+@pytest.mark.parametrize("pergunta", [
+    "Quais contratos tem o fornecedor de CNPJ 05.340.639/0001-30?",
+    "Quais contratos tem o fornecedor de CNPJ 05340639000130?",
+])
+def test_listagem_pelo_cnpj_do_fornecedor(pergunta, base_cnpj):
+    from src.query_analysis import analisar_query
+    consulta = sq.detectar_consulta(pergunta, analisar_query(pergunta).filtros, ESTRUTURADA)
+
+    _, _, linhas = sq.executar_consulta(consulta, base_cnpj["banco"])
+
+    assert consulta.tipo == "listagem"
+    assert linhas[0].startswith("2 registros")
+    assert all("PRIME CONSULTORIA" in linha for linha in linhas[1:])
+
+
+def test_soma_pelo_cnpj_do_orgao(base_cnpj):
+    from src.query_analysis import analisar_query
+    pergunta = "Qual o valor total dos contratos do CNPJ 29.131.075/0001-93 em 2025?"
+    consulta = sq.detectar_consulta(pergunta, analisar_query(pergunta).filtros, ESTRUTURADA)
+
+    _, _, linhas = sq.executar_consulta(consulta, base_cnpj["banco"])
+
+    assert "2 registros" in linhas[0] and "R$ 4.000,00" in linhas[0]
+
+
+@pytest.mark.parametrize("cnpj,valido", [
+    ("05340639000130", True), ("29131075000193", True), ("11222333000181", True),
+    ("11222333000180", False), ("05340639000131", False), ("11111111111111", False), ("1234567800019", False),
+])
+def test_cnpj_valido_confere_os_digitos_verificadores(cnpj, valido):
+    assert structured_db.cnpj_valido(cnpj) is valido
+
+
+def test_cabecalho_avisa_cnpj_com_digito_verificador_invalido(base_cnpj):
+    from src.query_analysis import analisar_query
+    pergunta = "Quais contratos tem o fornecedor de CNPJ 05.340.639/0001-31?"
+    consulta = sq.detectar_consulta(pergunta, analisar_query(pergunta).filtros, ESTRUTURADA)
+
+    _, cabecalho, _ = sq.executar_consulta(consulta, base_cnpj["banco"])
+
+    assert "cnpj=05340639000131 (dígito verificador inválido" in cabecalho
+
+
+def test_cabecalho_nao_avisa_cnpj_valido(base_cnpj):
+    from src.query_analysis import analisar_query
+    pergunta = "Quais contratos tem o fornecedor de CNPJ 05.340.639/0001-30?"
+    consulta = sq.detectar_consulta(pergunta, analisar_query(pergunta).filtros, ESTRUTURADA)
+
+    _, cabecalho, _ = sq.executar_consulta(consulta, base_cnpj["banco"])
+
+    assert "cnpj=05340639000130" in cabecalho and "inválido" not in cabecalho
+
+
+@pytest.mark.parametrize("verbo", ["foram firmados", "firmou", "firmaram"])
+def test_firmar_nao_vira_termo_do_objeto(verbo):
+    assert sq._termos_do_objeto(f"quantos contratos de ambulancia {verbo}") == ("ambulancia",)
+
+
+@pytest.mark.parametrize("verbo", ["se houver", "se houve", "havendo", "havia", "haja", "se houvesse"])
+def test_haver_nao_vira_termo_do_objeto(verbo):
+    assert sq._termos_do_objeto(f"contratos de ambulancia {verbo}") == ("ambulancia",)
+
+
+def test_pergunta_da_f1_nao_traz_houver_como_termo_do_objeto():
+    pergunta = (
+        "Em 2025, órgãos estaduais do Rio de Janeiro pagaram mais por ambulâncias tipo D do que os "
+        "municípios fluminenses? Compare apenas os registros tecnicamente equivalentes disponíveis "
+        "no corpus; se não houver dados suficientes, reconheça a insuficiência de evidência."
+    )
+
+    termos = sq._termos_do_objeto(structured_db.normalizar(pergunta))
+
+    assert "houver" not in termos
+    assert "ambulancia" in termos
+
+
+def test_resultado_sql_vazio_e_marcado_sem_registros(base):
+    chunks = _consultar("Quantos contratos de helicóptero existem?", base, metrica="contagem")
+
+    assert chunks and all(chunk.metadata.extras["sem_registros"] for chunk in chunks)
 # P3: recorte da consulta — confiabilidade, completude e cobertura separadas
 # --------------------------------------------------------------------------
 
@@ -1068,7 +1184,7 @@ def test_recorte_traz_snapshot_versao_e_hash(tmp_path):
     banco = _banco_com(tmp_path, [_contratacao("111-2-000001/2025")])
     recorte = {}
     sq.executar_consulta(_consulta_soma(), banco, recorte)
-    assert recorte["snapshot_versao"] == "6"
+    assert recorte["snapshot_versao"] == structured_db.SCHEMA_VERSION
     assert recorte["snapshot_hash"]  # proveniência da base, sem ler o texto
 
 
@@ -1141,3 +1257,25 @@ def test_especificacao_de_tipo_e_preservada():
 def test_qual_tipo_de_contrato_nao_gera_termo():
     """"tipo" sozinho é palavra genérica; só a especificação conta."""
     assert sq._termos_do_objeto("qual tipo de contrato") == ()
+
+
+@pytest.mark.parametrize("pergunta", [
+    "Qual foi o valor pago pelas ambulâncias?",
+    "Quanto foi pago pelas ambulâncias?",
+])
+def test_pagamento_vira_soma_com_aviso_de_que_nao_e_o_pago(pergunta, base):
+    consulta = sq.detectar_consulta(pergunta, QueryFilters(), ESTRUTURADA)
+
+    _, cabecalho, _ = sq.executar_consulta(consulta, base["banco"])
+
+    assert consulta.tipo == "estatistica" and consulta.pagamento_citado
+    assert "o PNCP não registra pagamentos" in cabecalho
+
+
+def test_valor_total_sem_pagamento_nao_ganha_o_aviso(base):
+    consulta = sq.detectar_consulta("Qual o valor total das ambulâncias?", QueryFilters(), ESTRUTURADA)
+
+    _, cabecalho, _ = sq.executar_consulta(consulta, base["banco"])
+
+    assert not consulta.pagamento_citado
+    assert "não registra pagamentos" not in cabecalho

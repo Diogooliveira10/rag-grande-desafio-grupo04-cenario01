@@ -11,11 +11,14 @@ avaliacao a essa consulta e ``GET /api/v1/history`` devolve o historico
 salvo. O estagio ``feedback`` ja existia reservado em ``src/obs.py``
 (Stage.FEEDBACK) mas nao estava integrado a nenhum fluxo ate agora.
 
-Acesso ao historico com dois personas (decisao de 2026-10-14, substituindo a
-abertura temporaria): quem tem a ``RAG_API_KEY`` (operador) ve o historico
-inteiro; o dono da conversa se identifica pelo header ``X-Session-Id`` e ve
-so as suas consultas. O query param ``session_id`` e filtro do operador, nao
-autenticacao. O trace segue a mesma autorizacao. ``/query`` e ``/feedback``
+Acesso ao historico com dois personas (decisao de 2026-10-14): quem tem a
+``RAG_API_KEY`` (operador) ve o historico inteiro e pode filtrar por
+``session_id``; o dono da conversa se identifica pelo header ``X-Session-Id``
+e ve so as suas consultas. O query param ``session_id`` e filtro do operador,
+nao autenticacao. O trace segue a mesma autorizacao. ``HISTORY_PUBLIC=true``
+no ``.env`` abre o historico geral sem chave, para uma demo que precise dele;
+mostra consultas de todos os usuarios, entao fica desligado por padrao.
+``/query`` e ``/feedback``
 continuam abertos: sao o uso normal do chat.
 """
 
@@ -24,6 +27,8 @@ from __future__ import annotations
 import logging
 import os
 import secrets
+import threading
+from contextlib import asynccontextmanager
 from pathlib import PurePosixPath
 from typing import Any, Literal, Optional
 
@@ -34,7 +39,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
 import config
-from src import pipeline
+from src import pipeline, rerank
 from app import catalog
 from app.catalog_models import ContratacaoRecord, DocumentoRecord, OfficialSource, OrgaoRecord, ProjectSummary
 from src.history_store import ConsultaNaoEncontrada, default_store as historico
@@ -75,6 +80,27 @@ def _autorizar_trace(
         x_session_id.encode(), sessao_do_trace.encode()
     ):
         return
+    raise HTTPException(
+        status_code=401,
+        detail="Envie X-Session-Id da conversa ou X-API-Key.",
+    )
+
+
+def _sessao_do_historico(
+    x_api_key: Optional[str], x_session_id: Optional[str], session_id: Optional[str]
+) -> Optional[str]:
+    """Sessão a que o histórico fica restrito; ``None`` = histórico geral.
+
+    Dois personas: o operador com chave (ou ``HISTORY_PUBLIC``) vê tudo e
+    filtra por ``session_id``; o dono se identifica pelo ``X-Session-Id`` e vê
+    só a sua conversa. Para o dono o ``session_id`` de query não autentica: o
+    escopo vem do header. Sem nenhuma das duas credenciais, 401 sem revelar o
+    que existe no histórico.
+    """
+    if config.HISTORY_PUBLIC or _chave_valida(x_api_key):
+        return session_id
+    if x_session_id:
+        return x_session_id
     raise HTTPException(
         status_code=401,
         detail="Envie X-Session-Id da conversa ou X-API-Key.",
@@ -228,13 +254,24 @@ class SessaoTraceResponse(BaseModel):
     perguntas: list[SessaoPergunta]
 
 
-app = FastAPI(title="Adaptive RAG API", version="1.0.0")
+@asynccontextmanager
+async def _ciclo_de_vida(_app: FastAPI):
+    # O cross-encoder leva ~15 s para carregar: numa thread, para o servidor
+    # já aceitar requisições, e antes da primeira pergunta de verdade.
+    if config.RERANK_ENABLED and config.RERANK_PRELOAD:
+        threading.Thread(target=rerank.pre_carregar, name="rerank-preload", daemon=True).start()
+    yield
+
+
+app = FastAPI(title="Adaptive RAG API", version="1.0.0", lifespan=_ciclo_de_vida)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "X-API-Key", "X-Session-Id"],
+    # ngrok-skip-browser-warning: o túnel ngrok gratuito põe uma página de aviso
+    # na frente do tráfego de navegador; o site envia este header para pulá-la.
+    allow_headers=["Content-Type", "X-API-Key", "X-Session-Id", "ngrok-skip-browser-warning"],
 )
 
 
@@ -346,8 +383,6 @@ def enviar_feedback(request: FeedbackRequest) -> dict[str, str]:
     return {"status": "recebido"}
 
 
-# Temporariamente público para a demo; o filtro de sessão não é autenticação.
-# Os endpoints de trace abaixo continuam protegidos.
 @app.get("/api/v1/history", response_model=list[HistoricoItem])
 def obter_historico(
     limit: int = Query(default=20, ge=1, le=100),
@@ -355,20 +390,8 @@ def obter_historico(
     x_api_key: Optional[str] = Header(default=None),
     x_session_id: Optional[str] = Header(default=None),
 ) -> list[dict]:
-    """Dois personas: o operador com chave ve tudo; o dono ve a sua conversa.
-
-    O dono se identifica pelo ``X-Session-Id`` — a mesma autorizacao do trace.
-    O ``session_id`` de query e filtro de quem tem a chave; para o novo
-    usuario ele nao autentica (o escopo vem do header). Sem nenhuma das duas
-    credenciais, 401 sem revelar o que existe no historico.
-    """
-    if not _chave_valida(x_api_key):
-        if not x_session_id:
-            raise HTTPException(
-                status_code=401, detail="Envie X-Session-Id da conversa ou X-API-Key."
-            )
-        session_id = x_session_id
-    items = historico.obter_historico(limit=limit, session_id=session_id)
+    sessao_permitida = _sessao_do_historico(x_api_key, x_session_id, session_id)
+    items = historico.obter_historico(limit=limit, session_id=sessao_permitida)
     for item in items:
         item["resposta"] = _public_rag_payload(item["resposta"])
     return items

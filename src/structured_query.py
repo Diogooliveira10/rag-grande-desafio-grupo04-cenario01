@@ -76,6 +76,9 @@ _RE_NORMA_NUMERADA = re.compile(
     r"\b(?:lei|decreto|portaria|resolucao|instrucao normativa)(?:\s+complementar)?"
     r"(?:\s+(?:federal|estadual|municipal))?(?:\s+n[o.]?)?\s+\d|\blei do pregao\b"
 )
+# Pagamento citado na pergunta: o PNCP só traz valor contratado/informado, e o
+# resultado avisa que o número não é o que foi pago.
+_RE_PAGAMENTO = re.compile(r"\bpag(?:o|os|a|as|ou|aram|amentos?)\b")
 _RE_CITACAO_DE_NORMA = re.compile(
     r"\b(?:lei|decreto|portaria|resolucao|instrucao normativa)\s+(?:complementar\s+)?"
     r"(?:federal|estadual|municipal)\b|\blei do pregao\b"
@@ -213,6 +216,9 @@ class Consulta:
     # A pergunta cita lei/decreto ("contratos que seguem a Lei 14.133"): a norma
     # não é filtro, e o resultado avisa isso em vez de parecer uma contagem por lei.
     norma_citada: bool = False
+    # A pergunta fala em pagamento ("valor pago", "quanto pagou"): o resultado
+    # avisa que a base tem o valor contratado/informado, não o pago.
+    pagamento_citado: bool = False
     valor_max_exclusivo: bool = False
     plano_tipado: bool = False
     numero_controle_pncp: Optional[str] = None
@@ -342,7 +348,11 @@ def _singular(token: str) -> str:
 
 
 # Radicais que nunca descrevem o objeto, em qualquer flexão ("comparando", "publicaram").
-_RADICAIS_GENERICOS = ("compar", "publica", "assina", "vigen", "contrat", "registr", "realiz", "celebr")
+# "houv"/"haver"/"havia"/"haven"/"haja" são o verbo haver ("se não houver dados suficientes").
+_RADICAIS_GENERICOS = (
+    "compar", "publica", "assina", "vigen", "contrat", "registr", "realiz", "celebr", "firma",
+    "houv", "haver", "havia", "haven", "haja",
+)
 
 
 _TIPO_CODIGO_INVALIDO = frozenset("de do da dos das em no na um uma ou e os as ao aos por com".split())
@@ -420,7 +430,8 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
         tipo = "estatistica"  # sai quebrada por esfera, que é a comparação pedida
     elif _RE_RANKING.search(texto):
         tipo = "ranking"
-    elif _RE_ESTATISTICA.search(texto):
+    elif _RE_ESTATISTICA.search(texto) or (_RE_PAGAMENTO.search(texto) and re.search(r"\bvalor(es)?\b", texto)):
+        # "Qual foi o valor pago à empresa X?" pede uma soma, como "valor total".
         tipo = "estatistica"
     elif (
         tabela == "contratacoes"
@@ -524,7 +535,9 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
     # Contrato conta pela assinatura, salvo quando a pergunta pede a publicação.
     referencia_temporal = filtros.referencia_temporal or ("assinatura" if so_contratos else None)
     termos_objeto = _termos_do_objeto(texto_objeto) if tabela == "contratacoes" else ()
-    if tipo == "listagem" and not termos_objeto and not modalidade_termos and not orgao_termos:
+    # O CNPJ citado também delimita o pedido ("contratos do fornecedor de CNPJ X").
+    if (tipo == "listagem" and not termos_objeto and not modalidade_termos and not orgao_termos
+            and not analiticos.get("cnpj")):
         return None  # "Quais contratos existem?" sem assunto: a busca normal responde
     return Consulta(
         tabela=tabela,
@@ -554,6 +567,7 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
         orgao_termos=orgao_termos,
         so_contratos=so_contratos,
         norma_citada=bool(_RE_NORMA_NUMERADA.search(texto)),
+        pagamento_citado=bool(_RE_PAGAMENTO.search(texto)),
 
     )
 
@@ -673,6 +687,12 @@ def _where(consulta: Consulta, termos: Iterable[str], juncao: str = "AND") -> tu
     if consulta.deduplicar and consulta.tabela == "contratacoes":
         condicoes.append(_SEM_DUPLICATA_MODALIDADE if _usa_modalidade(consulta) else _SEM_DUPLICATA)
     for campo, valor in consulta.filtros_analiticos:
+        if campo == "cnpj":
+            # A pergunta cita o CNPJ sem dizer se é do órgão ou do fornecedor.
+            colunas = [c for c in ("orgao_cnpj", "fornecedor_cnpj") if c in structured_db._TABELAS[consulta.tabela]]
+            condicoes.append("(" + " OR ".join(f"{coluna} = ?" for coluna in colunas) + ")")
+            parametros.extend(valor for _ in colunas)
+            continue
         if campo not in structured_db._TABELAS[consulta.tabela]:
             raise ValueError("Campo SQL não permitido")
         if campo in {"orgao_nome", "fornecedor"}:
@@ -968,6 +988,9 @@ def _cabecalho(consulta: Consulta, total_tabela: int, termos: tuple[str, ...], j
             f"Consulta SQL na tabela contratacoes: {total_tabela} registros da amostra PNCP/RJ. "
             "Contratos: valorGlobal; compras: homologado ou estimado. Valores informados, não pagamentos."
         )
+        if consulta.pagamento_citado:
+            origem += (" A pergunta fala em pagamento, mas o PNCP não registra pagamentos: o valor"
+                       " abaixo é o contratado ou informado, não o que foi efetivamente pago.")
         if consulta.norma_citada:
             origem += (" A norma citada na pergunta NÃO é filtro desta conta: os contratos assinados do PNCP"
                        " não trazem o amparo legal, então o resultado vale para todos os registros com os"
@@ -1004,7 +1027,11 @@ def _cabecalho(consulta: Consulta, total_tabela: int, termos: tuple[str, ...], j
             f"órgão em {', '.join(consulta.orgaos[:5])}{'…' if len(consulta.orgaos) > 5 else ''}" if consulta.orgaos
             else f"órgão {' '.join(consulta.orgao_termos)} (nenhum órgão do corpus casa com esse nome)"
         )
-    filtros.extend(f"{k}={v}" for k, v in consulta.filtros_analiticos)
+    filtros.extend(
+        f"{k}={v} (dígito verificador inválido: confira o número)"
+        if k == "cnpj" and not structured_db.cnpj_valido(str(v)) else f"{k}={v}"
+        for k, v in consulta.filtros_analiticos
+    )
     if consulta.referencia_temporal:
         filtros.append(f"referência={consulta.referencia_temporal}")
     if consulta.campo:
@@ -1274,7 +1301,12 @@ def _chunks(consulta: Consulta, sql: str, cabecalho: str, linhas: list[str], ban
                             "Campos ausentes não são zero. Esta amostra não é um censo do RJ.",
                             "recorte": recorte},
                         "geracao_deterministica": consulta.tipo in {"estatistica", "ranking", "agrupamento", "evolucao"}
-                        and not consulta.norma_citada},
+                        and not consulta.norma_citada,
+                        # Nada atendeu aos filtros: é ausência na amostra, não um número calculado.
+                        "sem_registros": not linhas or all(
+                            linha.strip().casefold() == "(nenhum registro)"
+                            or linha.strip().casefold().startswith("nenhum registro encontrado")
+                            for linha in linhas)},
             ),
         )
         for indice, parte in enumerate(partes, 1)

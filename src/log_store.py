@@ -95,16 +95,27 @@ class EventStore:
         conn.execute("DELETE FROM events WHERE NOT EXISTS "
                      "(SELECT 1 FROM event_sources s WHERE s.event_hash=events.event_hash)")
 
+    @staticmethod
+    def _signature(stat: os.stat_result) -> tuple[int, int, int, int]:
+        """size, mtime_ns, device and inode as SQLite-safe signed 64-bit ints.
+
+        On Windows ``st_dev`` is the unsigned volume serial and can exceed
+        2**63 - 1, which SQLite rejects (OverflowError, losing the log batch).
+        """
+        def signed(value: int) -> int:
+            return value - 2**64 if value >= 2**63 else value
+        return stat.st_size, stat.st_mtime_ns, signed(stat.st_dev), signed(stat.st_ino)
+
     def _sync_file(self, conn: sqlite3.Connection, path: Path) -> None:
         if not path.is_file() or path.is_symlink():
             return
         name = str(path.resolve())
-        stat = path.stat()
+        size, mtime_ns, device, inode = self._signature(path.stat())
         old = conn.execute("SELECT offset,size,mtime_ns,device,inode FROM sources WHERE path=?", (name,)).fetchone()
-        if old and (old[1], old[2], old[3], old[4]) == (stat.st_size, stat.st_mtime_ns, stat.st_dev, stat.st_ino):
+        if old and (old[1], old[2], old[3], old[4]) == (size, mtime_ns, device, inode):
             return
-        reset = bool(old and (stat.st_size < old[0] or (old[3], old[4]) != (stat.st_dev, stat.st_ino)
-                              or (stat.st_size == old[1] and stat.st_mtime_ns != old[2])))
+        reset = bool(old and (size < old[0] or (old[3], old[4]) != (device, inode)
+                              or (size == old[1] and mtime_ns != old[2])))
         offset = old[0] if old and not reset else 0
         if reset:
             conn.execute("DELETE FROM event_sources WHERE path=?", (name,))
@@ -120,7 +131,7 @@ class EventStore:
                 except UnicodeError:
                     continue
         conn.execute("INSERT OR REPLACE INTO sources VALUES(?,?,?,?,?,?)",
-                     (name, offset, stat.st_size, stat.st_mtime_ns, stat.st_dev, stat.st_ino))
+                     (name, offset, size, mtime_ns, device, inode))
         if reset:
             self._orphans(conn)
 
@@ -166,10 +177,8 @@ class EventStore:
             known = {row[0]: row[1:] for row in conn.execute("SELECT * FROM sources")}
             changed = []
             for path in paths:
-                stat = path.stat()
                 old = known.get(str(path))
-                if not old or (old[1], old[2], old[3], old[4]) != (
-                    stat.st_size, stat.st_mtime_ns, stat.st_dev, stat.st_ino):
+                if not old or (old[1], old[2], old[3], old[4]) != self._signature(path.stat()):
                     changed.append(path)
             removed = [name for name in known if Path(name).parent in directories and Path(name) not in paths]
             if changed or removed:

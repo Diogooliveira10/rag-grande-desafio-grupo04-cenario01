@@ -131,6 +131,9 @@ reenviando as últimas trocas no campo opcional `historico` de
   novos, `consultou_*` significa tentativa; `sql_retornou_evidencia` e
   `vetorial_retornou_evidencia` distinguem retorno de chunks. Uma tentativa SQL
   com erro não aparece como SQL não consultado.
+  Perguntas registradas antes de 05/10 vêm com `caminho: null`, sem
+  `fontes_citadas` (só a contagem, em `num_fontes`) e com
+  `evidencias_vetorial` às vezes como número total em vez de contagem por base.
 - Campos aditivos do trace: `status`, `completo`, `latencia_metodo` e
   `latencia_pipeline_ms`. O tempo total vem do envelope API/pipeline monotônico,
   sem somar etapas sobrepostas nem feedback posterior. Início sem fim é
@@ -142,9 +145,6 @@ reenviando as últimas trocas no campo opcional `historico` de
   significa não executado; `degradado` significa fallback tratado. Os detalhes
   incluem `outcome`, origem, sequência, motivo e metadados permitidos. O evento
   terminal da API confirma retorno preparado, não recebimento pelo navegador.
-- Perguntas antigas sem `resumo_consulta` vêm com `caminho: null`, sem
-  `fontes_citadas` (só a contagem, em `num_fontes`) e com
-  `evidencias_vetorial` às vezes como número total em vez de contagem por base.
 - `GET /api/v1/sessions/{session_id}/trace`: a conversa inteira, com as
   perguntas em ordem (`perguntas[]` com `query_id`, `pergunta`, `resumo` e os
   nomes das etapas) e quantas delas usaram SQL e busca vetorial. O detalhe de
@@ -170,10 +170,17 @@ O acesso ao histórico usa a mesma autorização do trace, com dois personas:
 O trace mantém os mesmos dois tipos de acesso:
 
 - **Dono da conversa** (o site público): envia o header `X-Session-Id` com o
-  `session_id` que recebeu no `QueryResponse`. Vê o trace das perguntas da
-  própria conversa e o trace da sessão. Não vê traces de outras pessoas.
+  `session_id` que recebeu no `QueryResponse`. Vê o histórico, o trace das
+  perguntas e o trace da sessão **da própria conversa**. Não vê os de outras
+  pessoas. No histórico, o parâmetro `session_id` é só filtro: sem chave, ele
+  precisa ser igual ao `X-Session-Id` (ou ficar vazio).
 - **Quem opera a demo**: envia `X-API-Key` igual a `RAG_API_KEY` do `.env` do
   servidor. Vê o trace de qualquer conversa.
+
+`HISTORY_PUBLIC=true` no `.env` do servidor abre o histórico geral sem chave,
+para uma demo que precise mostrá-lo. Ele lista as consultas de todos os
+usuários, então fica desligado por padrão; a máscara de dados pessoais não
+substitui controle de acesso. Os traces continuam protegidos mesmo assim.
 
 Respostas:
 
@@ -182,6 +189,8 @@ Respostas:
 - Trace sem `X-Session-Id` da conversa e sem chave válida: `401`, mesmo quando
   o id não existe (não revela quais perguntas estão no log). Com acesso e id
   inexistente: `404`.
+- Histórico sem `X-Session-Id` e sem chave válida: `401` (exceto com
+  `HISTORY_PUBLIC=true`, que abre o histórico geral para uma demo).
 - `POST /api/v1/query` e `POST /api/v1/feedback` não pedem nada.
 - O CORS libera os headers `X-API-Key` e `X-Session-Id`.
 

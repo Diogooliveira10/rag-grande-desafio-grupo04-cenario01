@@ -13,7 +13,8 @@ Consulte o [inventário](CORPUS_INVENTORY.md), o
 A consulta também inclui o [suplemento sintético conversacional](docs/emails_sinteticos.md):
 25 conversas fictícias (45 mensagens), em uma base separada dos dados reais da v6.
 
-Os vetores em `data/embeddings/2026-09-30_12-08-51/`, os índices em `index/`,
+Os vetores ativos em `data/embeddings/2026-10-07_21-18-41_ocr-recovery/` (a v6
+após a recuperação OCR; a geração original fica em `2026-09-30_12-08-51/`), os índices em `index/`,
 os documentos normalizados e o SQLite da v6 estão versionados para consulta.
 As credenciais ECOA continuam locais no `.env`. Os arquivos brutos são externos
 ao Git; as fontes públicas constam nos metadados. As entregas das atas estão em
@@ -36,7 +37,7 @@ Contexto completo do desafio, dos outros dois cenários e dos padrões de engenh
 | `editais_normativo` | Normativa | Lei 14.133/2021, decretos estaduais, editais de licitação | Senado Federal, REDELOG-RJ, CGE-RJ, MPPI | PDF/HTML por URL |
 | `contratos_estruturado` | Estruturada | 625 contratos de órgãos do RJ, quase todos de 2025 (434 municipais, 159 federais, 32 estaduais) | PNCP — API de consulta | REST paginado |
 | `atas_conversacional` | Conversacional | 376 arquivos de atas de registro de preços: 336 JSON de metadados e 40 PDFs | PNCP | REST (JSON) + PDF |
-| `emails_sinteticos` | Conversacional | Suplemento: 25 conversas fictícias de compras públicas; 20 públicas e 5 restritas | Base sintética fornecida pelo grupo | JSON local |
+| `emails_sinteticos` | Conversacional | Suplemento: 25 conversas fictícias de compras públicas; 20 públicas e 5 restritas | Base sintética gerada pelo tutor | JSON local |
 | `pca_agregado` | Agregada | 386 registros relacionados ao planejamento e ao resultado das compras: itens homologados, contratações vinculadas e um PCA confirmado (Secretaria de Saúde estadual) | PNCP | REST (JSON) |
 
 Números da v6 (limite de cinco arquivos por órgão e por base); detalhes em [CORPUS_INVENTORY.md](CORPUS_INVENTORY.md) e em [docs/registro_execucao_v6.md](docs/registro_execucao_v6.md).
@@ -461,7 +462,7 @@ qualidade, sem gerar vetores, reaproveite os vetores da v6 base a base:
 ```powershell
 foreach ($base in "atas_conversacional", "contratos_estruturado", "editais_normativo", "pca_agregado") {
   py .\src\index.py --input "data\normalized\v6\$base\documents.jsonl" --output index `
-    --embeddings "data\embeddings\2026-09-30_12-08-51\$base\embeddings.jsonl" --merge-existing
+    --embeddings "data\embeddings\2026-10-07_21-18-41_ocr-recovery\$base\embeddings.jsonl" --merge-existing
 }
 ```
 
@@ -497,7 +498,9 @@ Onde a base fica depende de `DATABASE_URL` no `.env` — o mesmo código e o mes
 - **Preenchido:** Postgres no [Neon](https://neon.tech) (`postgresql://...?sslmode=require`). É a base do projeto. A connection string tem senha: fica só no `.env`, nunca no repositório nem no log (o log mostra só o host). Com o usuário dono, a base se remonta sozinha quando o `documents.jsonl` ou o esquema mudam; com um usuário só de leitura (`rag_leitor`), ela é usada como está e o log da etapa `consulta_sql` marca `base_desatualizada` — quem tem o usuário dono roda `py -m src.structured_db build` uma vez.
 - **Vazio:** SQLite em `data/structured/base_estruturada.sqlite`, versionado no Git com o snapshot v6. Serve a quem não tem a connection string do Neon, aos testes (que sempre usam SQLite temporário, sem internet nem senha; ver `tests/conftest.py`) e às avaliações reproduzíveis. Quando o esquema muda, o arquivo remontado entra no commit, para ninguém ficar com ele alterado.
 
-Tabelas: `contratacoes` e `pca_planos`. Em `contratacoes`, cada linha é uma compra publicada ou um contrato assinado do PNCP: órgão, esfera, município, objeto, modalidade (só as compras trazem), fornecedor (só os contratos trazem) e valor (`valorGlobal` no contrato; homologado, ou estimado, na compra). O contrato guarda o número da compra que o originou (`numero_controle_compra`), e as perguntas sobre "contratações" contam uma vez a contratação que tem os dois registros. Valores abaixo de R$ 1,00 (R$ 0,00 e R$ 0,01 simbólicos do PNCP) ficam fora de média, mediana e ranking. `pca_planos` tem um plano de contratações anual por unidade, com valor total e quantidade de itens. Só entram registros da base agregada cujo número de controle PNCP é de plano (`CNPJ-0-…/ano`): a base traz também compras (`-1-`) e contratos (`-2-`) ligados aos planos, que não são planos (na v6, 1 plano entre 377 registros). Essas compras e contratos vão para `contratacoes` quando a base de contratos não os tem, são do RJ e foram publicados num ano que ela já cobre: na v6, 184 registros, e a tabela passa de 625 para 809 linhas, todas do RJ publicadas em 2025. São só os planos presentes no corpus — o total oficial do PCA do Estado está nos indicadores da base agregada, e o resultado SQL avisa isso.
+Tabelas: `contratacoes` e `pca_planos`. Em `contratacoes`, cada linha é uma compra publicada ou um contrato assinado do PNCP: órgão, esfera, município, objeto, modalidade (só as compras trazem), fornecedor (só os contratos trazem) e valor (`valorGlobal` no contrato; homologado, ou estimado, na compra). O contrato guarda o número da compra que o originou (`numero_controle_compra`), e as perguntas sobre "contratações" contam uma vez a contratação que tem os dois registros. Valores abaixo de R$ 1,00 (R$ 0,00 e R$ 0,01 simbólicos do PNCP) ficam fora de média, mediana e ranking. `pca_planos` tem um plano de contratações anual por unidade, com valor total e quantidade de itens. Só entram registros da base agregada cujo número de controle PNCP é de plano (`CNPJ-0-…/ano`): a base traz também compras (`-1-`) e contratos (`-2-`) ligados aos planos, que não são planos (na v6, 1 plano entre 377 registros). Essas compras e contratos vão para `contratacoes` quando a base de contratos não os tem, são do RJ e foram publicados num ano que ela já cobre: na v6, 184 registros, e a tabela passa de 625 para 809 linhas, todas do RJ publicadas em 2025 (810 desde a remontagem de 2026-10-09 no schema 7, com 185 registros vindos da base agregada). São só os planos presentes no corpus — o total oficial do PCA do Estado está nos indicadores da base agregada, e o resultado SQL avisa isso.
+
+Cobertura de cada campo (o que o PNCP traz em contratos e em compras), lacunas, validação de CNPJ e onde a compressão foi aplicada: [docs/QUALIDADE_DOS_DADOS.md](docs/QUALIDADE_DOS_DADOS.md).
 
 **5. Testar o endpoint de LLM/embeddings compartilhado**
 
@@ -544,7 +547,7 @@ py .\eval\ablacao_rerank.py --candidatos 10 30                 # ablação da re
 
 `eval/adapters.py:rota_apenas` avalia só o estágio de roteamento, sem chamar o LLM — útil para checar regressão rápida. `src/pipeline.py:responder` roda o pipeline completo (roteamento + recuperação híbrida via `retrieve.py` + geração via `generate.py`), chamando o LLM de verdade a cada pergunta do golden set.
 
-O relatório (`eval/runs/<run_id>/REPORT.md`) traz rota e recusa (o que define o acerto), citação, confiança, latência e tokens, e o texto de cada resposta. Um caso que dá erro aparece como ERRO sem interromper a rodada. Na rodada `golden-v6-final` (corpus v6, rerank ligado) foram 22/22 em rota e recusa e citação em 21/22; esse número não mede se o conteúdo da resposta está certo, porque o golden set ainda não tem gabarito de conteúdo. Os casos `G1`–`G3` testam os guardrails do cenário (dados bancários, credenciais em e-mail, juízo de fraude). A ablação do rerank usa outro conjunto, [eval/retrieval_set.jsonl](eval/retrieval_set.jsonl), com o trecho relevante de cada pergunta rotulado; resultado e decisão em [docs/ABLACAO_RERANK.md](docs/ABLACAO_RERANK.md).
+O relatório (`eval/runs/<run_id>/REPORT.md`) traz rota e recusa (o que define o acerto), citação, confiança, latência e tokens, e o texto de cada resposta. Um caso que dá erro aparece como ERRO sem interromper a rodada. Na rodada `golden-v6-final` (corpus v6, rerank ligado) foram 22/22 em rota e recusa e citação em 21/22; esse número não mede se o conteúdo da resposta está certo, porque o golden set ainda não tem gabarito de conteúdo. Os casos `G1`–`G3` testam os guardrails do cenário (dados bancários, credenciais em e-mail, juízo de fraude), e `E1`–`E3` os e-mails sintéticos: um e-mail público encontrado com os dados pessoais mascarados e duas recusas de conteúdo restrito (dados bancários e credencial). A ablação do rerank usa outro conjunto, [eval/retrieval_set.jsonl](eval/retrieval_set.jsonl), com o trecho relevante de cada pergunta rotulado; resultado e decisão em [docs/ABLACAO_RERANK.md](docs/ABLACAO_RERANK.md).
 
 **9. Subir a API HTTP (backend do frontend)**
 
@@ -565,13 +568,74 @@ com origem, a configuração usa `https://etuarda.github.io`, sem o caminho
 `/frontendRAG/`.
 
 No projeto do frontend, configure `VITE_API_BASE_URL` com a URL pública HTTPS
-deste backend, sem `/api/v1/query` no final:
+deste backend, sem `/api/v1/query` no final (na demo, o domínio do túnel ngrok;
+ver 9.1):
 
 ```env
 VITE_API_BASE_URL=https://rag-api.exemplo.com
 ```
 
 O frontend atual tem telas de Consulta, Histórico, Feedback, Explorar e Transparência, sem mocks. Localmente, `.env.development` aponta para `http://localhost:8080`; o site publicado exige backend HTTPS público. Saudações e conversas recebem respostas sem consulta ao acervo; pedidos factuais seguem pelo RAG com fontes e guardrails ativos. O frontend deve consumir apenas os contratos HTTP, sem catálogos mockados nem armazenamento paralelo. O passo a passo da integração local está em [docs/GUIA_INTEGRACAO_LOCAL_FRONTEND_BACKEND.md](docs/GUIA_INTEGRACAO_LOCAL_FRONTEND_BACKEND.md).
+
+**9.1 Expor o backend para o site publicado (demo)**
+
+O backend roda na máquina de quem apresenta e fica público por um túnel do
+[ngrok](https://ngrok.com) no plano gratuito, que dá um domínio HTTPS fixo por
+conta. Não há deploy em nuvem: a Vercel não serve (função Python de até 500 MB,
+300 s de duração e disco temporário, e o trace lê os logs gravados no disco do
+próprio servidor), e o plano gratuito do Render (512 MB) não carrega o rerank.
+
+1. Instalar o agente e gravar o authtoken (copiado de *Your Authtoken* no painel
+   do ngrok, depois de clicar em *Show authtoken*):
+
+   ```powershell
+   winget install --id Ngrok.Ngrok --exact
+   ngrok update                      # o pacote do winget vem com uma versão antiga
+   ngrok config add-authtoken <authtoken>
+   ```
+
+   Num terminal aberto antes da instalação o comando `ngrok` ainda não existe;
+   use o caminho completo `& "$env:LOCALAPPDATA\Microsoft\WinGet\Links\ngrok.exe"`.
+
+2. Subir o backend e, em outro terminal, o túnel no domínio fixo da conta
+   (menu *Domains* do painel):
+
+   ```powershell
+   python -m uvicorn app.api:app --host 127.0.0.1 --port 8080
+   ngrok http --url=https://<dominio>.ngrok-free.dev 8080
+   ```
+
+   O modelo de rerank carrega quando a API sobe, em segundo plano (cerca de
+   15 s; `RERANK_PRELOAD=false` desliga). Faça uma pergunta de aquecimento antes
+   de abrir para o público.
+
+3. No frontend, `VITE_API_BASE_URL` recebe esse domínio, e toda chamada envia o
+   header `ngrok-skip-browser-warning`: sem ele, o ngrok responde ao navegador
+   com uma página de aviso em HTML no lugar do JSON. O backend já libera esse
+   header no CORS.
+
+4. Conferir de fora:
+
+   ```bash
+   curl -H "ngrok-skip-browser-warning: 1" https://<dominio>.ngrok-free.dev/health
+   ```
+
+O site só funciona enquanto a máquina estiver com o backend e o túnel ligados.
+Como o domínio é fixo, reiniciar não muda o endereço nem exige publicar o
+frontend de novo.
+
+Configuração do `.env` usada na demo (ECOA como modelo principal, OpenRouter de
+reserva). Medido em 2026-10-14: com o padrão de 180 s e uma nova tentativa, uma
+consulta esperou até 400 s no ECOA; com o limite de 60 s, as consultas lentas
+ficaram entre 69 e 101 s, abaixo do limite de 240 s do site:
+
+```env
+GENERATION_TIMEOUT=60
+GENERATION_MAX_RETRIES=0
+OPENROUTER_API_KEY=<chave>
+OPENROUTER_MODEL=nvidia/nemotron-3-super-120b-a12b:free
+OPENROUTER_MODEL_FALLBACK=google/gemma-4-31b-it:free
+```
 
 ### Endpoint de modelos (compartilhado com toda a turma)
 

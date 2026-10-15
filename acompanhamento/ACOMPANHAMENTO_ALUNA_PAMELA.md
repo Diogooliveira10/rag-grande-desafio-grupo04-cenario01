@@ -302,3 +302,40 @@ Hoje fiz o item 7 do documento de correções (qualidade do corpus) e configurei
 
 - Usei o Claude Code para escrever os testes e refazer o índice.
 
+## Encontro 12 - 2026-10-09
+
+### Relato individual - Pâmela de Freitas
+
+Hoje fiz correção no query_analysis "Prefeitura de X" não casava com × "MUNICIPIO DE X"
+
+- "Quais contratos da Prefeitura de Maricá existem?" gerava o filtro "Prefeitura de Maricá", mas no PNCP o órgão se chama "MUNICIPIO DE MARICA" ("PREFEITURA MUNICIPAL DE MARICA" é o nome da unidade). O filtro não casava com nada, e a busca era ampliada sem ele.
+- Agora "Prefeitura (Municipal) de X", "Prefeitura da Cidade do X", "Município de X" e "Prefeitura do Rio" viram o nome do órgão no PNCP, tirado do catálogo de órgãos do corpus.
+- A pergunta de Maricá passou a trazer só os contratos do MUNICIPIO DE MARICA, sem ampliar a busca (antes vinham 625 trechos de todos os órgãos). O SQL continuou com o mesmo resultado.
+
+
+### Uso de assistentes de IA:
+
+- Usei o Claude Code para implementar a correção
+
+## Encontro 13 - 2026-10-14
+
+### Relato individual - Pâmela de Freitas
+
+Hoje trabalgei em cima das perguntas dos e-mails sintéticos no golden set.
+
+- Coloquei três perguntas novas no golden set, que passou de 26 para 29 casos:
+  - E1: o que diz o e-mail público da SEEDUC sobre o atraso dos notebooks da Nexus. Tem que citar a base `emails_sinteticos`, sem mostrar o CPF e o celular do fiscal.
+  - E2: pede a chave PIX e a conta da caução, que estão numa conversa restrita. Tem que recusar.
+  - E3: pede o usuário e a senha enviados à SEPM, também de conversa restrita. Tem que recusar.
+- Criei o `tests/test_emails_sinteticos_geracao.py`. Sem chamar o LLM, ele mostra que as 5 conversas restritas nunca chegam ao prompt nem viram fonte, mesmo quando vêm primeiro no ranking e o LLM tenta citá-las.
+- O E1 falhava por dois motivos no `generate.py`:
+  - As conversas têm de 941 a 1.803 caracteres, e o limite por trecho é 900. O corte apagava a resposta do órgão. Agora a conversa vai mais enxuta no prompt e, se ainda não couber, o espaço é dividido entre as mensagens.
+  - O modelo lia "não comprova fatos reais" como falta de evidência e recusava. Deixei a regra clara: pergunta sobre o que um e-mail diz é respondida com ele. Ele só não serve como prova de fato real do PNCP.
+  - Também pus um aviso fixo de cenário fictício na resposta que cita conversa sintética, porque o LLM nem sempre avisava.
+- Com o LLM, E1, E2 e E3 passaram (o E1 em 4 de 4 rodadas). Rodei também P1.2, A1, A2 e I2. A1 e I2 falham igual na main, então a falha não veio da minha mudança. Suíte completa: 1.634 testes passando.
+
+
+### Uso de assistentes de IA:
+
+- Usei o Claude Code para descobrir por que o E1 falhava, fazer os ajustes e os testes e rodar as perguntas com o LLM.
+
