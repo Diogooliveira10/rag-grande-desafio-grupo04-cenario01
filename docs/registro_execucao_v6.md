@@ -1635,3 +1635,107 @@ usar as perguntas do roteiro, que passaram pelo golden.
   idempotente (dedupe por `chunk_id`), então reexecutar o mesmo comando é
   seguro. Ritmo atual projeta ~12–13 h restantes.
 - Enquanto o build roda, o Demo Day segue sobre a v6 (ativa) — não há bloqueio.
+
+### Auditoria documental do Golden Set — execução `20261014T191537Z` (2026-10-15)
+
+Auditoria feita sobre os artefatos já existentes, sem executar novamente o pipeline
+e sem alterar o Golden Set, os avaliadores, o relatório ou o JSON.
+
+**Identificação e proveniência**
+
+- Branch da execução: `main`; commit avaliado: `0e4cd730f06805faf766ae34a1c6df5d13f5ba6b`
+  (`0e4cd73`). O commit existe neste histórico. O `HEAD` atual é posterior
+  (`d6e988c`); o relatório JSON não grava o SHA, portanto o vínculo da execução
+  ao commit é conferido pelo registro da rodada e pelo snapshot versionado no commit.
+- Run ID: `20261014T191537Z`; gerado em `2026-10-14T19:15:37+00:00`.
+- Artefatos: [relatório](../eval/runs/20261014T191537Z/REPORT.md) e
+  [JSON](../eval/runs/20261014T191537Z/report.json).
+- Comando da execução bem-sucedida: `.\.venv\Scripts\python.exe .\eval\run_eval.py run --pipeline eval.adapters:pipeline_completo`.
+  A tentativa anterior com `py` não carregou `dotenv` no Python selecionado;
+  a primeira instalação de dependências via `requirements.txt` também encontrou
+  erro de decodificação do arquivo no ambiente Windows. A execução foi então
+  feita com o Python do virtualenv. O processo terminou com código 2 porque o
+  runner sinaliza a existência de casos reprovados, embora tenha escrito os dois
+  artefatos completos. Houve aviso de parsing do `.env` na linha 83.
+- O snapshot do Golden Set em `0e4cd73` tinha 26 casos. O Golden Set no `HEAD`
+  atual tem 29 casos; os casos `E1`–`E3` foram adicionados depois do commit
+  avaliado (`5cc8888`). Logo, os resultados abaixo descrevem a versão de 26
+  casos do commit avaliado, não o conjunto atual de 29.
+
+**Reconciliação das métricas**
+
+| Medida | Resultado confirmado | Interpretação |
+|---|---:|---|
+| Total e taxa geral | 26; 13 acertos (50%) | 13 resultados não passaram no critério geral. |
+| Falhas não relacionadas ao provedor | 11 | Casos funcionais reprovados: dez com validação de conteúdo `failed` e um (`P4.3`) com conteúdo validado, mas sem citação. |
+| Erros do provedor | 2 (`A1`, `A2`) | São reprovados na taxa geral, mas não são respostas funcionais avaliáveis. |
+| Roteamento | 25/26 (96,15%) | `F1` foi roteado somente para `estruturada`; o Golden Set exigia também `agregada` e `normativa`. |
+| Recusa | 24/26 (92,31%) | Os dois erros do provedor não contam como recusas corretas; não são recusas funcionais esperadas. |
+| Conteúdo | 14/24 = 0,5833 (58,33%) | O denominador exclui `A1` e `A2`, com status `not_validatable`; há 14 `validated` e 10 `failed`. |
+| Presença de citação | 17/26 = 0,6538 (65,38%) | Casos com pelo menos uma fonte. |
+| Correção de citação | 22/24 = 0,9167 (91,67%) | Duas respostas avaliadas falharam; os dois erros de provedor foram excluídos. |
+| Fonte esperada | 7/8 = 0,8750 (87,50%) | Somente oito respostas tinham prefixo de fonte esperado configurado. |
+| Erros de execução / erros do provedor | 0 / 2 | A métrica `erros` é para exceções capturadas pelo runner; falhas do provedor são uma métrica separada. |
+
+Portanto, 26 − 13 = 13 casos não aprovados, compostos por 11 reprovações
+funcionais e dois erros do provedor. `A1` e `A2` aparecem como `FALHOU` na
+tabela Markdown e contam como não acertos; o JSON os marca com
+`erro_provedor=true`, `content_validation=not_validatable` e citação não
+avaliada. A resposta genérica informa falha no serviço de geração, mas os
+artefatos não incluem o detalhe técnico subjacente da falha. O campo `erros=0`
+não contradiz os dois erros do provedor, pois a implementação contabiliza esses
+eventos separadamente. Em `P4.3`, `content_validation=validated` não significa
+aprovação geral: a resposta não trouxe fontes (`n_fontes=0`, `citacao_ok=false`).
+
+**Análise individual dos casos não aprovados**
+
+As classificações abaixo referem-se ao principal problema demonstrado pelos
+artefatos; não inferem uma causa interna de recuperação/SQL quando os logs do
+caso não a demonstram.
+
+| ID | Solicitação e critério documentado | Resposta/evidência e critérios | Classificação principal e certeza |
+|---|---|---|---|
+| `P2.1` | Informar órgão, fornecedor, modalidade e valor das contratações de ambulância tipo D. O Golden Set exige também o objeto literal `REMOÇÃO DE PACIENTES EM AMBULÂNCIA TIPO D`, `R$ 0,00` e fonte `sql:contratacoes`. | A resposta trouxe órgão, fornecedor e `R$ 0,00`, mas omitiu o objeto exigido. Citação aprovada; conteúdo reprovado e fonte esperada reprovada (`expected_source_ok=false`). | **Geração — alta.** O próprio critério mostra a omissão e a divergência de fonte. Os artefatos não permitem separar falha de seleção SQL da composição. |
+| `P2.2` | Calcular mediana por veículo para municípios e órgãos estaduais; se insuficiente, dizer isso explicitamente. O critério aceita termos explícitos de insuficiência e veda declarar comparabilidade estatística. | A resposta diz “Não há evidência...” e que os trechos não especificam tipo D ou valores; não fornece medianas, comparação por grupo nem formulação explícita de insuficiência aceita pelo critério. Também não tem fontes (`citacao_ok=false`). O registro v6 documenta apenas um registro de ambulância tipo D, por R$ 0,00, insuficiente para a comparação. | **Geração — alta.** A saída não cumpre os requisitos de comparação/insuficiência e não cita evidência; a ausência de medianas não prova, por si só, defeito do corpus. |
+| `P2.3` | Identificar editais ligados às ambulâncias tipo D e especificações; caso não haja dados para comparar, explicitar insuficiência. | A resposta informa que não há edital específico comprovado, distingue um contrato genérico de ambulância e conclui “Faltam detalhes sobre editais e especificações técnicas para comparação”. A citação foi aprovada; a validação de conteúdo foi reprovada porque essa formulação não coincide com as alternativas lexicais cadastradas (`dados insuficientes`, `faltam os editais` etc.). | **Indeterminado/misto — média.** Há provável limitação lexical do avaliador: a resposta expressa falta de dados em termos semanticamente próximos, mas os artefatos não demonstram que a busca exauriu o corpus ou que todos os subitens foram atendidos. Revisar manualmente antes de atribuir falso negativo ao avaliador. |
+| `P3.2` | Indicar normas aplicáveis quando a modalidade puder ser identificada e reconhecer insuficiência quando não puder. O critério exige `modalidade` e uma alternativa de insuficiência; teto de confiança `media`. | A resposta cita Lei 14.133/2021, art. 28, I, identifica pregão nos dois registros e ressalva que a amostra é limitada. Rota, citação e confiança média passaram; conteúdo falhou por não conter uma das formulações de insuficiência aceitas. | **Indeterminado/misto — média.** A resposta atende à parte de modalidade identificada, mas não esclarece se há registros sem modalidade nem usa uma formulação aceita para esse ramo condicional. A exigência lexical do avaliador também pode ser mais estrita que o enunciado. |
+| `P4.1` | Listar os órgãos e valores de manutenção de computadores; exigir `SÃO JOÃO DA BARRA`, `BOM JARDIM`, `RIO BONITO` e R$ 215.880,00. | A resposta afirma “Nenhum registro atende” e não apresenta nenhum dos três órgãos nem valor. Rota, citação e fonte esperada passaram, mas conteúdo falhou. O histórico deste registro já documenta os três registros e respectivos valores (RIO BONITO R$ 215.880,00; SÃO JOÃO DA BARRA R$ 47.400,00; BOM JARDIM R$ 5.148,00). | **Geração — alta.** Contradição direta com os requisitos e com os registros descritos no histórico; a etapa exata que perdeu os resultados não está isolada pelos artefatos do run. |
+| `P4.2` | Informar as modalidades dos três registros e se há dados suficientes para declarar predominância; critério exige reconhecer insuficiência/modalidade ausente e teto `media`. | A resposta conclui que pregão “é predominante”, embora não apresente evidência de outras modalidades; conteúdo falhou e a confiança foi `alta`, acima do teto. A citação passou. | **Geração — alta.** A conclusão excede a evidência e contradiz o requisito de não afirmar predominância sem dados suficientes. |
+| `P4.3` | Explicar as normas aplicáveis a contratos de manutenção quando a modalidade não aparece. | A validação de conteúdo passou, e a rota também; contudo, a resposta não usou nenhuma fonte (`n_fontes=0`, `citacao_ok=false`) apesar de citar normas e regras gerais. | **Geração — alta.** A reprovação geral decorre da falta de citação/evidência, não do conteúdo validado. |
+| `P6.2` | Verificar se há contratação de material de escritório com fornecedor, órgão e modalidade. A alternativa de conteúdo pede reconhecer a lacuna de fornecedor. | A resposta diz que nenhum registro informa fornecedor. O registro anterior deste documento registra que, entre os casos correspondentes, há uma compra com modalidade e sem fornecedor e um contrato com fornecedor e sem modalidade; portanto, a conclusão correta deve distinguir a ausência de um mesmo registro com os três campos da ausência de fornecedor em todos os registros. Citação e rota passaram; conteúdo falhou porque “nenhum registro informa o fornecedor” não corresponde à conclusão sustentada pelos dados documentados. | **Geração — alta.** Generalização incorreta da lacuna de campos; não é apenas uma reprovação lexical do avaliador. |
+| `P6.3` | Explicar regras para microempresas e identificar contratações/modalidades compatíveis; critério exige referência à base normativa e um ramo honesto de modalidade. | A resposta cita regras como `E2, Inciso I/II` e `E3, § 2º`, e discute pregão; porém não identifica a Lei Complementar/LC 123, arts. 44/48 ou desempate, que são as alternativas documentadas para comprovar a base normativa. Citação e rota passaram; conteúdo falhou. | **Geração — alta.** A resposta não satisfaz a exigência de identificar a base legal nem sustenta completamente a compatibilidade afirmada. |
+| `F1` | Comparar órgãos estaduais e municípios somente em registros tecnicamente equivalentes, reconhecendo insuficiência se necessário; teto `baixa`. | O SQL respondeu com um registro municipal de R$ 0,00 e sem estatísticas válidas; a resposta não concluiu a insuficiência com formulação aceita. Rota incorreta: obteve só `estruturada`, mas eram esperadas `agregada`, `estruturada` e `normativa`. Confiança `media` excedeu o teto `baixa`; conteúdo reprovado. | **Geração — alta.** Não cumpriu a comparação nem declarou insuficiência e ainda excedeu a confiança; falha de roteamento secundária. O resultado do SQL não demonstra, sozinho, indisponibilidade do dado no corpus. |
+| `A1` | Recuperar campos de uma ata específica (órgão, localidade, datas e objeto). | Resposta: falha no serviço de geração. JSON: `erro_provedor=true`, motivo `erro_provedor`, sem erro de execução capturado, conteúdo não validável, citação não avaliada e recusa reprovada. | **Infraestrutura/provedor — alta.** Não é uma resposta funcional avaliada; faltam os detalhes técnicos da falha. |
+| `A2` | Responder pergunta factual sobre ata, conforme o caso do Golden Set. | Mesma resposta genérica de falha de geração e mesmos estados de infraestrutura/não validável de `A1`. | **Infraestrutura/provedor — alta.** Não é uma resposta funcional avaliada; faltam os detalhes técnicos da falha. |
+| `I2` | Informar órgão, assinatura, vigência e objeto da ata identificada; `MUNICIPIO DE ITABORAI` e o identificador `28741080000155` são termos obrigatórios. | A resposta trouxe órgão, data, vigência e objeto, mas omitiu o identificador. Rota, citação e fonte esperada passaram; conteúdo falhou. | **Geração — alta.** O campo obrigatório está ausente na resposta registrada. |
+
+**Comparação com as rodadas anteriores e limitações**
+
+- A arquitetura e os registros anteriores mencionam `golden-2026-10-09-cnpj`
+  com 14/26. A diferença bruta para esta rodada é de um acerto a menos
+  (−3,85 pontos percentuais, de 53,85% para 50%). O relatório/JSON daquela
+  rodada não está disponível nesta cópia; portanto, não foi possível confirmar
+  casos, denominadores, métricas por critério ou equivalência dos avaliadores.
+  A comparação é **parcial** e não permite concluir regressão em cada dimensão.
+- O registro também menciona `benchmark-demo-day-2026-10-14` e logs associados,
+  mas esses arquivos não estão presentes nesta cópia. Essa menção preexistente
+  não foi usada para substituir nem alterar os artefatos auditados aqui.
+- O runner de conteúdo usa critérios lexicais por caso e agrega
+  `content_accuracy` somente sobre estados `validated`/`failed`; erros do
+  provedor ficam fora desse denominador. O total geral, ao contrário, mantém
+  todos os casos e não considera erros do provedor como acertos.
+- O relatório não contém logs detalhados por etapa para explicar a causa interna
+  de cada resposta. Assim, as classificações apontam o defeito observável, sem
+  atribuir a origem a SQL, recuperação ou geração quando o artefato não permite.
+
+**Próximos passos técnicos recomendados (para atividade posterior)**
+
+1. Repetir avaliação completa do snapshot vigente de 29 casos, com configuração,
+   commit, corpus e artefatos identificados, sem substituir esta rodada histórica.
+2. Para `P4.1`, `P4.2`, `P6.2`, `P6.3`, `F1` e `I2`, inspecionar trace/SQL/fontes
+   por pergunta e comparar com a evidência no SQLite e nos documentos citados.
+3. Para `P2.2`, `P2.3` e `P3.2`, revisar manualmente a semântica da resposta e
+   os critérios lexicais do Golden Set; não alterar critérios sem uma decisão
+   explícita e teste de regressão separado.
+4. Obter logs técnicos do provedor para `A1`/`A2` e verificar se uma repetição
+   controlada é necessária, sem reescrever o resultado desta execução.
