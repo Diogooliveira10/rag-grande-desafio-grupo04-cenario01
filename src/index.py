@@ -197,6 +197,26 @@ def stored_embed_fn(embeddings_file: Path) -> tuple[EmbedFn, str]:
     return embed, models.pop()
 
 
+def _vetores_existentes(vectors_path: Path) -> dict[str, list[float]]:
+    '''Vetores já gravados por execução anterior, para retomar sem reembedar.
+
+    Linhas truncadas (queda no meio da escrita) são ignoradas: o chunk
+    correspondente é embedado de novo.
+    '''
+    existentes: dict[str, list[float]] = {}
+    if not vectors_path.exists():
+        return existentes
+    with vectors_path.open(encoding="utf-8") as handle:
+        for linha in handle:
+            try:
+                registro = json.loads(linha)
+            except ValueError:
+                continue
+            if registro.get("chunk_id") and registro.get("embedding") is not None:
+                existentes[registro["chunk_id"]] = registro["embedding"]
+    return existentes
+
+
 @observar_offline(Stage.INDEXACAO)
 def build_index(
     input_file: Path,
@@ -248,16 +268,24 @@ def build_index(
         vectors_path = base_dir / "vectors.jsonl"
         dimension: int | None = None
         embedding_rows: list[list[float]] = []
+        existentes = _vetores_existentes(vectors_path)
+        reaproveitados = 0
         with vectors_path.open("w", encoding="utf-8", newline="\n") as handle:
             for batch in batched(chunks, batch_size):
-                with observar_lote_embedding(model=model, count=len(batch),
-                    cache=getattr(embed_fn, "observation_source", None) == "cache", base_id=base_id):
-                    embeddings = embed_fn([chunk.text for chunk in batch])
-                if len(embeddings) != len(batch):
-                    raise RuntimeError(
-                        f"embed_fn retornou {len(embeddings)} vetores para {len(batch)} textos"
-                    )
-                for chunk, embedding in zip(batch, embeddings):
+                novos = [chunk for chunk in batch if chunk.chunk_id not in existentes]
+                if novos:
+                    with observar_lote_embedding(model=model, count=len(novos),
+                        cache=getattr(embed_fn, "observation_source", None) == "cache", base_id=base_id):
+                        embeddings = embed_fn([chunk.text for chunk in novos])
+                    if len(embeddings) != len(novos):
+                        raise RuntimeError(
+                            f"embed_fn retornou {len(embeddings)} vetores para {len(novos)} textos"
+                        )
+                    for chunk, vetor in zip(novos, embeddings):
+                        existentes[chunk.chunk_id] = vetor
+                reaproveitados += len(batch) - len(novos)
+                for chunk in batch:
+                    embedding = existentes[chunk.chunk_id]
                     if dimension is None:
                         dimension = len(embedding)
                         if any(base.get("dimension") != dimension for base in existing_bases.values()):
@@ -291,6 +319,7 @@ def build_index(
             "dimension": dimension or 0,
             "faiss_index": faiss_path.name,
             "total_chunks": len(chunks),
+            "vetores_reaproveitados": reaproveitados,
             "chunks_ilegiveis_ignorados": skipped_ilegiveis.get(base_id, 0),
             "source_file": _relative(input_file),
             "source_sha256": source_hash,

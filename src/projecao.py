@@ -136,6 +136,53 @@ def embed_fn_concorrente(embed_fn: EmbedFn, n: int = 4) -> EmbedFn:
     return embed
 
 
+def embed_fn_com_pausa(embed_fn: EmbedFn, pausa_s: float) -> EmbedFn:
+    '''Espera ``pausa_s`` depois de cada lote — respeita endpoint compartilhado.'''
+    import time
+
+    def embed(texts: list[str]) -> list[list[float]]:
+        vetores = embed_fn(texts)
+        if pausa_s > 0:
+            time.sleep(pausa_s)
+        return vetores
+
+    return embed
+
+
+def embed_fn_com_fallback(
+    primario: EmbedFn,
+    reserva: EmbedFn,
+    *,
+    estatisticas: dict[str, int] | None = None,
+    ao_fallback=None,
+) -> EmbedFn:
+    '''Tenta o primário lote a lote; na falha, usa a reserva e registra.
+
+    Os dois encoders devem servir o MESMO modelo base — o fallback troca a
+    origem do vetor, não o espaço vetorial. ``estatisticas`` acumula
+    ``{"primario": n, "reserva": n}`` (vetores por origem) e
+    ``ao_fallback(erro, tamanho_do_lote)`` é chamado a cada troca, para o
+    inventário registrar quando o build rodou degradado.
+    '''
+
+    def embed(texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        try:
+            vetores = primario(texts)
+        except Exception as erro:  # falha do provedor: o build continua
+            if estatisticas is not None:
+                estatisticas["reserva"] = estatisticas.get("reserva", 0) + len(texts)
+            if ao_fallback is not None:
+                ao_fallback(erro, len(texts))
+            return reserva(texts)
+        if estatisticas is not None:
+            estatisticas["primario"] = estatisticas.get("primario", 0) + len(vetores)
+        return vetores
+
+    return embed
+
+
 def embed_fn_projetado(embed_fn: EmbedFn, modo: str = MODO_COMPLETA) -> EmbedFn:
     '''Envolve ``embed_fn`` projetando os textos de documento no modo pedido.
 

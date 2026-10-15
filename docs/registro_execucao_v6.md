@@ -1635,3 +1635,80 @@ usar as perguntas do roteiro, que passaram pelo golden.
   idempotente (dedupe por `chunk_id`), então reexecutar o mesmo comando é
   seguro. Ritmo atual projeta ~12–13 h restantes.
 - Enquanto o build roda, o Demo Day segue sobre a v6 (ativa) — não há bloqueio.
+
+### Embeddings do v7: ECOA primário com fallback local e retomada (2026-10-14)
+
+Pedido do time: pausar o build local e gerar os embeddings pelo ECOA, com
+fallback se ele falhar. Situação encontrada: **ECOA fora do ar**
+(`WinError 10060` em `/v1/models` e `/v1/embeddings`) — o mesmo episódio
+anterior. Decisão: preparar tudo agora e manter o build local correndo (os
+vetores prontos são reaproveitados, então nada se perde); a troca vira um
+comando quando o ECOA responder.
+
+Implementado:
+
+- **`embed_fn_com_fallback`** (`src/projecao.py`): tenta o primário lote a
+  lote; na falha, usa a reserva e registra. `estatisticas` conta vetores por
+  origem e `ao_fallback` guarda os primeiros 20 eventos.
+- **`embed_fn_com_pausa`** + `PAUSA_ENTRE_LOTES_EMBEDDING` (padrão 0,5 s):
+  respiro entre lotes quando o encoder é o endpoint compartilhado.
+- **Retomada no `build_index`** (`src/index.py`): chunks já presentes no
+  `vectors.jsonl` não voltam ao encoder (`vetores_reaproveitados` no
+  manifest); linha truncada por queda é ignorada e o chunk é reembedado.
+- **Composição do `finalizar_direto`**: ECOA (com pausa) → fallback no encoder
+  local concorrente (4 slots). O inventário registra `embedding_por_origem` e
+  `embedding_fallbacks` em `meta`. Os dois servem o mesmo modelo base
+  (Qwen3-Embedding-0.6B; Q4_K_M no ECOA, Q8_0 local) — o fallback troca a
+  origem do vetor, não o espaço vetorial.
+- Nota no `eval/medir_regressao.py`: se o v7 sair embutido pelo ECOA, a
+  regressão contra o índice v6 local mede corpus+encoder, não só corpus.
+
+Testes: `test_embed_fallback.py` **6**, `test_index.py` **12** (2 novos de
+retomada), `test_build_direto.py` **5**, `test_projecao.py` **12**. Corrigido
+no caminho: `_vetores_existentes` havia ficado entre o decorador
+`@observar_offline` e o `build_index`.
+
+**Troca quando o ECOA voltar** (o build atual, local, segue até ser parado):
+
+```bash
+# 1) parar o build local (o vectors.jsonl fica como está)
+# 2) relançar — retoma do que existe e passa a usar ECOA com fallback:
+python -m src.coletar_direto --manifest corpus_manifest.yaml \
+  --base-id contratos_estruturado --destino data/v7_direto --taxa-seg 1.0 --finalizar
+```
+
+A quantização mista (Q8 retomado + Q4 do ECOA) fica documentada nas
+estatísticas do inventário; para um índice v7 uniforme na promoção, decidir
+entre reembedar tudo no ECOA ou tudo no local — decisão de promoção, não de
+construção.
+
+### PDFs das atas: registrado como possibilidade futura (2026-10-14)
+
+A evidência documental de atas na geração (registro citado → cache → PDF →
+trecho no contexto) foi **adiada para o futuro** e descrita como possibilidade
+em `docs/PLANO_POSSIVEL_CORPUS_V7.md` §10, com custos e a exigência de
+re-medir o golden set quando sair. O recorte do Demo Day permanece: censo com
+os registros JSON; PDFs sob demanda.
+
+### Coleta de atas: janelas anuais e limite de taxa do PNCP (2026-10-14)
+
+A coleta censitária das atas (522 CNPJs de `orgaos_rj_2025.json`, derivado do
+próprio censo) começou em `data/v7_direto_atas/`, destino separado do build de
+embeddings em execução — índices são por base, então não há arquivo em comum.
+
+Dois comportamentos da API confirmados na prática e corrigidos:
+
+1. **Períodos maiores que 365 dias levam HTTP 422** ("Período maior que 365
+   dias"): as janelas de atas passaram a ser **anuais** (vigência `ano` e
+   `ano + 1` por CNPJ, com o filtro declarativo `anoAta == 2025` fechando o
+   corte). Uma ata com vigência nos dois anos aparece nas duas janelas; o
+   `finalizar_direto` deduplica por `chunk_id`.
+2. **429 em HTML sem `Retry-After`** a partir de ~15 chamadas em rajada
+   ("Limite de Requisições Excedido"). Ritmo seguro medido pela comunidade que
+   opera a API: ~12 requisições/minuto. A coleta roda com `--taxa-seg 5.0`
+   (12/min) e o backoff de 429 (30→60→120 s) como rede de segurança; janela
+   falhada fica registrada e é re-tentada na retomada.
+
+Medição em 5 min de coleta: 8 janelas completas, 1.337 registros lidos, 684 no
+corpus (anoAta=2025), ~7 requisições/min. Estimativa total: ~4.600
+requisições, cerca de 6–8 h.

@@ -25,7 +25,7 @@ Uso (CLI):
 
     python -m src.coletar_direto --manifest corpus_manifest.yaml \
         --base-id contratos_estruturado --destino data/v7_direto \
-        --orgaos orgaos_v6.json [--sem-publicacoes] [--so-publicacoes]
+        --orgaos orgaos_v6.json [--sem-publicacoes] [--so-publicacoes] [--so-atas]
 '''
 
 from __future__ import annotations
@@ -54,18 +54,25 @@ RequestFn = Callable[[str], Any]
 MODALIDADES_PADRAO = (1, 3, 4, 5, 6, 7, 8, 9, 11)
 ENDPOINT_CONTRATOS = "https://pncp.gov.br/api/consulta/v1/contratos"
 ENDPOINT_PUBLICACOES = "https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao"
+ENDPOINT_ATAS = "https://pncp.gov.br/api/consulta/v1/atas"
 TAMANHO_PAGINA_CONTRATOS = 500
 TAMANHO_PAGINA_PUBLICACOES = 50
+TAMANHO_PAGINA_ATAS = 50
 MAX_PAGINAS_POR_JANELA = 10000
 
 
 @dataclass
 class Janela:
-    '''Um recorte determinístico da API: mesmo recorte = mesmos registros.'''
+    '''Um recorte determinístico da API: mesmo recorte = mesmos registros.
+
+    ``filtro`` fecha o corte no lado do cliente (chave/valor, comparação por
+    texto): a API de atas filtra por vigência, não pelo ano da ata.
+    '''
 
     id: str
     endpoint: str
     params: dict[str, Any] = field(default_factory=dict)
+    filtro: dict[str, Any] = field(default_factory=dict)
 
     @property
     def tamanho_pagina(self) -> int:
@@ -112,6 +119,33 @@ def janelas_publicacoes(
     return janelas
 
 
+def janelas_atas(orgaos: list[str], ano: int = 2025) -> list[Janela]:
+    '''Atas de registro de preço REGISTRADAS em ``ano`` (``anoAta == ano``).
+
+    A API de consulta filtra atas por **período de vigência** (não pelo ano da
+    ata) e rejeita períodos maiores que 365 dias, então cada órgão tem uma
+    janela por ano de vigência — ``ano`` e ``ano + 1`` como superset — e o
+    filtro declarativo fecha o corte. O recorte por órgão é o parâmetro
+    ``cnpj`` (a consulta de atas não filtra por UF).
+    '''
+    cnpjs = sorted({str(cnpj).strip() for cnpj in orgaos if str(cnpj).strip()})
+    return [
+        Janela(
+            id=f"ata_registro_preco:{cnpj}:{ano_base}",
+            endpoint=ENDPOINT_ATAS,
+            params={
+                "dataInicial": f"{ano_base}0101",
+                "dataFinal": f"{ano_base}1231",
+                "cnpj": cnpj,
+                "tamanhoPagina": TAMANHO_PAGINA_ATAS,
+            },
+            filtro={"anoAta": ano},
+        )
+        for cnpj in cnpjs
+        for ano_base in (ano, ano + 1)
+    ]
+
+
 class FalhaDeColeta(RuntimeError):
     '''Falha de uma página/janela, com a resposta original para diagnóstico.'''
 
@@ -142,6 +176,21 @@ def _e_429(exc: FalhaDeColeta) -> bool:
     )
 
 
+def _e_fim_de_paginacao(exc: FalhaDeColeta) -> bool:
+    '''400 "Página N inexistente" é fim da paginação, não falha.
+
+    Janela cujo total é múltiplo do tamanho da página termina numa página
+    cheia; a página seguinte não existe e a API responde 400 com
+    "Página ... inexistente". É o mesmo caso do 204 vazio: não há mais
+    registros a ler.
+    '''
+    resposta = exc.resposta or {}
+    if str(resposta.get("http_status")) != "400":
+        return False
+    previa = str(resposta.get("previa") or "").casefold()
+    return "página" in previa and "inexistente" in previa
+
+
 def _buscar_pagina(
     url: str,
     request_fn: RequestFn,
@@ -155,6 +204,8 @@ def _buscar_pagina(
         try:
             return request_fn(url)
         except FalhaDeColeta as exc:
+            if _e_fim_de_paginacao(exc):
+                return {"data": []}
             if not _e_429(exc) or tentativa == tentativas_429:
                 raise
             if espera > 0:
@@ -224,6 +275,7 @@ def coletar_direto(
 
         linhas: list[str] = []
         registros_janela = 0
+        lidos_janela = 0
         pagina = 1
         try:
             while pagina <= MAX_PAGINAS_POR_JANELA:
@@ -235,6 +287,18 @@ def coletar_direto(
                 ultima_chamada = time.monotonic()
                 payload = _buscar_pagina(url, request_fn, espera_429=espera_429)
                 registros = _payload_records(payload)
+                lidos_pagina = len(registros)
+                lidos_janela += lidos_pagina
+                if janela.filtro:
+                    registros = [
+                        registro
+                        for registro in registros
+                        if isinstance(registro, dict)
+                        and all(
+                            str(registro.get(chave)) == str(valor)
+                            for chave, valor in janela.filtro.items()
+                        )
+                    ]
                 for registro in registros:
                     if not isinstance(registro, dict):
                         continue
@@ -249,7 +313,7 @@ def coletar_direto(
                         json.dumps(chunk, ensure_ascii=False, sort_keys=True) for chunk in chunks
                     )
                 registros_janela += len(registros)
-                if len(registros) < janela.tamanho_pagina:
+                if lidos_pagina < janela.tamanho_pagina:
                     break
                 pagina += 1
         except Exception as exc:  # noqa: BLE001 — falha registrada, não aborta a coleta
@@ -269,6 +333,7 @@ def coletar_direto(
             "status": "completa",
             "paginas": pagina,
             "registros": registros_janela,
+            "registros_lidos": lidos_janela,
         }
         estado["gerado_em"] = _agora()
         _gravar_estado(estado_path, estado)
@@ -295,10 +360,17 @@ def main(argv: list[str] | None = None) -> int:
                         help="JSON com a lista de CNPJs (padrão: da base estruturada da v6)")
     parser.add_argument("--sem-publicacoes", action="store_true")
     parser.add_argument("--so-publicacoes", action="store_true")
+    parser.add_argument("--so-atas", action="store_true",
+                        help="só as janelas de atas (use com --base-id atas_conversacional)")
     parser.add_argument("--taxa-seg", type=float, default=1.0)
     parser.add_argument("--finalizar", action="store_true",
                         help="roda o finalizar_direto (embeddings/SQLite) ao terminar")
     args = parser.parse_args(argv)
+
+    if args.so_atas and args.base_id != "atas_conversacional":
+        parser.error("--so-atas exige --base-id atas_conversacional")
+    if not args.so_atas and args.base_id == "atas_conversacional":
+        parser.error("--base-id atas_conversacional exige --so-atas")
 
     manifest = load_manifest(args.manifest)
     manifest_hash = f"sha256:{hashlib.sha256(args.manifest.read_bytes()).hexdigest()}"
@@ -322,10 +394,13 @@ def main(argv: list[str] | None = None) -> int:
         ]
 
     janelas: list[Janela] = []
-    if not args.sem_publicacoes:
-        janelas.extend(janelas_publicacoes())
-    if not args.so_publicacoes:
-        janelas.extend(janelas_contratos(orgaos))
+    if args.so_atas:
+        janelas.extend(janelas_atas(orgaos))
+    else:
+        if not args.sem_publicacoes:
+            janelas.extend(janelas_publicacoes())
+        if not args.so_publicacoes:
+            janelas.extend(janelas_contratos(orgaos))
     relatorio = coletar_direto(
         janelas, base, args.destino,
         manifest_hash=manifest_hash, taxa_seg=args.taxa_seg,

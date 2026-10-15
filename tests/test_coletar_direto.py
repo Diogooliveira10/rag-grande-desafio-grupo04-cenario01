@@ -8,10 +8,13 @@ from urllib.parse import parse_qs, urlparse
 
 from src.build_direto import finalizar_direto
 from src.coletar_direto import (
+    FalhaDeColeta,
     Janela,
     coletar_direto,
+    janelas_atas,
     janelas_contratos,
     janelas_publicacoes,
+    main,
 )
 from src.fetch_corpus import _build_request_url
 
@@ -234,3 +237,104 @@ def test_429_faz_backoff_e_tenta_de_novo(tmp_path):
     assert relatorio["janelas_completas_agora"] == 1
     assert relatorio["janelas_falhadas"] == 0
     assert len(chamadas) == 2  # 429 e depois sucesso
+
+
+BASE_ATA = {
+    "base_id": "atas_conversacional",
+    "escopo": "oficial",
+    "natureza": "conversacional",
+    "fonte": "PNCP - atas de registro de preço",
+    "acesso": {"tipo": "provider", "provider": "pncp"},
+    "sensitivity_default": "publico",
+    "chunking_sugerido": "chunking_generico",
+    "metadados_extras": ["anoAta", "numeroAtaRegistroPreco", "vigenciaInicio", "vigenciaFim"],
+}
+
+
+def _registro_ata(numero: str, ano: int) -> dict:
+    return {
+        "numeroControlePNCPAta": numero,
+        "anoAta": ano,
+        "objetoContratacao": "Registro de preço de teste",
+        "cnpjOrgao": "33333333000001",
+        "vigenciaInicio": "2025-02-01",
+        "vigenciaFim": "2026-01-31",
+    }
+
+
+def test_janelas_atas_sao_deterministicas_e_por_orgao():
+    janelas = janelas_atas(["33333333000001", "22222222000001", "33333333000001"])
+    assert [j.id for j in janelas] == [
+        "ata_registro_preco:22222222000001:2025", "ata_registro_preco:22222222000001:2026",
+        "ata_registro_preco:33333333000001:2025", "ata_registro_preco:33333333000001:2026"]
+    url = _build_request_url(janelas[0].endpoint, {**janelas[0].params, "pagina": 1})
+    consulta = parse_qs(urlparse(url).query)
+    assert consulta["dataInicial"] == ["20250101"]
+    assert consulta["dataFinal"] == ["20251231"]  # ano de vigência (a API rejeita > 365 dias)
+    assert consulta["cnpj"] == ["22222222000001"]  # filtro de órgão da consulta
+    assert consulta["tamanhoPagina"] == ["50"]
+    assert janelas[0].filtro == {"anoAta": 2025}
+
+
+def test_coleta_de_atas_filtra_pelo_ano_da_ata(tmp_path):
+    '''O endpoint filtra por vigência; o corte por ano da ata é local e declarativo.'''
+    paginas = {
+        1: [
+            _registro_ata("33333333000001-1-000001/2024-1", 2024),
+            _registro_ata("33333333000001-1-000002/2025-1", 2025),
+        ],
+    }
+
+    def request_fn(url):
+        consulta = parse_qs(urlparse(url).query)
+        return {"data": paginas.get(int(consulta["pagina"][0]), [])}
+
+    janela = janelas_atas(["33333333000001"])[0]
+    relatorio = coletar_direto([janela], BASE_ATA, tmp_path, request_fn=request_fn)
+
+    assert relatorio["registros"] == 1
+    documentos = (tmp_path / "documents.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(documentos) == 1
+    assert "000002/2025" in documentos[0]
+    estado = json.loads((tmp_path / "estado_coleta.json").read_text(encoding="utf-8"))
+    janela_estado = estado["janelas"]["ata_registro_preco:33333333000001:2025"]
+    assert janela_estado["registros"] == 1  # entrou no corpus
+    assert janela_estado["registros_lidos"] == 2  # lidos da API
+
+
+def test_pagina_inexistente_encerra_janela_que_termina_em_pagina_cheia(tmp_path):
+    '''Janela cujo total é múltiplo do tamanho da página: a API responde 400
+    "Página inexistente" na página seguinte, e isso é fim de paginação, não falha.'''
+
+    def request_fn(url):
+        consulta = parse_qs(urlparse(url).query)
+        pagina = int(consulta["pagina"][0])
+        if pagina == 1:
+            return {"data": [
+                _registro_ata(f"33333333000001-1-{i:06d}/2025-1", 2025)
+                for i in range(1, 51)
+            ]}
+        raise FalhaDeColeta(
+            f"{url}: erro_requisicao",
+            {"http_status": 400, "previa": '{"message": "Página 2 inexistente"}', "erro": "Bad Request"},
+        )
+
+    janela = janelas_atas(["33333333000001"])[0]
+    relatorio = coletar_direto([janela], BASE_ATA, tmp_path, request_fn=request_fn)
+
+    assert relatorio["janelas_falhadas"] == 0
+    assert relatorio["registros"] == 50  # página cheia lida inteira
+    estado = json.loads((tmp_path / "estado_coleta.json").read_text(encoding="utf-8"))
+    assert estado["janelas"][janela.id]["status"] == "completa"
+
+
+def test_so_atas_exige_base_de_ata(tmp_path):
+    import pytest
+
+    with pytest.raises(SystemExit):
+        main([
+            "--manifest", str(tmp_path / "qualquer.yaml"),
+            "--base-id", "contratos_estruturado",
+            "--destino", str(tmp_path / "out"),
+            "--so-atas",
+        ])

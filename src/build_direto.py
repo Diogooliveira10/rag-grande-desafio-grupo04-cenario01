@@ -56,7 +56,14 @@ from src.prepare_documents import (
     _declared_record_metadata,
     _record_logical_id,
 )
-from src.projecao import MODO_COMPLETA, MODOS, embed_fn_concorrente, embed_fn_projetado
+from src.projecao import (
+    MODO_COMPLETA,
+    MODOS,
+    embed_fn_com_fallback,
+    embed_fn_com_pausa,
+    embed_fn_concorrente,
+    embed_fn_projetado,
+)
 from src.structured_db import Banco, construir_banco
 
 EmbedFn = Callable[[list[str]], list[list[float]]]
@@ -185,14 +192,39 @@ def finalizar_direto(
     import config
 
     destino = Path(destino)
+    estatisticas_embed: dict[str, int] = {}
+    eventos_fallback: list[dict[str, Any]] = []
     if embed_fn is None:
-        # Padrão do modo direto: o MESMO encoder do lado da consulta
-        # (config.EMBEDDING_PROVIDER) — um índice nunca mistura modelos.
+        # Padrão do modo direto: ECOA primeiro (endpoint compartilhado, com
+        # pausa entre lotes) e encoder local como reserva. Os dois servem o
+        # MESMO modelo base (Qwen3-Embedding-0.6B), então trocar de origem no
+        # meio do build não mistura espaços vetoriais — e a contagem por
+        # origem fica registrada no inventário.
         from src.create_embeddings import _configured_embed_batch
 
-        endpoint, api_key, modelo_endpoint = config.embedding_endpoint()
-        modelo = modelo or modelo_endpoint
-        embed_fn = _configured_embed_batch(config.EMBEDDING_PROVIDER, endpoint, api_key, modelo)
+        endpoint, api_key, modelo_ecoa = config.embedding_endpoint("ecoa")
+        modelo = modelo or modelo_ecoa
+        primario = embed_fn_com_pausa(
+            _configured_embed_batch("ecoa", endpoint, api_key, modelo_ecoa),
+            config.PAUSA_ENTRE_LOTES_EMBEDDING,
+        )
+        local_url, local_key, modelo_local = config.embedding_endpoint("ollama")
+        reserva = embed_fn_concorrente(
+            _configured_embed_batch("ollama", local_url, local_key, modelo_local),
+            CONCORRENCIA_PADRAO,
+        )
+
+        def _registrar_fallback(erro: Exception, tamanho: int) -> None:
+            if len(eventos_fallback) < 20:
+                eventos_fallback.append({
+                    "erro": f"{type(erro).__name__}: {erro}"[:200],
+                    "lote": tamanho,
+                })
+
+        embed_fn = embed_fn_com_fallback(
+            primario, reserva,
+            estatisticas=estatisticas_embed, ao_fallback=_registrar_fallback,
+        )
     modelo = modelo or config.EMBEDDING_MODEL
     documents = destino / "documents.jsonl"
     linhas = [
@@ -263,6 +295,8 @@ def finalizar_direto(
             "manifest_hash": manifest_hash,
             "source_sha256": source_sha256,
             "projecao_embedding": projecao,
+            "embedding_por_origem": estatisticas_embed,
+            "embedding_fallbacks": eventos_fallback,
         },
         "por_base": [{
             "base_id": str(base["base_id"]),

@@ -221,3 +221,41 @@ def test_stored_embed_fn_recusa_texto_sem_vetor(tmp_path):
     with pytest.raises(KeyError, match="sem vetor"):
         embed_fn(["texto alterado"])
 
+
+
+def test_build_index_reaproveita_vetores_de_execucao_anterior(tmp_path):
+    '''Retomada: chunks já embedados não voltam ao encoder.'''
+    output_dir = tmp_path / "index"
+    build_index(SAMPLE_INPUT, output_dir, _fake_embed_fn(), model="fixture-model", batch_size=2)
+
+    recebidos = []
+
+    def embed(texts):
+        recebidos.extend(texts)
+        return _fake_embed_fn()(texts)
+
+    manifest = build_index(SAMPLE_INPUT, output_dir, embed, model="fixture-model", batch_size=2)
+
+    assert recebidos == []
+    assert all(base["vetores_reaproveitados"] == base["total_chunks"] for base in manifest["bases"])
+
+
+def test_build_index_reembece_linha_truncada_na_retomada(tmp_path):
+    '''Queda no meio da escrita: só o chunk da linha truncada é embedado de novo.'''
+    output_dir = tmp_path / "index"
+    build_index(SAMPLE_INPUT, output_dir, _fake_embed_fn(), model="fixture-model", batch_size=2)
+    vectors_path = output_dir / "contratos_estruturado" / "vectors.jsonl"
+    linhas = vectors_path.read_text(encoding="utf-8").splitlines()
+    vectors_path.write_text("\n".join(linhas[:-1] + [linhas[-1][:40]]) + "\n", encoding="utf-8")
+
+    recebidos = []
+
+    def embed(texts):
+        recebidos.extend(texts)
+        return _fake_embed_fn()(texts)
+
+    manifest = build_index(SAMPLE_INPUT, output_dir, embed, model="fixture-model", batch_size=2)
+
+    assert len(recebidos) == 1
+    base_contratos = next(b for b in manifest["bases"] if b["base_id"] == "contratos_estruturado")
+    assert base_contratos["vetores_reaproveitados"] == base_contratos["total_chunks"] - 1
