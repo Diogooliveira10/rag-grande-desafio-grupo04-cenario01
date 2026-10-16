@@ -28,7 +28,7 @@ import time
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Optional
 
 from src.obs import default_logger, new_run_id
 from src.router import inferir_motivo_recusa, rotear_pergunta
@@ -71,13 +71,17 @@ def metricas_do_log(run_id: str, log_paths: Iterable[Path]) -> dict[str, Any]:
     }
 
 
-def pipeline_completo(pergunta: str) -> dict[str, Any]:
-    """Roda ``src.pipeline.responder`` e anexa ``_metricas`` lidas do log do pipeline."""
+def pipeline_completo(pergunta: str, historico: Optional[list[dict[str, str]]] = None) -> dict[str, Any]:
+    """Roda ``src.pipeline.responder`` e anexa ``_metricas`` lidas do log do pipeline.
+
+    ``historico`` vem do ``depende_de`` do caso: as perguntas anteriores da
+    conversa, para a pergunta de continuação ser reescrita como no frontend.
+    """
     from src.pipeline import responder
 
     run_id = new_run_id()
     inicio = datetime.now().astimezone()
-    resposta = responder(pergunta, run_id=run_id)
+    resposta = responder(pergunta, run_id=run_id, historico=historico)
     # Uma pergunta que atravessa a meia-noite grava em dois arquivos diários.
     paths = {default_logger.log_path(inicio), default_logger.log_path()}
     resposta["_metricas"] = metricas_do_log(run_id, sorted(paths))
