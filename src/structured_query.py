@@ -72,6 +72,15 @@ _PALAVRAS_ORGAO_VAZIAS = frozenset("de da do das dos e no na nos nas em pca plan
 # "Universidade do Estado do RJ" não é a "Universidade FEDERAL do Estado do RJ".
 _QUALIFICADORES_DE_ORGAO = frozenset({"federal", "regional"})
 # Citação de norma não é esfera nem modalidade: "Lei federal 14.133", "Lei do Pregão".
+# Pedido que a lista de registros não responde sozinha: julgamento, explicação,
+# suficiência, norma. Com ele, a listagem vai ao LLM com o resultado SQL.
+_RE_PEDIDO_ALEM_DA_LISTA = re.compile(
+    r"\b(?:suficientes?|insuficien\w*|conclu\w*|predomin\w*|por que|porque|expli\w*|analis\w*|"
+    r"avali\w*|interpret\w*|tendenc\w*|padr(?:ao|oes)|riscos?|recomend\w*|deveri\w*|irregular\w*|"
+    r"regras?|normas?|leis?|decretos?|justifi\w*|motivos?|razo(?:es)?|razao|significa\w*|"
+    r"semelhan\w*|diferen\w*|resum\w*|explicit\w*)\b"
+)
+
 _RE_NORMA_NUMERADA = re.compile(
     r"\b(?:lei|decreto|portaria|resolucao|instrucao normativa)(?:\s+complementar)?"
     r"(?:\s+(?:federal|estadual|municipal))?(?:\s+n[o.]?)?\s+\d|\blei do pregao\b"
@@ -227,6 +236,11 @@ class Consulta:
     # A pergunta cita mais de uma esfera ("estaduais" e "municípios"): a conta sai
     # quebrada por esfera, e só compara de fato se houver valor em duas ou mais.
     comparacao_esferas: bool = False
+    # Listagem que a pergunta pede por inteiro ("quais órgãos contrataram X em
+    # 2025 e quais os valores?"): a resposta sai das linhas do SQL, sem o LLM,
+    # que resumia a lista e deixava registros de fora. Com um pedido além da
+    # lista ("há dados suficientes para concluir?", "quais regras?"), False.
+    listagem_direta: bool = False
 
 
 # Contrato de compilação apenas: estas tabelas de fatos não são criadas aqui.
@@ -583,7 +597,8 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
         so_contratos=so_contratos,
         norma_citada=bool(_RE_NORMA_NUMERADA.search(texto)),
         pagamento_citado=bool(_RE_PAGAMENTO.search(texto)),
-
+        listagem_direta=(tipo == "listagem" and not _RE_NORMA_NUMERADA.search(texto)
+                         and not _RE_PEDIDO_ALEM_DA_LISTA.search(texto)),
     )
 
 
@@ -871,7 +886,9 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
             return sql, [f"{total} registros atendem aos filtros; os {len(linhas)} de maior valor:"] + [
                 f"{i}. PNCP {l['numero_controle_pncp']} | {_brl(l['valor'])} | {l['data_referencia']} | {l['orgao_nome']} ({l['esfera']}, {l['municipio']}) | "
                 f"modalidade: {l['modalidade'] or 'não informada'} | fornecedor: {l['fornecedor'] or 'não informado'} | "
-                f"{_resumir(l['objeto'], 70)}"
+                # 180: o objeto é o que identifica o contrato; com 70, "remoção de
+                # pacientes em ambulância tipo D" virava "remoção de pacien…".
+                f"{_resumir(l['objeto'], 180)}"
                 for i, l in enumerate(linhas, 1)
             ]
         if consulta.tabela == "pca_planos":
@@ -1314,6 +1331,10 @@ def _preencher_recorte(recorte: dict[str, Any], consulta: Consulta, banco: Banco
     recorte.update(modelo.model_dump(mode="json"))
 
 
+_POLITICA_LISTAGEM = ("Campo sem valor aparece como \"não informado\"; valor de R$ 0,00 é o que "
+                      "o registro traz, não um campo ausente. Esta amostra não é um censo do RJ.")
+
+
 def _chunks(consulta: Consulta, sql: str, cabecalho: str, linhas: list[str], banco: Banco,
             recorte: Optional[dict[str, Any]] = None) -> list[Chunk]:
     """Resultado em um ou mais chunks que cabem em ``GENERATION_CHUNK_CHARS``
@@ -1343,11 +1364,13 @@ def _chunks(consulta: Consulta, sql: str, cabecalho: str, linhas: list[str], ban
                 chunking_strategy="consulta_sql",
                 extras={"sql": sql, "tipo": consulta.tipo, "parte": indice, "partes": len(partes),
                         "resultado_sql": {"cabecalho": cabecalho, "linhas": parte,
-                            "politica": "Totais somam os valores registrados, inclusive zeros/centavos; "
+                            "politica": _POLITICA_LISTAGEM if consulta.tipo == "listagem" else
+                            "Totais somam os valores registrados, inclusive zeros/centavos; "
                             "média, mediana, mínimo e máximo consideram valores >= R$ 1,00. "
                             "Campos ausentes não são zero. Esta amostra não é um censo do RJ.",
                             "recorte": recorte},
-                        "geracao_deterministica": consulta.tipo in {"estatistica", "ranking", "agrupamento", "evolucao"}
+                        "geracao_deterministica": (consulta.tipo in {"estatistica", "ranking", "agrupamento", "evolucao"}
+                                                   or consulta.listagem_direta)
                         and not consulta.norma_citada,
                         # Nada atendeu aos filtros: é ausência na amostra, não um número calculado.
                         "sem_registros": not linhas or all(
@@ -1369,7 +1392,8 @@ def pode_consultar_sql_direto(
     if not bases or not set(bases) <= {Natureza.ESTRUTURADA, Natureza.AGREGADA}:
         return False
     consulta = consulta_da_intencao(intencao) if intencao is not None else detectar_consulta(query, filtros, bases)
-    return bool(consulta and consulta.tipo in {"estatistica", "ranking", "agrupamento", "evolucao"}
+    return bool(consulta and (consulta.tipo in {"estatistica", "ranking", "agrupamento", "evolucao"}
+                              or consulta.listagem_direta)
                 and not consulta.norma_citada)
 
 
