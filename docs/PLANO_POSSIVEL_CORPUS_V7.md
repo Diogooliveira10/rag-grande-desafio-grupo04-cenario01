@@ -5,6 +5,14 @@
 > ativa, v7 como artefato derivado, promoção só após re-auditoria + medição
 > de qualidade). A **v6 continua sendo a base** do corpus, do eval e da demo.
 
+**Atualização de execução (15/10/2026):** contratos e empenhos serão preservados
+separadamente, e o cadastro será ampliado/reconciliado para o RJ. O modo direto
+apresentou divergências de recorte e modalidades, documentadas em
+[Coleta e recuperação v7](COLETA_DAS_BASES_E_RECUPERACAO_V7.md) e no
+[relatório parcial](RELATORIO_RECUPERACAO_V7_2026-10-15.md). Os números abaixo são
+a avaliação histórica, não a certificação da aquisição atual. Promoção só após
+relatório final, rollback integrado validado e decisão explícita.
+
 Data da avaliação: 2026-10-13. Medidas coletadas nesta data, descritas na seção 3.
 
 ---

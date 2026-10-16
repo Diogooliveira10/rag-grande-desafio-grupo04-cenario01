@@ -18,6 +18,8 @@ env/
 
 # Artefatos da construção v7 (modo direto): promovidos só após re-auditoria
 data/v7_direto/
+data/v7_direto_atas/
+data/v7_recuperacao/
 data/v7_direto_*.log
 
 # Ferramentas de teste e análise

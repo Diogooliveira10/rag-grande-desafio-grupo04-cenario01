@@ -1712,3 +1712,22 @@ Dois comportamentos da API confirmados na prática e corrigidos:
 Medição em 5 min de coleta: 8 janelas completas, 1.337 registros lidos, 684 no
 corpus (anoAta=2025), ~7 requisições/min. Estimativa total: ~4.600
 requisições, cerca de 6–8 h.
+
+## 2026-10-15 — recuperação do corpus de atas e deduplicação em streaming
+
+O `finalizar` das atas caiu com `MemoryError` ao reescrever o `documents.jsonl`
+na deduplicação (o arquivo inteiro era montado numa string em memória depois de
+truncar o original), zerando a coleta de 109.871 atas de 2025.
+
+Recuperação sem re-coletar: cópia de sombra do NTFS de 15/10 06:49 (VSS,
+`HarddiskVolumeShadowCopy52`) devolveu 211.494 linhas / 109.864 únicas. As 7
+atas restantes ficavam nas 2 janelas que ainda estavam falhas no snapshot e
+foram coletadas de novo em minutos. Corpus final idêntico ao perdido: 211.759
+linhas / 109.871 únicas.
+
+Correção em `src/build_direto.py`: `finalizar_direto` e `construir_direto`
+passam a deduplicar/escrever em streaming, com temporário + troca atômica
+(`Path.replace`) e limpeza do temporário em erro. O arquivo original só é
+substituído depois do temporário completo; falha no meio não toca no corpus. Dois
+testes novos em `tests/test_build_direto.py` cobrem a preservação byte a byte e
+a não destruição em erro (7/7 verdes).
