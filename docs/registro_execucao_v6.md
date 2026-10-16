@@ -1739,3 +1739,44 @@ caso não a demonstram.
    explícita e teste de regressão separado.
 4. Obter logs técnicos do provedor para `A1`/`A2` e verificar se uma repetição
    controlada é necessária, sem reescrever o resultado desta execução.
+
+### Item 6 — perguntas dependentes com histórico e casos de CNPJ (2026-10-16)
+
+P1.3, P4.2 e P4.3 continuam a pergunta anterior ("esses contratos", "os mesmos
+contratos") e eram avaliadas sozinhas. Agora declaram `depende_de` no golden
+set (P1.3 depois de P1.1 e P1.2; P4.2 depois de P4.1; P4.3 depois de P4.1 e
+P4.2), e o avaliador manda essas perguntas como `historico` a
+`pipeline_completo`, como o frontend faz. Só as perguntas vão no histórico, sem
+as respostas, para o erro de um caso não passar ao seguinte. Entraram também
+`I3` (contratos de fornecedor pelo CNPJ, DATAPREV) e `I4` (compras de órgão
+pelo CNPJ, Ministério das Relações Exteriores), com o gabarito conferido no
+SQLite. O golden set passou de 29 para 31 casos.
+
+Rodada `golden-2026-10-16-dependentes` (LLM do ECOA, `RERANK_PROVIDER=ecoa`): 3/5.
+
+| Caso | Resultado | O que aconteceu |
+|---|---|---|
+| P1.3 | OK | A pergunta foi reescrita com o histórico ("os contratos de tecnologia acima de R$ 500 mil de 2025…") e continuou recusada por juízo de legalidade. |
+| P4.2 | FALHOU | O modelo da reformulação recebeu o histórico e julgou a pergunta autossuficiente. A resposta diz que nenhum registro informa a modalidade e que não há informações suficientes para concluir a predominância, mas essas formulações não estavam nas alternativas do gabarito. |
+| P4.3 | FALHOU | Reescrita com o contexto certo. A resposta diz que nenhum trecho traz regras para modalidade ausente, sem citar a Lei 14.133 nem as alternativas aceitas, e saiu com confiança alta acima do teto média (item 22). |
+| I3 | OK | SQL por CNPJ: os dois contratos e os dois valores. |
+| I4 | OK | SQL por CNPJ: as três dispensas e os três valores. |
+
+Critério da P4.2, com o OK do Renato: as alternativas ganharam "não há
+informações suficientes" (insuficiência) e "nenhum dos registros informa a
+modalidade" (modalidade ausente). Com elas, a resposta acima passa, e respostas
+que afirmam predominância ou citam modalidades que os registros não trazem
+continuam reprovadas (teste em `tests/test_eval_historico.py`). A P4.3 não
+mudou: a falha dela é de conteúdo e de confiança, não de vocabulário.
+
+Nova rodada só da P4.2 com o critério novo (`golden-2026-10-16-p42-criterio`):
+o texto passou ("não há dados suficientes", modalidade "não informada neste
+registro"), mas a confiança saiu `alta`, acima do teto `media`, e o caso
+reprovou. Com confiança média ou baixa, a mesma resposta seria aprovada. O teto
+não muda: é o defeito do item 22, confiança alta em resposta que admite falta
+de dados.
+
+Achado da preparação do I4: "publicou" ("Quais compras o órgão X publicou em
+2025?") e "seus" ("…e seus fornecedores") viram termo do objeto no SQL, e a
+consulta procura essas palavras no objeto. O I4 foi escrito sem esse verbo para
+medir o CNPJ, e o defeito ficou registrado para correção à parte.
