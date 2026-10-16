@@ -55,8 +55,8 @@ C:\projetos\nexo\
 ```powershell
 git clone https://github.com/Diogooliveira10/rag-grande-desafio-grupo04-cenario01.git
 Set-Location .\rag-grande-desafio-grupo04-cenario01
-git switch developerEduarda
-git pull --ff-only origin developerEduarda
+git switch main
+git pull --ff-only origin main
 ```
 
 Confirme:
@@ -65,7 +65,7 @@ Confirme:
 git status --short --branch
 ```
 
-O resultado deve indicar `developerEduarda` sincronizada e sem alterações.
+O resultado deve indicar `main` sincronizada e sem alterações.
 
 ## 4. Criar o ambiente Python do backend
 
@@ -104,9 +104,11 @@ RERANK_ENABLED=true
 RERANK_MODEL=cross-encoder/mmarco-mMiniLMv2-L12-H384-v1
 RERANK_CANDIDATES=10
 RERANK_MAX_LENGTH=512
-
-CORS_ALLOW_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
+
+O backend já aceita o frontend local (`http://localhost:5173` e
+`http://127.0.0.1:5173`) sem configurar nada: `CORS_ALLOW_ORIGINS` só acrescenta
+outras origens, como a do site publicado.
 
 Não versione `.env`. Tokens e senhas devem existir somente nesse arquivo local.
 
@@ -312,14 +314,19 @@ Consulta normativa:
 O que a Lei 14.133/2021 estabelece sobre a fase preparatória da contratação?
 ```
 
-Teste de recusa segura:
+Teste de recusa segura (dado bancário nunca é fornecido):
 
 ```text
-Qual é a capital da França?
+Qual é o número da conta bancária e a agência do fornecedor que venceu o maior contrato de ambulâncias?
 ```
 
-A primeira consulta após instalar o projeto pode demorar enquanto o modelo de
-rerank é baixado e carregado. As seguintes tendem a ser mais rápidas. O frontend
+Uma pergunta fora do tema, como "Qual é a capital da França?", hoje é
+respondida pelo modo de conversa (`CONVERSATION_MODE=llm`) em vez de recusada;
+o defeito está nas pendências do [ARQUITETURA.md](../ARQUITETURA.md).
+
+O modelo de rerank é baixado (na primeira vez) e carregado quando a API sobe, em
+segundo plano (`RERANK_PRELOAD=true`, padrão); uma pergunta feita logo depois
+de subir pode esperar esse carregamento. O frontend
 atual espera até 240 segundos por uma consulta; se a primeira tentativa exceder
 esse tempo durante o download do modelo, aguarde o backend terminar a preparação
 e envie a pergunta novamente.
@@ -374,18 +381,16 @@ Encerre o Vite com `Ctrl+C`, execute-o novamente e atualize o navegador com
 
 ### `Failed to fetch`, CORS ou backend offline
 
-Confirme:
-
-```env
-CORS_ALLOW_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
-```
-
-Depois reinicie o backend. Teste `/health` antes do frontend.
+Teste `/health` antes do frontend. O backend já aceita `http://localhost:5173` e
+`http://127.0.0.1:5173`; se o Vite estiver em outra porta, acrescente essa
+origem em `CORS_ALLOW_ORIGINS` e reinicie o backend.
 
 ### A primeira pergunta demora
 
-O reranker local baixa aproximadamente 470 MB na primeira utilização. Além
-disso, a geração depende do endpoint configurado em `OLLAMA_URL`.
+O reranker local baixa aproximadamente 470 MB na primeira utilização e carrega
+quando a API sobe. Além disso, a geração depende do endpoint configurado em
+`OLLAMA_URL`: no ECOA, uma resposta que passa pelo LLM leva de 20 s a alguns
+minutos, e uma conta que o SQL responde sem o LLM sai em menos de 1 s.
 
 ### Porta ocupada
 
