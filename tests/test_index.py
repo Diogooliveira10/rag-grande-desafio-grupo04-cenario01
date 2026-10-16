@@ -259,3 +259,23 @@ def test_build_index_reembece_linha_truncada_na_retomada(tmp_path):
     assert len(recebidos) == 1
     base_contratos = next(b for b in manifest["bases"] if b["base_id"] == "contratos_estruturado")
     assert base_contratos["vetores_reaproveitados"] == base_contratos["total_chunks"] - 1
+
+
+def test_falha_no_faiss_nao_trunca_checkpoint_existente(tmp_path, monkeypatch):
+    out = tmp_path / "index"
+    build_index(SAMPLE_INPUT, out, _fake_embed_fn(), model="fixture-model")
+    p = out / "contratos_estruturado/vectors.jsonl"
+    antes = p.read_bytes()
+    def falhar(*args):
+        raise MemoryError("simulado")
+    monkeypatch.setattr("src.index._write_faiss_index", falhar)
+    with pytest.raises(MemoryError):
+        build_index(SAMPLE_INPUT, out, _fake_embed_fn(), model="fixture-model")
+    assert p.read_bytes() == antes
+
+
+def test_retomada_nao_relabela_modelo(tmp_path):
+    out = tmp_path / "index"
+    build_index(SAMPLE_INPUT, out, _fake_embed_fn(), model="fixture-model")
+    with pytest.raises(ValueError, match="retomada"):
+        build_index(SAMPLE_INPUT, out, _fake_embed_fn(), model="outro-modelo")

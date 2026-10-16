@@ -51,10 +51,12 @@ def _write_faiss_index(path: Path, embeddings: list[list[float]]) -> None:
     import faiss
     import numpy as np
 
-    vectors = np.ascontiguousarray(embeddings, dtype=np.float32)
-    faiss.normalize_L2(vectors)
-    index = faiss.IndexFlatIP(vectors.shape[1])
-    index.add(vectors)
+    # Evitar uma segunda matriz contígua do corpus inteiro em RAM.
+    index = faiss.IndexFlatIP(len(embeddings[0]))
+    for inicio in range(0, len(embeddings), 1024):
+        vectors = np.ascontiguousarray(embeddings[inicio:inicio + 1024], dtype=np.float32)
+        faiss.normalize_L2(vectors)
+        index.add(vectors)
     faiss.write_index(index, str(path))
 
 
@@ -266,11 +268,25 @@ def build_index(
         base_dir = output_dir / base_id
         base_dir.mkdir(parents=True, exist_ok=True)
         vectors_path = base_dir / "vectors.jsonl"
+        base_manifest = base_dir / "manifest.json"
+        if vectors_path.exists() and base_manifest.exists():
+            anterior = json.loads(base_manifest.read_text(encoding="utf-8"))
+            if anterior.get("embedding_model") != model or anterior.get("encoding_config") != getattr(embed_fn, "encoding_config", None):
+                raise ValueError("retomada exige o mesmo modelo e configuração; não relabelar vetores")
+        vectors_temporario = base_dir / "vectors.jsonl.provisorio"
         dimension: int | None = None
         embedding_rows: list[list[float]] = []
         existentes = _vetores_existentes(vectors_path)
+        retomada_path = base_dir / "retomada.json"
+        configuracao_retomada = {"model": model, "encoding_config": getattr(embed_fn, "encoding_config", None), "source_sha256": source_hash}
+        if vectors_temporario.exists():
+            if not retomada_path.exists() or json.loads(retomada_path.read_text(encoding="utf-8")) != configuracao_retomada:
+                raise ValueError("checkpoint provisório incompatível; preserve-o e use outro staging")
+            existentes.update(_vetores_existentes(vectors_temporario))
+        retomada_path.write_text(json.dumps(configuracao_retomada, sort_keys=True) + "\n", encoding="utf-8")
         reaproveitados = 0
-        with vectors_path.open("w", encoding="utf-8", newline="\n") as handle:
+        # Nunca truncar o único checkpoint ao retomar. Em erro, o antigo fica.
+        with vectors_temporario.open("w", encoding="utf-8", newline="\n") as handle:
             for batch in batched(chunks, batch_size):
                 novos = [chunk for chunk in batch if chunk.chunk_id not in existentes]
                 if novos:
@@ -308,7 +324,10 @@ def build_index(
                     embedding_rows.append(embedding)
 
         faiss_path = base_dir / "vectors.faiss"
-        _write_faiss_index(faiss_path, embedding_rows)
+        faiss_temporario = base_dir / "vectors.faiss.provisorio"
+        _write_faiss_index(faiss_temporario, embedding_rows)
+        vectors_temporario.replace(vectors_path)
+        faiss_temporario.replace(faiss_path)
 
         manifest = {
             "base_id": base_id,
