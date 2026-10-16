@@ -352,7 +352,10 @@ def _linha_contratacao(chunk: Mapping[str, Any], registro: dict[str, Any]) -> di
         "data_assinatura": data_assinatura,
         "ano_assinatura": int(data_assinatura[:4]) if data_assinatura else None,
         "mes_assinatura": data_assinatura[:7] if data_assinatura else None,
-        "tipo_registro": "contrato_assinado" if contrato_assinado else "publicacao_compra",
+        # Recortes novos carregam classificação oficial explícita em extras.
+        # Legado sem essa marca mantém o contrato/schema ativo até promoção.
+        "tipo_registro": (chunk.get("extras") or {}).get("tipo_instrumento") or (
+            "contrato_assinado" if contrato_assinado else "publicacao_compra"),
         "numero_controle_compra": registro.get("numeroControlePncpCompra") if contrato_assinado else None,
         "fornecedor": registro.get("nomeRazaoSocialFornecedor") or (chunk.get("extras") or {}).get("fornecedor"),
         "fornecedor_cnpj": _cnpj(registro.get("niFornecedor")),

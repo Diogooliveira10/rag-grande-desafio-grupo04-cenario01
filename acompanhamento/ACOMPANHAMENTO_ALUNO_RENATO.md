@@ -220,4 +220,4 @@
 ### Uso de assistentes de IA
 
 - Usei o Claude (Claude Code) para conferir os merges, ligar e testar o backend e o túnel, capturar as consultas e montar o plano B, revisar o código, medir onde ia o tempo de cada etapa, implementar as correções com testes, comparar o ECOA com e sem raciocínio no avaliador e escrever a mensagem para o Diogo.
-- Tomei as decisões: deixei o item 22 com o Diogo e não mexi no `generate.py`, para não haver conflito; mantive o raciocínio do ECOA ligado por padrão, para a rodada do golden set seguir comparável à auditoria; e liberei mudanças em `src/` e `app/` só até segunda-feira, antes do freeze. Fiz o commit e o push.
+- Tomei as decisões: deixei o item 22 com o Diogo e não mexi no `generate.py`, para não haver conflito; mantive o raciocínio do ECOA ligado por padrão, para a rodada do golden set seguir comparável à auditoria; e liberei mudanças em `src/` e `app/` só até segunda-feira, antes do freeze.

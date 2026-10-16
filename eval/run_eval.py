@@ -249,9 +249,11 @@ def _termo_afirmado(term: str, text: str) -> bool:
         antes = text_norm[:achado.start()]
         # A negação não atravessa fronteira de frase. Sem isso, "Campos ausentes
         # não são zero. Nenhum fornecedor tem 3" seria lido como negado — o "não"
-        # pertence à frase anterior. Reproduzido no teste de regressão.
+        # pertence à frase anterior. Reproduzido no teste de regressão. O "|"
+        # separa os campos de um registro SQL: em "modalidade: não informada |
+        # fornecedor: X", o "não" é da modalidade, não do fornecedor.
         fim_de_frase = max(antes.rfind("."), antes.rfind(";"), antes.rfind("?"),
-                           antes.rfind("!"), antes.rfind("\n"))
+                           antes.rfind("!"), antes.rfind("\n"), antes.rfind("|"))
         if fim_de_frase >= 0:
             antes = antes[fim_de_frase + 1:]
         janela = " ".join(antes.split()[-_JANELA_DE_NEGACAO:])

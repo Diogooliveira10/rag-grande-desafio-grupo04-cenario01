@@ -716,6 +716,12 @@ def test_negacao_em_uma_frase_nao_anula_a_seguinte():
     assert _termo_afirmado("nenhum fornecedor", "Campos ausentes nao sao zero. Nenhum fornecedor tem 3") is True
 
 
+def test_negacao_de_um_campo_do_registro_nao_anula_o_campo_seguinte():
+    linha = "modalidade: não informada | fornecedor: PROTEGER SERVIÇOS LTDA | REMOÇÃO DE PACIENTES"
+    assert _termo_afirmado("PROTEGER SERVIÇOS LTDA", linha) is True
+    assert _termo_afirmado("modalidade informada", "modalidade não informada | fornecedor: X") is False
+
+
 def test_negacao_na_mesma_frase_continua_valendo():
     assert _termo_afirmado("tecnologia da informacao", "Nao e tecnologia da informacao") is False
     assert _termo_afirmado("tecnologia da informacao", "Nao se trata de tecnologia da informacao") is False

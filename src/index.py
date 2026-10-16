@@ -51,10 +51,12 @@ def _write_faiss_index(path: Path, embeddings: list[list[float]]) -> None:
     import faiss
     import numpy as np
 
-    vectors = np.ascontiguousarray(embeddings, dtype=np.float32)
-    faiss.normalize_L2(vectors)
-    index = faiss.IndexFlatIP(vectors.shape[1])
-    index.add(vectors)
+    # Evitar uma segunda matriz contígua do corpus inteiro em RAM.
+    index = faiss.IndexFlatIP(len(embeddings[0]))
+    for inicio in range(0, len(embeddings), 1024):
+        vectors = np.ascontiguousarray(embeddings[inicio:inicio + 1024], dtype=np.float32)
+        faiss.normalize_L2(vectors)
+        index.add(vectors)
     faiss.write_index(index, str(path))
 
 
@@ -197,6 +199,26 @@ def stored_embed_fn(embeddings_file: Path) -> tuple[EmbedFn, str]:
     return embed, models.pop()
 
 
+def _vetores_existentes(vectors_path: Path) -> dict[str, list[float]]:
+    '''Vetores já gravados por execução anterior, para retomar sem reembedar.
+
+    Linhas truncadas (queda no meio da escrita) são ignoradas: o chunk
+    correspondente é embedado de novo.
+    '''
+    existentes: dict[str, list[float]] = {}
+    if not vectors_path.exists():
+        return existentes
+    with vectors_path.open(encoding="utf-8") as handle:
+        for linha in handle:
+            try:
+                registro = json.loads(linha)
+            except ValueError:
+                continue
+            if registro.get("chunk_id") and registro.get("embedding") is not None:
+                existentes[registro["chunk_id"]] = registro["embedding"]
+    return existentes
+
+
 @observar_offline(Stage.INDEXACAO)
 def build_index(
     input_file: Path,
@@ -246,18 +268,40 @@ def build_index(
         base_dir = output_dir / base_id
         base_dir.mkdir(parents=True, exist_ok=True)
         vectors_path = base_dir / "vectors.jsonl"
+        base_manifest = base_dir / "manifest.json"
+        if vectors_path.exists() and base_manifest.exists():
+            anterior = json.loads(base_manifest.read_text(encoding="utf-8"))
+            if anterior.get("embedding_model") != model or anterior.get("encoding_config") != getattr(embed_fn, "encoding_config", None):
+                raise ValueError("retomada exige o mesmo modelo e configuração; não relabelar vetores")
+        vectors_temporario = base_dir / "vectors.jsonl.provisorio"
         dimension: int | None = None
         embedding_rows: list[list[float]] = []
-        with vectors_path.open("w", encoding="utf-8", newline="\n") as handle:
+        existentes = _vetores_existentes(vectors_path)
+        retomada_path = base_dir / "retomada.json"
+        configuracao_retomada = {"model": model, "encoding_config": getattr(embed_fn, "encoding_config", None), "source_sha256": source_hash}
+        if vectors_temporario.exists():
+            if not retomada_path.exists() or json.loads(retomada_path.read_text(encoding="utf-8")) != configuracao_retomada:
+                raise ValueError("checkpoint provisório incompatível; preserve-o e use outro staging")
+            existentes.update(_vetores_existentes(vectors_temporario))
+        retomada_path.write_text(json.dumps(configuracao_retomada, sort_keys=True) + "\n", encoding="utf-8")
+        reaproveitados = 0
+        # Nunca truncar o único checkpoint ao retomar. Em erro, o antigo fica.
+        with vectors_temporario.open("w", encoding="utf-8", newline="\n") as handle:
             for batch in batched(chunks, batch_size):
-                with observar_lote_embedding(model=model, count=len(batch),
-                    cache=getattr(embed_fn, "observation_source", None) == "cache", base_id=base_id):
-                    embeddings = embed_fn([chunk.text for chunk in batch])
-                if len(embeddings) != len(batch):
-                    raise RuntimeError(
-                        f"embed_fn retornou {len(embeddings)} vetores para {len(batch)} textos"
-                    )
-                for chunk, embedding in zip(batch, embeddings):
+                novos = [chunk for chunk in batch if chunk.chunk_id not in existentes]
+                if novos:
+                    with observar_lote_embedding(model=model, count=len(novos),
+                        cache=getattr(embed_fn, "observation_source", None) == "cache", base_id=base_id):
+                        embeddings = embed_fn([chunk.text for chunk in novos])
+                    if len(embeddings) != len(novos):
+                        raise RuntimeError(
+                            f"embed_fn retornou {len(embeddings)} vetores para {len(novos)} textos"
+                        )
+                    for chunk, vetor in zip(novos, embeddings):
+                        existentes[chunk.chunk_id] = vetor
+                reaproveitados += len(batch) - len(novos)
+                for chunk in batch:
+                    embedding = existentes[chunk.chunk_id]
                     if dimension is None:
                         dimension = len(embedding)
                         if any(base.get("dimension") != dimension for base in existing_bases.values()):
@@ -280,7 +324,10 @@ def build_index(
                     embedding_rows.append(embedding)
 
         faiss_path = base_dir / "vectors.faiss"
-        _write_faiss_index(faiss_path, embedding_rows)
+        faiss_temporario = base_dir / "vectors.faiss.provisorio"
+        _write_faiss_index(faiss_temporario, embedding_rows)
+        vectors_temporario.replace(vectors_path)
+        faiss_temporario.replace(faiss_path)
 
         manifest = {
             "base_id": base_id,
@@ -291,6 +338,7 @@ def build_index(
             "dimension": dimension or 0,
             "faiss_index": faiss_path.name,
             "total_chunks": len(chunks),
+            "vetores_reaproveitados": reaproveitados,
             "chunks_ilegiveis_ignorados": skipped_ilegiveis.get(base_id, 0),
             "source_file": _relative(input_file),
             "source_sha256": source_hash,

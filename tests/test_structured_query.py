@@ -1161,6 +1161,22 @@ def test_termo_no_singular_acha_objeto_no_plural(tmp_path):
     assert linhas[0].startswith("2 registros atendem aos filtros")
 
 
+def test_listagem_direta_so_dispensa_o_llm_quando_ha_registros(tmp_path):
+    documents = tmp_path / "documents.jsonl"
+    escrever_documents(documents, contratacoes=[_contratacao("L-1", objeto="Locação de ambulância")])
+    banco = Banco(sqlite_path=tmp_path / "base.sqlite")
+    structured_db.construir_banco(documents, banco)
+
+    def chunks(termos):
+        consulta = sq.Consulta(tabela="contratacoes", tipo="listagem", termos_objeto=termos, listagem_direta=True)
+        sql, cabecalho, linhas = sq.executar_consulta(consulta, banco)
+        return sq._chunks(consulta, sql, cabecalho, linhas, banco)
+
+    assert all(c.metadata.extras["geracao_deterministica"] for c in chunks(("ambulancia",)))
+    # Zero pode ser sinônimo ("UTI móvel"): a busca semântica ainda tem chance.
+    assert not any(c.metadata.extras["geracao_deterministica"] for c in chunks(("helicoptero",)))
+
+
 def test_pergunta_da_f1_nao_traz_houver_como_termo_do_objeto():
     pergunta = (
         "Em 2025, órgãos estaduais do Rio de Janeiro pagaram mais por ambulâncias tipo D do que os "

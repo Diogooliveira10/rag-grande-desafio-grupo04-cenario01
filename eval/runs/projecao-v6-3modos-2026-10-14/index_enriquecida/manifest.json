@@ -1,0 +1,100 @@
+{
+  "embedding_model": "Qwen3-Embedding-0.6B.Q8_0",
+  "source_file": "data/normalized/documents.jsonl",
+  "source_sha256": "d8a4f47f5758d88d78a670b09896e0ed7b0e26687fefccee809af68fd0827504",
+  "built_at": "2026-10-14T08:11:40+00:00",
+  "chunks_sem_texto_ignorados": 0,
+  "chunks_ilegiveis_ignorados": 0,
+  "bases": [
+    {
+      "base_id": "atas_conversacional",
+      "embedding_model": "Qwen3-Embedding-0.6B.Q8_0",
+      "encoding_config": null,
+      "inventory_versions": [
+        "v6"
+      ],
+      "inventory_hashes": [
+        "887e3d061880396e0717d6c578f0e2d90fd08e64cb79e836e1a2384d224035ff"
+      ],
+      "dimension": 1024,
+      "faiss_index": "vectors.faiss",
+      "total_chunks": 1997,
+      "chunks_ilegiveis_ignorados": 0,
+      "source_file": "data/normalized/documents.jsonl",
+      "source_sha256": "d8a4f47f5758d88d78a670b09896e0ed7b0e26687fefccee809af68fd0827504",
+      "built_at": "2026-10-14T08:11:40+00:00"
+    },
+    {
+      "base_id": "contratos_estruturado",
+      "embedding_model": "Qwen3-Embedding-0.6B.Q8_0",
+      "encoding_config": null,
+      "inventory_versions": [
+        "v6"
+      ],
+      "inventory_hashes": [
+        "887e3d061880396e0717d6c578f0e2d90fd08e64cb79e836e1a2384d224035ff"
+      ],
+      "dimension": 1024,
+      "faiss_index": "vectors.faiss",
+      "total_chunks": 625,
+      "chunks_ilegiveis_ignorados": 0,
+      "source_file": "data/normalized/documents.jsonl",
+      "source_sha256": "d8a4f47f5758d88d78a670b09896e0ed7b0e26687fefccee809af68fd0827504",
+      "built_at": "2026-10-14T08:11:40+00:00"
+    },
+    {
+      "base_id": "editais_normativo",
+      "embedding_model": "Qwen3-Embedding-0.6B.Q8_0",
+      "encoding_config": null,
+      "inventory_versions": [
+        "v6"
+      ],
+      "inventory_hashes": [
+        "887e3d061880396e0717d6c578f0e2d90fd08e64cb79e836e1a2384d224035ff"
+      ],
+      "dimension": 1024,
+      "faiss_index": "vectors.faiss",
+      "total_chunks": 1557,
+      "chunks_ilegiveis_ignorados": 0,
+      "source_file": "data/normalized/documents.jsonl",
+      "source_sha256": "d8a4f47f5758d88d78a670b09896e0ed7b0e26687fefccee809af68fd0827504",
+      "built_at": "2026-10-14T08:11:40+00:00"
+    },
+    {
+      "base_id": "emails_sinteticos",
+      "embedding_model": "Qwen3-Embedding-0.6B.Q8_0",
+      "encoding_config": null,
+      "inventory_versions": [
+        "v1"
+      ],
+      "inventory_hashes": [
+        "c0102ee81d8df94a4d6e34a4c7820d797ac4dd2ff0e3bf6aeeb016489e346dc6"
+      ],
+      "dimension": 1024,
+      "faiss_index": "vectors.faiss",
+      "total_chunks": 25,
+      "chunks_ilegiveis_ignorados": 0,
+      "source_file": "data/normalized/documents.jsonl",
+      "source_sha256": "d8a4f47f5758d88d78a670b09896e0ed7b0e26687fefccee809af68fd0827504",
+      "built_at": "2026-10-14T08:11:40+00:00"
+    },
+    {
+      "base_id": "pca_agregado",
+      "embedding_model": "Qwen3-Embedding-0.6B.Q8_0",
+      "encoding_config": null,
+      "inventory_versions": [
+        "v6"
+      ],
+      "inventory_hashes": [
+        "887e3d061880396e0717d6c578f0e2d90fd08e64cb79e836e1a2384d224035ff"
+      ],
+      "dimension": 1024,
+      "faiss_index": "vectors.faiss",
+      "total_chunks": 911,
+      "chunks_ilegiveis_ignorados": 0,
+      "source_file": "data/normalized/documents.jsonl",
+      "source_sha256": "d8a4f47f5758d88d78a670b09896e0ed7b0e26687fefccee809af68fd0827504",
+      "built_at": "2026-10-14T08:11:40+00:00"
+    }
+  ]
+}

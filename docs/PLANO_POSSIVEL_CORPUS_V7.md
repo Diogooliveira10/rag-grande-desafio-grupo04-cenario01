@@ -5,6 +5,14 @@
 > ativa, v7 como artefato derivado, promoção só após re-auditoria + medição
 > de qualidade). A **v6 continua sendo a base** do corpus, do eval e da demo.
 
+**Atualização de execução (15/10/2026):** contratos e empenhos serão preservados
+separadamente, e o cadastro será ampliado/reconciliado para o RJ. O modo direto
+apresentou divergências de recorte e modalidades, documentadas em
+[Coleta e recuperação v7](COLETA_DAS_BASES_E_RECUPERACAO_V7.md) e no
+[relatório parcial](RELATORIO_RECUPERACAO_V7_2026-10-15.md). Os números abaixo são
+a avaliação histórica, não a certificação da aquisição atual. Promoção só após
+relatório final, rollback integrado validado e decisão explícita.
+
 Data da avaliação: 2026-10-13. Medidas coletadas nesta data, descritas na seção 3.
 
 ---
@@ -192,3 +200,27 @@ regressão.
   seção "Auditoria do golden set concluída".
 - Limitação de cobertura e a separação confiabilidade/completude/cobertura:
   fase P3 do plano de demo.
+
+## 10. Possibilidade futura: evidência documental das atas na geração
+
+Os registros de ata do censo trazem `numeroControlePNCPAta`, com CNPJ, compra,
+ano e sequencial embutidos, e o PNCP expõe os arquivos em
+`/orgaos/{cnpj}/compras/{ano}/{seq}/atas/{seqAta}/arquivos`. Uma evolução
+possível é usar o PDF da ata como evidência adicional na geração, além do
+registro JSON:
+
+- **Fluxo**: registro citado na resposta → cache por ata (sha256; a primeira
+  consulta paga o download, as seguintes reutilizam) → extração de texto pelo
+  caminho de PDF/OCR já existente → trecho limitado como evidência extra
+  dentro do orçamento de contexto.
+- **Falhas**: download ou extração que falham respondem só com o registro JSON
+  e registram `degradado`; a resposta nunca depende do PDF.
+- **Configuração**: chave própria (`EVIDENCIA_PDF_ATAS=auto|off`) e testes
+  offline com PDF mockado, seguindo o padrão de testes do projeto.
+- **Custos aceitos**: latência por consulta (limitar às atas efetivamente
+  citadas), chamadas externas por consulta (cache obrigatório) e **re-medida
+  do golden set** com a evidência ativa — os critérios atuais foram calibrados
+  só com o registro JSON, então o número do Demo Day não pode misturar os dois
+  regimes.
+- **Fora do recorte atual**: o censo guarda os registros; os PDFs continuam
+  sob demanda (inclusive por comando de operador) enquanto a feature não sair.
