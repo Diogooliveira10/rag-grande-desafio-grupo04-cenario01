@@ -574,3 +574,75 @@ Frontend (`sevenRevy/frontendRAG`, `main`):
 ### Uso de IA
 
 Utilizei assistentes de IA para investigar o comportamento da API de atas do PNCP (parâmetros, limites de período e de taxa), implementar o fallback de embeddings com retomada, analisar a cobertura de modalidade nos registros e preparar os incrementos do censo. As decisões foram validadas com testes automatizados, medições locais e consultas pontuais à API.
+
+## Atualização — 16/10/2026
+
+### Atividades realizadas desde o último registro
+
+Dei continuidade à recuperação e à validação do corpus v7, com foco na correção do recorte territorial e temporal, na preservação dos dados e na comparação da recuperação com a v6. Mantive os candidatos em staging, sem substituir a base ativa nem promover a v7.
+
+**Coleta, preservação e retomada:**
+
+Consolidei a política compartilhada de coleta para UF, data de assinatura, identidade da unidade, compra vinculada e classificação dos instrumentos. Separei contratos, empenhos e outros instrumentos, evitando contabilizá-los indistintamente como contratos. A retomada passou a verificar a compatibilidade entre janela, política, manifesto e chunking; paginação incompleta ou contraditória não recebe certificação de coleta concluída.
+
+Implementei melhorias de cache, checkpoints atômicos, limites de consultas e pausas para respostas HTTP 429/503, respeitando `Retry-After`. Também ajustei a deduplicação e a escrita de documentos e vetores para usar arquivos provisórios, preservando os resultados anteriores em caso de falha e reduzindo o risco de perda por falta de memória.
+
+Preservei uma baseline dos artefatos ativos e ensaiei sua restauração em sandbox. A conferência dos arquivos restaurados validou SQLite e FAISS, mas não incluiu a aplicação funcionando nem perguntas pela API; portanto, o rollback integrado continua pendente.
+
+**Cadastro oficial e complementação das bases:**
+
+A verificação cadastral alcançou os **524 CNPJs-semente**, com **5.049 unidades RJ e zero falhas**, conforme a consolidação da execução. Usei o cadastro oficial para reconciliar o território das atas, em vez de inferir a UF pelo nome ou pelo CNPJ do órgão.
+
+O candidato_04 passou a reunir **32.956 atas com evidência territorial cadastral do RJ**, sem pendências de UF dentro da seleção. A recuperação também incorporou 572 publicações de modalidades omitidas da aquisição anterior e dez compras auxiliares. Esses complementos permitiram preencher modalidade por vínculo com a compra, mantendo a proveniência e sem contar compras auxiliares como publicações principais.
+
+Avancei na complementação de instrumentos assinados em 2025 e publicados em 2026, com cache e retomada por janela. Incorporei ao candidato_05 as bases herdadas normativa e agregada: **1.557 chunks normativos e 911 de PCA**, preservando texto, hashes e identidades.
+
+**Embeddings e montagem do FAISS:**
+
+Implementei ferramentas de montagem e reestruturação do índice candidato, com reaproveitamento de vetores e organização por base. Corrigi a validação do modelo na retomada para impedir que vetores de outro modelo fossem apenas reidentificados como se fossem compatíveis.
+
+O manifesto da montagem do candidato_05 registra **142.026 vetores de dimensão 1.024**, com **Qwen3-Embedding-0.6B Q8_0 local**: **108.385 reaproveitados e 33.641 gerados**.
+
+### Avaliação de recuperação
+
+Implementei `eval/medir_regressao_v7.py` e comparei o candidato com o índice v6 de referência usando os **47 casos** de `eval/retrieval_set.jsonl` e o encoder local Q8_0.
+
+| Configuração | hit@3 | hit@10 | mrr@10 |
+|---|---:|---:|---:|
+| v6 — busca densa de referência | 0,7021 | 0,7872 | 0,6401 |
+| v7 — busca densa | 0,5319 | 0,6170 | 0,5011 |
+| v7 — BM25 + RRF | 0,5745 | 0,7021 | 0,5036 |
+
+A comparação densa registrou **10 regressões e uma melhoria**. A comparação da v7 híbrida com a v6 densa registrou **17 regressões e sete melhorias**; ela não isola apenas o efeito do corpus, pois também muda a estratégia de recuperação.
+
+A busca híbrida ajudou em parte das consultas por identificadores, mas prejudicou algumas perguntas semânticas. Registrei como proposta avaliar uma seleção de estratégia conforme o tipo de pergunta, sem apresentá-la como correção já implementada. Também mantive a necessidade de revisar relevância e cobertura por caso: posição no ranking não comprova suficiência de evidência nem correção factual da resposta. Não tratei essas medições como uma nova aprovação do Golden Set ou como autorização de promoção.
+
+Os detalhes estão no [relatório de regressão v7](../docs/RELATORIO_REGRESSAO_V7_2026-10-16.md), no [relatório de execução](../docs/RELATORIO_EXECUCAO_V7_2026-10-16.md) e nos registros de [recuperação](../docs/RELATORIO_RECUPERACAO_V7_2026-10-15.md) e [reconciliação cadastral](../docs/RELATORIO_CADASTRO_V7_2026-10-16.md).
+
+### Validação e integração
+
+O log da suíte associada à correção de modelo registra **1.731 testes aprovados em 79,29 segundos**. As validações offline da recuperação utilizaram bloqueio de rede externa para evitar chamadas involuntárias a provedores. Esses resultados são das execuções registradas nos artefatos; não executei novamente a suíte completa apenas para redigir este acompanhamento.
+
+Integrei as alterações da `main` à branch `joao-reis`, incluindo contribuições da equipe para avaliação e perguntas dependentes de histórico. Mantive a distinção entre o trabalho compartilhado recebido pelo merge e minhas implementações de coleta, recuperação, indexação e regressão.
+
+### Commits já existentes no histórico
+
+Os principais commits de minha autoria em 16/10, anteriores à edição deste registro, são:
+
+- `bb63704` — `feat(coleta): infraestrutura de coleta configurável v7`;
+- `bb3d118` — `feat(recuperacao): scripts de recuperação e complementação do corpus v7`;
+- `799ab39` — `feat(index): montagem e reestruturação FAISS v7, fix embedding model`;
+- `a754ed3` — `feat(eval): regressão de recuperação v7 com dense e hybrid`;
+- `2712b9e` — `docs(v7): relatórios de recuperação, cadastro, execução e regressão`;
+- `e7e51cf` — `data(v6): adiciona índice e documents v6 de referência para regressão`.
+
+### Pendências
+
+- Auditar a consistência final entre documentos, SQL, índices e origem dos vetores do candidato.
+- Investigar as regressões e validar uma estratégia de recuperação para consultas semânticas e por identificadores.
+- Reauditar o Golden Set atual, de 29 casos, sobre o candidato, separando recuperação, conteúdo, cálculos, citações e recusas.
+- Validar o rollback com a aplicação funcionando e preparar o relatório final. A v6 permanece ativa; a promoção da v7 depende de decisão explícita.
+
+### Uso de IA
+
+Utilizei assistentes de IA como apoio à análise do corpus e do código, às correções de coleta e retomada, à reconciliação cadastral, à montagem dos índices, à elaboração de testes e à comparação dos resultados de recuperação. Para este acompanhamento, conferi o histórico Git, os relatórios, o manifesto do índice e os logs de testes, distinguindo checkpoints intermediários de resultados posteriores e resultados medidos de propostas ainda pendentes.
