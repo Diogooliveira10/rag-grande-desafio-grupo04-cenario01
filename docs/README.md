@@ -10,6 +10,16 @@ Este diretório reúne guias de uso e referências do projeto.
   publicações de 2025 em construção paralela (modo direto, projeção
   `completa`), com DIFF, regressão e re-auditoria do golden set como etapas
   de promoção; a v6 permanece a base ativa.
+- [Coleta das bases e recuperação do v7](COLETA_DAS_BASES_E_RECUPERACAO_V7.md):
+  fontes, limitações das APIs, recortes, instrumentos, modalidade vinculada,
+  staging e bloqueios de promoção.
+- [Relatório parcial da recuperação v7](RELATORIO_RECUPERACAO_V7_2026-10-15.md):
+  baseline, reclassificação, pilotos, testes e pendências; sem promoção.
+- [Cadastro oficial e reconciliação territorial](RELATORIO_CADASTRO_V7_2026-10-16.md):
+  continuação em lotes, acompanhamento em segundo plano e janelas propostas.
+- [Execução v7 — consolidação atualizada](RELATORIO_EXECUCAO_V7_2026-10-16.md):
+  candidato_04, complementação de contratos, atas com território oficial,
+  1.731 testes, pendências e bloqueios de promoção.
 - [Guia de comandos da CLI](CLI.md): instalação, coleta, inventário, curadoria,
   preparação, busca local e embeddings.
 - [Guia de execução local](GUIA_INTEGRACAO_LOCAL_FRONTEND_BACKEND.md): backend e

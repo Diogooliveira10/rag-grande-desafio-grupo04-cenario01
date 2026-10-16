@@ -36,6 +36,9 @@ OPENROUTER_MODEL_FALLBACK = _env("OPENROUTER_MODEL_FALLBACK", "openrouter/free")
 OPENROUTER_MAX_TOKENS = int(_env("OPENROUTER_MAX_TOKENS", "4096"))
 LLM_PROVIDER_MODE = _env("LLM_PROVIDER_MODE", "auto")
 EMBEDDING_MODEL = _env("EMBEDDING_MODEL", "xagi/qwen3-embedding:0.6b-q4_k_m")
+# Respiro entre lotes de embedding quando o encoder é o endpoint compartilhado
+# (ECOA). O modo direto usa isto antes de cair no encoder local.
+PAUSA_ENTRE_LOTES_EMBEDDING = float(_env("PAUSA_ENTRE_LOTES_EMBEDDING", "0.5"))
 # Orçamento do contexto da geração (src/generate.py). O Ollama da turma usa
 # janela de 2048 tokens e corta o INÍCIO do prompt que passar disso, levando
 # junto a instrução de responder em JSON; para essa janela curta, 3500 chars

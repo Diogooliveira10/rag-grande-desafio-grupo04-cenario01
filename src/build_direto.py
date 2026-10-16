@@ -56,7 +56,14 @@ from src.prepare_documents import (
     _declared_record_metadata,
     _record_logical_id,
 )
-from src.projecao import MODO_COMPLETA, MODOS, embed_fn_concorrente, embed_fn_projetado
+from src.projecao import (
+    MODO_COMPLETA,
+    MODOS,
+    embed_fn_com_fallback,
+    embed_fn_com_pausa,
+    embed_fn_concorrente,
+    embed_fn_projetado,
+)
 from src.structured_db import Banco, construir_banco
 
 EmbedFn = Callable[[list[str]], list[list[float]]]
@@ -185,52 +192,87 @@ def finalizar_direto(
     import config
 
     destino = Path(destino)
+    estatisticas_embed: dict[str, int] = {}
+    eventos_fallback: list[dict[str, Any]] = []
     if embed_fn is None:
-        # Padrão do modo direto: o MESMO encoder do lado da consulta
-        # (config.EMBEDDING_PROVIDER) — um índice nunca mistura modelos.
+        # Padrão do modo direto: ECOA primeiro (endpoint compartilhado, com
+        # pausa entre lotes) e encoder local como reserva. Os dois servem o
+        # modelo base Qwen3-Embedding-0.6B, mas quantizações distintas não
+        # provam identidade: compatibilidade/proveniência são gates de promoção.
+        # A contagem por origem desta execução fica registrada no inventário.
         from src.create_embeddings import _configured_embed_batch
 
-        endpoint, api_key, modelo_endpoint = config.embedding_endpoint()
-        modelo = modelo or modelo_endpoint
-        embed_fn = _configured_embed_batch(config.EMBEDDING_PROVIDER, endpoint, api_key, modelo)
+        endpoint, api_key, modelo_ecoa = config.embedding_endpoint("ecoa")
+        modelo = modelo or modelo_ecoa
+        primario = embed_fn_com_pausa(
+            _configured_embed_batch("ecoa", endpoint, api_key, modelo_ecoa),
+            config.PAUSA_ENTRE_LOTES_EMBEDDING,
+        )
+        local_url, local_key, modelo_local = config.embedding_endpoint("ollama")
+        reserva = embed_fn_concorrente(
+            _configured_embed_batch("ollama", local_url, local_key, modelo_local),
+            CONCORRENCIA_PADRAO,
+        )
+
+        def _registrar_fallback(erro: Exception, tamanho: int) -> None:
+            if len(eventos_fallback) < 20:
+                eventos_fallback.append({
+                    "erro": f"{type(erro).__name__}: {erro}"[:200],
+                    "lote": tamanho,
+                })
+
+        embed_fn = embed_fn_com_fallback(
+            primario, reserva,
+            estatisticas=estatisticas_embed, ao_fallback=_registrar_fallback,
+        )
     modelo = modelo or config.EMBEDDING_MODEL
     documents = destino / "documents.jsonl"
-    linhas = [
-        json.loads(linha)
-        for linha in documents.read_text(encoding="utf-8").splitlines()
-        if linha.strip()
-    ]
+    # Deduplicação em streaming com troca atômica: só os ids ficam na memória e
+    # o arquivo original só é substituído depois do temporário completo.
+    # (Uma reescrita em memória já derrubou o processo com MemoryError depois
+    # de truncar o arquivo, custando uma coleta inteira.)
+    provisorio = documents.with_name(documents.name + ".provisorio")
     vistas: set[str] = set()
-    unicas: list[dict[str, Any]] = []
-    for chunk in linhas:
-        if chunk["chunk_id"] in vistas:
-            continue
-        vistas.add(chunk["chunk_id"])
-        unicas.append(chunk)
-    if len(unicas) != len(linhas):
-        documents.write_text(
-            "".join(json.dumps(c, ensure_ascii=False, sort_keys=True) + "\n" for c in unicas),
-            encoding="utf-8",
-        )
-    source_sha256 = hashlib.sha256(documents.read_bytes()).hexdigest()
-
-    # Inventário por origem derivado dos próprios chunks (1 entrada por documento).
+    vistos_documentos: set[str] = set()
     arquivos: list[dict[str, Any]] = []
-    vistos: set[str] = set()
-    for chunk in unicas:
-        if chunk["document_id"] in vistos:
-            continue
-        vistos.add(chunk["document_id"])
-        extras = chunk.get("extras") or {}
-        arquivos.append({
-            "base_id": chunk["base_id"],
-            "origem": chunk.get("origem") or "",
-            "sha256": chunk.get("sha256") or "",
-            "hash_derivado": bool(extras.get("hash_derivado")),
-            "bytes": chunk.get("bytes") or 0,
-            "coletado_em": chunk.get("coletado_em") or "",
-            "status": "ok",
-        })
+    total_linhas = 0
+    chunks_unicos = 0
+    try:
+        with (
+            documents.open(encoding="utf-8") as entrada,
+            provisorio.open("w", encoding="utf-8", newline="\n") as saida,
+        ):
+            for linha in entrada:
+                if not linha.strip():
+                    continue
+                total_linhas += 1
+                chunk = json.loads(linha)
+                if chunk["chunk_id"] in vistas:
+                    continue
+                vistas.add(chunk["chunk_id"])
+                chunks_unicos += 1
+                saida.write(linha if linha.endswith("\n") else linha + "\n")
+                if chunk["document_id"] in vistos_documentos:
+                    continue
+                vistos_documentos.add(chunk["document_id"])
+                extras = chunk.get("extras") or {}
+                arquivos.append({
+                    "base_id": chunk["base_id"],
+                    "origem": chunk.get("origem") or "",
+                    "sha256": chunk.get("sha256") or "",
+                    "hash_derivado": bool(extras.get("hash_derivado")),
+                    "bytes": chunk.get("bytes") or 0,
+                    "coletado_em": chunk.get("coletado_em") or "",
+                    "status": "ok",
+                })
+    except BaseException:
+        provisorio.unlink(missing_ok=True)
+        raise
+    if chunks_unicos != total_linhas:
+        provisorio.replace(documents)
+    else:
+        provisorio.unlink(missing_ok=True)
+    source_sha256 = index_mod.file_sha256(documents)
 
     relatorio_indice = index_mod.build_index(
         input_file=documents,
@@ -240,11 +282,23 @@ def finalizar_direto(
         ),
         model=modelo,
     )
+    # Corrigir modelo no manifest: o nome inicial é do ECOA (primário),
+    # mas se todos os vetores vieram do fallback local, o manifest deve
+    # refletir o encoder que realmente gerou os vetores.
+    modelo_efetivo = modelo
+    if estatisticas_embed:
+        primario = config.embedding_endpoint("ecoa")[2] if "primario" in estatisticas_embed else None
+        reserva = config.embedding_endpoint("ollama")[2] if "reserva" in estatisticas_embed else None
+        if estatisticas_embed.get("reserva", 0) > 0 and estatisticas_embed.get("primario", 0) == 0:
+            modelo_efetivo = reserva or modelo
+        elif estatisticas_embed.get("primario", 0) > 0 and estatisticas_embed.get("reserva", 0) > 0:
+            modelo_efetivo = f"{primario or modelo}+{reserva or modelo}"
     # A projeção é registrada no manifest de cada base e no inventário: um
     # índice nunca é misturado com projeção diferente em silêncio.
     for manifest_path in sorted((destino / "index").glob("*/manifest.json")):
         manifest_indice = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest_indice["projecao_embedding"] = projecao
+        manifest_indice["embedding_model"] = modelo_efetivo
         manifest_path.write_text(
             json.dumps(manifest_indice, ensure_ascii=False, indent=1) + "\n",
             encoding="utf-8",
@@ -255,7 +309,8 @@ def finalizar_direto(
     )
 
     inventario = {
-        "completo": True,
+        "completo": True,  # artefatos finalizados, não prova de censo estadual
+        "cobertura_institucional_comprovada": False,
         "falhas": [],
         "modo": "direto",
         "gerado_em": _agora(),
@@ -263,6 +318,9 @@ def finalizar_direto(
             "manifest_hash": manifest_hash,
             "source_sha256": source_sha256,
             "projecao_embedding": projecao,
+            "embedding_model": modelo_efetivo,
+            "embedding_por_origem": estatisticas_embed,
+            "embedding_fallbacks": eventos_fallback,
         },
         "por_base": [{
             "base_id": str(base["base_id"]),
@@ -280,7 +338,7 @@ def finalizar_direto(
         "documents": str(documents),
         "source_sha256": source_sha256,
         "registros": len(arquivos),
-        "chunks": len(unicas),
+        "chunks": chunks_unicos,
         "index": relatorio_indice,
         "banco": relatorio_banco,
         "inventario": str(inventario_path),
@@ -306,15 +364,23 @@ def construir_direto(
     '''
     destino = Path(destino)
     destino.mkdir(parents=True, exist_ok=True)
-    linhas: list[str] = []
-    for registro in registros:
-        chunks, _entrada = chunk_de_registro(
-            registro, base, manifest_hash=manifest_hash,
-            chunk_size=chunk_size, overlap=overlap,
-        )
-        linhas.extend(json.dumps(chunk, ensure_ascii=False, sort_keys=True) for chunk in chunks)
     documents = destino / "documents.jsonl"
-    documents.write_text("".join(linha + "\n" for linha in linhas), encoding="utf-8")
+    # Escrita em streaming com troca atômica: nenhum lote inteiro na memória e
+    # o arquivo anterior só é substituído depois do temporário completo.
+    provisorio = documents.with_name(documents.name + ".provisorio")
+    try:
+        with provisorio.open("w", encoding="utf-8", newline="\n") as saida:
+            for registro in registros:
+                chunks, _entrada = chunk_de_registro(
+                    registro, base, manifest_hash=manifest_hash,
+                    chunk_size=chunk_size, overlap=overlap,
+                )
+                for chunk in chunks:
+                    saida.write(json.dumps(chunk, ensure_ascii=False, sort_keys=True) + "\n")
+    except BaseException:
+        provisorio.unlink(missing_ok=True)
+        raise
+    provisorio.replace(documents)
     return finalizar_direto(
         destino, base, embed_fn=embed_fn, modelo=modelo, manifest_hash=manifest_hash,
         projecao=projecao,

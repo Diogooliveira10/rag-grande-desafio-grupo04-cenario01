@@ -7,7 +7,9 @@ import json
 import sqlite3
 from pathlib import Path
 
-from src.build_direto import RegistroDireto, construir_direto
+import pytest
+
+from src.build_direto import RegistroDireto, construir_direto, finalizar_direto
 from src.corpus_validator import validate_inventory_contract
 
 BASE = {
@@ -152,6 +154,56 @@ def test_inventario_traz_proveniencia_por_origem(tmp_path):
     assert validate_inventory_contract(manifesto, inventario, official=False).ok
 
 
+def test_dedup_preserva_as_linhas_originais(tmp_path, monkeypatch):
+    '''A deduplicação preserva cada linha byte a byte e não sobra temporário.'''
+    monkeypatch.setattr("src.build_direto.index_mod.build_index", lambda **_k: {"chunks": 0})
+    monkeypatch.setattr("src.build_direto.construir_banco", lambda **_k: {"ok": True})
+    destino = tmp_path / "base"
+    destino.mkdir()
+
+    def linha_chunk(chunk_id: str, documento: str) -> str:
+        # Formatação propositalmente diferente do sort_keys do coletor.
+        return json.dumps(
+            {"document_id": documento, "texto": "texto ", "chunk_id": chunk_id,
+             "base_id": "contratos_estruturado", "extras": {}, "bytes": 1,
+             "coletado_em": "2026-10-15T00:00:00", "origem": "u", "sha256": ""},
+            ensure_ascii=False,
+        )
+
+    primeira = linha_chunk("c1", "d1")
+    segunda = linha_chunk("c2", "d1")
+    repetida = linha_chunk("c1", "d1")
+    arquivo = destino / "documents.jsonl"
+    arquivo.write_text("\n".join([primeira, segunda, repetida]) + "\n", encoding="utf-8")
+
+    relatorio = finalizar_direto(destino, BASE, embed_fn=_embed_fake)
+
+    assert arquivo.read_text(encoding="utf-8") == primeira + "\n" + segunda + "\n"
+    assert relatorio["chunks"] == 2
+    assert relatorio["registros"] == 1  # um único document_id
+    assert not (destino / "documents.jsonl.provisorio").exists()
+
+
+def test_falha_na_reescrita_preserva_o_documents(tmp_path, monkeypatch):
+    '''Linha corrompida interrompe a dedup sem tocar no arquivo original.'''
+    monkeypatch.setattr("src.build_direto.index_mod.build_index", lambda **_k: {"chunks": 0})
+    monkeypatch.setattr("src.build_direto.construir_banco", lambda **_k: {"ok": True})
+    destino = tmp_path / "base"
+    destino.mkdir()
+    arquivo = destino / "documents.jsonl"
+    original = (
+        '{"chunk_id": "c1", "document_id": "d1", "base_id": "contratos_estruturado"}\n'
+        '{"chunk_id": "c2", "document_id": "d1", "base_id": "contratos_estruturad'
+    )
+    arquivo.write_text(original, encoding="utf-8")
+
+    with pytest.raises(json.JSONDecodeError):
+        finalizar_direto(destino, BASE, embed_fn=_embed_fake)
+
+    assert arquivo.read_text(encoding="utf-8") == original  # nada truncado
+    assert not (destino / "documents.jsonl.provisorio").exists()
+
+
 def test_registro_sem_sha_usa_hash_derivado_marcado(tmp_path):
     registro = RegistroDireto(
         payload=_registro("33333333000001-2-000003/2025", "CAMARA DE EXEMPLO", "Exemplo", 300.0),
@@ -163,3 +215,6 @@ def test_registro_sem_sha_usa_hash_derivado_marcado(tmp_path):
     inventario = json.loads(Path(relatorio["inventario"]).read_text(encoding="utf-8"))
     assert inventario["arquivos"][0]["hash_derivado"] is True
     assert len(inventario["arquivos"][0]["sha256"]) == 64
+    # Modelo efetivo no inventário e manifests
+    assert inventario["meta"]["embedding_model"] == "modelo-de-teste"
+    assert json.loads((tmp_path / "v7" / "index" / "manifest.json").read_text())["embedding_model"] == "modelo-de-teste"

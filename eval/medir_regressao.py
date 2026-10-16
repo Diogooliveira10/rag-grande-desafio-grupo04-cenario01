@@ -9,7 +9,9 @@ cada caso: regrediu, melhorou ou empatou.
 Para isolar o efeito do CORPUS, os dois alvos devem usar o mesmo encoder e a
 mesma projeção de embedding; a comparação v6 × v7 do registro usou os índices
 do `eval/runs/projecao-v6-3modos-*/index_completa` (v6, encoder local) contra
-`data/v7_direto/index` (v7, encoder local, projeção completa).
+`data/v7_direto/index` (v7, encoder local, projeção completa). Se o v7 tiver
+sido embutido pelo ECOA (mesmo modelo base, quantização diferente), a
+diferença mede corpus+encoder e deve ser lida assim no relatório.
 
 Uso:
 

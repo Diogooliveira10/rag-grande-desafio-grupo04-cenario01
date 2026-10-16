@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from ..pncp_client import PncpClient
+from ..coleta_policy import ano_assinatura, nome_instrumento, uf_unidade
 from .base import ResolvedSource, SourceArtifact, SourceCandidate, SourceRef
 
 
@@ -440,43 +441,15 @@ class PNCPProvider:
 
     @staticmethod
     def _is_empenho(record: dict[str, Any]) -> bool:
-        value = PNCPProvider._first(
-            record,
-            "tipoContrato",
-            "tipoContratoNome",
-            "tipoContratoDescricao",
-            "tipoInstrumento",
-        )
-        if isinstance(value, dict):
-            value = PNCPProvider._first(value, "nome", "descricao", "tipo")
-        return "empenho" in str(value or "").casefold()
+        return "empenho" in nome_instrumento(record).casefold()
 
     @staticmethod
     def _unit_uf(record: dict[str, Any]) -> str:
-        unit = PNCPProvider._first(
-            record,
-            "unidadeOrgao",
-            "unidadeExecutora",
-            "unidadeAdministrativa",
-            "unidade",
-        ) or {}
-        if not isinstance(unit, dict):
-            return ""
-        direct_unit_uf = PNCPProvider._first(unit, "ufSigla", "siglaUF")
-        if direct_unit_uf:
-            return str(direct_unit_uf).upper()
-        location = PNCPProvider._first(unit, "localidade", "municipio") or {}
-        if not isinstance(location, dict):
-            return ""
-        uf = PNCPProvider._first(location, "uf", "ufSigla", "siglaUF")
-        if isinstance(uf, dict):
-            uf = PNCPProvider._first(uf, "siglaUF", "ufSigla", "sigla")
-        return str(uf or "").upper()
+        return uf_unidade(record)
 
     @staticmethod
     def _signature_year(record: dict[str, Any]) -> str:
-        value = PNCPProvider._first(record, "dataAssinatura")
-        return str(value or "")[:4]
+        return ano_assinatura(record)
 
     def _load_contract_cnpjs(self, query: dict[str, Any], params: dict[str, Any]) -> list[str]:
         if query.get("censo_nacional"):
@@ -596,7 +569,9 @@ class PNCPProvider:
                 on_organization_verified(cnpj, verification)
             for unit in units:
                 code = str(unit.get("codigoUnidadeAdministrativa") or "").strip()
-                if code and code in observed_codes:
+                # Uma unidade RJ cadastrada não deixa de ser elegível só por
+                # não ter aparecido nas publicações já observadas.
+                if code:
                     scopes[(cnpj, code)] = {
                         "cnpj": cnpj,
                         "codigoUnidadeAdministrativa": code,
@@ -614,7 +589,10 @@ class PNCPProvider:
             for verification in verifications.values()
             if isinstance(verification, dict) and verification.get("status") == "verificado"
         )
-        discovery_state["unidades_observadas_confirmadas"] = len(result)
+        discovery_state["unidades_observadas_confirmadas"] = sum(
+            scope["codigoUnidadeAdministrativa"] in (observed_by_cnpj.get(scope["cnpj"]) or {})
+            for scope in result
+        )
         discovery_state["organizacoes_verificadas"] = sum(
             1
             for cnpj in organizations

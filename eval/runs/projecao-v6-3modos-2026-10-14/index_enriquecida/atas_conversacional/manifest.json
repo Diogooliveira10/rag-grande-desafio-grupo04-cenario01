@@ -1,0 +1,18 @@
+{
+  "base_id": "atas_conversacional",
+  "embedding_model": "Qwen3-Embedding-0.6B.Q8_0",
+  "encoding_config": null,
+  "inventory_versions": [
+    "v6"
+  ],
+  "inventory_hashes": [
+    "887e3d061880396e0717d6c578f0e2d90fd08e64cb79e836e1a2384d224035ff"
+  ],
+  "dimension": 1024,
+  "faiss_index": "vectors.faiss",
+  "total_chunks": 1997,
+  "chunks_ilegiveis_ignorados": 0,
+  "source_file": "data/normalized/documents.jsonl",
+  "source_sha256": "d8a4f47f5758d88d78a670b09896e0ed7b0e26687fefccee809af68fd0827504",
+  "built_at": "2026-10-14T08:11:40+00:00"
+}
