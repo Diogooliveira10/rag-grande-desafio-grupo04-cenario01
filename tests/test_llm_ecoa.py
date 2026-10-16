@@ -41,6 +41,34 @@ def test_ecoa_success_does_not_call_fallback(monkeypatch, providers):
     assert not calls and info["provider"] == "ecoa" and not info["fallback_used"]
 
 
+def test_reasoning_effort_configurado_vai_so_para_o_ecoa(monkeypatch, providers):
+    calls, response = providers
+    ecoa = []
+    def primary(**arguments):
+        ecoa.append(arguments)
+        raise TimeoutError("offline")
+    monkeypatch.setattr(config, "GENERATION_REASONING_EFFORT", "none")
+    monkeypatch.setattr(llm_ecoa, "client", client_for(primary))
+    info = {}
+
+    llm_ecoa.completar_chat([], diagnosticos=info)
+
+    assert ecoa[0]["extra_body"] == {"reasoning_effort": "none"}
+    assert "reasoning_effort" not in calls[0]["extra_body"]
+    assert info["reasoning_effort"] == "none"
+
+
+def test_sem_reasoning_effort_o_ecoa_usa_o_padrao_do_servidor(monkeypatch, providers):
+    _, response = providers
+    ecoa = []
+    monkeypatch.setattr(config, "GENERATION_REASONING_EFFORT", "")
+    monkeypatch.setattr(llm_ecoa, "client", client_for(lambda **a: ecoa.append(a) or response))
+
+    llm_ecoa.completar_chat([], diagnosticos={})
+
+    assert "extra_body" not in ecoa[0]
+
+
 def test_timeout_fallback_keeps_schema_and_free_model(monkeypatch, providers):
     calls, response = providers
     def primary(**_):

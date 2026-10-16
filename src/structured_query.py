@@ -155,6 +155,8 @@ _PALAVRAS_GENERICAS = frozenset(
     suficiente suficientes tecnica tecnicas equivalente equivalentes tecnicamente
     disponivel disponiveis apenas comprovem comprovado comprovada
     assinou assinaram contratou contrataram comprou compraram gastou gastaram
+    publicou publicaram custou custaram custam custa custaria
+    seus suas dele dela deles delas respectivo respectiva respectivos respectivas
     seguem segue seguindo base baseado baseada baseados baseadas fundamentado fundamentada fundamentados
     fundamentadas fundamento amparo amparado amparada amparados amparadas conforme lei leis decreto decretos
     portaria portarias norma normas
@@ -343,7 +345,14 @@ def compilar_consulta_postgres(consulta: Consulta) -> tuple[str, tuple[Any, ...]
 
 
 def _singular(token: str) -> str:
-    """Plural simples do português: "ambulancias" casa com "ambulancia"."""
+    """Plural simples do português: "ambulancias" casa com "ambulancia".
+
+    "-gem"/"-gens" viram o radical "-ge": o termo vai num ``LIKE``, e
+    "passage" casa "passagem" e "passagens" (com "passagen", "passagem" ficava
+    de fora; com "passagem", "passagens").
+    """
+    if token.endswith(("gem", "gens")) and len(token) > 5:
+        return token[: token.rindex("ge") + 2]
     for plural, singular in (("oes", "ao"), ("res", "r"), ("zes", "z"), ("ais", "al"), ("eis", "el")):
         if token.endswith(plural) and len(token) > len(plural) + 2:
             return token[: -len(plural)] + singular

@@ -581,3 +581,23 @@ def test_api_sem_pre_carregamento_nao_carrega_o_rerank(monkeypatch):
 
     with TestClient(app) as cliente:
         assert cliente.get("/health").status_code == 200
+
+
+def test_api_pre_carrega_os_indices_ao_subir(monkeypatch):
+    import threading
+    chamou = threading.Event()
+    monkeypatch.setattr(api_module.config, "INDEX_PRELOAD", True)
+    monkeypatch.setattr(api_module.retrieve, "pre_carregar_indices", chamou.set)
+
+    with TestClient(app):
+        assert chamou.wait(timeout=5)
+
+
+def test_api_sem_pre_carregamento_nao_le_os_indices(monkeypatch):
+    chamadas = []
+    monkeypatch.setattr(api_module.config, "INDEX_PRELOAD", False)
+    monkeypatch.setattr(api_module.retrieve, "pre_carregar_indices", lambda: chamadas.append(1))
+
+    with TestClient(app) as cliente:
+        assert cliente.get("/health").status_code == 200
+    assert chamadas == []

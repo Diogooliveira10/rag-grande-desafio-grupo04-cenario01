@@ -1132,6 +1132,35 @@ def test_haver_nao_vira_termo_do_objeto(verbo):
     assert sq._termos_do_objeto(f"contratos de ambulancia {verbo}") == ("ambulancia",)
 
 
+@pytest.mark.parametrize("complemento", [
+    "e seus fornecedores", "e suas modalidades", "e os valores deles", "e seus respectivos valores",
+    "que o orgao publicou", "que publicaram", "e quanto custaram",
+])
+def test_pronome_e_verbo_da_pergunta_nao_viram_termo_do_objeto(complemento):
+    assert sq._termos_do_objeto(f"contratos de ambulancia {complemento}") == ("ambulancia",)
+
+
+@pytest.mark.parametrize("palavra", ["passagem", "passagens"])
+def test_gem_e_gens_viram_o_mesmo_radical(palavra):
+    assert sq._termos_do_objeto(f"contratos de {palavra} aerea") == ("passage", "aerea")
+
+
+def test_termo_no_singular_acha_objeto_no_plural(tmp_path):
+    documents = tmp_path / "documents.jsonl"
+    escrever_documents(documents, contratacoes=[
+        _contratacao("P-1", objeto="Fornecimento de passagens aéreas"),
+        _contratacao("P-2", objeto="Agenciamento de passagem aérea nacional"),
+    ])
+    banco = Banco(sqlite_path=tmp_path / "base.sqlite")
+    structured_db.construir_banco(documents, banco)
+    consulta = sq.Consulta(tabela="contratacoes", tipo="listagem",
+                           termos_objeto=sq._termos_do_objeto("contratos de passagem"))
+
+    _, _, linhas = sq.executar_consulta(consulta, banco)
+
+    assert linhas[0].startswith("2 registros atendem aos filtros")
+
+
 def test_pergunta_da_f1_nao_traz_houver_como_termo_do_objeto():
     pergunta = (
         "Em 2025, órgãos estaduais do Rio de Janeiro pagaram mais por ambulâncias tipo D do que os "
