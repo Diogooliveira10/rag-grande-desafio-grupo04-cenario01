@@ -48,7 +48,9 @@ data/runs/
 data/inventory/checkpoints/
 
 # Corpus bruto e artefatos gerados (regra do desafio: data/raw nao vai para o Git)
-data/normalized/
+data/normalized/*
+# Exceção: documents.jsonl v6 para regressão v7
+!data/normalized/documents.jsonl
 data/runs/
 data/inventory/checkpoints/
 data/attempts
@@ -63,7 +65,9 @@ tests/reports/corpus-validation-*.md
 data/source_catalog/runs/
 
 # Relatórios de execução do eval (golden set em si é versionado)
-eval/runs/
+eval/runs/*
+# Exceção: dados v6 de referência para regressão v7
+!eval/runs/projecao-v6-3modos-2026-10-14/
 
 # Claude
 .claude/
