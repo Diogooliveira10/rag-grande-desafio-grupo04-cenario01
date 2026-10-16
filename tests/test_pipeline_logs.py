@@ -121,6 +121,8 @@ def test_retrieval_denso_registra_tokens_do_embedding_padrao(indice, monkeypatch
             )
 
     monkeypatch.setattr(openai, "OpenAI", FakeOpenAI)
+    # Este teste cobre ECOA, não a seleção local herdada do .env da demo.
+    monkeypatch.setattr(config, "EMBEDDING_PROVIDER", "ecoa")
     sem_embed_proprio = {k: v for k, v in indice.items() if k != "embed_fn"}
 
     retrieve("contrato de ambulancias", None, **sem_embed_proprio)
@@ -244,6 +246,9 @@ def test_cliente_padrao_usa_sdk_do_llm_ecoa(monkeypatch):
         return sdk
 
     monkeypatch.setattr(llm_ecoa, "client", SimpleNamespace(with_options=with_options))
+    # Não deixar o .env desviar do SDK falso para uma chamada OpenRouter real.
+    monkeypatch.setattr(gen.config, "LLM_PROVIDER_MODE", "auto")
+    monkeypatch.setattr(gen.config, "OPENROUTER_API_KEY", "")
 
     texto, tokens = gen._texto_e_tokens(gen._cliente_padrao()([{"role": "user", "content": "oi"}]))
 

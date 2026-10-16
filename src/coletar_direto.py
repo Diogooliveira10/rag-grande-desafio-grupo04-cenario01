@@ -12,10 +12,10 @@ Janelas (as mesmas URLs que a v6 registrou no inventário):
 - ``contratacao`` (publicações de compra) — mês × modalidade:
   ``/api/consulta/v1/contratacoes/publicacao?...&codigoModalidadeContratacao=M&uf=RJ``.
 
-Retomada: ``estado_coleta.json`` guarda as janelas completas; uma janela só é
-gravada no ``documents.jsonl`` quando termina inteira (append atômico por
-janela), então a retomada nunca duplica registros — e o ``finalizar_direto``
-deduplica por ``chunk_id`` de qualquer forma.
+Retomada: ``estado_coleta.json`` guarda janelas e fingerprint da configuração.
+Só se faz append depois de ler a janela inteira. Uma queda entre append e
+checkpoint pode repetir registros; staging deduplica por identidade PNCP e
+audita revisões. Checkpoint legado/incompatível exige destino separado.
 
 As retentativas/paletas são as do ``src/source_check.py``
 (``request_url(..., attempts=3)``) e o rate limit declarado no manifesto
@@ -31,10 +31,14 @@ Uso (CLI):
 from __future__ import annotations
 
 import argparse
+import calendar
 import hashlib
 import json
+import shutil
+import tempfile
 import time
-from dataclasses import dataclass, field
+from collections import Counter
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -47,6 +51,7 @@ from src.build_direto import (
     finalizar_direto,
 )
 from src.fetch_corpus import _build_request_url, _payload_records, load_manifest
+from src.coleta_policy import PoliticaColeta, chave_unidade, periodos, tipo_instrumento
 
 RequestFn = Callable[[str], Any]
 
@@ -73,26 +78,34 @@ class Janela:
     endpoint: str
     params: dict[str, Any] = field(default_factory=dict)
     filtro: dict[str, Any] = field(default_factory=dict)
+    uf_verificada: str = ""
 
     @property
     def tamanho_pagina(self) -> int:
         return int(self.params.get("tamanhoPagina") or 50)
 
 
-def janelas_contratos(orgaos: list[str]) -> list[Janela]:
-    return [
-        Janela(
-            id=f"contrato_assinado:{cnpj}",
-            endpoint=ENDPOINT_CONTRATOS,
-            params={
-                "dataInicial": "20250101",
-                "dataFinal": "20251231",
-                "cnpjOrgao": cnpj,
-                "tamanhoPagina": TAMANHO_PAGINA_CONTRATOS,
-            },
-        )
-        for cnpj in sorted({str(cnpj).strip() for cnpj in orgaos if str(cnpj).strip()})
-    ]
+def janelas_contratos(
+    orgaos: list[str], *, inicio: str = "2025-01-01", fim: str = "2025-12-31",
+    unidades: list[dict[str, Any]] | None = None,
+) -> list[Janela]:
+    faixas = periodos(inicio, fim)
+    escopos = [(cnpj, "", "") for cnpj in sorted(set(orgaos))]
+    if unidades is not None:
+        escopos = sorted({(str(u["cnpj"]), str(u["codigoUnidadeAdministrativa"]), str(u["ufSigla"])) for u in unidades})
+        if any(uf != "RJ" for _, _, uf in escopos):
+            raise ValueError("cadastro contém unidade não RJ")
+    resultado = []
+    for cnpj, codigo, uf in escopos:
+        for a, b in faixas:
+            sufixo = (f":unidade={codigo}" if codigo else "")
+            if len(faixas) > 1:
+                sufixo += f":{a.isoformat()}:{b.isoformat()}"
+            params = {"dataInicial": a.strftime("%Y%m%d"), "dataFinal": b.strftime("%Y%m%d"), "cnpjOrgao": cnpj, "tamanhoPagina": TAMANHO_PAGINA_CONTRATOS}
+            if codigo:
+                params["codigoUnidadeAdministrativa"] = codigo
+            resultado.append(Janela(id=f"contrato_assinado:{cnpj}{sufixo}", endpoint=ENDPOINT_CONTRATOS, params=params, uf_verificada=uf))
+    return resultado
 
 
 def janelas_publicacoes(
@@ -103,7 +116,7 @@ def janelas_publicacoes(
     for modalidade in modalidades:
         for mes in range(1, 13):
             inicio = f"{ano}{mes:02d}01"
-            fim_dia = 31 if mes in (1, 3, 5, 7, 8, 10, 12) else 30 if mes != 2 else 28
+            fim_dia = calendar.monthrange(ano, mes)[1]
             fim = f"{ano}{mes:02d}{fim_dia:02d}"
             janelas.append(Janela(
                 id=f"contratacao:{ano}-{mes:02d}:mod{modalidade}",
@@ -119,7 +132,7 @@ def janelas_publicacoes(
     return janelas
 
 
-def janelas_atas(orgaos: list[str], ano: int = 2025) -> list[Janela]:
+def janelas_atas(orgaos: list[str], ano: int = 2025, *, unidades: list[dict[str, Any]] | None = None) -> list[Janela]:
     '''Atas de registro de preço REGISTRADAS em ``ano`` (``anoAta == ano``).
 
     A API de consulta filtra atas por **período de vigência** (não pelo ano da
@@ -128,6 +141,18 @@ def janelas_atas(orgaos: list[str], ano: int = 2025) -> list[Janela]:
     filtro declarativo fecha o corte. O recorte por órgão é o parâmetro
     ``cnpj`` (a consulta de atas não filtra por UF).
     '''
+    if unidades is not None:
+        resultado = []
+        for unidade in unidades:
+            if unidade.get("ufSigla") != "RJ" or not unidade.get("codigoUnidadeAdministrativa"):
+                raise ValueError("unidade de ata sem comprovação RJ/código")
+            for janela in janelas_atas([str(unidade["cnpj"])], ano):
+                codigo = str(unidade["codigoUnidadeAdministrativa"])
+                janela.id += f":unidade={codigo}"
+                janela.params["codigoUnidadeAdministrativa"] = codigo
+                janela.uf_verificada = "RJ"
+                resultado.append(janela)
+        return resultado
     cnpjs = sorted({str(cnpj).strip() for cnpj in orgaos if str(cnpj).strip()})
     return [
         Janela(
@@ -246,6 +271,7 @@ def coletar_direto(
     espera_429: float = 30.0,
     chunk_size: int = CHUNK_SIZE_PADRAO,
     overlap: int = OVERLAP_PADRAO,
+    politica: PoliticaColeta | None = None,
 ) -> dict[str, Any]:
     '''Coleta as janelas em ``destino/documents.jsonl``, retomável por janela.
 
@@ -263,6 +289,18 @@ def coletar_direto(
         estado = json.loads(estado_path.read_text(encoding="utf-8"))
         estado.setdefault("janelas", {})
 
+    def fingerprint(janela: Janela) -> str:
+        dados = {"janela": asdict(janela), "politica": asdict(politica) if politica else None,
+                 "manifest_hash": manifest_hash, "chunk_size": chunk_size, "overlap": overlap,
+                 "base": base, "coletor_version": 2}
+        return hashlib.sha256(json.dumps(dados, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+    # Validar todas as retomadas antes de qualquer append. Estado legado não
+    # certifica a nova regra de seleção; recuperar para destino separado.
+    for janela in janelas:
+        salvo = estado["janelas"].get(janela.id) or {}
+        if salvo.get("status") == "completa" and salvo.get("fingerprint") != fingerprint(janela):
+            raise ValueError(f"checkpoint incompatível/legado: {janela.id}; use novo destino")
     completas = puladas = falhadas = 0
     registros_totais = 0
     ultima_chamada = 0.0
@@ -273,7 +311,8 @@ def coletar_direto(
             registros_totais += int(ja_feita.get("registros") or 0)
             continue
 
-        linhas: list[str] = []
+        linhas = tempfile.TemporaryFile(mode="w+t", encoding="utf-8", newline="\n", dir=destino)
+        descartes: Counter[str] = Counter()
         registros_janela = 0
         lidos_janela = 0
         pagina = 1
@@ -302,6 +341,16 @@ def coletar_direto(
                 for registro in registros:
                     if not isinstance(registro, dict):
                         continue
+                    if politica:
+                        if janela.uf_verificada:
+                            _, codigo_retornado = chave_unidade(registro)
+                            if codigo_retornado != str(janela.params.get("codigoUnidadeAdministrativa") or ""):
+                                descartes["unidade_divergente_da_consulta"] += 1
+                                continue
+                        aceito, motivo = politica.decidir(registro, uf_resolvida=janela.uf_verificada)
+                        if not aceito:
+                            descartes[motivo] += 1
+                            continue
                     chunks, _entrada = chunk_de_registro(
                         RegistroDireto(payload=registro, origem=url, coletado_em=_agora()),
                         base,
@@ -309,16 +358,30 @@ def coletar_direto(
                         chunk_size=chunk_size,
                         overlap=overlap,
                     )
-                    linhas.extend(
-                        json.dumps(chunk, ensure_ascii=False, sort_keys=True) for chunk in chunks
-                    )
-                registros_janela += len(registros)
-                if lidos_pagina < janela.tamanho_pagina:
+                    for chunk in chunks:
+                        if politica and "-2-" in str(registro.get("numeroControlePNCP") or ""):
+                            chunk.setdefault("extras", {})["tipo_instrumento"] = tipo_instrumento(registro)
+                        linhas.write(json.dumps(chunk, ensure_ascii=False, sort_keys=True) + "\n")
+                    registros_janela += 1
+                total_paginas = payload.get("totalPaginas") if isinstance(payload, dict) else None
+                if total_paginas is not None:
+                    total_paginas = int(total_paginas)
+                    if total_paginas < 0 or (total_paginas == 0 and lidos_pagina):
+                        raise FalhaDeColeta("metadados de paginação inconsistentes")
+                    if not lidos_pagina and pagina < total_paginas:
+                        raise FalhaDeColeta("página vazia antes do fim declarado")
+                    if pagina >= total_paginas:
+                        break
+                elif lidos_pagina < janela.tamanho_pagina:
                     break
                 pagina += 1
+            else:
+                raise FalhaDeColeta("teto de páginas atingido; janela incompleta")
         except Exception as exc:  # noqa: BLE001 — falha registrada, não aborta a coleta
+            linhas.close()
             estado["janelas"][janela.id] = {
                 "status": "falhada",
+                "fingerprint": fingerprint(janela),
                 "erro": f"{type(exc).__name__}: {exc}"[:300],
             }
             estado["gerado_em"] = _agora()
@@ -326,11 +389,18 @@ def coletar_direto(
             falhadas += 1
             continue
 
-        # Janela completa: append e estado juntos — a retomada não duplica.
-        with documents.open("a", encoding="utf-8") as handle:
-            handle.writelines(linha + "\n" for linha in linhas)
+        # Append só após a janela inteira. Se cair entre append e checkpoint,
+        # a retomada pode repetir identidade; staging deduplica sem perder origem.
+        try:
+            linhas.seek(0)
+            with documents.open("a", encoding="utf-8", newline="\n") as handle:
+                shutil.copyfileobj(linhas, handle)
+        finally:
+            linhas.close()
         estado["janelas"][janela.id] = {
             "status": "completa",
+            "fingerprint": fingerprint(janela),
+            "descartes": dict(descartes),
             "paginas": pagina,
             "registros": registros_janela,
             "registros_lidos": lidos_janela,
@@ -362,7 +432,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--so-publicacoes", action="store_true")
     parser.add_argument("--so-atas", action="store_true",
                         help="só as janelas de atas (use com --base-id atas_conversacional)")
-    parser.add_argument("--taxa-seg", type=float, default=1.0)
+    parser.add_argument("--taxa-seg", type=float, default=5.0)
+    parser.add_argument("--unidades", type=Path, help="cadastro oficial verificado com verified_unit_scopes")
+    parser.add_argument("--catalogo-modalidades", type=Path, help="catálogo oficial versionado (JSON lista ou {modalidades: [...]})")
+    parser.add_argument("--planejar", action="store_true", help="mostra janelas e política, sem rede nem escrita")
     parser.add_argument("--finalizar", action="store_true",
                         help="roda o finalizar_direto (embeddings/SQLite) ao terminar")
     args = parser.parse_args(argv)
@@ -393,18 +466,46 @@ def main(argv: list[str] | None = None) -> int:
             )
         ]
 
+    unidades = None
+    if args.unidades:
+        cadastro = json.loads(args.unidades.read_text(encoding="utf-8"))
+        if cadastro.get("verificacao_completa") is not True:
+            parser.error("cadastro de unidades não está verificado")
+        unidades = cadastro.get("verified_unit_scopes")
+        if not unidades:
+            parser.error("cadastro sem unidades RJ verificadas")
+    if args.so_atas and unidades is None:
+        parser.error("atas exigem --unidades para resolver o território sem inferência por nome")
+    populations = (base.get("acesso") or {}).get("populations") or []
+    contrato_params = next((p.get("params") or {} for p in populations if p.get("resource_type") == "contrato_assinado"), {})
+    politica = PoliticaColeta(ano=int(contrato_params.get("anoAssinatura") or 2025),
+        publicacao_inicio=str(contrato_params.get("dataInicial") or "2025-01-01"),
+        publicacao_fim=str(contrato_params.get("dataFinal") or "2026-09-25"))
     janelas: list[Janela] = []
     if args.so_atas:
-        janelas.extend(janelas_atas(orgaos))
+        janelas.extend(janelas_atas(orgaos, unidades=unidades))
     else:
         if not args.sem_publicacoes:
-            janelas.extend(janelas_publicacoes())
+            if not args.catalogo_modalidades:
+                parser.error("publicações exigem --catalogo-modalidades; lista fixa não certifica censo")
+            catalogo = json.loads(args.catalogo_modalidades.read_text(encoding="utf-8"))
+            valores = catalogo if isinstance(catalogo, list) else catalogo["modalidades"]
+            modalidades = tuple(sorted({int(v["id"]) for v in valores}))
+            janelas.extend(janelas_publicacoes(modalidades, ano=politica.ano))
         if not args.so_publicacoes:
-            janelas.extend(janelas_contratos(orgaos))
+            janelas.extend(janelas_contratos(orgaos, inicio=politica.publicacao_inicio, fim=politica.publicacao_fim, unidades=unidades))
+    if args.planejar:
+        print(json.dumps({"politica": asdict(politica), "janelas": [asdict(j) for j in janelas], "cobertura_institucional_comprovada": False}, ensure_ascii=False, indent=2))
+        return 0
+    protegidos = [Path("index"), Path("data/normalized"), Path("data/structured"), Path("data/v7_direto"), Path("data/v7_direto_atas")]
+    if any(args.destino.resolve() == p.resolve() or args.destino.resolve().is_relative_to(p.resolve()) for p in protegidos):
+        parser.error("destino protegido; use staging separado da v6 e das aquisições originais")
     relatorio = coletar_direto(
         janelas, base, args.destino,
-        manifest_hash=manifest_hash, taxa_seg=args.taxa_seg,
+        manifest_hash=manifest_hash, taxa_seg=args.taxa_seg, politica=politica,
     )
+    if args.finalizar and relatorio["janelas_falhadas"]:
+        parser.error("finalização recusada: há janelas falhadas/incompletas")
     if args.finalizar:
         relatorio["finalizacao"] = finalizar_direto(
             args.destino, base, manifest_hash=manifest_hash

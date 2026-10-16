@@ -149,6 +149,7 @@ class PncpClient:
                 return {
                     "status": status,
                     "http_status": error.code,
+                    "retry_after": retry_after,
                     "content_type": content_type,
                     "bytes_lidos": len(body),
                     "url_final": url,

@@ -338,3 +338,70 @@ def test_so_atas_exige_base_de_ata(tmp_path):
             "--destino", str(tmp_path / "out"),
             "--so-atas",
         ])
+
+
+def test_politica_filtra_rj_assinatura_e_preserva_empenho(tmp_path):
+    from src.coleta_policy import PoliticaColeta
+    registros = [_registro(f"11111111000001-2-00000{i}/2025") for i in range(1, 4)]
+    for r in registros:
+        r["dataPublicacaoPncp"] = "2025-05-06"
+    registros[0]["tipoContrato"] = {"nome": "Empenho"}
+    registros[1]["unidadeOrgao"]["ufSigla"] = "DF"
+    registros[2]["dataAssinatura"] = "2024-01-01"
+    janela = janelas_contratos(["11111111000001"])[0]
+    r = coletar_direto([janela], BASE, tmp_path, request_fn=lambda _: {"data": registros}, taxa_seg=0, politica=PoliticaColeta())
+    assert r["registros"] == 1
+    c = json.loads((tmp_path / "documents.jsonl").read_text())
+    assert c["extras"]["tipo_instrumento"] == "empenho"
+
+
+def test_teto_paginas_nao_certifica_janela(tmp_path, monkeypatch):
+    monkeypatch.setattr("src.coletar_direto.MAX_PAGINAS_POR_JANELA", 1)
+    janela = Janela("cheia", "https://teste", {"tamanhoPagina": 1})
+    r = coletar_direto([janela], BASE, tmp_path, request_fn=lambda _: {"data": [_registro("a")]}, taxa_seg=0)
+    assert r["janelas_falhadas"] == 1
+    assert not (tmp_path / "documents.jsonl").exists()
+
+
+def test_mudar_politica_recusa_checkpoint_sem_tocar_documents(tmp_path):
+    import pytest
+    from src.coleta_policy import PoliticaColeta
+    janela = Janela("a", "https://teste", {"tamanhoPagina": 50})
+    coletar_direto([janela], BASE, tmp_path, request_fn=lambda _: {"data": [_registro("a")]}, taxa_seg=0)
+    antes = (tmp_path / "documents.jsonl").read_bytes()
+    with pytest.raises(ValueError, match="checkpoint"):
+        coletar_direto([janela], BASE, tmp_path, politica=PoliticaColeta())
+    assert (tmp_path / "documents.jsonl").read_bytes() == antes
+
+
+def test_janelas_assinatura_obedecem_intervalo_publicacao_e_unidade():
+    j = janelas_contratos([], inicio="2025-01-01", fim="2026-09-25", unidades=[{"cnpj": "1", "codigoUnidadeAdministrativa": "2", "ufSigla": "RJ"}])
+    assert len(j) == 2
+    assert j[1].params["dataFinal"] == "20260925"
+    assert all(x.params["codigoUnidadeAdministrativa"] == "2" for x in j)
+    assert len({x.id for x in j}) == 2
+
+
+def test_pagina_curta_nao_encerra_antes_total_declarado(tmp_path):
+    janela = Janela("a", "https://teste", {"tamanhoPagina": 50})
+    chamadas = []
+    def request(url):
+        pagina = int(parse_qs(urlparse(url).query)["pagina"][0])
+        chamadas.append(pagina)
+        return {"totalPaginas": 2, "data": [_registro(str(pagina))]}
+    r = coletar_direto([janela], BASE, tmp_path, request_fn=request, taxa_seg=0)
+    assert chamadas == [1, 2]
+    assert r["registros"] == 2
+
+
+def test_fevereiro_bissexto():
+    j = janelas_publicacoes((8,), 2024)
+    assert j[1].params["dataFinal"] == "20240229"
+
+
+def test_ata_unidade_verificada_inclui_territorio_sem_campo_uf(tmp_path):
+    from src.coleta_policy import PoliticaColeta
+    j = janelas_atas([], unidades=[{"cnpj": "33333333000001", "codigoUnidadeAdministrativa": "1", "ufSigla": "RJ"}])[0]
+    r = coletar_direto([j], BASE_ATA, tmp_path, politica=PoliticaColeta(), taxa_seg=0, request_fn=lambda _: {"data": [{**_registro_ata("ata", 2025), "codigoUnidadeOrgao": "1"}]})
+    assert r["registros"] == 1
+    assert j.params["codigoUnidadeAdministrativa"] == "1"
