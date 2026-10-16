@@ -100,7 +100,7 @@ Já estão implementados:
 - suporte a certificados HTTPS com `certifi` sem desabilitar validação SSL;
 - golden set atual com 31 casos (`E1`–`E3`, dos e-mails sintéticos, entraram em 14/10; `I3` e `I4`, de busca por CNPJ de fornecedor e de órgão, em 16/10) e critérios de conteúdo (radicais, teto de confiança, negação), mais um conjunto de busca com 47 perguntas e a ablação do rerank. A rodada auditada de 2026-10-14 (`20261014T191537Z`, commit `0e4cd73`) usou o snapshot de 26 casos anterior a `E1`–`E3`: 13/26 (50%), roteamento 25/26, recusa 24/26, conteúdo 14/24 e citação correta 22/24. Houve dois erros do provedor, não validáveis como conteúdo. Resultado pontual, não medida permanente; comparação com 09/10 é parcial. Detalhes e análise individual em [docs/registro_execucao_v6.md](docs/registro_execucao_v6.md#auditoria-documental-do-golden-set-execução-20261014t191537z-2026-10-15);
 - scripts de instalação (`scripts/setup.ps1`/`setup.sh`) e de download dos modelos com hash conferido (`scripts/models.ps1`/`models.sh`);
-- 1.653 testes automatizados passando na verificação realizada em 2026-10-14.
+- 1.677 testes automatizados passando na verificação realizada em 2026-10-16.
 
 ### Corpus e índice
 
@@ -165,6 +165,7 @@ Situação conferida em 2026-10-15, após auditoria documental da execução do 
 - **Publicar o site apontando para o backend:** o site publicado (09/10) tem as telas de trace, mas foi gerado com o `VITE_API_BASE_URL` vazio. Falta enviar o header `ngrok-skip-browser-warning` nas chamadas, configurar a variável com o domínio do túnel e publicar. Os repositórios `Etuarda/frontendRAG` (com as telas de trace) e `sevenRevy/frontendRAG` (com os dois personas, `check:backend` e o botão do NEXO) divergem, e a branch `feat/melhorias-trace` ainda não entrou na `main` da Eduarda.
 - **Validar frontend e backend juntos de novo**, pelo túnel, depois dos merges de 2026-10-14 (personas, recorte, avisos, filtros novos).
 - **Roteiro do Demo Day** (material interno do grupo, fora do repositório): já leva ao vivo só as consultas estáveis e rápidas (medidas três vezes no ECOA, todas abaixo de 5 s); falta o ensaio cronometrado, marcar o freeze e preparar o checklist do plano B.
+- **Defeitos achados no teste de 2026-10-16 (frontend + backend local):** "Qual é a capital da França?" é respondida pelo modo de conversa (`CONVERSATION_MODE=llm`) em vez de recusada; "publicou" e "seus" viram termo do objeto no SQL ("Quais compras o órgão X publicou em 2025?", "…e seus fornecedores"); e "Qual o valor de todos os contratos de 2025?" não vai ao SQL e o LLM soma só os trechos recuperados (com "valor total" o SQL responde R$ 2.546.786.958,21).
 - **Cobertura do PCA e da modalidade dos contratos:** limitação da fonte, documentada; depende do censo v7.
 - **Depois do Demo Day:** fornecedor por apelido (a Infolog do roteiro não existe no corpus, então o zero da consulta é real) e a promoção do corpus v7.
 
