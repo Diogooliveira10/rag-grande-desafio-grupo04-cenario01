@@ -191,9 +191,6 @@ regressão.
 
 ## 9. Referências
 
-- Plano de execução da demo: [PLANO_DE_ACAO_DEMO_DAY.md](PLANO_DE_ACAO_DEMO_DAY.md)
-  — as regras de preservação de origem, versionamento de derivados e orçamento
-  de inferência valem também aqui.
 - Corpus e inventário: `corpus_manifest.yaml` (limite por órgão por base),
   `data/inventory/v6.json`, [../CORPUS_INVENTORY.md](../CORPUS_INVENTORY.md).
 - Estado do eval auditado: [registro_execucao_v6.md](registro_execucao_v6.md),

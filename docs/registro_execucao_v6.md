@@ -87,8 +87,8 @@ explicitamente; novas execuções continuam ignoradas por padrão.
 
 ## P0/P8A — baseline e primeiro ensaio integrado (2026-10-13)
 
-Execução de [PLANO_DE_ACAO_DEMO_DAY.md](PLANO_DE_ACAO_DEMO_DAY.md), fases P0 e
-P8A, sobre backend `joao-reis` @ `435c9c0` e frontend `main` @ `91c0fbb`
+Execução das fases P0 e P8A do plano de ação interno do Demo Day (material do
+grupo, fora do repositório), sobre backend `joao-reis` @ `435c9c0` e frontend `main` @ `91c0fbb`
 (`../frontendRAG`), árvore de trabalho do backend com dois arquivos de docs não
 commitados. Nenhuma troca de branch, merge, publicação ou reconstrução de banco.
 
