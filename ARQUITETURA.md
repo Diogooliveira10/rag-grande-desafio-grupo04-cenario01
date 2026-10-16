@@ -100,7 +100,7 @@ Já estão implementados:
 - suporte a certificados HTTPS com `certifi` sem desabilitar validação SSL;
 - golden set atual com 31 casos (`E1`–`E3`, dos e-mails sintéticos, entraram em 14/10; `I3` e `I4`, de busca por CNPJ de fornecedor e de órgão, em 16/10) e critérios de conteúdo (radicais, teto de confiança, negação), mais um conjunto de busca com 47 perguntas e a ablação do rerank. A rodada auditada de 2026-10-14 (`20261014T191537Z`, commit `0e4cd73`) usou o snapshot de 26 casos anterior a `E1`–`E3`: 13/26 (50%), roteamento 25/26, recusa 24/26, conteúdo 14/24 e citação correta 22/24. Houve dois erros do provedor, não validáveis como conteúdo. Resultado pontual, não medida permanente; comparação com 09/10 é parcial. Detalhes e análise individual em [docs/registro_execucao_v6.md](docs/registro_execucao_v6.md#auditoria-documental-do-golden-set-execução-20261014t191537z-2026-10-15);
 - scripts de instalação (`scripts/setup.ps1`/`setup.sh`) e de download dos modelos com hash conferido (`scripts/models.ps1`/`models.sh`);
-- 1.677 testes automatizados passando na verificação realizada em 2026-10-16.
+- 1.793 testes automatizados passando na verificação realizada em 2026-10-16.
 
 ### Corpus e índice
 
@@ -149,25 +149,22 @@ As tarefas são distribuídas entre os integrantes a cada encontro conforme as n
 
 ### Frentes atuais
 
-- Preparação do Demo Day (23/10): publicação do site, roteiro e ensaio.
-- Avaliação: a execução de 2026-10-14 foi auditada sobre o snapshot de 26 casos do commit `0e4cd73` (13/26); o Golden Set atual tem 31 casos, então ainda é necessária uma execução completa do snapshot vigente antes de tomar o resultado como medida atual.
+- Preparação do Demo Day (23/10): publicação do site, ensaio e freeze em 20/10.
+- Avaliação: execução completa do Golden Set vigente (31 casos) em 2026-10-16, na configuração da demo: 24/31.
 - Corpus v7 (censo de 2025), em construção; a v6 segue como base ativa.
 
 ### Pendências em aberto
 
-Situação conferida em 2026-10-15, após auditoria documental da execução do Golden Set de 2026-10-14.
+Situação conferida em 2026-10-16, depois do PR #52.
 
-- **Reexecutar o Golden Set vigente (31 casos).** A rodada auditada em `docs/registro_execucao_v6.md` foi executada sobre o commit `0e4cd73`, cujo Golden Set continha 26 casos; `E1`–`E3`, `I3` e `I4` foram adicionados depois, e P1.3, P4.2 e P4.3 passaram a ser avaliadas com o histórico da conversa. Medir o snapshot atual com configuração e commit registrados e guardar os artefatos completos.
-- **F1 (comparação sem dados suficientes):** nesta execução, a rota obtida foi somente `estruturada` (esperavam-se também `agregada` e `normativa`), o SQL apresentou 1 registro municipal de R$ 0,00, a resposta não declarou a insuficiência exigida e a confiança `media` excedeu o teto `baixa`. O resultado sustenta falha observável de roteamento e geração; não demonstra, por si só, ausência do dado no corpus.
-- **P4.1/P4.2, P6.2/P6.3 e I2:** a execução mostrou, respectivamente, omissão de registros obrigatórios, conclusão de predominância sem suporte suficiente, afirmação imprecisa sobre disponibilidade de fornecedor, falta de referência normativa exigida pelo caso e omissão do identificador da ata. As etapas internas precisam ser confirmadas com trace/SQL antes de atribuir causa específica.
-- **P2.3 e P3.2:** conteúdo reprovado apesar de respostas que podem satisfazer parte da intenção em linguagem natural; revisar os casos contra os critérios lexicais e as condições do enunciado. Não concluir que é erro do avaliador sem revisão manual dos documentos/fontes da execução.
-- **Erros de infraestrutura em A1/A2:** obter os registros técnicos do provedor para diagnosticar as duas falhas; os artefatos disponíveis só apresentam a mensagem genérica de erro de geração.
-- **Publicar o site apontando para o backend:** o site publicado (09/10) tem as telas de trace, mas foi gerado com o `VITE_API_BASE_URL` vazio. Falta enviar o header `ngrok-skip-browser-warning` nas chamadas, configurar a variável com o domínio do túnel e publicar. Os repositórios `Etuarda/frontendRAG` (com as telas de trace) e `sevenRevy/frontendRAG` (com os dois personas, `check:backend` e o botão do NEXO) divergem, e a branch `feat/melhorias-trace` ainda não entrou na `main` da Eduarda.
-- **Validar frontend e backend juntos de novo**, pelo túnel, depois dos merges de 2026-10-14 (personas, recorte, avisos, filtros novos).
-- **Roteiro do Demo Day** (material interno do grupo, fora do repositório): já leva ao vivo só as consultas estáveis e rápidas (medidas três vezes no ECOA, todas abaixo de 5 s); falta o ensaio cronometrado, marcar o freeze e preparar o checklist do plano B.
-- **Defeitos achados no teste de 2026-10-16 (frontend + backend local):** "Qual é a capital da França?" é respondida pelo modo de conversa (`CONVERSATION_MODE=llm`) em vez de recusada; "publicou" e "seus" viram termo do objeto no SQL ("Quais compras o órgão X publicou em 2025?", "…e seus fornecedores"); e "Qual o valor de todos os contratos de 2025?" não vai ao SQL e o LLM soma só os trechos recuperados (com "valor total" o SQL responde R$ 2.546.786.958,21).
+- **Registrar a execução do Golden Set de 2026-10-16.** Rodada `revisao-16-10-completo`, sobre a `main` com os PRs #47 a #50, com o ECOA (tempo-limite de 60 s, sem nova tentativa) e o OpenRouter de reserva: 24/31. Passaram a acertar P2.1, P4.1 e P6.2 (listagem respondida pelo SQL), P4.3, F1, A1 e A2. Falharam P2.2, P2.3, P3.2, P4.2, P6.1, P6.3 e I2; a I2 falhava só pelo critério que exigia repetir o identificador da ata, já trocado pelo órgão e pela data de assinatura. Falta registrar o resumo em `docs/registro_execucao_v6.md`.
+- **Insuficiência e confiança nas respostas do LLM** (P2.2, P2.3, P3.2, P4.2, P6.1): a resposta não admite a falta de dados com as palavras do critério ou sai com confiança acima do teto. Na P4.2 e na P4.3 a consulta SQL não roda; a confiança é a que o LLM declara, e ele escreve "não há dados suficientes" e marca "alta".
+- **P6.3:** a resposta acerta as contratações de material de escritório, mas não cita a Lei Complementar 123/2006, que a P6.1 cita. Verificar no trace se o trecho chega ao prompt nas perguntas que misturam norma e contratações.
+- **Publicar o site apontando para o backend:** o PR #2 em `Etuarda/frontendRAG` põe o domínio do túnel como padrão do `deploy.yml` e valida a publicação. O site publicado sai sem backend porque o GitHub Pages está em *Deploy from a branch*; além do merge, é preciso trocar a origem para *GitHub Actions* e publicar de novo.
+- **Validar frontend e backend juntos pelo site publicado.** O teste de 2026-10-16 com o frontend local passou (telas, trace, histórico e feedback), e os três defeitos achados nele foram corrigidos no mesmo dia.
+- **Ensaio do Demo Day** (roteiro e plano B são material interno do grupo, fora do repositório): falta o ensaio cronometrado pelo site publicado. Na demo, a base estruturada é o SQLite local (`DATABASE_URL` vazio): as consultas ao vivo levam de 0,2 a 0,3 s e não dependem da rede.
 - **Cobertura do PCA e da modalidade dos contratos:** limitação da fonte, documentada; depende do censo v7.
-- **Depois do Demo Day:** fornecedor por apelido (a Infolog do roteiro não existe no corpus, então o zero da consulta é real) e a promoção do corpus v7.
+- **Depois do Demo Day:** fornecedor por apelido (a Infolog do roteiro não existe no corpus, então o zero da consulta é real); a promoção do corpus v7, que na regressão de 2026-10-16 recupera pior que a v6 (hit@10 de 0,62 a 0,70, contra 0,79); limite de requisições na API pública; e revogar a chave do OpenRouter usada na demo.
 
 ---
 
