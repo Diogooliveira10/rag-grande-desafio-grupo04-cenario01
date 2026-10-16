@@ -1,0 +1,363 @@
+{
+ "total": 47,
+ "documents_file": "C:\\Users\\REVY\\Desktop\\PUC_Rio\\rag-grande-desafio-grupo04-cenario01\\data\\normalized\\documents.jsonl",
+ "modelo": "Qwen3-Embedding-0.6B.Q8_0",
+ "resumos": {
+  "completa": {
+   "hit@1": 0.5532,
+   "hit@3": 0.7021,
+   "hit@5": 0.766,
+   "hit@10": 0.7872,
+   "mrr@10": 0.6401
+  },
+  "compacta": {
+   "hit@1": 0.5106,
+   "hit@3": 0.6383,
+   "hit@5": 0.6809,
+   "hit@10": 0.6809,
+   "mrr@10": 0.5734
+  },
+  "enriquecida": {
+   "hit@1": 0.5106,
+   "hit@3": 0.617,
+   "hit@5": 0.6809,
+   "hit@10": 0.7021,
+   "mrr@10": 0.574
+  }
+ },
+ "deltas_hit@3": {
+  "compacta": -0.0638,
+  "enriquecida": -0.0851
+ },
+ "por_caso": [
+  {
+   "id": "R01",
+   "pergunta": "Em quanto tempo depois da assinatura o contrato precisa aparecer no portal nacional para ter validade?",
+   "posicao_completa": 1,
+   "posicao_compacta": 1,
+   "posicao_enriquecida": 1
+  },
+  {
+   "id": "R02",
+   "pergunta": "Empresas podem se juntar para disputar uma licitação em conjunto?",
+   "posicao_completa": 1,
+   "posicao_compacta": 1,
+   "posicao_enriquecida": 1
+  },
+  {
+   "id": "R03",
+   "pergunta": "Como é corrigido o preço de um serviço contínuo depois de doze meses?",
+   "posicao_completa": 1,
+   "posicao_compacta": 1,
+   "posicao_enriquecida": 1
+  },
+  {
+   "id": "R04",
+   "pergunta": "O que a lei entende por estudo técnico preliminar?",
+   "posicao_completa": 4,
+   "posicao_compacta": 4,
+   "posicao_enriquecida": 4
+  },
+  {
+   "id": "R05",
+   "pergunta": "Quais tipos de procedimento licitatório existem na nova lei?",
+   "posicao_completa": 1,
+   "posicao_compacta": 1,
+   "posicao_enriquecida": 1
+  },
+  {
+   "id": "R06",
+   "pergunta": "Em que situação a administração pode contratar sem licitar porque não há concorrência possível?",
+   "posicao_completa": 5,
+   "posicao_compacta": 5,
+   "posicao_enriquecida": 5
+  },
+  {
+   "id": "R07",
+   "pergunta": "Que punições uma empresa pode receber por cometer infrações em licitações e contratos?",
+   "posicao_completa": 1,
+   "posicao_compacta": 1,
+   "posicao_enriquecida": 1
+  },
+  {
+   "id": "R08",
+   "pergunta": "Qualquer pessoa pode contestar um edital por irregularidade? Até quando?",
+   "posicao_completa": 2,
+   "posicao_compacta": 2,
+   "posicao_enriquecida": 2
+  },
+  {
+   "id": "R09",
+   "pergunta": "A administração pode pagar o fornecedor antes de receber o produto?",
+   "posicao_completa": 1,
+   "posicao_compacta": 1,
+   "posicao_enriquecida": 1
+  },
+  {
+   "id": "R10",
+   "pergunta": "Pequenos negócios têm algum benefício nas licitações pela nova lei?",
+   "posicao_completa": 1,
+   "posicao_compacta": 1,
+   "posicao_enriquecida": 1
+  },
+  {
+   "id": "R11",
+   "pergunta": "Como se calcula o valor estimado de uma compra comparando com o mercado?",
+   "posicao_completa": 1,
+   "posicao_compacta": 1,
+   "posicao_enriquecida": 1
+  },
+  {
+   "id": "R12",
+   "pergunta": "Por quanto tempo um contrato de serviço contínuo pode ser renovado?",
+   "posicao_completa": 1,
+   "posicao_compacta": 1,
+   "posicao_enriquecida": 1
+  },
+  {
+   "id": "R13",
+   "pergunta": "Qual percentual do valor do contrato pode ser exigido como garantia?",
+   "posicao_completa": 2,
+   "posicao_compacta": 2,
+   "posicao_enriquecida": 2
+  },
+  {
+   "id": "R14",
+   "pergunta": "Qual decreto estadual colocou em prática o plano anual de contratações no Rio?",
+   "posicao_completa": 3,
+   "posicao_compacta": 3,
+   "posicao_enriquecida": 3
+  },
+  {
+   "id": "R15",
+   "pergunta": "Quanto a Secretaria de Estado de Saúde do RJ planejou gastar no plano de contratações de 2025?",
+   "posicao_completa": 1,
+   "posicao_compacta": 1,
+   "posicao_enriquecida": null
+  },
+  {
+   "id": "R16",
+   "pergunta": "Qual empresa ficou com o serviço de lavar roupas hospitalares?",
+   "posicao_completa": 2,
+   "posicao_compacta": 3,
+   "posicao_enriquecida": 3
+  },
+  {
+   "id": "R17",
+   "pergunta": "Quem forneceu os computadores portáteis homologados?",
+   "posicao_completa": null,
+   "posicao_compacta": null,
+   "posicao_enriquecida": null
+  },
+  {
+   "id": "R18",
+   "pergunta": "Quem venceu o item de emissão de passagens e agenciamento de viagens?",
+   "posicao_completa": 1,
+   "posicao_compacta": 3,
+   "posicao_enriquecida": 1
+  },
+  {
+   "id": "R19",
+   "pergunta": "Qual a mediana do preço unitário homologado de serviço de engenharia no município do Rio?",
+   "posicao_completa": 1,
+   "posicao_compacta": 1,
+   "posicao_enriquecida": 1
+  },
+  {
+   "id": "R20",
+   "pergunta": "Quantas compras vinculadas aos contratos tiveram resultado homologado coletado?",
+   "posicao_completa": 1,
+   "posicao_compacta": 1,
+   "posicao_enriquecida": 1
+  },
+  {
+   "id": "R21",
+   "pergunta": "Houve compra de equipamentos de proteção contra radiação para quem opera raio-x?",
+   "posicao_completa": 1,
+   "posicao_compacta": 1,
+   "posicao_enriquecida": 1
+  },
+  {
+   "id": "R22",
+   "pergunta": "O Tribunal Superior do Trabalho contratou telefonia fixa?",
+   "posicao_completa": 1,
+   "posicao_compacta": 1,
+   "posicao_enriquecida": 1
+  },
+  {
+   "id": "R23",
+   "pergunta": "Que contrato de controle da frota de veículos pela internet o serviço de água e esgoto fez?",
+   "posicao_completa": 1,
+   "posicao_compacta": 1,
+   "posicao_enriquecida": 1
+  },
+  {
+   "id": "R24",
+   "pergunta": "Algum fundo municipal de saúde comprou aparelho de tomografia?",
+   "posicao_completa": 1,
+   "posicao_compacta": 1,
+   "posicao_enriquecida": 1
+  },
+  {
+   "id": "R25",
+   "pergunta": "Volta Redonda comprou o código-fonte de um sistema de computador?",
+   "posicao_completa": 1,
+   "posicao_compacta": 1,
+   "posicao_enriquecida": 1
+  },
+  {
+   "id": "R26",
+   "pergunta": "A Defensoria Pública terceirizou o serviço de impressão?",
+   "posicao_completa": 1,
+   "posicao_compacta": 1,
+   "posicao_enriquecida": 1
+  },
+  {
+   "id": "R27",
+   "pergunta": "Teresópolis contratou destinação final do lixo em aterro?",
+   "posicao_completa": 1,
+   "posicao_compacta": 1,
+   "posicao_enriquecida": 1
+  },
+  {
+   "id": "R28",
+   "pergunta": "Quem fornece as assinaturas do sistema operacional Red Hat?",
+   "posicao_completa": 1,
+   "posicao_compacta": 1,
+   "posicao_enriquecida": 1
+  },
+  {
+   "id": "R29",
+   "pergunta": "Algum fundo de assistência social contratou crédito de passagem de ônibus para usuários?",
+   "posicao_completa": 2,
+   "posicao_compacta": null,
+   "posicao_enriquecida": 4
+  },
+  {
+   "id": "R30",
+   "pergunta": "Há ata de registro de preços para serviço de borracharia e conserto de pneus da frota?",
+   "posicao_completa": 10,
+   "posicao_compacta": null,
+   "posicao_enriquecida": null
+  },
+  {
+   "id": "R31",
+   "pergunta": "Existe ata para compra de espectrômetro de laboratório?",
+   "posicao_completa": 1,
+   "posicao_compacta": 1,
+   "posicao_enriquecida": 1
+  },
+  {
+   "id": "R32",
+   "pergunta": "Alguma ata registra preço de equipamentos para dentistas?",
+   "posicao_completa": 1,
+   "posicao_compacta": 1,
+   "posicao_enriquecida": 1
+  },
+  {
+   "id": "R33",
+   "pergunta": "Há ata para comprar material de cirurgia do coração?",
+   "posicao_completa": 1,
+   "posicao_compacta": 1,
+   "posicao_enriquecida": 1
+  },
+  {
+   "id": "R34",
+   "pergunta": "Por quanto foi homologado o forro de PVC no pregão 62/2023?",
+   "posicao_completa": 2,
+   "posicao_compacta": 2,
+   "posicao_enriquecida": 2
+  },
+  {
+   "id": "I01",
+   "pergunta": "Contrato 42498733000148-2-000014/2025",
+   "posicao_completa": null,
+   "posicao_compacta": null,
+   "posicao_enriquecida": null
+  },
+  {
+   "id": "I02",
+   "pergunta": "Quais contratos tem o fornecedor de CNPJ 05340639000130?",
+   "posicao_completa": 1,
+   "posicao_compacta": null,
+   "posicao_enriquecida": null
+  },
+  {
+   "id": "I03",
+   "pergunta": "Quais contratos tem o fornecedor de CNPJ 05.340.639/0001-30?",
+   "posicao_completa": 5,
+   "posicao_compacta": null,
+   "posicao_enriquecida": null
+  },
+  {
+   "id": "I04",
+   "pergunta": "Contrato nº 75/2025 da Gente Seguradora",
+   "posicao_completa": 2,
+   "posicao_compacta": null,
+   "posicao_enriquecida": 9
+  },
+  {
+   "id": "I05",
+   "pergunta": "Contratos com a empresa 40213951000163",
+   "posicao_completa": null,
+   "posicao_compacta": null,
+   "posicao_enriquecida": null
+  },
+  {
+   "id": "I06",
+   "pergunta": "Detalhes do contrato 01612355000102-2-000017/2025",
+   "posicao_completa": null,
+   "posicao_compacta": null,
+   "posicao_enriquecida": null
+  },
+  {
+   "id": "I07",
+   "pergunta": "Mensagens do sistema no pregão 90022/2025 da UASG 120645",
+   "posicao_completa": 1,
+   "posicao_compacta": 1,
+   "posicao_enriquecida": 1
+  },
+  {
+   "id": "I08",
+   "pergunta": "Qual ata tem o fornecedor CNPJ 44.292.391/0001-30?",
+   "posicao_completa": null,
+   "posicao_compacta": null,
+   "posicao_enriquecida": null
+  },
+  {
+   "id": "I09",
+   "pergunta": "Em que ata aparece a empresa 41.001.483/0001-26?",
+   "posicao_completa": null,
+   "posicao_compacta": null,
+   "posicao_enriquecida": null
+  },
+  {
+   "id": "I10",
+   "pergunta": "Qual ata tem o fornecedor CNPJ 44292391000130?",
+   "posicao_completa": null,
+   "posicao_compacta": null,
+   "posicao_enriquecida": null
+  },
+  {
+   "id": "I11",
+   "pergunta": "Resultado dos itens da compra 33663683000116-1-000354/2024",
+   "posicao_completa": null,
+   "posicao_compacta": null,
+   "posicao_enriquecida": null
+  },
+  {
+   "id": "I12",
+   "pergunta": "O que diz o art. 75 da Lei 14.133?",
+   "posicao_completa": null,
+   "posicao_compacta": null,
+   "posicao_enriquecida": null
+  },
+  {
+   "id": "I13",
+   "pergunta": "Decreto 48.816",
+   "posicao_completa": null,
+   "posicao_compacta": null,
+   "posicao_enriquecida": null
+  }
+ ]
+}
