@@ -1250,6 +1250,92 @@ def test_instrucao_da_pergunta_nao_vira_termo_de_objeto():
         "tipo d", "ambulancia")
 
 
+# --------------------------------------------------------------------------
+# Comparação entre esferas sem dados suficientes (F1 do golden set)
+# --------------------------------------------------------------------------
+
+_PERGUNTA_F1 = (
+    "Em 2025, órgãos estaduais do Rio de Janeiro pagaram mais por ambulâncias tipo D do que os "
+    "municípios fluminenses? Compare apenas os registros tecnicamente equivalentes disponíveis "
+    "no corpus; se não houver dados suficientes, reconheça a insuficiência de evidência."
+)
+
+
+def _consulta_comparacao(**mudancas):
+    argumentos = dict(metrica="media", campo="valor_estimado", so_contratos=False,
+                      referencia_temporal=None, comparacao_esferas=True)
+    argumentos.update(mudancas)
+    return _consulta_soma(**argumentos)
+
+
+def test_pergunta_que_cita_duas_esferas_e_comparacao_entre_esferas():
+    from src.query_analysis import analisar_query
+    consulta = sq.detectar_consulta(_PERGUNTA_F1, analisar_query(_PERGUNTA_F1).filtros, ESTRUTURADA)
+
+    assert consulta is not None and consulta.comparacao_esferas
+
+
+@pytest.mark.parametrize("pergunta", [
+    "Qual a média dos contratos municipais de ambulâncias em 2025?",
+    "Qual a média dos contratos de ambulâncias em 2025?",
+])
+def test_pergunta_sem_duas_esferas_nao_e_comparacao_entre_esferas(pergunta):
+    from src.query_analysis import analisar_query
+    consulta = sq.detectar_consulta(pergunta, analisar_query(pergunta).filtros, ESTRUTURADA)
+
+    assert consulta is not None and not consulta.comparacao_esferas
+
+
+def test_comparacao_sem_esfera_com_valor_e_marcada_como_insuficiente(tmp_path):
+    """F1: só há um registro municipal e ele vale R$ 0,00; não há o que comparar."""
+    municipal = _contratacao("111-2-000001/2025", esfera="M", valor_estimado=0.0)
+    banco = _banco_com(tmp_path, [municipal])
+    recorte = {}
+
+    _sql, _cabecalho, linhas = sq.executar_consulta(_consulta_comparacao(), banco, recorte)
+
+    assert recorte["tipo_resultado"] == "comparacao_insuficiente"
+    assert "não é possível comparar" in recorte["calculo_motivo"]
+    assert recorte["calculo_disponivel"] is True  # a conta existe; é a comparação que não se sustenta
+    assert any(linha.startswith("Dados insuficientes") and "municipal: 0 valores" in linha for linha in linhas)
+
+
+def test_comparacao_com_uma_so_esfera_com_valor_e_insuficiente(tmp_path):
+    estadual = _contratacao("111-2-000001/2025", esfera="E", valor_estimado=500_000.0)
+    municipal = _contratacao("111-2-000002/2025", esfera="M", valor_estimado=0.0)
+    banco = _banco_com(tmp_path, [estadual, municipal])
+    recorte = {}
+
+    _sql, _cabecalho, linhas = sq.executar_consulta(_consulta_comparacao(), banco, recorte)
+
+    assert recorte["tipo_resultado"] == "comparacao_insuficiente"
+    assert any("estadual: 1 valores" in linha and "municipal: 0 valores" in linha for linha in linhas)
+
+
+def test_comparacao_com_duas_esferas_com_valor_nao_e_marcada(tmp_path):
+    estadual = _contratacao("111-2-000001/2025", esfera="E", valor_estimado=500_000.0)
+    municipal = _contratacao("111-2-000002/2025", esfera="M", valor_estimado=120_000.0)
+    banco = _banco_com(tmp_path, [estadual, municipal])
+    recorte = {}
+
+    _sql, _cabecalho, linhas = sq.executar_consulta(_consulta_comparacao(), banco, recorte)
+
+    assert recorte["tipo_resultado"] == "registros"
+    assert not any(linha.startswith("Dados insuficientes") for linha in linhas)
+
+
+def test_consulta_que_nao_e_comparacao_entre_esferas_nao_e_marcada(tmp_path):
+    municipal = _contratacao("111-2-000001/2025", esfera="M", valor_estimado=0.0)
+    banco = _banco_com(tmp_path, [municipal])
+    recorte = {}
+
+    _sql, _cabecalho, linhas = sq.executar_consulta(
+        _consulta_comparacao(comparacao_esferas=False), banco, recorte)
+
+    assert recorte["tipo_resultado"] != "comparacao_insuficiente"
+    assert not any(linha.startswith("Dados insuficientes") for linha in linhas)
+
+
 def test_especificacao_de_tipo_e_preservada():
     assert sq._termos_do_objeto("contratacoes de ambulancias tipo d") == ("tipo d", "ambulancia")
 

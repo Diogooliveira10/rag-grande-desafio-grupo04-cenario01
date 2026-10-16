@@ -769,6 +769,20 @@ def test_calculo_indisponivel_nao_vira_zero():
     assert any("campo de valor preenchido" in a for a in avisos)
 
 
+def test_comparacao_entre_esferas_sem_dados_suficientes_e_baixa():
+    nivel, avisos = gen._confianca_do_recorte(
+        _recorte(tipo_resultado="comparacao_insuficiente",
+                 calculo_motivo="Dados insuficientes: não é possível comparar as esferas neste recorte."))
+    assert nivel == ConfidenceLevel.BAIXA
+    assert any("não é possível comparar" in a for a in avisos)
+
+
+def test_comparacao_insuficiente_limita_o_que_o_llm_afirmar():
+    chunk = _chunk_com_recorte(_recorte(tipo_resultado="comparacao_insuficiente"))
+    saida = gen._aplicar_recorte(_resposta_llm(ConfidenceLevel.ALTA), [chunk])
+    assert saida.confidence_level == ConfidenceLevel.BAIXA
+
+
 def test_soma_zero_e_diferente_de_sem_correspondencia():
     soma_zero = gen._confianca_do_recorte(_recorte(tipo_resultado="soma_zero"))[0]
     sem_registros = gen._confianca_do_recorte(
