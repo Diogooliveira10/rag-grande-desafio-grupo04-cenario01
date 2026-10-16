@@ -30,12 +30,18 @@ e-mail, juízo sobre contrato específico) e os ``E*`` dos e-mails sintéticos
 declara a rota esperada (bases) e, quando aplicável, se a resposta correta é
 uma recusa — é o gabarito citado em 2.3 do documento do desafio: rodar esse
 benchmark antes e depois de atualizar a base mostra se a recuperação piorou.
+
+Pergunta que continua a anterior ("Esses contratos…") declara em
+``depende_de`` os casos que vêm antes dela na conversa da persona. O avaliador
+manda essas perguntas como ``historico`` ao adaptador que o aceita
+(``pipeline_completo`` e ``src.pipeline:responder``), como o frontend faz.
 """
 
 from __future__ import annotations
 
 import argparse
 import importlib
+import inspect
 import json
 import os
 import re
@@ -45,7 +51,7 @@ import threading
 import time
 import unicodedata
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -93,6 +99,11 @@ class EvalCase:
     criterios_numericos: list["CriterioNumerico"] = field(default_factory=list)
     fontes_esperadas_prefixo: list[str] = field(default_factory=list)
     confianca_maxima: Optional[str] = None
+    # Casos que vêm antes deste na conversa da persona. O ``historico`` leva só
+    # as perguntas deles: a resposta mudaria a cada rodada e levaria o erro de
+    # um caso para o seguinte.
+    depende_de: list[str] = field(default_factory=list)
+    historico: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -149,13 +160,30 @@ def load_golden_set(path: Path) -> list[EvalCase]:
                     ],
                     fontes_esperadas_prefixo=list(record.get("fontes_esperadas_prefixo") or []),
                     confianca_maxima=record.get("confianca_maxima"),
+                    depende_de=list(record.get("depende_de") or []),
                 )
             )
     ids = [case.id for case in cases]
     duplicated = sorted({item for item in ids if ids.count(item) > 1})
     if duplicated:
         raise ValueError(f"IDs duplicados no golden set: {duplicated}")
-    return cases
+    return _com_historico(cases)
+
+
+def _com_historico(cases: list[EvalCase]) -> list[EvalCase]:
+    """Resolve ``depende_de`` no carregamento: assim ``--ids P4.2`` roda com o
+    histórico certo mesmo sem rodar a P4.1."""
+    anteriores: dict[str, EvalCase] = {}
+    resolvidos = []
+    for case in cases:
+        faltando = [caso_id for caso_id in case.depende_de if caso_id not in anteriores]
+        if faltando:
+            raise ValueError(f"{case.id} depende de caso inexistente ou posterior: {faltando}")
+        historico = [{"pergunta": anteriores[caso_id].pergunta} for caso_id in case.depende_de]
+        case = replace(case, historico=historico) if historico else case
+        anteriores[case.id] = case
+        resolvidos.append(case)
+    return resolvidos
 
 
 def _normalizar_texto(valor: Any) -> str:
@@ -532,13 +560,26 @@ def evaluate_case(case: EvalCase, response: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _aceita_historico(pipeline_fn: PipelineFn) -> bool:
+    """O adaptador recebe ``historico``? O de rota e o da CLI não recebem."""
+    try:
+        parametros = inspect.signature(pipeline_fn).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(p.name == "historico" or p.kind is inspect.Parameter.VAR_KEYWORD for p in parametros)
+
+
 def _executar_caso(case: EvalCase, pipeline_fn: PipelineFn) -> dict[str, Any]:
     """Roda um caso medindo a latência; exceção vira caso errado, não derruba a rodada."""
+    com_historico = bool(case.historico) and _aceita_historico(pipeline_fn)
     inicio = time.perf_counter()
     try:
         from src.log_context import log_origin
         with log_origin("avaliacao"):
-            resposta = pipeline_fn(case.pergunta)
+            if com_historico:
+                resposta = pipeline_fn(case.pergunta, historico=case.historico)
+            else:
+                resposta = pipeline_fn(case.pergunta)
         erro = None
     except Exception as exc:  # noqa: BLE001 - o relatório precisa registrar qualquer falha
         resposta = {}
@@ -548,6 +589,11 @@ def _executar_caso(case: EvalCase, pipeline_fn: PipelineFn) -> dict[str, Any]:
     resultado = evaluate_case(case, resposta)
     resultado["latencia_ms"] = latencia_ms
     resultado["erro"] = erro
+    if case.depende_de:
+        # Registra se o contexto chegou e como a pergunta foi reescrita com ele.
+        resultado["depende_de"] = list(case.depende_de)
+        resultado["historico_enviado"] = com_historico
+        resultado["pergunta_reformulada"] = resposta.get("pergunta_reformulada")
     if erro:
         resultado.update(
             rota_ok=False,
@@ -752,6 +798,12 @@ def render_report_markdown(report: dict[str, Any], run_id: str, built_at: str) -
         lines.extend(["", "## Respostas", ""])
         for resultado in com_texto:
             lines.extend([f"### {resultado['id']}", ""])
+            if resultado.get("depende_de"):
+                enviado = ("enviado" if resultado.get("historico_enviado")
+                           else "não enviado: o adaptador não recebe histórico")
+                lines.extend([f"Histórico: {', '.join(resultado['depende_de'])} ({enviado})", ""])
+                if resultado.get("pergunta_reformulada"):
+                    lines.extend([f"Pergunta reescrita: {resultado['pergunta_reformulada']}", ""])
             if resultado.get("erro"):
                 lines.append(f"Erro: `{resultado['erro']}`")
             else:
