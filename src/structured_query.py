@@ -222,6 +222,9 @@ class Consulta:
     valor_max_exclusivo: bool = False
     plano_tipado: bool = False
     numero_controle_pncp: Optional[str] = None
+    # A pergunta cita mais de uma esfera ("estaduais" e "municípios"): a conta sai
+    # quebrada por esfera, e só compara de fato se houver valor em duas ou mais.
+    comparacao_esferas: bool = False
 
 
 # Contrato de compilação apenas: estas tabelas de fatos não são criadas aqui.
@@ -484,6 +487,7 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
     analiticos = filtros.filtros_analiticos or {}
     sem_normas = _RE_CITACAO_DE_NORMA.sub(" ", texto)
     esfera = None
+    citadas: list[str] = []
     if tabela == "contratacoes":
         if analiticos.get("esfera"):
             esfera = analiticos["esfera"]
@@ -559,6 +563,8 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
         valor_min=filtros.valor_min,
         valor_max=filtros.valor_max,
         esfera=esfera,
+        comparacao_esferas=bool(tabela == "contratacoes" and tipo == "estatistica"
+                                and esfera is None and len(citadas) > 1),
         termos_objeto=termos_objeto,
         referencia_temporal=referencia_temporal,
         minimo_por_grupo=minimo_por_grupo,
@@ -784,6 +790,22 @@ def _estatisticas(valores: list[float]) -> str:
     )
 
 
+def _comparacao_esferas_insuficiente(consulta: Consulta, por_esfera: dict[str, list[float]]) -> Optional[str]:
+    """Motivo, quando a comparação entre esferas não tem duas esferas com valor informativo.
+
+    Valor simbólico (< R$ 1,00) não entra na estatística, então uma esfera só
+    com R$ 0,00 não sustenta comparação, como uma esfera sem registros.
+    """
+    if not consulta.comparacao_esferas:
+        return None
+    contagens = {esfera: sum(_tem_valor(v) for v in valores) for esfera, valores in sorted(por_esfera.items())}
+    if sum(1 for n in contagens.values() if n) >= 2:
+        return None
+    detalhe = "; ".join(f"{esfera}: {n} valores >= R$ 1,00" for esfera, n in contagens.items()) or "nenhuma esfera com valor registrado"
+    return ("Dados insuficientes: não é possível comparar as esferas neste recorte, porque menos de duas "
+            f"têm registros com valor >= R$ 1,00 ({detalhe}).")
+
+
 def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao: str) -> tuple[str, list[str]]:
     where, parametros = _where(consulta, termos, juncao)
     coluna_valor = _coluna_valor(consulta)
@@ -974,6 +996,9 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
             if l["valor"] is not None:
                 por_esfera.setdefault(l["esfera"] or "não informada", []).append(float(l["valor"]))
         resultado += [f"Esfera {esfera}: {_estatisticas(v)}" for esfera, v in sorted(por_esfera.items())]
+        insuficiente = _comparacao_esferas_insuficiente(consulta, por_esfera)
+        if insuficiente:
+            resultado.append(insuficiente)
     return sql, resultado
 
 
@@ -1248,6 +1273,19 @@ def _preencher_recorte(recorte: dict[str, Any], consulta: Consulta, banco: Banco
                 soma = banco.consultar(f"SELECT SUM({valor_col}) AS s FROM {consulta.tabela}{where}", parametros)[0]["s"]
                 if float(soma or 0) == 0.0:
                     tipo = TipoResultado.SOMA_ZERO
+
+    # Comparação entre esferas sem duas esferas com valor: a conta existe, mas
+    # não sustenta a comparação pedida.
+    if (consulta.comparacao_esferas and correspondentes
+            and tipo in {TipoResultado.REGISTROS, TipoResultado.SOMA_ZERO}):
+        por_esfera: dict[str, list[float]] = {}
+        for linha in banco.consultar(
+                f"SELECT esfera, {_coluna_valor(consulta)} AS valor FROM {consulta.tabela}{where}", parametros):
+            if linha["valor"] is not None:
+                por_esfera.setdefault(linha["esfera"] or "não informada", []).append(float(linha["valor"]))
+        insuficiente = _comparacao_esferas_insuficiente(consulta, por_esfera)
+        if insuficiente:
+            tipo, motivo = TipoResultado.COMPARACAO_INSUFICIENTE, insuficiente
 
     versao, hash_origem = _snapshot_do_banco(banco)
     modelo = RecorteConsulta(
