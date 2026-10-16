@@ -339,3 +339,25 @@ Hoje trabalgei em cima das perguntas dos e-mails sintéticos no golden set.
 
 - Usei o Claude Code para descobrir por que o E1 falhava, fazer os ajustes e os testes e rodar as perguntas com o LLM.
 
+
+## Encontro 14 - 2026-10-16
+
+### Relato individual - Pâmela de Freitas
+
+Hoje fiz perguntas do golden set que dependem da anterior e casos de CNPJ e a correção dos textos desatualizados, e testei o sistema com frontend e backend juntos.
+
+  - P1.3, P4.2 e P4.3 começam com "esses contratos" ou "os mesmos contratos" e eram avaliadas sozinhas. Agora cada uma diz de quais perguntas depende (`depende_de`), e o avaliador manda essas perguntas como histórico, como o frontend faz numa conversa. Vai só a pergunta anterior, sem a resposta, para o erro de um caso não passar para o seguinte.
+  - Criei dois casos de CNPJ, com o gabarito conferido no banco: I3 (contratos da DATAPREV pelo CNPJ do fornecedor) e I4 (compras do Ministério das Relações Exteriores pelo CNPJ do órgão). O golden set passou de 29 para 31 casos.
+  - Com o LLM, P1.3, I3 e I4 passaram. A P4.2 deu uma resposta certa com palavras que não estavam no gabarito; com o OK do Renato, acrescentei dois sinônimos, com teste mostrando que respostas erradas continuam reprovadas. A P4.2 e a P4.3 ainda falham por confiança alta, que é o item 22.
+
+  - README: a tabela tem 810 linhas, não 809 (conferi no banco), e o golden set já tem gabarito de conteúdo.
+  - Guia de execução local: a branch é a `main`, o CORS do frontend local já vem liberado e troquei o exemplo de recusa por um que funciona.
+  - Índice da pasta docs: faltavam 9 documentos, e o passo a passo dos e-mails sintéticos não funcionava mais.
+  - Também pus o `RERANK_PRELOAD` no `.env.example` e atualizei o número de testes no ARQUITETURA.
+- No teste do frontend com o backend, telas, trace, histórico e feedback funcionaram. Achei três defeitos e registrei nas pendências: "Qual é a capital da França?" é respondida em vez de recusada, "publicou" e "seus" viravam filtro no SQL (o Renato já corrigiu) e "Qual o valor de todos os contratos de 2025?" não passa pelo SQL.
+- Suíte completa na main: 1.704 testes passando.
+
+
+### Uso de assistentes de IA:
+
+- Usei o Claude Code para implementar o histórico no avaliador e os testes, conferir os gabaritos no banco, rodar as perguntas com o LLM, testar o frontend com o backend e revisar a documentação.
