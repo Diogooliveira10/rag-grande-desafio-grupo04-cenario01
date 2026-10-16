@@ -90,7 +90,7 @@ def test_typed_mixed_query_skips_only_analytic_intent(local_sql, monkeypatch):
 
 @pytest.mark.parametrize("query,bases", [
     ("Qual o total dos contratos e quais regras legais se aplicam?", [Natureza.ESTRUTURADA, Natureza.NORMATIVA]),
-    ("Quais contratos de computadores existem?", [Natureza.ESTRUTURADA]),
+    ("Quais contratos de computadores existem e há dados suficientes para concluir algo?", [Natureza.ESTRUTURADA]),
     ("Qual a média de preço unitário de computadores?", [Natureza.ESTRUTURADA, Natureza.AGREGADA]),
 ])
 def test_mixed_listings_and_unsupported_metrics_are_not_fast_routes(query, bases):
@@ -99,3 +99,21 @@ def test_mixed_listings_and_unsupported_metrics_are_not_fast_routes(query, bases
     if "unitário" in query:
         filtros = filtros.model_copy(update={"tipo_valor": "unitario"})
     assert not structured_query.pode_consultar_sql_direto(query, filtros, bases)
+
+
+@pytest.mark.parametrize("query", [
+    "Quais contratos de computadores existem?",
+    "Quais órgãos contrataram manutenção de computadores em 2025 e quais foram os valores?",
+])
+def test_listagem_pura_e_rota_rapida(query):
+    from src.query_analysis import analisar_query
+    assert structured_query.pode_consultar_sql_direto(query, analisar_query(query).filtros, [Natureza.ESTRUTURADA])
+
+
+@pytest.mark.parametrize("query", [
+    "Quais contratos de computadores existem e por que foram feitos?",
+    "Quais contratos de computadores existem e quais regras se aplicam a eles?",
+])
+def test_listagem_com_pedido_alem_da_lista_vai_ao_llm(query):
+    from src.query_analysis import analisar_query
+    assert not structured_query.pode_consultar_sql_direto(query, analisar_query(query).filtros, [Natureza.ESTRUTURADA])

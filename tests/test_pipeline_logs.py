@@ -264,8 +264,9 @@ def test_cliente_padrao_usa_sdk_do_llm_ecoa(monkeypatch):
 def test_pipeline_amarra_todos_os_stages_pelo_mesmo_run_id(monkeypatch, indice):
     monkeypatch.setattr(pipeline, "retrieve", lambda q, rota, **kw: retrieve(q, rota, **indice, **kw))
 
+    # "Explique": a listagem pura sai do SQL; esta pergunta precisa da busca.
     resposta = pipeline.responder(
-        "Quais contratos de ambulancias foram publicados?",
+        "Quais contratos de ambulancias foram publicados? Explique o objeto.",
         cliente=lambda mensagens: _resposta_sdk(sources=("c1",)),
     )
 

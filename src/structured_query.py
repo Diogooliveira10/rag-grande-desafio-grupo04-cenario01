@@ -1347,6 +1347,10 @@ def _chunks(consulta: Consulta, sql: str, cabecalho: str, linhas: list[str], ban
         if tamanho > limite and (partes[-1] or len(partes) == 1):
             partes.append([])
         partes[-1].append(linha)
+    sem_registros = not linhas or all(
+        linha.strip().casefold() == "(nenhum registro)"
+        or linha.strip().casefold().startswith("nenhum registro encontrado")
+        for linha in linhas)
     assinatura = hashlib.sha256(f"{sql}|{consulta}".encode("utf-8")).hexdigest()[:12]
     base_id = structured_db.BASE_PCA if consulta.tabela == "pca_planos" else structured_db.BASE_CONTRATACOES
     natureza = Natureza.AGREGADA if consulta.tabela == "pca_planos" else Natureza.ESTRUTURADA
@@ -1369,14 +1373,14 @@ def _chunks(consulta: Consulta, sql: str, cabecalho: str, linhas: list[str], ban
                             "média, mediana, mínimo e máximo consideram valores >= R$ 1,00. "
                             "Campos ausentes não são zero. Esta amostra não é um censo do RJ.",
                             "recorte": recorte},
+                        # Listagem vazia não dispensa a busca: o objeto pode
+                        # estar com outra palavra ("UTI móvel"), e a busca
+                        # semântica ainda acha; o LLM recebe o zero e os trechos.
                         "geracao_deterministica": (consulta.tipo in {"estatistica", "ranking", "agrupamento", "evolucao"}
-                                                   or consulta.listagem_direta)
+                                                   or (consulta.listagem_direta and not sem_registros))
                         and not consulta.norma_citada,
                         # Nada atendeu aos filtros: é ausência na amostra, não um número calculado.
-                        "sem_registros": not linhas or all(
-                            linha.strip().casefold() == "(nenhum registro)"
-                            or linha.strip().casefold().startswith("nenhum registro encontrado")
-                            for linha in linhas)},
+                        "sem_registros": sem_registros},
             ),
         )
         for indice, parte in enumerate(partes, 1)
