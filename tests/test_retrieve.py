@@ -1315,3 +1315,38 @@ def test_cache_de_query_separa_por_provedor(tmp_path, monkeypatch):
     chamadas.clear()
     retrieve._embed_fn_com_uso([])(["uma pergunta"])
     assert chamadas == []
+
+
+def test_read_jsonl_le_uma_vez_e_rele_quando_o_arquivo_muda(tmp_path, monkeypatch):
+    arquivo = tmp_path / "vectors.jsonl"
+    arquivo.write_text('{"chunk_id": "a"}\n', encoding="utf-8")
+    assert [r["chunk_id"] for r in retrieve_module._read_jsonl(arquivo)] == ["a"]
+
+    leituras = []
+    original = json.loads
+    monkeypatch.setattr(retrieve_module.json, "loads", lambda *a, **k: leituras.append(1) or original(*a, **k))
+    primeira = retrieve_module._read_jsonl(arquivo)
+    primeira.append({"chunk_id": "intruso"})
+    assert [r["chunk_id"] for r in retrieve_module._read_jsonl(arquivo)] == ["a"]
+    assert leituras == []
+
+    arquivo.write_text('{"chunk_id": "a"}\n{"chunk_id": "b"}\n', encoding="utf-8")
+    assert [r["chunk_id"] for r in retrieve_module._read_jsonl(arquivo)] == ["a", "b"]
+    assert leituras == [1, 1]
+
+
+def test_read_jsonl_de_arquivo_ausente_devolve_lista_vazia(tmp_path):
+    assert retrieve_module._read_jsonl(tmp_path / "nao-existe.jsonl") == []
+
+
+def test_pre_carregar_indices_deixa_os_arquivos_no_cache(tmp_path, monkeypatch):
+    base = tmp_path / "index" / "contratos_estruturado"
+    base.mkdir(parents=True)
+    (base / "vectors.jsonl").write_text('{"chunk_id": "a"}\n', encoding="utf-8")
+    documents = tmp_path / "documents.jsonl"
+    documents.write_text('{"chunk_id": "a", "text": "x"}\n', encoding="utf-8")
+    monkeypatch.setattr(retrieve_module, "QUERY_CACHE_PATH", tmp_path / "sem-cache.jsonl")
+
+    assert retrieve_module.pre_carregar_indices(tmp_path / "index", documents) == 2
+    assert str(base / "vectors.jsonl") in retrieve_module._JSONL_CACHE
+    assert str(documents) in retrieve_module._JSONL_CACHE

@@ -532,6 +532,18 @@ def _sha_registrado(banco: Banco) -> Optional[str]:
     return linhas[0]["valor"] if linhas else None
 
 
+# Bancos já conferidos contra o documents.jsonl neste processo. A conferência
+# abria uma conexão e fazia duas consultas a cada pergunta (~1,3 s no Neon); a
+# chave muda quando o arquivo muda, e aí a conferência roda de novo. Só entra
+# aqui o banco que estava em dia: o desatualizado continua sendo conferido.
+_BANCOS_CONFERIDOS: set[tuple[str, str, str, int, int]] = set()
+
+
+def _chave_conferencia(banco: Banco, documents_file: Path) -> tuple[str, str, str, int, int]:
+    stat = documents_file.stat()
+    return (banco.url, str(banco.sqlite_path), str(documents_file), stat.st_mtime_ns, stat.st_size)
+
+
 def garantir_banco(
     documents_file: Path = DOCUMENTS_FILE,
     banco: Optional[Banco] = None,
@@ -551,6 +563,10 @@ def garantir_banco(
         raise FileNotFoundError(f"documents.jsonl não encontrado: {documents_file}")
     if not banco.existe():
         construir_banco(documents_file, banco)
+        _BANCOS_CONFERIDOS.add(_chave_conferencia(banco, documents_file))
+        return banco
+    chave = _chave_conferencia(banco, documents_file)
+    if chave in _BANCOS_CONFERIDOS:
         return banco
     with banco.sessao():
         registrado = _sha_registrado(banco)
@@ -559,6 +575,7 @@ def garantir_banco(
         except Exception:
             versao = []
     if registrado == _sha256(documents_file) and versao and versao[0]["valor"] == SCHEMA_VERSION:
+        _BANCOS_CONFERIDOS.add(chave)
         return banco
     try:
         construir_banco(documents_file, banco)
@@ -568,6 +585,8 @@ def garantir_banco(
         if status is not None:
             status["base_desatualizada"] = True
             status["erro_remontagem"] = type(erro).__name__
+    else:
+        _BANCOS_CONFERIDOS.add(chave)
     return banco
 
 
