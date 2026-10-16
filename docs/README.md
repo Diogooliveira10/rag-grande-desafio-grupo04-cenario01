@@ -2,10 +2,6 @@
 
 Este diretório reúne guias de uso e referências do projeto.
 
-- [Plano de ação para o Demo Day](PLANO_DE_ACAO_DEMO_DAY.md): correções com
-  reutilização e testes por módulo, ensaio integrado desde a baseline e marco
-  opcional de classificação com MiMo-V2.6-Pro pago (taxonomia v1, holdout
-  independente e descoberta/ranking antes de filtros estritos).
 - [Plano do corpus v7](PLANO_POSSIVEL_CORPUS_V7.md): censo dos contratos e
   publicações de 2025 em construção paralela (modo direto, projeção
   `completa`), com DIFF, regressão e re-auditoria do golden set como etapas

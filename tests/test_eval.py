@@ -90,6 +90,7 @@ def test_matching_de_identificador_pncp_completo_preserva_pontuacao():
     caso = replace(
         next(case for case in load_golden_set(GOLDEN_SET) if case.id == "I2"),
         deve_conter=[identificador],
+        deve_conter_qualquer=[],
         nao_deve_conter=[],
     )
 
