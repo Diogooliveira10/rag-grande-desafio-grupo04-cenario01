@@ -39,6 +39,25 @@ def test_long_presentation_is_conversation_not_refusal_or_rag(conversation_llm, 
     assert len(calls) == 1
 
 
+@pytest.mark.parametrize("query", ["Qual é a capital da França?", "Quem ganhou a Copa de 2002?"])
+def test_pergunta_de_fato_fora_do_acervo_nao_vira_conversa(conversation_llm, query):
+    calls, install = conversation_llm
+    install({"tipo": "conversa", "answer": "A capital da França é Paris."})
+
+    assert conversation.resposta_conversacional(query) is None
+    assert calls == []
+
+
+def test_pergunta_sobre_o_proprio_sistema_continua_conversa(conversation_llm):
+    calls, install = conversation_llm
+    install({"tipo": "conversa", "answer": "O NEXO consulta o acervo e cita as fontes."})
+
+    resposta = conversation.resposta_conversacional("Qual a diferença entre o NEXO e um buscador?")
+
+    assert resposta is not None and "NEXO" in resposta.answer
+    assert len(calls) == 1
+
+
 def test_long_factual_query_remains_in_rag(conversation_llm):
     _, install = conversation_llm
     install({"tipo": "consulta", "answer": ""})

@@ -140,6 +140,16 @@ def test_expressao_de_filtro_nao_vira_termo_do_objeto(pergunta):
     assert consulta.termos_objeto == ()
 
 
+@pytest.mark.parametrize("pergunta", [
+    "Qual o valor de todos os contratos de 2025?",
+    "Quanto deram os contratos de ambulância somados em 2025?",
+])
+def test_valor_de_todos_e_somados_pedem_a_soma(pergunta):
+    from src.query_analysis import _analisar
+
+    assert sq.detectar_consulta(pergunta, _analisar(pergunta), ESTRUTURADA).tipo == "estatistica"
+
+
 def test_maior_que_como_filtro_nao_vira_ranking():
     from src.query_analysis import _analisar
 

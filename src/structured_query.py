@@ -103,7 +103,9 @@ _RE_COMPARACAO = re.compile(r"\bmais car[oa]s?\b|\bmais barat|\bpag(?:ou|aram|am
 # é listar, não calcular. Só conta como cálculo a palavra que declara a conta
 # (média, mediana, total, soma, quanto, quantidade). Métrica sem a pergunta
 # pedir é extrapolação — ver P4 do plano.
-_RE_ESTATISTICA = re.compile(r"\bmedia\b|\bmedio\b|\bmediana\b|\btotal\b|\bsoma\b|\bquant[oa]s?\b|\bquantidade\b|\bmaior(es)?\b|\bmenor(es)?\b")
+# "Valor de todos os contratos" e "somados" também pedem a soma (sem a palavra "total").
+_RE_ESTATISTICA = re.compile(r"\bmedia\b|\bmedio\b|\bmediana\b|\btotal\b|\bsoma\b|\bquant[oa]s?\b|\bquantidade\b|\bmaior(es)?\b|\bmenor(es)?\b"
+                             r"|\bvalor(?:es)?\s+(?:de\s+)?tod[oa]s\b|\bsomad[oa]s?\b")
 _RE_CONTAGEM_CONTRATOS = re.compile(
     r"\b(?:(?P<numero>\d+|um|dois|tres|quatro|cinco)\s+ou\s+mais|"
     r"(?:pelo\s+menos|no\s+minimo)\s+(?P<minimo>\d+|um|dois|tres|quatro|cinco))"

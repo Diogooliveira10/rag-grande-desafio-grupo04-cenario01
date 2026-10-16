@@ -98,6 +98,11 @@ _CAPABILITIES = (
 )
 
 
+_PERGUNTA_FACTUAL = re.compile(
+    r"(?:qual|quais|quem|quando|onde|quanto|quantos|quantas|em que ano|em que data|que dia)\b")
+_SOBRE_O_SISTEMA = re.compile(r"\b(?:nexo|voce|sistema|projeto|acervo|site|assistente|rag)\b")
+
+
 def resposta_conversacional(query: str, *, run_id: str = "sem-run-id",
                            query_id: str = "sem-query-id") -> RAGResponse | None:
     if not isinstance(query, str):
@@ -123,6 +128,11 @@ def resposta_conversacional(query: str, *, run_id: str = "sem-run-id",
             return None
         # Consultas curtas já reconhecidas seguem diretamente para o RAG.
         if CONVERSATION_MODE != "llm" or (len(query) < 160 and route.bases_selecionadas):
+            return None
+        # Pergunta de fato fora do acervo ("Qual é a capital da França?") não é
+        # conversa: o LLM a classificava assim e respondia de conhecimento geral.
+        # Vai ao pipeline, que recusa por falta de evidência no acervo.
+        if _PERGUNTA_FACTUAL.match(normalized) and not _SOBRE_O_SISTEMA.search(normalized):
             return None
         decision = _interpret_interaction(query, run_id=run_id, query_id=query_id)
         if decision is None or decision.tipo != "conversa":
