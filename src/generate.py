@@ -848,6 +848,42 @@ def _recorte_dos_chunks(chunks: list[Chunk]) -> dict[str, Any]:
     return {}
 
 
+# Frases com que a própria resposta admite falta de dados ou de confirmação.
+# Comparadas sem acento e em minúsculas.
+_RESSALVA_DE_INSUFICIENCIA = re.compile(
+    r"insuficien"
+    r"|\bnao ha (?:dados|informac\w*|evidencia\w*|amostra)\b[^.]{0,40}\bsuficientes?\b"
+    r"|\bnao ha (?:mencao|confirmacao|registro) explicit"
+    r"|\bnao (?:menciona|mencionam|confirma|confirmam) explicitamente\b"
+    r"|\bnao (?:e possivel|permitem?|ha como) (?:concluir|determinar|afirmar|calcular|confirmar)\b"
+    r"|\bfaltam dados\b|\blimitando a conclusao\b"
+)
+_AVISO_RESSALVA = ("Confiança limitada a média: a própria resposta registra falta de dados "
+                   "ou de confirmação explícita no acervo.")
+
+
+def _sem_acento(texto: str) -> str:
+    import unicodedata
+
+    return "".join(c for c in unicodedata.normalize("NFKD", texto.casefold()) if not unicodedata.combining(c))
+
+
+def _limitar_confianca_pela_ressalva(resposta: RAGResponse) -> RAGResponse:
+    """Resposta do LLM que admite falta de dados não sai com confiança alta.
+
+    O LLM declarava "alta" escrevendo "não há dados suficientes" (P4.2, P3.2,
+    P6.1 do golden set). Vale só para o caminho do LLM: a resposta determinística
+    do SQL tem a confiança do recorte e não passa por aqui.
+    """
+    if (resposta.is_refusal or resposta.confidence_level != ConfidenceLevel.ALTA
+            or not _RESSALVA_DE_INSUFICIENCIA.search(_sem_acento(resposta.answer))):
+        return resposta
+    return resposta.model_copy(update={
+        "confidence_level": ConfidenceLevel.MEDIA,
+        "avisos": list(dict.fromkeys([*resposta.avisos, _AVISO_RESSALVA])),
+    })
+
+
 def _aplicar_recorte(resposta: RAGResponse, chunks: list[Chunk]) -> RAGResponse:
     """Mesma política de confiança da resposta determinística, no caminho do LLM.
 
@@ -1000,6 +1036,7 @@ def gerar_resposta(
     if ids_no_texto:
         sensibilidade["ids_internos_no_texto"] = ids_no_texto
     resposta = _aplicar_recorte(resposta, chunks)
+    resposta = _limitar_confianca_pela_ressalva(resposta)
     resposta = _avisar_fonte_sintetica(resposta, chunks)
     # Defesa em profundidade: o dado pode ter vindo da própria pergunta.
     answer_mascarada, mascaramentos_resposta = mascarar(resposta.answer)
