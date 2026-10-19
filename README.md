@@ -228,8 +228,9 @@ powershell -ExecutionPolicy Bypass -File scripts\setup.ps1   # Windows
 O script cria o `.venv`, instala o `requirements-lock.txt`, copia
 `.env.example` para `.env` (quando falta) e confere os artefatos versionados.
 
-**Dados V7:** os arquivos grandes (629 MB) ficam fora do Git.
-Baixe do Google Drive e copie para as pastas corretas:
+**Dados V7:** os arquivos grandes ficam fora do Git: são **5,3 GB** no total
+(o `documents.jsonl` sozinho tem 629 MB; o `index/`, 4,6 GB). Cada integrante
+baixa na própria máquina. Baixe do Google Drive e copie para as pastas corretas:
 
 **📁 [Dados V7 no Google Drive](https://drive.google.com/drive/folders/1GEHoZALIIxp9hYR8V_WhKweRqQkw824r?usp=drive_link)**
 
@@ -251,6 +252,13 @@ Depois de ter os dados:
 ```powershell
 .venv\Scripts\python -m uvicorn app.api:app --host 127.0.0.1 --port 8080
 ```
+
+Com a v7, a API leva cerca de 1 minuto para ficar pronta depois de subir: ela
+lê os índices e prepara o BM25 em segundo plano (`INDEX_PRELOAD`), e ocupa
+~4,6 GB de RAM (medido em 2026-10-19 numa máquina de 16 GB). Feche o que não
+for necessário antes da demonstração e faça uma pergunta de aquecimento.
+O golden set roda o pipeline no próprio processo e carrega a v7 de novo:
+desligue o backend antes de rodá-lo, para os dois não disputarem a memória.
 
 Modelos externos (reranker ~470 MB + GGUF do Qwen3-Embedding 639 MB, só para
 o modo local de embeddings) têm download em um comando com URL oficial e
