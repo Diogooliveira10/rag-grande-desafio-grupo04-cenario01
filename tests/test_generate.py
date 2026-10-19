@@ -729,6 +729,42 @@ def test_prompt_pede_evidence_id_entre_colchetes_e_nada_de_chunk_id():
     assert "não escreva chunk_id" in gen._SYSTEM_PROMPT
 
 
+def test_amparo_legal_nao_vira_modalidade_do_contrato():
+    # P4.2 (item 22): o contrato não traz modalidade, mas o amparo legal cita o
+    # artigo do pregão; o LLM concluía "pregão predominante" a partir dele.
+    contrato = json.dumps({
+        "numeroControlePNCP": "29116902000170-2-000010/2025", "objetoContrato": "Manutenção de computadores",
+        "categoriaProcesso": {"nome": "Serviços"},
+        "amparoLegal": {"nome": "Lei 14.133/2021, Art. 28, I", "descricao": "pregão"},
+    })
+    prompt = {}
+
+    def cliente(mensagens):
+        prompt.update(sistema=mensagens[0]["content"], usuario=mensagens[1]["content"])
+        return json.dumps({"answer": "A modalidade não está informada [E1].", "is_refusal": False,
+                           "confidence_level": "baixa", "sources_used": ["E1"]})
+
+    gen.gerar_resposta("Qual a modalidade predominante desses contratos?",
+                       [_chunk(conteudo=contrato)], [Natureza.ESTRUTURADA], cliente=cliente)
+
+    assert '"modalidade_licitacao":"não informada neste registro"' in prompt["usuario"]
+    assert "Art. 28, I" in prompt["usuario"]  # a norma continua visível para a P4.3
+    assert "Não a deduza do amparo legal" in prompt["sistema"]
+    assert "nem a copie de registro de outro objeto ou processo" in prompt["sistema"]
+
+
+def test_modalidade_da_compra_vinculada_aparece_no_registro_e_no_cabecalho():
+    # Corpus v7: o contrato não traz modalidadeNome, e a modalidade vem da compra
+    # vinculada. O registro dizia "não informada" e o cabeçalho, "Pregão".
+    chunk = _chunk(conteudo=json.dumps({"objetoContrato": "Manutenção de computadores"}))
+    chunk.metadata.extras.update(modalidade="Pregão - Eletrônico", modalidade_fonte="compra_vinculada")
+
+    [preparado] = gen._chunks_no_orcamento([chunk])
+
+    assert json.loads(preparado.content)["modalidade_licitacao"] == "Pregão - Eletrônico (da compra vinculada)"
+    assert "modalidade=Pregão - Eletrônico (da compra vinculada)" in gen._cabecalho(preparado.metadata)
+
+
 # --------------------------------------------------------------------------
 # P3: confiabilidade no recorte, completude e cobertura separadas
 # --------------------------------------------------------------------------
