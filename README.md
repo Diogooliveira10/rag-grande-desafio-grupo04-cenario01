@@ -12,7 +12,8 @@ fora do Git e são compartilhados via Google Drive:
 
 Consulte o [inventário](CORPUS_INVENTORY.md), o
 [plano de correção](docs/PLANO_CORRECAO_SQL_PIPELINE_V7.md) e o
-[fluxo de consulta](docs/CLI.md).
+[fluxo de consulta](docs/CLI.md). Correções de consulta e limites sem alterar o
+snapshot: [qualidade das respostas sem reindexação](docs/QUALIDADE_RESPOSTAS_SEM_REINDEXACAO.md).
 O suplemento sintético conversacional (25 e-mails) também está ativo:
 [docs/emails_sinteticos.md](docs/emails_sinteticos.md).
 
@@ -107,9 +108,15 @@ flowchart TD
 ```
 
 O diagrama mostra os caminhos possíveis: em uma pergunta puramente analítica,
-SQL suficiente vai direto à geração determinística, sem executar a recuperação
-ou carregar o reranker. Se o cálculo falhar ou for insuficiente, a busca permanece
-como fallback; perguntas mistas preservam as evidências das outras bases.
+SQL suficiente dispensa recuperação e reranker. A LLM faz uma única chamada
+para escrever uma apresentação neutra com `{{sql}}`; o backend substitui o marcador
+pelo resultado determinístico completo, com fontes, sem enviar os números à LLM.
+Template inválido ou falha do provedor preserva a resposta SQL direta como fallback.
+Resultados tabulares são Markdown GFM gerado pelo código, renderizado como tabela
+no frontend e preservado por inteiro nos logs (`resultado_markdown` no SQL e
+`resultado_sql_markdown` na geração). O histórico guarda o mesmo `answer` Markdown.
+Se o cálculo falhar ou for insuficiente, a busca permanece como fallback;
+perguntas mistas preservam as evidências das outras bases e a geração normal.
 
 Estágios de consulta (nomes fixos no campo `stage`): `interacao`, `reformulacao`, `query_analysis`, `roteamento`, `retrieval_denso`, `retrieval_bm25`, `fusao_rrf`, `rerank`, `consulta_sql`, `geracao`, `validacao`, `feedback` e `resumo_consulta`. Envelopes: `pipeline_inicio`, `pipeline_fim`, `requisicao_inicio`, `requisicao_fim` e `persistencia_historico`. Operações offline usam `coleta`, `inventario`, `ingestao`, `preparacao`, `embeddings`, `indexacao` e `embedding_lote`, no mesmo JSONL. Detalhes de decisão e divisão de responsabilidades em [ARQUITETURA.md](ARQUITETURA.md); contrato dos logs em [docs/OBSERVABILIDADE.md](docs/OBSERVABILIDADE.md).
 
@@ -119,9 +126,9 @@ Estágios de consulta (nomes fixos no campo `stage`): `interacao`, `reformulacao
 - `roteamento` ([src/router.py](src/router.py)): escolhe as bases antes de buscar.
 - `retrieval_denso` / `retrieval_bm25` / `fusao_rrf` ([src/retrieve.py](src/retrieve.py)): busca híbrida com filtros de metadado. Os filtros são aplicados base a base: numa base sem o campo filtrado, ou em que o filtro excluiria todos os chunks, ele é ignorado e o log registra isso em `extra.filtros_ignorados`. Se ainda assim os filtros zerarem o resultado, [src/pipeline.py](src/pipeline.py) refaz a busca sem eles.
 - `rerank` ([src/rerank.py](src/rerank.py)): um cross-encoder local (`RERANK_MODEL`, padrão `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`, roda em CPU) reordena os `RERANK_CANDIDATES` (padrão 10) primeiros do RRF. Chunks JSON vão para o modelo com os campos de conteúdo primeiro (`objetoCompra`, título, órgão...), porque o modelo só lê 512 tokens. Se o modelo falhar, o log registra erro e o resultado volta a ser o do RRF. O `retrieve` aplica o reranker que receber; `reranker_padrao()` devolve o cross-encoder, ou `None` com `RERANK_ENABLED=false`. O `responder` ([src/pipeline.py](src/pipeline.py)) usa o `reranker_padrao()` quando nenhum reranker é passado. Na ablação no corpus v6 (47 perguntas rotuladas, 13 delas de identificador como CNPJ e número de contrato), o hit@3 sobe de 0,64 (só RRF) para 0,83 com o rerank, a melhor configuração medida; o denso sozinho não acha identificadores (0,31) e o BM25 sozinho erra as perguntas parafraseadas: ver [docs/ABLACAO_RERANK.md](docs/ABLACAO_RERANK.md). Na primeira execução o modelo (~470 MB) é baixado para o cache do Hugging Face.
-- `consulta_sql` ([src/structured_query.py](src/structured_query.py) + [src/structured_db.py](src/structured_db.py)): perguntas de conta sobre as bases estruturada e agregada (ranking, estatística com média e mediana, comparação entre esferas, evolução no tempo, agrupamento) são respondidas por uma consulta SQL pré-escrita e parametrizada — o LLM nunca escreve SQL. O resultado entra como chunk (`doc_type="sql"`, `chunk_id` começando com `sql:`) antes dos chunks da busca. Perguntas exclusivamente analíticas tentam SQL primeiro: com cálculo suficiente, pulam busca densa/BM25/RRF/rerank e são renderizadas diretamente desses resultados, sem LLM alterar os números; perguntas mistas mantêm a recuperação e a geração normal. Totais incluem zeros/centavos registrados, enquanto média/mediana e extremos informativos são qualificados para valores >= R$ 1,00. Validação real CLI/frontend e valores conferidos no bruto em [docs/NUMERICAL_VALIDATION.md](docs/NUMERICAL_VALIDATION.md). Se o termo pedido não existe no objeto de nenhuma contratação, o resultado diz isso em vez de calcular sobre outro assunto. Falha no banco é registrada no log e a resposta segue só com a busca.
+- `consulta_sql` ([src/structured_query.py](src/structured_query.py) + [src/structured_db.py](src/structured_db.py)): perguntas de conta sobre as bases estruturada e agregada (ranking, estatística com média e mediana, comparação entre esferas, evolução no tempo, agrupamento) são respondidas por uma consulta SQL pré-escrita e parametrizada — o LLM nunca escreve SQL. O resultado entra como chunk (`doc_type="sql"`, `chunk_id` começando com `sql:`) antes dos chunks da busca. Perguntas exclusivamente analíticas tentam SQL primeiro: com cálculo suficiente, pulam busca densa/BM25/RRF/rerank. A LLM escreve somente um template com `{{sql}}`, e o backend injeta os resultados completos depois, sem reescrita dos números pela LLM. O marcador precisa aparecer uma única vez, em linha própria; marcadores extras, números/citações na narrativa ou falha do modelo acionam fallback determinístico (`sql_template_fallback` no log). A validação do template é sintática, não prova semântica de toda a narrativa. Perguntas mistas mantêm a recuperação e a geração normal. Totais incluem zeros/centavos registrados, enquanto média/mediana e extremos informativos são qualificados para valores >= R$ 1,00. Validação real CLI/frontend e valores conferidos no bruto em [docs/NUMERICAL_VALIDATION.md](docs/NUMERICAL_VALIDATION.md). Se o termo pedido não existe no objeto de nenhuma contratação, o resultado diz isso em vez de calcular sobre outro assunto. Falha no banco é registrada no log e a resposta segue só com a busca.
 - `geracao` ([src/generate.py](src/generate.py)): guardrails determinísticos antes do LLM, prompt limitado à janela do modelo (`GENERATION_CONTEXT_CHARS` no total e `GENERATION_CHUNK_CHARS` por chunk; o log registra `chunks_no_prompt` e `chunks_fora_do_orcamento`) e saída pedida em JSON (`response_format`).
-- `validacao` ([src/generate.py](src/generate.py)): checa a saída do LLM. JSON inválido vira recusa segura, citação de chunk que não foi recuperado é descartada (`extra.citacoes_descartadas`) e dado pessoal na resposta é mascarado.
+- `validacao` ([src/generate.py](src/generate.py)): checa a saída do LLM. no caminho normal, JSON inválido vira recusa segura (no template SQL, preserva o resultado calculado como fallback); citação de chunk que não foi recuperado é descartada (`extra.citacoes_descartadas`) e dado pessoal na resposta é mascarado.
 
 [src/pipeline.py](src/pipeline.py) une as etapas numa única função (`responder`).
 

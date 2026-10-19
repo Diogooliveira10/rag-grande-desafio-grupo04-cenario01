@@ -1,5 +1,12 @@
 # Validação numérica — CLI e frontend, corpus v6
 
+> **Relatório histórico:** a execução abaixo antecede o template `{{sql}}`.
+> Atualmente, SQL suficiente usa `metodo=sql_template`: a LLM escreve somente
+> a apresentação, e o backend insere os números depois. Este relatório não
+> comprova latência ou aderência do modelo real ao novo template; os testes
+> novos são offline, com clientes simulados. Veja
+> [QUALIDADE_RESPOSTAS_SEM_REINDEXACAO.md](QUALIDADE_RESPOSTAS_SEM_REINDEXACAO.md).
+
 Execução local: 09/10/2026. Escopo: números presentes no corpus, **não um censo de contratos do RJ**, nem uma verificação externa dos fatos publicados no PNCP.
 
 ## Método

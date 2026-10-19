@@ -646,3 +646,60 @@ Os principais commits de minha autoria em 16/10, anteriores à edição deste re
 ### Uso de IA
 
 Utilizei assistentes de IA como apoio à análise do corpus e do código, às correções de coleta e retomada, à reconciliação cadastral, à montagem dos índices, à elaboração de testes e à comparação dos resultados de recuperação. Para este acompanhamento, conferi o histórico Git, os relatórios, o manifesto do índice e os logs de testes, distinguindo checkpoints intermediários de resultados posteriores e resultados medidos de propostas ainda pendentes.
+
+## Atualização — 19/10/2026
+
+### Atividades realizadas desde o último registro
+
+Em qualidade de respostas (sem reindexar), foram feitas correções no caminho de consulta para proteger os artefatos do snapshot (documents.jsonl, SQLite, índice), além da expansão do prompt no generate.py (datas de publicação, modalidade de compra, apresentação curta e formatação em R$), tudo documentado em docs/QUALIDADE_RESPOSTAS_SEM_REINDEXACAO.md. Para SQL e apresentação determinística, o novo módulo src/sql_markdown.py passou a gerar tabelas GFM sem acionar LLM, enquanto o structured_query.py agora reconhece consultas do tipo "quais órgãos e total", limita "maior/menor contrato" a um registro e permite listas diretas com filtros analíticos, valor ou ano. Na recuperação de normas, o retrieve.py recebeu ordenação aprimorada com preferência para identidade declarada sobre menção incidental, visão geral focada nas disposições iniciais, artigos explicitamente pedidos e deduplicação por número/ano. Na etapa de fornecedor e consulta, o query_analysis.py passa a ignorar artigos e preposições em nomes de fornecedores (como Casa da Moeda), garantindo que fornecedores reconhecidos não virem órgãos no fallback. Em conversação, o conversation.py responde sobre a origem dos dados sem buscar factual e exige confiança maior ou igual a 0.9 para recusas de FORA_DE_ESCOPO. A refatoração do catálogo em catalog.py agora carrega apenas o inventário oficial mais recente, compacta metadados por arquivo/contrato, aplica mascaramento de dados sensíveis exclusivamente na página publicada, protege a carga concorrente com RLock e aciona o aquecimento em thread no boot (catalog.prewarm em _ciclo_de_vida). A documentação e contratos foram atualizados em FRONTEND_API_CONTRACT.md, OBSERVABILIDADE.md e NUMERICAL_VALIDATION.md, acompanhados de novas variáveis no .env.example. A suíte de testes novos foi expandida com test_catalog_api.py, test_sql_markdown.py, test_sql_template.py, test_response_quality_regressions.py e test_retrieval_runtime_quality.py.
+
+Nesta sessão, trabalhei em duas correções de interface: o carregamento da tela **EXPLORAR ACERVO** e a atualização da página **TRANSPARÊNCIA DA IA**. Também investiguei um teste intermitente relatado por um colega.
+
+**EXPLORAR ACERVO — carregamento:**
+
+A tela estava estourando o timeout de 20 s do navegador. A causa medida era o servidor: a primeira chamada a `GET /api/v1/explore/contratacoes` levava **15,17 s**, porque `app/catalog.py` carregava na memória todos os inventários históricos (até 19 MB) e desserializava o `documents.jsonl` inteiro (629 MB, ~109 mil entradas compactas) antes de devolver 24 registros.
+
+Refatorei o catálogo para:
+- carregar somente o inventário oficial completo mais recente, parando a leitura no primeiro que satisfaz o critério, em vez de ler todos;
+- compactar metadados por arquivo/contrato durante o varrimento do JSONL, sem reter textos de chunks nem repetir a desserialização de páginas de coleta com vários contratos;
+- aplicar o mascaramento de CPF/telefone/e-mail apenas à página publicada (24 registros), não a milhares de descartados;
+- manter deduplicação por `source_file` + identificador, para não perder contratos distintos vindos do mesmo arquivo de origem;
+- proteger a primeira carga com `RLock`, para requisições concorrentes não lerem o JSONL duas vezes;
+- aquecer o snapshot em thread no boot (`catalog.prewarm` em `_ciclo_de_vida`), sem derrubar o servidor se o aquecimento falhar;
+- elevar o timeout das rotas de catálogo no frontend para 30 s (`TIMEOUT_CATALOG_MS`).
+
+Medição antes/depois (backend local, sem rede externa): `contratacoes` **15,17 s → 0,87 s**, `orgaos` 0,58 s, `summary` 0,05 s; clique até renderizar no navegador **2,23 s** com 24 cards.
+
+**TRANSPARÊNCIA DA IA — conteúdo:**
+
+Atualizei os quatro princípios para o que o pipeline faz hoje: busca documental com recortes calculados em SQL (sem busca vetorial quando o SQL é suficiente), apresentação de tabela pelo marcador `{{sql}}` com fallback determinístico sem segunda chamada à LLM, níveis de evidência explicados como atribuição do servidor (não probabilidade de acerto) e avaliação/histórico.
+
+Alinhei o painel de resumo ao [`CORPUS_INVENTORY.md`](../CORPUS_INVENTORY.md), depois de confirmar a divergência: a API lia `data/inventory/v6.json` (único inventário JSON oficial+completo) enquanto o `.md` foi atualizado à mão para a v7 no commit `e098542`. Como a v7 nunca gerou `data/inventory/v7.json`, passei a derivar o inventário principal dos metadados verificados do bundle ativo, com validação por hash:
+
+- `versao_corpus` = `v7-reparo` e `corpus_ativo` vindos do `meta` do SQLite e do `manifest.json` do índice, só quando o `source_sha256` de cada um bate com o JSONL ativo; divergência vira aviso, nunca versão afirmada;
+- painel principal com **Chunks normalizados 144.112**, **Vetores FAISS 143.299**, **Schema SQL 7**, Versão `v7-reparo`, Snapshot `candidato_07_reparo`, Coletado em 18/10, `documents.jsonl 629 MB`;
+- tabela de bases com **Chunks** por base, sem coluna de vetores e sem a linha "Trechos sem vetor", conforme ajuste pedido;
+- a v6 ficou como nota de snapshot anterior, com caminho do backup `data/backup_v6_20261018_224104`.
+
+Revisei os textos com o pedido de manter os quatro cards originais: os cards adicionais que havia criado foram removidos.
+
+### Resultado da sessão
+
+- Explorar acervo carrega sem timeout nas duas portas locais (5173 e 5174), com 24 cards e zero erro de console.
+- Transparência mostra v7-reparo como inventário principal e v6 como histórico, sem cards extras.
+
+### Validação
+
+- Backend: `python -m pytest -p tests.offline_guard tests/test_catalog_api.py tests/test_app_api.py` → **78 testes passaram** (inclui os novos de snapshot compacto, contrato em lote, mascaramento por página, carga concorrente única, inventário v7 verificado por hash e rejeição quando os hashes divergem).
+- Frontend: `npm test` → **46 testes Vitest + 8 testes node** passaram; `npm run build` concluiu sem erros.
+- Navegador real (Playwright, MSEdge headless): Explorar 2,23 s/24 cards; Transparência com `Schema SQL`, `documents.jsonl 629 MB`, v7-reparo e nota da v6.
+requisições falhas = 0.
+- Nenhum arquivo de dados protegido foi alterado (`index/`, `data/normalized`, `data/structured`): as alterações ficaram em `app/catalog.py`, `app/api.py`, `app/catalog_models.py`, `tests/test_catalog_api.py` e nos arquivos do frontend.
+
+### Pendências
+
+- Avaliar se a geração de `data/inventory/v7.json` é necessária para alinhar o inventário máquina-legível ao `CORPUS_INVENTORY.md`, em vez de derivar dos metadados ativos.
+
+### Uso de IA
+
+Utilizei assistentes de IA para localizar o teste relatado e reproduzi-lo, medir o gargalo do catálogo com e sem as mudanças, implementar a compactação do snapshot e a validação por hash, ajustar os textos da transparência conforme o pedido de manter os quatro cards originais, e rodar testes e a verificação no navegador. As decisões de escopo — remover os cards extras, manter a v6 apenas como nota e não exibir a coluna de vetores — foram do usuário; os números exibidos vêm sempre da resposta da API, sem valores fixados no frontend.

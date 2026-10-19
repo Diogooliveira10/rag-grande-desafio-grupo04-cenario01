@@ -68,13 +68,25 @@ sintéticas. Totais incompletos são `null`, não zero.
 ## Respostas numéricas
 
 Operações analíticas suportadas (total, contagem, média, mediana, ranking,
-agrupamento e evolução) sem intenção normativa/conversacional são renderizadas
-diretamente dos resultados SQL, sem passar os números pelo LLM. O contrato
-`QueryResponse` não muda: as fontes continuam em `sources_used` e o texto cita
-`[n]`. Perguntas mistas e operações sem cálculo disponível mantêm o caminho
-normal de geração. Quando o SQL é suficiente, a busca vetorial/BM25/RRF e o
+agrupamento e evolução) sem intenção normativa/conversacional são apresentadas
+como tabelas Markdown GFM construídas dos resultados SQL/Python, sem passar
+os números pelo LLM. O modelo escreve apenas um template com `{{sql}}`; o
+backend insere o Markdown completo depois. Template inválido/falha do modelo
+mantém esse mesmo resultado calculado como fallback.
+
+O contrato `QueryResponse` não muda: `answer` continua sendo uma string, agora
+podendo conter tabelas GFM; as fontes continuam em `sources_used` e o texto cita
+`[n]`. O frontend deve renderizar Markdown com suporte GFM, sem executar HTML
+bruto ou carregar imagens da resposta. Não separar células por `|` manualmente:
+barras e metacaracteres nos dados são escapados. Cabeçalhos devem ser acessíveis
+e tabelas largas precisam de rolagem horizontal dentro do contêiner.
+
+O histórico guarda o mesmo Markdown em `resposta.answer`, sem migração do banco.
+Consultas antigas em texto continuam legíveis, mas não viram tabela por inferência.
+Perguntas mistas e operações sem cálculo disponível mantêm o caminho normal de geração. Quando o SQL é suficiente, a busca vetorial/BM25/RRF e o
 reranker são pulados (`motivo=calculo_sql_suficiente`, `attempted=false`);
-`consultou_vetorial=false` não indica erro. Não é preciso mudar o frontend.
+`consultou_vetorial=false` não indica erro. O frontend precisa do renderizador GFM
+para exibir tabelas; renderizar a string somente em `<p>` mostraria os separadores.
 
 “Contratos de 2025” usa o ano de assinatura; “contratos publicados em 2025”
 usa publicação. Totais incluem todos os valores registrados, inclusive zeros
@@ -82,9 +94,13 @@ e centavos. Média, mediana e extremos informativos consideram valores >=
 R$ 1,00, com essa qualificação explícita. Ausência de registros não é total
 financeiro zero, e o corpus é uma amostra, não um censo do RJ.
 
-No trace, `geracao.detalhes.metodo="sql_deterministico"`, `llm_called=false`
-e `evidencias_usadas` identificam o caminho; `prompt=[]` é esperado, não falha
-na observabilidade. Validação CLI/navegador e números conferidos no bruto:
+No trace, `geracao.detalhes.metodo="sql_template"` (ou `sql_template_fallback`)
+e `evidencias_usadas` identificam o caminho. A chamada ao modelo contém somente
+as instruções de apresentação e a pergunta, com `chunks_no_prompt=0`.
+`consulta_sql.detalhes.resultado_markdown` guarda a tabela completa, e
+`geracao.detalhes.resultado_sql_markdown` guarda o bloco SQL inserido com fontes,
+mesmo se o resumo de `answer` exceder o limite do log. Logs históricos com
+`sql_deterministico`, `llm_called=false` e prompt vazio continuam válidos. Validação CLI/navegador e números conferidos no bruto:
 [NUMERICAL_VALIDATION.md](NUMERICAL_VALIDATION.md).
 
 ## Contexto entre perguntas
