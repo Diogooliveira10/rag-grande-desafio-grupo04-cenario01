@@ -1269,12 +1269,12 @@ def _extrair_fornecedor(texto: str, bloqueados: Sequence[Span] = ()) -> tuple[Op
     for inicio_palavra, (primeira, comeca, termina) in enumerate(palavras):
         if primeira in _GENERICAS_DE_FORNECEDOR or len(primeira) < 4:
             continue
-        anteriores = [p for p, i, f in todas if f <= comeca]
+        anteriores = [p for p, i, f in todas if f <= comeca and p not in _VAZIAS_DE_NOME]
         tem_gatilho = bool(anteriores) and anteriores[-1] in _GATILHOS_DE_FORNECEDOR
         citados = [primeira]
         span: Span = (comeca, termina)
         for palavra, pos_inicio, pos_fim in palavras[inicio_palavra + 1: inicio_palavra + 6]:
-            if palavra in _GENERICAS_DE_FORNECEDOR:
+            if palavra in _GENERICAS_DE_FORNECEDOR or palavra in _VAZIAS_DE_NOME:
                 continue
             if _valor_do_catalogo(catalogo.fornecedores, citados + [palavra]) is None:
                 break
@@ -1732,6 +1732,12 @@ def _analisar_com_trechos(query: str) -> tuple[QueryFilters, str, list[Span]]:
     cnpjs, expr_cnpj = _extrair_cnpjs(texto)
     # O CNPJ sai do resto da pergunta: senão vira termo do objeto no SQL.
     trechos = valores.expressoes + expr_periodo + expr_cnpj
+    # "Quanto vale" é uma pergunta sobre valor, não objeto "vale" (mas
+    # "vale transporte" continua sendo objeto). "No acervo" declara escopo.
+    trechos += [m.span() for m in re.finditer(
+        r"\bquanto\s+(?:vale|valem)\b|\b(?:n[oa]|d[oa]|neste|nesta|desse|deste)\s+acervo(?:\s+d[oe]\s+rio de janeiro)?\b",
+        texto,
+    )]
     # Métrica, agrupamento e referência saem do texto sem as expressões que já
     # viraram filtro: em "no máximo 50 mil" o "máximo" é filtro, não métrica.
     resto = _sem_trechos(texto, trechos)
@@ -1741,8 +1747,10 @@ def _analisar_com_trechos(query: str) -> tuple[QueryFilters, str, list[Span]]:
     else:
         metrica = next((valor for padrao, valor in (
             (r"\bmediana\b", "mediana"), (r"\b(?:media|medio)\b", "media"),
-            (r"\b(?:soma|total)\b", "soma"), (r"\bvalor\b", "soma"), (r"\b(?:quantos|quantas|quantidade)\b", "contagem"),
+            (r"\b(?:quantos|quantas|quantidade)\b", "contagem"),
+            (r"\b(?:soma|total)\b", "soma"),
             (r"\b(?:maior|maiores|maximo)\b", "maximo"), (r"\b(?:menor|menores|minimo)\b", "minimo"),
+            (r"\bvalor\b", "soma"),
         ) if re.search(padrao, resto)), None)
     agrupamentos = [campo for termo, campo in (
         ("modalidade", "modalidade"), ("municipio", "municipio"), ("orgao", "orgao_nome"),
@@ -1779,6 +1787,13 @@ def _analisar_com_trechos(query: str) -> tuple[QueryFilters, str, list[Span]]:
     municipio, trecho_municipio = _extrair_municipio(texto)
     fornecedor, trecho_fornecedor = _extrair_fornecedor(
         texto, [s for s in (trecho_municipio,) if s])
+    if fornecedor and orgao and trecho_fornecedor and re.search(
+        r"\b(?:fornecedor(?:a)?|empresa|contratada)\s+(?:(?:a|o|da|do|de|e)\s+)*$",
+        texto[:trecho_fornecedor[0]],
+    ) and set(_tokens_de_nome(orgao)) & set(_tokens_de_nome(fornecedor)):
+        # Uma entidade pode constar nos dois catálogos; o papel explicitamente
+        # pedido prevalece, sem criar um segundo filtro por órgão.
+        orgao, sigla = None, None
     if municipio and not (orgao and _normalize(municipio) in _normalize(orgao)):
         # "Prefeitura de Maricá" já prende no órgão: não repetir o município,
         # que sozinho traria os 23 órgãos da cidade em vez da prefeitura.

@@ -33,6 +33,8 @@ from src.obs import Stage, default_logger
 from src.query_analysis import texto_sem_filtros
 from src.schema import Chunk, ChunkMetadata, Natureza, QueryFilters, QueryIntent
 from src.structured_db import Banco
+from src.sql_markdown import tabela_markdown, texto_markdown
+from src.sensitivity import mascarar
 
 DOCUMENTS_FILE = structured_db.DOCUMENTS_FILE
 
@@ -245,6 +247,7 @@ class Consulta:
     # que resumia a lista e deixava registros de fora. Com um pedido além da
     # lista ("há dados suficientes para concluir?", "quais regras?"), False.
     listagem_direta: bool = False
+    incluir_total_geral: bool = False
 
 
 # Contrato de compilação apenas: estas tabelas de fatos não são criadas aqui.
@@ -452,7 +455,11 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
     # Particípio + "por" + plural é o agente, não agrupamento: "publicadas por
     # órgãos públicos", "contratados por municípios". "Total por órgão" agrupa.
     texto_agrupamento = _RE_AGENTE.sub(" ", texto)
-    if _RE_EVOLUCAO.search(texto):
+    orgaos_e_total = bool(re.search(r"\bquais orgaos\b", texto)
+                          and re.search(r"\b(?:total|soma)\b", texto))
+    if orgaos_e_total:
+        tipo = "agrupamento"
+    elif _RE_EVOLUCAO.search(texto):
         tipo = "evolucao"
     elif _RE_AGRUPAMENTO.search(texto_agrupamento):
         tipo = "agrupamento"
@@ -493,17 +500,21 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
     limite = LIMITE_RANKING
     if n := _RE_N_RANKING.search(texto):
         limite = _NUMEROS_POR_EXTENSO.get(n.group(1)) or int(n.group(1))
+    elif tipo == "ranking" and re.search(r"\b(?:o|qual)\s+(?:o\s+)?(?:maior|menor)\s+contrato\b", texto):
+        limite = 1
     agrupar_por = "modalidade"
     if tabela == "pca_planos":
         agrupar_por = "unidade_nome"
-    elif "por orgao" in texto_agrupamento:
+    elif orgaos_e_total or "por orgao" in texto_agrupamento:
         agrupar_por = "orgao_nome"
     elif "por municipio" in texto_agrupamento:
         agrupar_por = "municipio"
     elif "por esfera" in texto_agrupamento:
         agrupar_por = "esfera"
 
-    metrica = "contagem"
+    metrica = filtros.metrica or "contagem"
+    if orgaos_e_total:
+        metrica = "soma"
     if tabela == "contratacoes" and re.search(r"\bfornecedo(?:r|res)\b", texto) and "valor total" in texto:
         tipo = "agrupamento"
         agrupar_por = "fornecedor"
@@ -570,7 +581,8 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
     termos_objeto = _termos_do_objeto(texto_objeto) if tabela == "contratacoes" else ()
     # O CNPJ citado também delimita o pedido ("contratos do fornecedor de CNPJ X").
     if (tipo == "listagem" and not termos_objeto and not modalidade_termos and not orgao_termos
-            and not analiticos.get("cnpj")):
+            and not analiticos and primeiro_ano is None and ultimo_ano is None
+            and filtros.valor_min is None and filtros.valor_max is None):
         return None  # "Quais contratos existem?" sem assunto: a busca normal responde
     return Consulta(
         tabela=tabela,
@@ -607,6 +619,7 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
         pagamento_citado=bool(_RE_PAGAMENTO.search(texto)),
         listagem_direta=(tipo == "listagem" and not _RE_NORMA_NUMERADA.search(texto)
                          and not _RE_PEDIDO_ALEM_DA_LISTA.search(texto)),
+        incluir_total_geral=orgaos_e_total,
     )
 
 
@@ -866,7 +879,31 @@ def _comparacao_esferas_insuficiente(consulta: Consulta, por_esfera: dict[str, l
             f"têm registros com valor >= R$ 1,00 ({detalhe}).")
 
 
-def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao: str) -> tuple[str, list[str]]:
+def _metricas_tabela(valores: list[float], *, n: Optional[int] = None) -> dict[str, Any]:
+    informativos = [v for v in valores if _tem_valor(v)]
+    return {"n": len(valores) if n is None else n,
+            "total": sum((Decimal(str(v)) for v in valores), Decimal(0)) if valores else None,
+            "media": statistics.fmean(informativos) if informativos else None,
+            "mediana": statistics.median(informativos) if informativos else None,
+            "minimo": min(informativos) if informativos else None,
+            "maximo": max(informativos) if informativos else None}
+
+
+def _tabela_metricas(consulta: Consulta, registros: list[dict], rotulo: str) -> str:
+    nomes = {"total": "Total registrado", "media": "Média (valores ≥ R$ 1,00)",
+             "mediana": "Mediana (valores ≥ R$ 1,00)", "minimo": "Mínimo (≥ R$ 1,00)",
+             "maximo": "Máximo (≥ R$ 1,00)"}
+    campos = (["total", "media", "mediana", "minimo", "maximo"] if consulta.comparacao_esferas
+              else [] if consulta.metrica == "contagem"
+              else [{"soma": "total"}.get(consulta.metrica, consulta.metrica)])
+    campos = [c for c in campos if c in nomes]
+    return tabela_markdown([rotulo, "Registros", *(nomes[c] for c in campos)],
+        [[r["rotulo"], f"{r['n']} registros", *(_brl(r.get(c)) for c in campos)] for r in registros],
+        numericas=range(1, len(campos) + 2))
+
+
+def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao: str,
+              markdown: Optional[list[str]] = None) -> tuple[str, list[str]]:
     where, parametros = _where(consulta, termos, juncao)
     coluna_valor = _coluna_valor(consulta)
 
@@ -876,6 +913,10 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
             f"fornecedor, objeto, valor_contratado FROM {consulta.tabela}{where} LIMIT 1"
         )
         linhas = banco.consultar(sql, parametros)
+        if markdown is not None:
+            markdown.append(tabela_markdown(["PNCP", "Órgão", "Fornecedor", "Valor contratado", "Assinatura", "Objeto"],
+                [[l["numero_controle_pncp"], l["orgao_nome"], l["fornecedor"], _brl(l["valor_contratado"]),
+                  l["data_assinatura"], _resumir(l["objeto"], 220)] for l in linhas], numericas=[3]))
         return sql, [
             f"PNCP {linha['numero_controle_pncp']} | órgão: {linha['orgao_nome']} | "
             f"fornecedor: {linha['fornecedor'] or 'não informado'} | "
@@ -897,7 +938,7 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
             if consulta.tipo == "listagem":
                 colunas = f"numero_controle_pncp, {coluna_data} AS data_referencia, orgao_nome, esfera, municipio, modalidade, fornecedor, objeto, {coluna_valor} AS valor"
             else:
-                colunas = f"{coluna_data} AS data_referencia, orgao_nome, esfera, municipio, modalidade, fornecedor, objeto, {coluna_valor} AS valor"
+                colunas = f"numero_controle_pncp, {coluna_data} AS data_referencia, orgao_nome, esfera, municipio, modalidade, fornecedor, objeto, {coluna_valor} AS valor"
         ordem = (f"CASE WHEN {coluna_valor} IS NULL THEN 1 ELSE 0 END, {coluna_valor} {consulta.ordem}"
                  if consulta.tipo == "listagem" else f"{coluna_valor} {consulta.ordem}")
         sql = (
@@ -905,10 +946,24 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
             f"ORDER BY {ordem} LIMIT {consulta.limite}"
         )
         linhas = banco.consultar(sql, parametros)
+        if markdown is not None:
+            if consulta.tabela == "pca_planos":
+                markdown.append(tabela_markdown(["Posição", "Ano PCA", "Unidade", "Itens", "Valor registrado"],
+                    [[i, l["ano_pca"], l["unidade_nome"], l["quantidade_itens"], _brl(l["valor"])]
+                     for i, l in enumerate(linhas, 1)], numericas=[0, 3, 4]))
+            else:
+                data_rotulo = "Assinatura" if consulta.referencia_temporal == "assinatura" else "Publicação"
+                markdown.append(tabela_markdown(["Posição", "PNCP", "Órgão", "Fornecedor", "Valor registrado",
+                                                  data_rotulo, "Esfera", "Município", "Modalidade", "Objeto"],
+                    [[i, l["numero_controle_pncp"], l["orgao_nome"], l["fornecedor"], _brl(l["valor"]),
+                      l["data_referencia"], l["esfera"], l["municipio"], l["modalidade"], _resumir(l["objeto"], 180)]
+                     for i, l in enumerate(linhas, 1)], numericas=[0, 4]))
         if consulta.tipo == "listagem" and consulta.tabela == "contratacoes":
             total = banco.consultar(f"SELECT COUNT(*) AS n FROM {consulta.tabela}{where}", parametros)[0]["n"]
+            if markdown is not None and linhas:
+                markdown.insert(0, f"{total} registros atendem aos filtros; os {len(linhas)} de maior valor:")
             return sql, [f"{total} registros atendem aos filtros; os {len(linhas)} de maior valor:"] + [
-                f"{i}. PNCP {l['numero_controle_pncp']} | {_brl(l['valor'])} | {l['data_referencia']} | {l['orgao_nome']} ({l['esfera']}, {l['municipio']}) | "
+                f"{i}. PNCP {l['numero_controle_pncp']} | {_brl(l['valor'])} | {l['data_referencia'] or 'não informada'} | {l['orgao_nome'] or 'não informado'} ({l['esfera'] or 'não informada'}, {l['municipio'] or 'não informado'}) | "
                 f"modalidade: {l['modalidade'] or 'não informada'} | fornecedor: {l['fornecedor'] or 'não informado'} | "
                 # 180: o objeto é o que identifica o contrato; com 70, "remoção de
                 # pacientes em ambulância tipo D" virava "remoção de pacien…".
@@ -921,8 +976,9 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
                 for i, l in enumerate(linhas, 1)
             ]
         return sql, [
-            f"{i}. {_brl(l['valor'])} | {l['data_referencia']} | {l['orgao_nome']} ({l['esfera']}, {l['municipio']}) | "
-            f"{l['modalidade']} | {_resumir(l['objeto'], 60)}"
+            f"{i}. {_brl(l['valor'])} | {l['data_referencia'] or 'não informada'} | {l['orgao_nome'] or 'não informado'} ({l['esfera'] or 'não informada'}, {l['municipio'] or 'não informado'}) | "
+            f"modalidade: {l['modalidade'] or 'não informada'} | fornecedor: {l['fornecedor'] or 'não informado'} | "
+            f"PNCP {l['numero_controle_pncp']} | {_resumir(l['objeto'], 180)}"
             for i, l in enumerate(linhas, 1)
         ]
 
@@ -939,6 +995,7 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
             where_nulo = where + (" AND " if where else " WHERE ") + f"({nulos})"
             sem_campo = banco.consultar(f"SELECT COUNT(*) AS n FROM {consulta.tabela}{where_nulo}", parametros)[0]["n"]
             where += (" AND " if where else " WHERE ") + " AND ".join(f"{c} IS NOT NULL" for c in obrigatorios)
+        registros_tabela = []
         if consulta.metrica == "mediana":
             sql = f"SELECT {coluna}, {coluna_valor} AS valor FROM {consulta.tabela}{where}"
             valores_por_grupo: dict[tuple, list[float]] = {}
@@ -954,6 +1011,9 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
                        reverse=consulta.ordem == "DESC")
             grupos = [f"{' / '.join(str(k or 'não informado') for k in key)}: {_estatisticas(values)}"
                       for key, values in items[:consulta.limite]]
+            registros_tabela = [{"rotulo": " / ".join(str(k or 'não informado') for k in key),
+                                 **_metricas_tabela(values, n=contagens[key])}
+                                for key, values in items[:consulta.limite]]
         else:
             valor_informado = f"CASE WHEN {coluna_valor} >= {_VALOR_MINIMO_INFORMADO} THEN {coluna_valor} END"
             funcao = {"soma": "SUM", "media": "AVG", "minimo": "MIN", "maximo": "MAX"}.get(consulta.metrica)
@@ -971,12 +1031,19 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
             sql += f" ORDER BY {ordem}"
             if consulta.plano_tipado or consulta.metrica != "contagem":
                 sql += f" LIMIT {consulta.limite}"
+            registros = banco.consultar(sql, parametros)
+            registros_tabela = [{**l, "rotulo": " / ".join(str(l[c] or 'não informado') for c in campos)}
+                                for l in registros]
             grupos = [
                 f"{'Fornecedor ' if coluna == 'fornecedor' else ''}{' / '.join(str(l[c] or 'não informado') for c in campos)}: "
                 f"{l['n']} registros, total {_brl(l['total'])}, média {_brl(l['media'])}, "
                 f"mínimo {_brl(l['minimo'])}, máximo {_brl(l['maximo'])}"
-                for l in banco.consultar(sql, parametros)
+                for l in registros
             ]
+        if markdown is not None and registros_tabela:
+            rotulos = {"orgao_nome": "Órgão", "fornecedor": "Fornecedor", "modalidade": "Modalidade",
+                       "esfera": "Esfera", "municipio": "Município", "unidade_nome": "Unidade"}
+            markdown.append(_tabela_metricas(consulta, registros_tabela, " / ".join(rotulos.get(c, c) for c in campos)))
         if not grupos and consulta.minimo_por_grupo is not None:
             grupos = [f"Nenhum {coluna} tem {consulta.minimo_por_grupo} ou mais registros com esses filtros."]
         if sem_campo and not grupos:
@@ -987,6 +1054,19 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
                       f"com estes dados não é possível dizer qual {coluna} é a mais frequente."]
         elif sem_campo:
             grupos.append(f"({sem_campo} registros sem informação de {coluna} ficaram fora dos grupos.)")
+        if consulta.incluir_total_geral:
+            # Total de TODO o recorte, não só dos grupos que cabem no LIMIT.
+            totais = banco.consultar(
+                f"SELECT COUNT(*) AS n, COUNT(DISTINCT orgao_nome) AS orgaos, "
+                f"SUM({coluna_valor}) AS total FROM {consulta.tabela}{where}", parametros,
+            )[0]
+            grupos.insert(0, f"Total geral: {_brl(totais['total'])}; {totais['n']} registros em "
+                          f"{totais['orgaos']} órgãos; exibidos até {consulta.limite} órgãos por valor.")
+        if markdown is not None:
+            # Totais gerais e lacunas não são linhas de dados dos grupos.
+            notas = [g for g in grupos if g.startswith(("Total geral:", "(", "Nenhum"))]
+            markdown[:0] = [texto_markdown(n) for n in notas if n.startswith("Total geral:")]
+            markdown.extend(texto_markdown(n) for n in notas if not n.startswith("Total geral:"))
         return sql, grupos
 
     if consulta.tipo == "evolucao":
@@ -1016,11 +1096,18 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
             missing = sorted(expected - set(p for p, _ in conhecidos))
             if missing:
                 linhas.append("Meses sem registros com valor: " + ", ".join(missing) + "; não são valores zero.")
+        if markdown is not None:
+            markdown.append(_tabela_metricas(consulta, [
+                {"rotulo": p, **_metricas_tabela(v)} for p, v in conhecidos], "Período"))
+            markdown.extend(texto_markdown(l) for l in linhas if l.startswith(("Período observado", "Comparação", "Meses sem")))
         return sql, linhas
 
     if consulta.plano_tipado and consulta.metrica == "contagem":
         sql = f"SELECT COUNT(*) AS n FROM {consulta.tabela}{where}"
-        return sql, [f"Contagem no recorte solicitado: {banco.consultar(sql, parametros)[0]['n']} registros (inclui registros sem valor)."]
+        n = banco.consultar(sql, parametros)[0]['n']
+        if markdown is not None:
+            markdown.append(tabela_markdown(["Métrica", "Resultado"], [["Contagem no recorte solicitado", f"{n} registros"]], numericas=[1]))
+        return sql, [f"Contagem no recorte solicitado: {n} registros (inclui registros sem valor)."]
 
     if consulta.tipo == "estatistica":
         coluna_esfera = "esfera" if consulta.tabela == "contratacoes" else "NULL"
@@ -1030,6 +1117,10 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
             total = linha["total"] or 0
             qtd = linha["qtd"] or 0
             media = total / qtd if qtd else 0
+            if markdown is not None:
+                markdown.append(tabela_markdown(["Total planejado", "Quantidade de itens", "Média por item"],
+                    [[_brl(total), qtd, _brl(media)]], numericas=[0, 1, 2]))
+                markdown.append("Média ponderada: total planejado dividido pela quantidade total de itens.")
             return sql, [
                 f"Geral: Total {_brl(total)}; {qtd} itens; Média por item {_brl(media)}.",
                 "Nota: Média ponderada calculada sobre o total planejado dividido pela quantidade total de itens."
@@ -1050,6 +1141,7 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
             qualificacao += f", {simbolicos} com valor abaixo de R$ 1,00"
         geral = f"Geral: {qualificacao}; valores registrados: " + geral[7:]
     resultado = [geral]
+    insuficiente = None
     if consulta.tabela == "contratacoes":
         por_esfera: dict[str, list[float]] = {}
         for l in todas:
@@ -1059,6 +1151,19 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
         insuficiente = _comparacao_esferas_insuficiente(consulta, por_esfera)
         if insuficiente:
             resultado.append(insuficiente)
+    if markdown is not None and todas:
+        registros = [{"rotulo": "Recorte solicitado", **_metricas_tabela(
+            [float(l['valor']) for l in todas if l['valor'] is not None], n=len(todas))}]
+        if consulta.comparacao_esferas:
+            for esfera in sorted({l['esfera'] or 'não informada' for l in todas}):
+                grupo = [l for l in todas if (l['esfera'] or 'não informada') == esfera]
+                registros.append({"rotulo": esfera, **_metricas_tabela(
+                    [float(l['valor']) for l in grupo if l['valor'] is not None], n=len(grupo))})
+        markdown.append(_tabela_metricas(consulta, registros, "Recorte"))
+        if ausentes or simbolicos:
+            markdown.append(f"{ausentes} registros sem valor informado; {simbolicos} com valor abaixo de R$ 1,00. Campos ausentes não são zero.")
+        if consulta.comparacao_esferas and insuficiente:
+            markdown.append(texto_markdown(insuficiente))
     return sql, resultado
 
 
@@ -1182,6 +1287,7 @@ def _resolver_valores(consulta: Consulta, banco: Banco) -> Consulta:
     # um órgão do banco ("comando aeronautica"), vira filtro de órgão.
     termos_como_orgao = (
         not consulta.orgao_termos and len(consulta.termos_objeto) >= 2 and consulta.tabela == "contratacoes"
+        and not dict(consulta.filtros_analiticos).get("fornecedor")
     )
     if consulta.orgao_termos or termos_como_orgao:
         colunas = {
@@ -1203,7 +1309,8 @@ def _resolver_valores(consulta: Consulta, banco: Banco) -> Consulta:
     return replace(consulta, **mudancas) if mudancas else consulta
 
 
-def executar_consulta(consulta: Consulta, banco: Banco, recorte: Optional[dict] = None) -> tuple[str, str, list[str]]:
+def executar_consulta(consulta: Consulta, banco: Banco, recorte: Optional[dict] = None,
+                     *, markdown: Optional[list[str]] = None) -> tuple[str, str, list[str]]:
     """Roda a consulta e devolve (sql, cabeçalho, linhas de resultado).
 
     Com ``recorte`` (dict vazio), preenche as condições da evidência —
@@ -1235,10 +1342,26 @@ def executar_consulta(consulta: Consulta, banco: Banco, recorte: Optional[dict] 
             tentativas.append((uteis, "OR"))
     for indice, (termos, juncao) in enumerate(tentativas):
         if not termos or contagem(termos, juncao):
-            sql, linhas = _executar(banco, consulta, termos, juncao)
+            tabelas: list[str] = []
+            sql, linhas = _executar(banco, consulta, termos, juncao, markdown=tabelas if markdown is not None else None)
+            if consulta.tipo in {"ranking", "estatistica", "agrupamento", "evolucao"} and consulta.metrica != "contagem":
+                where, params = _where(consulta, termos, juncao)
+                coluna = _coluna_valor(consulta)
+                extremo = banco.consultar(
+                    f"SELECT MAX({coluna}) AS maior FROM {consulta.tabela}{where}", params,
+                )[0]["maior"]
+                if extremo is not None and float(extremo) >= config.VALUE_REVIEW_THRESHOLD:
+                    linhas.append(
+                        f"Alerta de qualidade: o recorte contém valor registrado de {_brl(extremo)}, "
+                        "igual ou acima do limiar de conferência. Confirme na fonte PNCP antes de interpretar "
+                        "totais ou rankings; os valores foram preservados, sem correção ou exclusão."
+                    )
             if recorte is not None:
                 _preencher_recorte(recorte, consulta, banco, total, contagem(termos, juncao),
                                    termos, juncao, relaxados=_relaxamentos(indice, consulta, termos, juncao))
+            if markdown is not None and (recorte is None or recorte.get("registros_correspondentes")):
+                tabelas.extend(texto_markdown(l) for l in linhas if l.startswith("Alerta de qualidade:"))
+                markdown.extend(m for m in tabelas if m)
             return sql, _cabecalho(consulta, total, termos, juncao), linhas
     where, _ = _where(consulta, consulta.termos_objeto, "OR")
     if recorte is not None:
@@ -1375,7 +1498,7 @@ _POLITICA_LISTAGEM = ("Campo sem valor aparece como \"não informado\"; valor de
 
 
 def _chunks(consulta: Consulta, sql: str, cabecalho: str, linhas: list[str], banco: Banco,
-            recorte: Optional[dict[str, Any]] = None) -> list[Chunk]:
+            recorte: Optional[dict[str, Any]] = None, *, markdown: str = "") -> list[Chunk]:
     """Resultado em um ou mais chunks que cabem em ``GENERATION_CHUNK_CHARS``
     (a geração corta o que passar disso); o cabeçalho se repete em cada parte."""
     limite = max(300, config.GENERATION_CHUNK_CHARS - 40)
@@ -1386,7 +1509,7 @@ def _chunks(consulta: Consulta, sql: str, cabecalho: str, linhas: list[str], ban
         if tamanho > limite and (partes[-1] or len(partes) == 1):
             partes.append([])
         partes[-1].append(linha)
-    sem_registros = not linhas or all(
+    sem_registros = bool(recorte and recorte.get("tipo_resultado") == "sem_correspondencia") or not linhas or all(
         linha.strip().casefold() == "(nenhum registro)"
         or linha.strip().casefold().startswith("nenhum registro encontrado")
         for linha in linhas)
@@ -1407,6 +1530,11 @@ def _chunks(consulta: Consulta, sql: str, cabecalho: str, linhas: list[str], ban
                 chunking_strategy="consulta_sql",
                 extras={"sql": sql, "tipo": consulta.tipo, "parte": indice, "partes": len(partes),
                         "resultado_sql": {"cabecalho": cabecalho, "linhas": parte,
+                            # A primeira evidência também contém a apresentação
+                            # integral da consulta, não limitada ao prompt.
+                            "markdown": markdown if indice == 1 else "",
+                            "metrica": consulta.metrica, "tipo": consulta.tipo,
+                            "comparacao_esferas": consulta.comparacao_esferas,
                             "politica": _POLITICA_LISTAGEM if consulta.tipo == "listagem" else
                             "Totais somam os valores registrados, inclusive zeros/centavos; "
                             "média, mediana, mínimo e máximo consideram valores >= R$ 1,00. "
@@ -1482,13 +1610,18 @@ def consultar_estruturado(
                 span.extra["execucao_sql"] = consultas
                 recorte: dict[str, Any] = {}
                 with banco.sessao():
-                    sql, cabecalho, linhas = executar_consulta(consulta, banco, recorte)
-            chunks = _chunks(consulta, sql, cabecalho, linhas, banco, recorte)
+                    tabelas: list[str] = []
+                    sql, cabecalho, linhas = executar_consulta(consulta, banco, recorte, markdown=tabelas)
+            markdown = "\n\n".join(tabelas)
+            chunks = _chunks(consulta, sql, cabecalho, linhas, banco, recorte, markdown=markdown)
             span.extra.update({
                 "sql": sql, "linhas": len(linhas), "chunks": len(chunks),
                 # O que a consulta devolveu, para acompanhar o dado até a resposta.
                 "cabecalho": cabecalho,
                 "resultado": linhas[:_LINHAS_NO_LOG],
+                # Markdown completo, além do resumo textual legado. Nenhuma
+                # linha da tabela é removida pelo limite _LINHAS_NO_LOG.
+                "resultado_markdown": mascarar(markdown)[0],
                 "linhas_fora_do_log": max(0, len(linhas) - _LINHAS_NO_LOG),
                 "chunk_ids": [chunk.metadata.chunk_id for chunk in chunks],
                 # Confiabilidade no recorte, completude e cobertura separadas:

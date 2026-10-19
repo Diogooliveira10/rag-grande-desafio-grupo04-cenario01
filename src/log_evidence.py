@@ -57,7 +57,8 @@ def auditar_geracao(
             "conteudo_disponivel": _conteudo(c.content, c.metadata.sensitivity),
             "selecionado": c.metadata.chunk_id in selecionados_por_id,
             "motivo_exclusao": (None if c.metadata.chunk_id in selecionados_por_id else
-                                "fora_da_resposta_sql" if metodo == "sql_deterministico" else "orcamento_contexto"),
+                                "fora_da_resposta_sql" if metodo == "sql_deterministico" or metodo.startswith("sql_template")
+                                else "orcamento_contexto"),
             "conteudo_selecionado": (
                 _conteudo(selecionados_por_id[c.metadata.chunk_id].content, c.metadata.sensitivity)
                 if c.metadata.chunk_id in selecionados_por_id else None),
