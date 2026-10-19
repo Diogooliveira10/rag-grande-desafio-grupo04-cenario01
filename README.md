@@ -4,14 +4,17 @@
 
 Sistema de **Adaptive RAG** sobre contratações públicas do Estado do Rio de Janeiro: dado uma pergunta em linguagem natural, o sistema decide sozinho **onde buscar** (norma, registro estruturado, conversa ou número agregado) antes de buscar, recupera evidência híbrida (densa + BM25 + RRF + rerank) e gera uma resposta citando fontes — ou recusa, quando o caso exige.
 
-O snapshot oficial atual é a **v6**, com 1.400 arquivos nas quatro bases e limite
-de cinco arquivos por órgão e por base. São 804 arquivos municipais, 513 federais
-e 83 estaduais: uma amostra orientada às personas, sem garantia de censo.
+O snapshot oficial atual é a **v7-reparo**, com 106.667 contratos, 144.112 chunks e
+143.299 vetores. Os dados grandes (documents.jsonl, SQLite, índices) ficam
+fora do Git e são compartilhados via Google Drive:
+
+**📁 [Dados V7 no Google Drive](https://drive.google.com/drive/folders/1GEHoZALIIxp9hYR8V_WhKweRqQkw824r?usp=drive_link)**
+
 Consulte o [inventário](CORPUS_INVENTORY.md), o
-[registro da v6](docs/registro_execucao_v6.md) e o
-[fluxo de consulta da v6](docs/CLI.md#snapshot-oficial-v6).
-A consulta também inclui o [suplemento sintético conversacional](docs/emails_sinteticos.md):
-25 conversas fictícias (45 mensagens), em uma base separada dos dados reais da v6.
+[plano de correção](docs/PLANO_CORRECAO_SQL_PIPELINE_V7.md) e o
+[fluxo de consulta](docs/CLI.md).
+O suplemento sintético conversacional (25 e-mails) também está ativo:
+[docs/emails_sinteticos.md](docs/emails_sinteticos.md).
 
 Os vetores ativos em `data/embeddings/2026-10-07_21-18-41_ocr-recovery/` (a v6
 após a recuperação OCR; a geração original fica em `2026-09-30_12-08-51/`), os índices em `index/`,
@@ -136,6 +139,10 @@ A escrita usa fila limitada e lotes, coordenados entre processos por SQLite/WAL 
 
 ## Estrutura do repositório
 
+[Reparo incremental V7](docs/REPARO_V7.md): reutilização dos módulos existentes,
+candidato separado, SQLite compatível, validações curtas e lacunas documentadas.
+A v6 continua ativa; o candidato não foi promovido.
+
 ```
 ├── acompanhamento/              ← relato individual + resumo do dia, a cada encontro
 ├── docs/                         ← guia da interface CLI e capturas de tela
@@ -212,9 +219,27 @@ powershell -ExecutionPolicy Bypass -File scripts\setup.ps1   # Windows
 ```
 
 O script cria o `.venv`, instala o `requirements-lock.txt`, copia
-`.env.example` para `.env` (quando falta) e confere os artefatos versionados
-da v6 (SQLite, índice FAISS, snapshot de embeddings). Como os dados da v6
-estão no Git, **não é preciso recoletar para consultar**:
+`.env.example` para `.env` (quando falta) e confere os artefatos versionados.
+
+**Dados V7:** os arquivos grandes (629 MB) ficam fora do Git.
+Baixe do Google Drive e copie para as pastas corretas:
+
+**📁 [Dados V7 no Google Drive](https://drive.google.com/drive/folders/1GEHoZALIIxp9hYR8V_WhKweRqQkw824r?usp=drive_link)**
+
+```
+V7-dados/
+├── documents.jsonl          → data/normalized/
+├── base_estruturada.sqlite  → data/structured/
+└── index/                   → raiz do projeto
+```
+
+Ou, sem o Drive, reconstrua do manifesto (lento, ~2h+):
+```bash
+python -m src.fetch_corpus fetch --manifest corpus_manifest.yaml
+python -m src.structured_db build
+```
+
+Depois de ter os dados:
 
 ```powershell
 .venv\Scripts\python -m uvicorn app.api:app --host 127.0.0.1 --port 8080

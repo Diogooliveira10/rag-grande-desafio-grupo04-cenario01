@@ -153,30 +153,58 @@ def test_filtros_para_retrieve_vazio_quando_sem_filtro():
     assert qa.filtros_para_retrieve(QueryFilters()) == {}
 
 
+def test_schema_llm_aceita_cnpj_analitico():
+    from src.schema import QueryIntent
+
+    schema = qa._schema_analise()
+    campos = schema["$defs"]["QueryFilters"]["properties"]["filtros_analiticos"]["properties"]
+    assert "cnpj" in campos
+    agrupamentos = schema["$defs"]["QueryFilters"]["properties"]["agrupamentos"]["items"]["enum"]
+    assert "cnpj" not in agrupamentos
+    intent = QueryIntent.model_validate({
+        "pergunta": "Contratos da empresa",
+        "bases": ["estruturada"],
+        "filtros": {"filtros_analiticos": {"cnpj": "44292391000130"}},
+    })
+    assert intent.filtros.filtros_analiticos["cnpj"] == "44292391000130"
+    with pytest.raises(ValueError, match="Campo analítico"):
+        QueryIntent.model_validate({
+            "pergunta": "Agrupar por CNPJ",
+            "bases": ["estruturada"],
+            "operacao": "agrupamento",
+            "termos_objeto": [],
+            "filtros": {
+                "metrica": "contagem",
+                "agrupamentos": ["cnpj"],
+                "filtros_analiticos": {},
+            },
+        })
+
+
 def test_filtros_para_retrieve_orgao_usa_contains():
     filtros = QueryFilters(orgao="Secretaria de Saude")
     convertido = qa.filtros_para_retrieve(filtros)
-    assert convertido["orgao"] == {"operator": "contains", "value": "Secretaria de Saude", "optional": True}
+    assert convertido["orgao"] == {"operator": "contains", "value": "Secretaria de Saude", "optional": False}
 
 
 def test_filtros_para_retrieve_valor_minimo_isolado():
     filtros = QueryFilters(valor_min=100_000.0)
     convertido = qa.filtros_para_retrieve(filtros)
-    assert convertido["valor"] == {"operator": ">=", "value": 100_000.0, "optional": True}
+    assert convertido["valor"] == {"operator": ">=", "value": 100_000.0, "optional": False}
 
 
 def test_filtros_para_retrieve_valor_maximo_isolado():
     filtros = QueryFilters(valor_max=500_000.0)
     convertido = qa.filtros_para_retrieve(filtros)
-    assert convertido["valor"] == {"operator": "<=", "value": 500_000.0, "optional": True}
+    assert convertido["valor"] == {"operator": "<=", "value": 500_000.0, "optional": False}
 
 
 def test_filtros_para_retrieve_faixa_de_valor_vira_lista_de_condicoes():
     filtros = QueryFilters(valor_min=100_000.0, valor_max=500_000.0)
     convertido = qa.filtros_para_retrieve(filtros)
     assert convertido["valor"] == [
-        {"operator": ">=", "value": 100_000.0, "optional": True},
-        {"operator": "<=", "value": 500_000.0, "optional": True},
+        {"operator": ">=", "value": 100_000.0, "optional": False},
+        {"operator": "<=", "value": 500_000.0, "optional": False},
     ]
 
 
@@ -184,20 +212,20 @@ def test_filtros_para_retrieve_ano_vira_faixa_de_data_vigencia():
     filtros = QueryFilters(ano=2023)
     convertido = qa.filtros_para_retrieve(filtros)
     assert convertido["data_vigencia"] == [
-        {"operator": ">=", "value": date(2023, 1, 1), "optional": True},
-        {"operator": "<", "value": date(2024, 1, 1), "optional": True},
+        {"operator": ">=", "value": date(2023, 1, 1), "optional": False},
+        {"operator": "<", "value": date(2024, 1, 1), "optional": False},
     ]
 
 
-def test_filtro_opcional_mantem_chunk_sem_o_campo_e_descarta_o_de_fora():
+def test_filtro_obrigatorio_aplica_ano_e_ignora_natureza_incompativel():
     """Caso real do PCA: o indicador com a resposta não tem data_vigencia."""
     from src.retrieve import _matches_filters
 
     filtros = qa.filtros_para_retrieve(QueryFilters(ano=2025))
 
     assert _matches_filters({"base_id": "pca_agregado"}, filtros)
-    assert _matches_filters({"data_vigencia": "2025-06-30"}, filtros)
-    assert not _matches_filters({"data_vigencia": "2023-06-30"}, filtros)
+    assert _matches_filters({"base_id": "contratos_estruturado", "data_vigencia": "2025-06-30"}, filtros)
+    assert not _matches_filters({"base_id": "contratos_estruturado", "data_vigencia": "2023-06-30"}, filtros)
 
 
 # --------------------------------------------------------------------------
@@ -326,8 +354,8 @@ def test_periodo_entre_dois_anos(pergunta):
 def test_periodo_vira_intervalo_de_data_vigencia_do_inicio_ao_fim():
     convertido = qa.filtros_para_retrieve(QueryFilters(ano=2024, ano_final=2025))
     assert convertido["data_vigencia"] == [
-        {"operator": ">=", "value": date(2024, 1, 1), "optional": True},
-        {"operator": "<", "value": date(2026, 1, 1), "optional": True},
+        {"operator": ">=", "value": date(2024, 1, 1), "optional": False},
+        {"operator": "<", "value": date(2026, 1, 1), "optional": False},
     ]
 
 
@@ -359,6 +387,55 @@ def test_temporal_reference_recognizes_natural_word_forms(question, reference):
     assert filtros.referencia_temporal == reference
     assert filtros.ano == 2025
     assert "data_vigencia" not in qa.filtros_para_retrieve(filtros)
+
+
+@pytest.mark.parametrize("question,reference,field", [
+    ("Quais contratos de 2025?", "assinatura", "data_assinatura"),
+    ("Quais contratações de 2025?", "publicacao", "data_publicacao"),
+    ("Quais compras em 2025?", "publicacao", "data_publicacao"),
+    ("Quanto foi planejado no plano de contratações de 2025?", "pca", "ano_pca"),
+])
+def test_default_temporal_reference_is_resolved_once_for_domain(question, reference, field):
+    filtros = qa.analisar_query(question).filtros
+
+    assert filtros.referencia_temporal == reference
+    assert field in qa.filtros_para_retrieve(filtros)
+    assert "data_vigencia" not in qa.filtros_para_retrieve(filtros)
+
+
+def test_explicit_publication_reference_overrides_contract_default():
+    filtros = qa.analisar_query("Contratos publicados em 2025").filtros
+
+    assert filtros.referencia_temporal == "publicacao"
+    assert "data_publicacao" in qa.filtros_para_retrieve(filtros)
+    assert "data_assinatura" not in qa.filtros_para_retrieve(filtros)
+
+
+@pytest.mark.parametrize("question,role", [
+    ("Quanto a Secretaria de Estado de Saúde planejou no plano de contratações de 2025?", "unidade"),
+    ("Qual o total planejado pelo órgão Secretaria de Estado de Saúde no PCA 2025?", "orgao"),
+    ("Qual o total da unidade responsável Secretaria de Estado de Saúde no PCA 2025?", "unidade"),
+])
+def test_pca_secretaria_resolve_o_papel_da_entidade(question, role):
+    filtros = qa.analisar_query(question).filtros
+    retrieve = qa.filtros_para_retrieve(filtros)
+    assert filtros.papel_orgao == role
+    assert ("unidade_nome" if role == "unidade" else "orgao") in retrieve
+    assert ("orgao" if role == "unidade" else "unidade_nome") not in retrieve
+
+
+def test_temporal_reference_explicitly_marks_yearless_contract_query_as_unchanged():
+    filtros = qa.analisar_query("Quais contratos existem?").filtros
+    assert filtros.referencia_temporal is None
+
+
+@pytest.mark.parametrize("question,role", [
+    ("CNPJ do fornecedor 05.340.639/0001-30", "fornecedor"),
+    ("CNPJ do órgão 29.131.075/0001-93", "orgao"),
+    ("CNPJ 29.131.075/0001-93", None),
+])
+def test_cnpj_only_gets_a_role_when_the_question_names_it(question, role):
+    assert qa.analisar_query(question).filtros.papel_cnpj == role
 
 
 def test_ano_isolado_nao_tem_ano_final():
@@ -449,7 +526,7 @@ def test_periodo_aberto(pergunta, intervalo):
 
 def test_periodo_aberto_vira_so_um_limite_de_data_vigencia():
     convertido = qa.filtros_para_retrieve(QueryFilters(ano_ate=2023))
-    assert convertido["data_vigencia"] == [{"operator": "<", "value": date(2024, 1, 1), "optional": True}]
+    assert convertido["data_vigencia"] == [{"operator": "<", "value": date(2024, 1, 1), "optional": False}]
 
 
 @pytest.mark.parametrize("pergunta", [
@@ -521,7 +598,7 @@ def test_pergunta_sobre_vigencia_de_norma_filtra_o_inicio_da_vigencia(pergunta):
     assert filtros.referencia_temporal == "vigencia"
     retrieve = qa.filtros_para_retrieve(filtros)
     fim_do_ano = date(filtros.intervalo_de_anos()[1] + 1, 1, 1)
-    assert retrieve["data_vigencia_inicio"] == {"operator": "<", "value": fim_do_ano, "optional": True}
+    assert retrieve["data_vigencia_inicio"] == {"operator": "<", "value": fim_do_ano, "optional": False}
     assert "data_vigencia" not in retrieve
 
 
@@ -878,8 +955,8 @@ def test_modalidade_so_em_pergunta_sobre_dados(pergunta, modalidade):
 def test_modalidade_vira_contains_de_cada_palavra_na_busca():
     filtros = qa.analisar_query("quantos pregões eletrônicos em 2025?").filtros
     assert qa.filtros_para_retrieve(filtros)["modalidade"] == [
-        {"operator": "contains", "value": "pregao", "optional": True},
-        {"operator": "contains", "value": "eletronico", "optional": True},
+        {"operator": "contains", "value": "pregao", "optional": False},
+        {"operator": "contains", "value": "eletronico", "optional": False},
     ]
 
 # Catálogo de órgãos do corpus e municípios do RJ (02/10, revisão adversarial).
@@ -953,6 +1030,19 @@ def test_esfera_nao_vem_de_lugar_nem_de_norma(pergunta, esfera):
     assert qa.analisar_query(pergunta).filtros.filtros_analiticos.get("esfera") == esfera
 
 
+def test_municipio_locativo_nao_vira_orgao_prefeitura():
+    filters = qa.analisar_query(
+        "Qual a mediana do preço unitário homologado no município do Rio de Janeiro?"
+    ).filtros
+    assert filters.orgao is None
+    assert filters.filtros_analiticos.get("municipio") == "Rio de Janeiro"
+
+
+def test_municipio_administrativo_explicito_continua_sendo_orgao():
+    filters = qa.analisar_query("Quanto planejou o Município de Maricá?").filtros
+    assert filters.orgao == "MUNICIPIO DE MARICA"
+
+
 @pytest.mark.parametrize("pergunta", [
     "Compare o valor médio de pregões e dispensas em 2025",
     "Como funciona a dispensa de licitação?",
@@ -991,6 +1081,63 @@ def test_publicacao_explicita_completa_referencia_omitida():
     assert result.intencoes[0].filtros.referencia_temporal == 'publicacao'
 
 
+def test_llm_default_periodo_temporal_nao_pode_conflitar_com_regra_de_dominio():
+    import json
+    raw = {'intencoes': [{'pergunta': 'mediana dos contratos de 2025', 'bases': ['estruturada'],
+                          'operacao': 'estatistica',
+                          'filtros': {'ano': 2025, 'referencia_temporal': 'vigencia', 'metrica': 'mediana'}}]}
+    result = qa.analisar_query(
+        'Qual a mediana dos contratos de 2025?', modo='llm', cliente=lambda _: json.dumps(raw)
+    )
+    assert result.metodo == 'llm'
+    assert result.intencoes[0].filtros.referencia_temporal == 'assinatura'
+
+
+def test_llm_usa_papel_cnpj_explicitamente_mencionado_se_omitir_o_campo():
+    import json
+    question = 'Quais contratos do fornecedor de CNPJ 05.340.639/0001-30?'
+    raw = {'intencoes': [{'pergunta': question, 'bases': ['estruturada'],
+                          'filtros': {'filtros_analiticos': {'cnpj': '05340639000130'}}}]}
+    result = qa.analisar_query(question, modo='llm', cliente=lambda _: json.dumps(raw))
+    assert result.metodo == 'llm'
+    assert result.intencoes[0].filtros.papel_cnpj == 'fornecedor'
+
+
+def test_llm_usa_unidade_da_secretaria_no_pca_mesmo_se_omitir_o_papel():
+    import json
+    question = 'Quanto a Secretaria de Estado de Saúde planejou no plano de contratações de 2025?'
+    raw = {'intencoes': [{'pergunta': question, 'bases': ['agregada'],
+                          'operacao': 'estatistica',
+                          'filtros': {'ano': 2025, 'metrica': 'soma', 'referencia_temporal': 'pca'}}]}
+    result = qa.analisar_query(question, modo='llm', cliente=lambda _: json.dumps(raw))
+    intent = result.intencoes[0]
+    assert result.metodo == 'llm'
+    assert intent.filtros.orgao == 'Secretaria de Estado de Saúde'
+    assert intent.filtros.papel_orgao == 'unidade'
+
+
+def test_llm_preserva_orgao_quando_pca_o_especifica():
+    import json
+    question = 'Qual o total planejado pelo órgão Secretaria de Estado de Saúde no PCA de 2025?'
+    raw = {'intencoes': [{'pergunta': question, 'bases': ['agregada'],
+                          'operacao': 'estatistica',
+                          'filtros': {'ano': 2025, 'metrica': 'soma', 'referencia_temporal': 'pca'}}]}
+    result = qa.analisar_query(question, modo='llm', cliente=lambda _: json.dumps(raw))
+    assert result.metodo == 'llm'
+    assert result.intencoes[0].filtros.papel_orgao == 'orgao'
+
+
+def test_llm_nao_aceita_orgao_inventado():
+    import json
+    raw = {'intencoes': [{'pergunta': 'Quais contratos existem?', 'bases': ['estruturada'],
+                          'filtros': {'orgao': 'SECRETARIA INVENTADA'}}]}
+    result = qa.analisar_query(
+        'Quais contratos existem?', modo='llm', cliente=lambda _: json.dumps(raw)
+    )
+    assert result.metodo == 'regras'
+    assert result.filtros.orgao is None
+
+
 @pytest.mark.parametrize('question', [
     'Compare a mediana do valor por veículo entre esferas.',
     'Qual o valor médio por quilo de feijão?',
@@ -999,6 +1146,18 @@ def test_publicacao_explicita_completa_referencia_omitida():
 def test_preco_por_unidade_nao_e_valor_global(question):
     filters = qa.analisar_query(question, modo='regras').filtros
     assert filters.tipo_valor == 'unitario'
+    assert filters.tipo_medida == 'unitaria' and filters.granularidade == 'item'
+
+
+def test_preco_unitario_homologado_preserva_etapa_do_valor_e_grao():
+    filters = qa.analisar_query(
+        'Qual a mediana do preço unitário homologado de serviço de engenharia?', modo='regras'
+    ).filtros
+    assert filters.tipo_valor == 'homologado'
+    assert filters.tipo_medida == 'unitaria'
+    assert filters.granularidade == 'item'
+    assert filters.metrica == 'mediana'
+    assert filters.referencia_temporal == 'resultado'
 
 
 def test_limites_monetarios_exclusivos_tambem_no_modo_regras():

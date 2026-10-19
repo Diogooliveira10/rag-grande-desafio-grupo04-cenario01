@@ -37,6 +37,7 @@ pytest-of-*/
 index/
 logs/
 data/backups/
+data/backup_v6_*/
 # Snapshots locais: a v6 validada é adicionada explicitamente ao Git.
 data/embeddings/*/
 data/embeddings/query_cache.jsonl
@@ -49,8 +50,6 @@ data/inventory/checkpoints/
 
 # Corpus bruto e artefatos gerados (regra do desafio: data/raw nao vai para o Git)
 data/normalized/*
-# Exceção: documents.jsonl v6 para regressão v7
-!data/normalized/documents.jsonl
 data/runs/
 data/inventory/checkpoints/
 data/attempts

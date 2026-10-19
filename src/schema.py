@@ -91,6 +91,7 @@ class QueryFilters(BaseModel):
     valor_min: Optional[float] = None
     valor_max: Optional[float] = None
     orgao: Optional[str] = None
+    papel_orgao: Optional[Literal["orgao", "unidade"]] = None
     filtros_analiticos: dict[str, str] = Field(default_factory=dict)
     metrica: Optional[str] = None
     agrupamentos: list[str] = Field(default_factory=list)
@@ -98,7 +99,20 @@ class QueryFilters(BaseModel):
     valor_min_exclusivo: bool = False
     valor_max_exclusivo: bool = False
     tipo_valor: Optional[Literal["contratado", "estimado", "homologado", "unitario"]] = None
+    tipo_medida: Optional[Literal["global", "unitaria"]] = None
+    granularidade: Optional[Literal["contrato", "item", "pca"]] = None
+    papel_cnpj: Optional[Literal["orgao", "fornecedor"]] = None
     minimo_por_grupo: Optional[int] = Field(default=None, ge=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def compatibilidade_valor_unitario(cls, value):
+        """Converte o campo legado unitario para o novo contrato de medida."""
+        if isinstance(value, dict) and value.get("tipo_valor") == "unitario":
+            value = dict(value)
+            value.setdefault("tipo_medida", "unitaria")
+            value.setdefault("granularidade", "item")
+        return value
 
     def intervalo_de_anos(self) -> tuple[Optional[int], Optional[int]]:
         """(primeiro ano, último ano), inclusivos; None = sem limite daquele lado."""
@@ -111,7 +125,8 @@ class QueryFilters(BaseModel):
             valor is None
             for valor in (
                 self.ano, self.ano_final, self.ano_desde, self.ano_ate,
-                self.valor_min, self.valor_max, self.orgao,
+                self.valor_min, self.valor_max, self.orgao, self.papel_orgao, self.papel_cnpj,
+                self.tipo_medida, self.granularidade,
             )
         )
 
@@ -135,12 +150,22 @@ class QueryIntent(BaseModel):
             raise ValueError("Operação analítica exige métrica explícita")
         if self.operacao == "agrupamento" and not self.filtros.agrupamentos:
             raise ValueError("Agrupamento exige campos explícitos")
-        if self.filtros.metrica not in {None, "contagem", "soma", "media", "mediana", "minimo", "maximo"}:
+        if self.filtros.metrica not in {None, "contagem", "soma", "media", "media_unitaria", "mediana", "minimo", "maximo"}:
             raise ValueError("Métrica não permitida")
+        if self.filtros.papel_cnpj is not None and not self.filtros.filtros_analiticos.get("cnpj"):
+            raise ValueError("Papel do CNPJ exige CNPJ explícito")
+        if self.filtros.papel_orgao is not None and not self.filtros.orgao:
+            raise ValueError("Papel da entidade exige órgão/unidade explícito")
+        if self.filtros.tipo_medida == "unitaria" and self.filtros.granularidade != "item":
+            raise ValueError("Medida unitária exige fatos no grão de item")
+        if self.filtros.granularidade == "item" and self.filtros.tipo_medida != "unitaria":
+            raise ValueError("Grão de item exige medida unitária")
         if self.filtros.referencia_temporal not in {None, "assinatura", "publicacao", "resultado", "pca", "vigencia", "propostas"}:
             raise ValueError("Referência temporal não permitida")
-        permitidos = {"esfera", "municipio", "uf", "modalidade", "fornecedor", "orgao_nome", "unidade_nome", "categoria", "classe", "mes_assinatura", "mes_publicacao"}
-        if set(self.filtros.agrupamentos) - permitidos or set(self.filtros.filtros_analiticos) - permitidos:
+        agrupamentos_permitidos = {"esfera", "municipio", "uf", "modalidade", "fornecedor", "orgao_nome", "unidade_nome", "categoria", "classe", "mes_assinatura", "mes_publicacao"}
+        filtros_permitidos = agrupamentos_permitidos | {"cnpj"}
+        if (set(self.filtros.agrupamentos) - agrupamentos_permitidos
+                or set(self.filtros.filtros_analiticos) - filtros_permitidos):
             raise ValueError("Campo analítico não permitido")
         if self.filtros.ano_final is not None and (self.filtros.ano is None or self.filtros.ano_final < self.filtros.ano):
             raise ValueError("Período inválido")

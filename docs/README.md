@@ -2,6 +2,10 @@
 
 Este diretório reúne guias de uso e referências do projeto.
 
+- [Plano de correção SQL/pipeline — alvo V7](PLANO_CORRECAO_SQL_PIPELINE_V7.md):
+  etapas, dependências, critérios de aceite, status de aplicação e gates de promoção.
+- [Reparo incremental V7](REPARO_V7.md): candidato separado, vetores recuperados,
+  herança, SQLite compatível, testes curtos e lacunas ainda abertas; sem promoção.
 - [Plano do corpus v7](PLANO_POSSIVEL_CORPUS_V7.md): censo dos contratos e
   publicações de 2025 em construção paralela (modo direto, projeção
   `completa`), com DIFF, regressão e re-auditoria do golden set como etapas

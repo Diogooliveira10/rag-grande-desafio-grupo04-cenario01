@@ -341,11 +341,14 @@ def _extras_for_unit(unit: SourceUnit) -> dict[str, Any]:
             fields = {
                 "orgao_cnpj": orgao.get("cnpj") or record.get("cnpjOrgao") or record.get("cnpj"),
                 "orgao": orgao.get("razaoSocial") or record.get("nomeOrgao") or record.get("razaoSocial"),
+                "unidade_nome": unidade.get("nomeUnidade") or record.get("nomeUnidade"),
                 "municipio": unidade.get("municipioNome") or record.get("municipio"),
                 "uf": unidade.get("ufSigla") or record.get("uf"),
                 "esfera": {"E": "estadual", "M": "municipal", "F": "federal", "D": "distrital"}.get(orgao.get("esferaId") or record.get("esfera")),
                 "modalidade": record.get("modalidadeNome"),
                 "fornecedor": record.get("nomeRazaoSocialFornecedor"),
+                "fornecedor_cnpj": (re.sub(r"\D", "", str(record.get("niFornecedor")))
+                                    if record.get("niFornecedor") else None),
                 "objeto": record.get("objetoContrato") or record.get("objetoCompra") or record.get("objetoContratacao") or record.get("objeto"),
                 "numero_controle_pncp": record.get("numeroControlePNCP") or record.get("numeroControlePNCPAta"),
                 "ano_pca": record.get("anoPca"),

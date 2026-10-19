@@ -1,12 +1,9 @@
 """Monta o índice FAISS do candidato_05 reutilizando vetores existentes.
 
-Reaproveita:
-- ~105.917 vetores de contratos do v7 original (Q8_0, 1024d)
-- ~2.468 vetores de normativas+PCA da v6 (Q8_0, 1024d)
-Embeda localmente:
-- ~749 contratos faltantes (complemento)
-- ~32.956 atas
-Total: ~142.090 vetores.
+Reaproveita vetores de contratos do índice v7 original e normativas/PCA da v6.
+O modelo declarado nas fontes é misto (manifest v7 original e manifests v6); os
+chunks faltantes são embedados no servidor local esperado Q8. O manifesto de saída
+registra contagens e configurações de cada origem, sem declarar o índice inteiro Q8.
 
 Saída: data/v7_recuperacao/2026-10-15/candidato_05/index/
 """
@@ -157,27 +154,37 @@ def main(argv: list[str] | None = None) -> int:
     
     # v7 original: contratos
     v7_map = _load_vector_map(V7_ORIGINAL_VECTORS)
+    v7_manifest_path = V7_ORIGINAL_VECTORS.parent / "manifest.json"
+    v7_manifest = json.loads(v7_manifest_path.read_text(encoding="utf-8")) if v7_manifest_path.exists() else {}
     print(f"  v7 original (contratos): {len(v7_map)} vetores")
     
     # v6: normativas e PCA
     v6_map: dict[str, list[float]] = {}
+    v6_sources: dict[str, dict[str, Any]] = {}
     for base_id, path in V6_VECTORS.items():
         if path.exists():
             m = _load_vector_map(path)
             v6_map.update(m)
+            source_manifest_path = path.parent / "manifest.json"
+            source_manifest = json.loads(source_manifest_path.read_text(encoding="utf-8")) if source_manifest_path.exists() else {}
+            v6_sources[base_id] = {"manifest": str(source_manifest_path), **source_manifest}
             print(f"  v6 ({base_id}): {len(m)} vetores")
     
     # 3. Classificar chunks por status de vetor
     reaproveitados: dict[str, list[float]] = {}  # chunk_id → embedding
     faltantes_por_base: dict[str, list[dict[str, Any]]] = {}
+    reused_v7 = 0
+    reused_v6: dict[str, int] = {base_id: 0 for base_id in V6_VECTORS}
     
     for base_id, chunks in docs_por_base.items():
         for chunk in chunks:
             chunk_id = chunk["chunk_id"]
             if chunk_id in v7_map:
                 reaproveitados[chunk_id] = v7_map[chunk_id]
+                reused_v7 += 1
             elif chunk_id in v6_map:
                 reaproveitados[chunk_id] = v6_map[chunk_id]
+                reused_v6[base_id] = reused_v6.get(base_id, 0) + 1
             else:
                 faltantes_por_base.setdefault(base_id, []).append(chunk)
     
@@ -283,10 +290,31 @@ def main(argv: list[str] | None = None) -> int:
     faiss.write_index(index, str(faiss_path))
     print(f"  FAISS: {index.ntotal} vetores, {faiss_path.stat().st_size // 1024 // 1024}MB")
     
-    # 7. Manifest
+    # 7. Manifest: declarar mistura de fontes, não só o modelo do encoder local.
     manifest = {
         "base_id": "candidato_05",
-        "embedding_model": "Qwen3-Embedding-0.6B.Q8_0",
+        "embedding_model": "mixed",
+        "embedding_model_declarado_para_novos_vetores": "Qwen3-Embedding-0.6B.Q8_0",
+        "proveniencia_vetores": {
+            "v7_direto": {
+                "vetores": reused_v7,
+                "embedding_model_declarado": v7_manifest.get("embedding_model"),
+                "encoding_config": v7_manifest.get("encoding_config"),
+                "manifest": str(v7_manifest_path),
+            },
+            "v6": {
+                "vetores": sum(reused_v6.values()),
+                "bases": {base_id: {"vetores": count, **v6_sources.get(base_id, {})}
+                          for base_id, count in reused_v6.items()},
+            },
+            "novos_vetores": {
+                "vetores": len(embedados),
+                "embedding_model_declarado": "Qwen3-Embedding-0.6B.Q8_0",
+                "encoding_config": None,
+            },
+            "homogeneidade_comprovada": False,
+        },
+        "encoding_verificado": False,
         "dimension": 1024,
         "faiss_index": "vectors.faiss",
         "total_chunks": written,

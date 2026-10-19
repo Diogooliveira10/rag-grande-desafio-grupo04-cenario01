@@ -71,6 +71,8 @@ RERANK_PROVIDER = _env("RERANK_PROVIDER", "local").lower()
 RERANK_URL = _env("RERANK_URL", "") or OLLAMA_URL.rstrip("/").removesuffix("/v1") + "/api/rerank"
 RERANK_TIMEOUT = float(_env("RERANK_TIMEOUT", "30"))
 RERANK_MODEL = _env("RERANK_MODEL", "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1")
+# O perfil experimental de 50 candidatos aumenta recall, mas ainda tem
+# regressões de ranking; ativar explicitamente, não como mudança global.
 RERANK_CANDIDATES = int(_env("RERANK_CANDIDATES", "10"))
 RERANK_MAX_LENGTH = int(_env("RERANK_MAX_LENGTH", "512"))
 # Carregar o cross-encoder quando a API sobe, e não na primeira pergunta:
@@ -129,6 +131,9 @@ OCR_DPI = int(_env("OCR_DPI", "300"))
 RAW_DATA_DIR = ROOT_DIR / "data" / "raw" / "v1"
 NORMALIZED_DATA_DIR = ROOT_DIR / "data" / "normalized"
 INDEX_DIR = ROOT_DIR / "index"
+# Manifesto de um bundle imutável de runtime. Vazio mantém o comportamento
+# existente e deixa readiness analítico explicitamente não pronto.
+SNAPSHOT_MANIFEST = _env("SNAPSHOT_MANIFEST", "")
 # Base estruturada em SQL (src/structured_db.py). Vazio = SQLite local em
 # data/structured/; preenchido = Postgres (ex.: Neon). Nunca versionar o valor.
 DATABASE_URL = _env("DATABASE_URL", "")

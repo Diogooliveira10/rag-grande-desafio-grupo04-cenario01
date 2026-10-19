@@ -25,6 +25,10 @@ _PNCP_CONTROL_RE = re.compile(r"(?<!\d)\d{14}-\d-\d{6}/\d{4}(?:-\d{6})?(?!\d)")
 # CNPJ com ou sem pontuação; os 14 dígitos no começo de um número de controle
 # ficam de fora pelo "-" que vem depois deles.
 _CNPJ_RE = re.compile(r"(?<![\d./-])(\d{2})\.?(\d{3})\.?(\d{3})/?(\d{4})-?(\d{2})(?![\d/-])")
+_CONTRACT_NUMBER_RE = re.compile(
+    r"\bcontrato\s*(?:n(?:[uú]mero|ro)?\.?\s*[º°o]?\s*)?"
+    r"(\d+)\s*/\s*(\d{4})(?!\d)", re.IGNORECASE
+)
 MANIFEST_PATH = config.ROOT_DIR / "corpus_manifest.yaml"
 _NATUREZAS = frozenset(item.value for item in Natureza)
 
@@ -323,17 +327,84 @@ def _sem_valor_comparavel(actual: Any, expected: Any) -> bool:
     return False
 
 
-def _matches_filters(metadata: Mapping[str, Any], filters: Mapping[str, Any] | None) -> bool:
+def _filtro_aplicavel(metadata: Mapping[str, Any], key: str, expected: Any) -> bool:
+    """Recortes do analisador são obrigatórios só na natureza correspondente.
+
+    Filtros diretos da API (sem optional=False explícito) conservam a semântica
+    estrita original. Natureza desconhecida também nunca afrouxa um filtro.
+    """
+    conditions = expected if isinstance(expected, list) else [expected]
+    if not conditions or not all(isinstance(c, Mapping) and c.get("optional") is False for c in conditions):
+        return True
+    natureza = _record_natureza(metadata, metadata)
+    if natureza not in _NATUREZAS:
+        return True
+    if key in {"objeto_auxiliar", "objeto_termo"}:
+        return natureza in {"estruturada", "conversacional"}
+    if key == "data_vigencia_inicio":
+        return natureza == "normativa"
+    if key == "ano_pca":
+        return natureza == "agregada"
+    if key in {"data_assinatura", "data_resultado", "orgao_cnpj", "fornecedor_cnpj"}:
+        return natureza == "estruturada"
+    if key == "unidade_nome":
+        return natureza in {"estruturada", "agregada"}
+    if key == "data_publicacao":
+        return natureza in {"estruturada", "normativa", "conversacional"}
+    if key == "data_vigencia":
+        # Vigência normativa usa início; ano de PCA usa ano_pca, não este campo.
+        return natureza in {"estruturada", "conversacional"}
+    if natureza == "normativa" and key in {
+        "valor", "fornecedor", "modalidade", "cnpj", "orgao_cnpj", "fornecedor_cnpj", "data_assinatura", "data_resultado",
+    }:
+        # Normas têm órgão emissor/UF e data de publicação; estes filtros
+        # continuam aplicáveis. Só ignorar critérios próprios de contratação.
+        return False
+    return True
+
+
+def _matches_filters(metadata: Mapping[str, Any], filters: Mapping[str, Any] | None,
+                     *, content: str = "") -> bool:
     if not filters:
         return True
     for key, expected in filters.items():
+        if not _filtro_aplicavel(metadata, key, expected):
+            continue
         actual = _metadata_value(metadata, key)
+        if key in {"objeto_auxiliar", "objeto_termo"}:
+            from src.retrieval_constraints import objeto_auxiliar, objeto_do_registro, radicais_do_objeto
+            objeto = objeto_do_registro(metadata, content)
+            actual = None if objeto is None else (
+                objeto_auxiliar(objeto) if key == "objeto_auxiliar" else radicais_do_objeto(objeto)
+            )
+        if key in {"orgao_cnpj", "fornecedor_cnpj"}:
+            actual = re.sub(r"\D", "", str(actual)) if actual is not None else None
+        if key == "cnpj":
+            # União dos identificadores do corpo e dos campos canônicos. Não
+            # confundir CNPJ com CPF nem com prefixo do controle PNCP.
+            text = content + " " + json.dumps(dict(metadata), ensure_ascii=False, default=str)
+            actual = ["".join(match.groups()) for match in _CNPJ_RE.finditer(text)]
         if actual is None or (_filtro_opcional(expected) and _sem_valor_comparavel(actual, expected)):
             if _filtro_opcional(expected):
                 continue
             return False
         for operator, value in _condicoes(expected):
-            if not _condicao_satisfeita(actual, operator, value):
+            if key in {"orgao", "unidade_nome"} and operator == "contains" and isinstance(actual, str):
+                # Nomes admitem qualificadores intermediários e abreviações do
+                # PNCP: "Secretaria de Estado de Saúde" casa com "SECRET ESTADO
+                # SAUDE". Exigir cada termo informativo no campo da entidade,
+                # sem procurar no objeto ou fornecedor.
+                conectores = {"de", "do", "da", "dos", "das", "e"}
+                requeridos = set(_tokens(str(value))) - conectores
+                disponiveis = set(_tokens(actual))
+                casa = lambda termo: any(
+                    token == termo or (len(token) >= 4 and termo.startswith(token))
+                    or (len(termo) >= 4 and token.startswith(termo))
+                    for token in disponiveis
+                )
+                if not requeridos or not all(casa(termo) for termo in requeridos):
+                    return False
+            elif not _condicao_satisfeita(actual, operator, value):
                 return False
     return True
 
@@ -364,7 +435,7 @@ def _records_for(
     for record in raw:
         metadata = _metadata_of(record)
         chunk_id = str(record.get("chunk_id") or metadata.get("chunk_id") or "")
-        if not chunk_id or chunk_id in seen_ids or not _matches_filters(metadata, filters):
+        if not chunk_id or chunk_id in seen_ids or not _matches_filters(metadata, filters, content=str(record.get("text", ""))):
             continue
         # Texto ilegível (src/qualidade_corpus.py) não é evidência: já fica fora
         # do índice denso, e o BM25 lê o documents.jsonl, onde ele continua.
@@ -395,9 +466,9 @@ def _filtrar_por_base(
     records: Iterable[Mapping[str, Any]],
     filters: Mapping[str, Any],
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, list[str]]]]:
-    """Aplica os filtros base a base, sem deixar um filtro zerar a busca.
+    """Aplica filtros obrigatórios; só os explicitamente opcionais podem relaxar.
 
-    Numa base, um filtro só vale se ao menos um chunk dela tem o campo (ex.:
+    No relaxamento opcional, um filtro só vale se ao menos um chunk tem o campo (ex.:
     ``valor`` não existe na base normativa) e se ao menos um desses chunks
     passa nele: um filtro que reprova todos os chunks que têm o campo está
     lendo errado aquela base (ex.: órgão "Secretaria de Saúde" contra os
@@ -416,8 +487,11 @@ def _filtrar_por_base(
     for base_id, registros in por_base.items():
         metadados = [_metadata_of(record) for record in registros]
         motivo: dict[str, list[str]] = {}
-        aplicaveis: dict[str, Any] = {}
+        obrigatorios = {key: value for key, value in filters.items() if not _filtro_opcional(value)}
+        aplicaveis: dict[str, Any] = dict(obrigatorios)
         for key, value in filters.items():
+            if key in obrigatorios:
+                continue
             com_campo = [m for m in metadados if _metadata_value(m, key) is not None]
             if not com_campo:
                 motivo.setdefault("sem_campo", []).append(key)
@@ -430,9 +504,9 @@ def _filtrar_por_base(
         passam = [
             record
             for record, metadata in zip(registros, metadados)
-            if _matches_filters(metadata, aplicaveis)
+            if _matches_filters(metadata, aplicaveis, content=str(record.get("text", "")))
         ]
-        if aplicaveis and not passam:
+        if aplicaveis and not passam and not obrigatorios:
             passam = registros
             motivo["zerou_resultados"] = sorted(aplicaveis)
         if motivo:
@@ -507,14 +581,50 @@ def _diagnostico_identificadores(
     return diagnosticos
 
 
+def _referencias_contrato(query: str) -> set[tuple[int, int]]:
+    """Só número/ano explicitamente associados a 'contrato', nunca uma data solta."""
+    return {(int(numero), int(ano)) for numero, ano in _CONTRACT_NUMBER_RE.findall(query)}
+
+
+def _contrato_corresponde(record: Mapping[str, Any], referencias: set[tuple[int, int]]) -> bool:
+    """Confere campos do contrato, não números de compra/ata citados em seu objeto."""
+    if not referencias:
+        return False
+    metadata = _metadata_of(record)
+    extras = metadata.get("extras") or {}
+    texto = str(record.get("text", ""))
+    try:
+        payload = json.loads(texto) if texto.lstrip().startswith("{") else {}
+    except ValueError:
+        payload = {}
+    if not isinstance(payload, Mapping):
+        payload = {}
+    numero = payload.get("numeroContratoEmpenho") or extras.get("numero_contrato")
+    if numero is None:
+        return False
+    match = re.fullmatch(r"\s*(\d+)\s*(?:/\s*(\d{4}))?\s*", str(numero))
+    if not match:
+        return False
+    ano = match[2] or payload.get("anoContrato") or extras.get("ano_contrato")
+    try:
+        return (int(match[1]), int(ano)) in referencias
+    except (ValueError, TypeError):
+        return False
+
+
 def _resultados_identificador_exato(
     query: str,
     records: Iterable[Mapping[str, Any]],
 ) -> list[RetrievalResult]:
     identificadores = [forma for identificador in _identificadores_pncp(query)
                        for forma in _variantes(identificador)]
-    if not identificadores:
+    referencias_contrato = _referencias_contrato(query)
+    if not identificadores and not referencias_contrato:
         return []
+    cnpjs_consulta = {identificador for identificador in _identificadores_pncp(query)
+                      if identificador.isdigit() and len(identificador) == 14}
+    consulta_fornecedor = bool(cnpjs_consulta and re.search(r"\bfornecedor(?:a)?\b", query, re.IGNORECASE))
+    termos_consulta = set(_tokens(query))
     resultados: list[RetrievalResult] = []
     vistos: set[str] = set()
     for record in records:
@@ -523,21 +633,48 @@ def _resultados_identificador_exato(
         texto_busca = str(record.get("text", ""))
         if isinstance(extras, Mapping):
             texto_busca += json.dumps(extras, ensure_ascii=False, default=str)
-        if not any(identificador in texto_busca for identificador in identificadores):
+        pncp_exato = any(identificador in texto_busca for identificador in identificadores)
+        payload: Mapping[str, Any] = {}
+        if consulta_fornecedor or referencias_contrato:
+            try:
+                parsed = json.loads(str(record.get("text", "")))
+                payload = parsed if isinstance(parsed, Mapping) else {}
+            except ValueError:
+                pass
+        if consulta_fornecedor and "niFornecedor" in payload:
+            # O mesmo CNPJ no órgão/compra não torna o fornecedor correto.
+            pncp_exato = re.sub(r"\D", "", str(payload["niFornecedor"])) in cnpjs_consulta
+        contrato_exato = _contrato_corresponde(record, referencias_contrato)
+        # Quando ambos foram explicitados, não promover um contrato de outro
+        # número só porque compartilha o CNPJ (nem o inverso).
+        if (identificadores and not pncp_exato) or (referencias_contrato and not contrato_exato):
             continue
         item = _result(record, 0.0, str(record.get("text", "")))
         if item.chunk_id in vistos:
             continue
         vistos.add(item.chunk_id)
+        # Número/ano não é globalmente único: um nome de fornecedor citado
+        # também na pergunta deve desambiguar ANTES do corte do rerank.
+        nome_fornecedor = payload.get("nomeRazaoSocialFornecedor") or (
+            extras.get("fornecedor") if isinstance(extras, Mapping) else ""
+        )
+        termos_fornecedor = set(_tokens(str(nome_fornecedor or ""))) - {
+            "s", "a", "sa", "ltda", "me", "epp", "eireli", "de", "da", "do", "e",
+        }
+        coincidentes = sorted(termos_fornecedor & termos_consulta) if contrato_exato else []
         item.metadata = {
             **item.metadata,
             "extras": {
                 **(item.metadata.get("extras") or {}),
-                "identificador_pncp_exato": True,
+                "identificador_pncp_exato": pncp_exato,
+                "identificador_contrato_exato": contrato_exato,
+                "fornecedor_termos_coincidentes": coincidentes,
             },
         }
         resultados.append(item)
-    return sorted(resultados, key=lambda item: item.chunk_id)
+    return sorted(resultados, key=lambda item: (
+        -len(item.metadata["extras"]["fornecedor_termos_coincidentes"]), item.chunk_id
+    ))
 
 
 def _promover_identificadores_exatos(
@@ -555,9 +692,18 @@ def _promover_identificadores_exatos(
         else:
             exatos.append(item)
     ids_exatos = {item.chunk_id for item in exatos}
-    ordenados = sorted(exatos, key=lambda item: item.chunk_id) + [
-        item for item in resultados if item.chunk_id not in ids_exatos
-    ]
+    # Identidade tem precedência, mas a relevância entre os matches continua
+    # sendo a da fusão/reranker, e não a ordem lexicográfica do hash do chunk.
+    exatos_por_id = {item.chunk_id: item for item in exatos}
+    ordenados = [exatos_por_id[item.chunk_id] for item in resultados if item.chunk_id in ids_exatos]
+    presentes = {item.chunk_id for item in ordenados}
+    ordenados += [item for item in exatos if item.chunk_id not in presentes]
+    # Mais identificadores explícitos concordantes precedem matches só de
+    # número/ano; empates mantêm a ordem de relevância já calculada.
+    ordenados.sort(key=lambda item: -len(
+        (item.metadata.get("extras") or {}).get("fornecedor_termos_coincidentes", [])
+    ))
+    ordenados += [item for item in resultados if item.chunk_id not in ids_exatos]
     return ordenados[:limite]
 
 
@@ -589,6 +735,9 @@ def _evidencias(resultados: Sequence[RetrievalResult], limite: int = 10) -> list
             "sparse_score": item.sparse_score,
             "rrf_score": item.rrf_score,
             "rerank_score": item.rerank_score,
+            "identificador_contrato_exato": bool(
+                (item.metadata.get("extras") or {}).get("identificador_contrato_exato")
+            ),
             "identificador_pncp_exato": bool(
                 (item.metadata.get("extras") or {}).get("identificador_pncp_exato")
             ),
@@ -1002,9 +1151,9 @@ def retrieve(
     ``fetch_k == top_k``, um chunk que as duas buscas põem logo abaixo do corte
     nunca chega à fusão. Padrão: ``max(5 * top_k, DEFAULT_FETCH_K)``.
 
-    Os filtros são aplicados base a base (``_filtrar_por_base``): numa base sem
-    o campo filtrado, ou em que o filtro excluiria todos os chunks, ele é
-    ignorado, e o log registra quais chaves foram ignoradas em
+    Os filtros são aplicados base a base (``_filtrar_por_base``). Somente os
+    explicitamente opcionais podem ser ignorados quando não há campo ou
+    correspondência; os obrigatórios permanecem. O log registra relaxamentos em
     ``extra.filtros_ignorados``. ``dense_retrieve`` e ``bm25_retrieve``, chamados
     diretamente, continuam aplicando os filtros de forma estrita.
 
@@ -1020,6 +1169,16 @@ def retrieve(
         else:
             bases = getattr(route, "bases_selecionadas", getattr(route, "bases", None))
             route_filters = getattr(route, "filters", getattr(route, "filtros", route_filters))
+    from src.retrieval_constraints import solicita_bem_completo, tema_bem_completo
+    if solicita_bem_completo(query):
+        # Critério de admissibilidade antes de dense/BM25, lookup e rerank.
+        # Não pode ser relaxado para devolver peças/serviços como aparelho.
+        route_filters = {**(route_filters or {}), "objeto_auxiliar": {
+            "operator": "==", "value": False, "optional": False,
+        }}
+        tema = tema_bem_completo(query)
+        if tema:
+            route_filters["objeto_termo"] = {"operator": "contains", "value": tema, "optional": False}
     fetch_k = fetch_k if fetch_k is not None else max(5 * top_k, DEFAULT_FETCH_K)
     dense_records: list[dict[str, Any]] | None = None
     sparse_records: list[dict[str, Any]] | None = None
@@ -1027,12 +1186,18 @@ def retrieve(
     if route_filters:
         # Seleção de bases e escopos antes, para decidir o filtro só entre as
         # bases que o roteador escolheu.
-        dense_records, ignorados_denso = _filtrar_por_base(
-            _records_for(index_dir, bases, None, None, escopos), route_filters
-        )
         sparse_records, ignorados_bm25 = _filtrar_por_base(
             _records_for(index_dir, bases, None, _read_jsonl(documents_file), escopos), route_filters
         )
+        # O payload vetorial não repete o texto JSON com o CNPJ do fornecedor.
+        # Os IDs dos documentos filtrados delimitam também os candidatos densos.
+        dense_filters = {key: value for key, value in route_filters.items() if key != "cnpj"}
+        dense_records, ignorados_denso = _filtrar_por_base(
+            _records_for(index_dir, bases, None, None, escopos), dense_filters
+        )
+        if "cnpj" in route_filters:
+            eligible = {str(record.get("chunk_id")) for record in sparse_records}
+            dense_records = [record for record in dense_records if str(record.get("chunk_id")) in eligible]
         filtros_ignorados = {**ignorados_bm25, **ignorados_denso}
     extra = {
         "bases": sorted(str(getattr(b, "value", b)) for b in ([bases] if isinstance(bases, str) else bases or [])),
@@ -1118,7 +1283,7 @@ def retrieve(
         span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(query, sparse)
 
     identificadores_exatos: list[RetrievalResult] = []
-    if _identificadores_pncp(query):
+    if _identificadores_pncp(query) or _referencias_contrato(query):
         records_exatos = sparse_records
         if records_exatos is None:
             records_exatos = _records_for(

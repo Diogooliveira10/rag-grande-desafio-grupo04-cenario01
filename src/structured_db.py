@@ -12,8 +12,9 @@ Dois destinos, escolhidos por ``DATABASE_URL`` no ``.env``:
 - **SQLite** local em ``data/structured/`` (fora do Git) quando está vazio —
   é o que os testes e quem não tem acesso ao Neon usam.
 
-O banco é derivado: pode ser apagado e remontado a qualquer momento, e se
-remonta sozinho quando o ``documents.jsonl`` muda (``garantir_banco``).
+O banco é derivado e preparado explicitamente por ``build``. O atendimento
+usa ``validar_banco`` e nunca o reconstrói durante uma pergunta.
+``garantir_banco`` permanece disponível para ferramentas administrativas legadas.
 
 Uso::
 
@@ -24,7 +25,6 @@ Uso::
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import re
 import sqlite3
@@ -34,6 +34,7 @@ from contextvars import ContextVar
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterator, Mapping, Optional, Sequence
 
@@ -368,7 +369,7 @@ def _linha_contratacao(chunk: Mapping[str, Any], registro: dict[str, Any]) -> di
         "orgao_nome": orgao.get("razaoSocial"),
         "esfera": ESFERAS.get(str(orgao.get("esferaId") or "")),
         "poder": orgao.get("poderId"),
-        "uf": unidade.get("ufSigla"),
+        "uf": unidade.get("ufSigla") or (chunk.get("extras") or {}).get("uf"),
         "municipio": unidade.get("municipioNome"),
         "codigo_ibge": unidade.get("codigoIbge"),
         "unidade_nome": unidade.get("nomeUnidade"),
@@ -437,7 +438,43 @@ def _linha_pca(chunk: Mapping[str, Any], registro: dict[str, Any]) -> dict[str, 
 
 
 def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    from src.index import file_sha256
+    return file_sha256(path)
+
+
+@lru_cache(maxsize=8)
+def _hash_snapshot(path: str, tamanho: int, modificado_ns: int) -> str:
+    """Hash por assinatura do arquivo imutável, não uma releitura a cada pergunta."""
+    return _sha256(Path(path))
+
+
+def _meta_valida(banco: Banco) -> dict[str, str] | None:
+    meta = {row["chave"]: row["valor"] for row in banco.consultar("SELECT chave, valor FROM meta")}
+    return meta if meta.get("schema_version") == SCHEMA_VERSION else None
+
+
+def validar_banco(documents_file: Path = DOCUMENTS_FILE, banco: Optional[Banco] = None, *, fast: bool = False) -> Banco:
+    """Abre somente um snapshot já preparado; nunca constrói/migra na consulta."""
+    banco = banco or banco_padrao()
+    documents_file = Path(documents_file).resolve()
+    if not banco.existe():
+        raise FileNotFoundError(f"banco não preparado: {banco.descricao()}; execute structured_db build")
+    with banco.sessao():
+        meta = _meta_valida(banco)
+        if meta is None:
+            raise ValueError("schema SQL incompatível; prepare um novo snapshot fora da consulta")
+        if fast:
+            for tabela in _TABELAS:
+                banco.consultar(f"SELECT 1 FROM {tabela} LIMIT 1")
+        else:
+            for tabela, colunas in _TABELAS.items():
+                banco.consultar(f"SELECT {', '.join(colunas)} FROM {tabela} LIMIT 0")
+    if not fast:
+        stat = documents_file.stat()
+        expected = _hash_snapshot(str(documents_file), stat.st_size, stat.st_mtime_ns)
+        if meta.get("source_sha256") != expected:
+            raise ValueError("SQL e documentos pertencem a snapshots diferentes; prepare o banco explicitamente")
+    return banco
 
 
 def _gravar(banco: Banco, conexao: Any, tabelas: dict[str, list[dict[str, Any]]]) -> None:
@@ -551,6 +588,8 @@ def garantir_banco(
     documents_file: Path = DOCUMENTS_FILE,
     banco: Optional[Banco] = None,
     status: Optional[dict[str, Any]] = None,
+    *,
+    fast: bool = False,
 ) -> Banco:
     """Devolve o banco pronto, remontando-o se não existe ou se o
     ``documents.jsonl`` mudou desde a última montagem (SHA-256 no ``meta``).
@@ -560,10 +599,14 @@ def garantir_banco(
     ``status["base_desatualizada"]`` fica ``True`` (o chamador leva ao log).
     Sem base nenhuma, o erro sobe.
     """
+    if fast:
+        banco = banco or banco_padrao()
+        try:
+            return validar_banco(documents_file, banco, fast=True)
+        except Exception:
+            construir_banco(documents_file, banco)
+            return banco
     banco = banco or banco_padrao()
-    documents_file = Path(documents_file)
-    if not documents_file.exists():
-        raise FileNotFoundError(f"documents.jsonl não encontrado: {documents_file}")
     if not banco.existe():
         construir_banco(documents_file, banco)
         _BANCOS_CONFERIDOS.add(_chave_conferencia(banco, documents_file))
@@ -607,7 +650,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.comando == "build":
         print(json.dumps(construir_banco(args.documents, banco), ensure_ascii=False, indent=2))
         return 0
-    garantir_banco(args.documents, banco)
+    validar_banco(args.documents, banco)
     linhas = banco.consultar(args.consulta)
     if linhas:
         print(" | ".join(linhas[0]))

@@ -44,7 +44,8 @@ def test_pncp_metadata_is_available_without_changing_source_text(tmp_path):
     source = tmp_path / "source"
     source.mkdir()
     record = {"orgaoEntidade": {"razaoSocial": "Órgão público", "esferaId": "E"},
-              "unidadeOrgao": {"municipioNome": "Rio de Janeiro", "ufSigla": "RJ"},
+              "unidadeOrgao": {"municipioNome": "Rio de Janeiro", "ufSigla": "RJ",
+                               "nomeUnidade": "Secretaria de Estado de Saúde"},
               "dataAssinatura": "2025-01-20", "dataVigenciaFim": "2026-01-20",
               "valorGlobal": 500123.45, "objetoContrato": "Licenças", "anoPca": 2025}
     (source / "record.json").write_text(json.dumps(record), encoding="utf-8")
@@ -53,6 +54,7 @@ def test_pncp_metadata_is_available_without_changing_source_text(tmp_path):
     chunk = json.loads(output.read_text(encoding="utf-8").splitlines()[0])
     assert json.loads(chunk["text"]) == record
     assert chunk["extras"]["orgao"] == "Órgão público"
+    assert chunk["extras"]["unidade_nome"] == "Secretaria de Estado de Saúde"
     assert chunk["extras"]["esfera"] == "estadual"
     assert chunk["extras"]["valor"] == 500123.45
     assert chunk["extras"]["campo_valor_original"] == "valorGlobal"

@@ -29,7 +29,7 @@ def _contratacao(numero, *, esfera="M", valor_homologado=None, valor_estimado=10
     }
 
 
-def _plano(numero, *, ano=2025, valor=5_000_000.0, unidade="Secretaria de Saúde"):
+def _plano(numero, *, ano=2025, valor=5_000_000.0, unidade="Secretaria de Saúde", quantidade=None):
     return {
         "numeroControlePNCP": numero,
         "anoPca": ano,
@@ -39,7 +39,7 @@ def _plano(numero, *, ano=2025, valor=5_000_000.0, unidade="Secretaria de Saúde
         "nomeUnidade": unidade,
         "uf": "RJ",
         "municipio": "Rio de Janeiro",
-        "quantidade": 12,
+        "quantidade": quantidade if quantidade is not None else 12,
         "valorTotal": valor,
         "dataPublicacaoPncp": "2024-12-01T00:00:00",
     }
@@ -298,3 +298,29 @@ def test_signed_contract_preserves_contract_value_and_distinct_signature_date():
     assert row["fornecedor"] == "Fornecedor público"
     assert row["modalidade"] == "Pregão eletrônico"
     assert row["tipo_registro"] == "contrato_assinado"
+
+
+def test_validar_snapshot_nunca_constroi_e_cacheia_hash(documents, banco, monkeypatch):
+    structured_db.construir_banco(documents, banco)
+    monkeypatch.setattr(structured_db, "construir_banco", lambda *a, **k: pytest.fail("consulta não pode construir banco"))
+    structured_db._hash_snapshot.cache_clear()
+    hashes = []
+    original = structured_db._sha256
+    monkeypatch.setattr(structured_db, "_sha256", lambda p: hashes.append(p) or original(p))
+    assert structured_db.validar_banco(documents, banco) is banco
+    assert structured_db.validar_banco(documents, banco) is banco
+    assert len(hashes) == 1
+    escrever_documents(documents, contratacoes=[_contratacao("outro")])
+    with pytest.raises(ValueError, match="snapshots diferentes"):
+        structured_db.validar_banco(documents, banco)
+
+
+def test_validar_snapshot_rejeita_schema_antigo_sem_alterar_arquivo(documents, banco):
+    structured_db.construir_banco(documents, banco)
+    from contextlib import closing
+    with closing(banco.conectar(somente_leitura=False)) as connection, connection:
+        connection.execute("UPDATE meta SET valor='v7-staging-2' WHERE chave='schema_version'")
+    before = banco.sqlite_path.read_bytes()
+    with pytest.raises(ValueError, match="schema SQL incompatível"):
+        structured_db.validar_banco(documents, banco)
+    assert banco.sqlite_path.read_bytes() == before

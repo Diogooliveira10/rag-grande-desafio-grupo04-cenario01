@@ -80,6 +80,36 @@ def texto_para_rerank(conteudo: str) -> str:
         return (len(_CAMPOS_PRIORITARIOS), posicao)
 
     ordenados = sorted(enumerate(pares), key=prioridade)
+    # PNCP completo: explicitar os papéis das entidades e reservar espaço para
+    # o órgão. Objetos longos e a descrição do amparo legal não podem consumir
+    # toda a janela do cross-encoder antes do contexto institucional.
+    try:
+        registro = json.loads(conteudo)
+    except ValueError:
+        registro = {}
+    if not isinstance(registro, dict):
+        registro = {}
+    orgao = registro.get("orgaoEntidade") or {}
+    unidade = registro.get("unidadeOrgao") or {}
+    nome_orgao = orgao.get("razaoSocial") if isinstance(orgao, dict) else None
+    nome_orgao = nome_orgao or registro.get("nomeOrgao")
+    chave_objeto = next((chave for chave in ("objetoContrato", "objetoCompra", "objetoContratacao")
+                         if isinstance(registro.get(chave), str)), None)
+    if nome_orgao and chave_objeto:
+        objeto = registro[chave_objeto]
+        campos = [
+            ("Órgão contratante", nome_orgao),
+            ("Objeto", objeto[:600]),
+            ("Unidade", unidade.get("nomeUnidade") if isinstance(unidade, dict) else None),
+            ("Fornecedor", registro.get("nomeRazaoSocialFornecedor")),
+            ("Número do contrato", registro.get("numeroContratoEmpenho")),
+        ]
+        usados = {chave_objeto, "razaoSocial", "nomeOrgao", "nomeUnidade",
+                  "nomeRazaoSocialFornecedor", "numeroContratoEmpenho"}
+        campos += [(chave, valor) for _posicao, (chave, valor) in ordenados if chave not in usados]
+        if len(objeto) > 600:
+            campos.append(("Complemento do objeto", objeto[600:]))
+        return "; ".join(f"{chave}: {valor}" for chave, valor in campos if valor not in (None, ""))
     return "; ".join(f"{chave}: {valor}" for _posicao, (chave, valor) in ordenados)
 
 

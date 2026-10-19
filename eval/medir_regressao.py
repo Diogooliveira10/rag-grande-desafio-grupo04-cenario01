@@ -41,7 +41,7 @@ from eval.ablacao_rerank import (  # noqa: E402
     posicao_do_primeiro_relevante,
     resumir,
 )
-from src.retrieve import DEFAULT_TOP_K, dense_retrieve  # noqa: E402
+from src.retrieve import DEFAULT_TOP_K, dense_retrieve, retrieve  # noqa: E402
 
 EmbedFn = Callable[[list[str]], list[list[float]]]
 
@@ -60,8 +60,23 @@ def medir_regressao(
     novo: Alvo,
     embed_fn: EmbedFn | None = None,
     top_k: int = DEFAULT_TOP_K,
+    strategy: str = "dense",
+    reranker: Any = None,
+    fetch_k: int | None = None,
+    query_filters: bool = False,
 ) -> dict[str, Any]:
-    '''Roda os mesmos casos nos dois alvos e classifica o delta de cada um.'''
+    '''Mesmos casos/configuração nos dois alvos, usando o núcleo de produção.'''
+    if strategy not in {"dense", "hybrid"}:
+        raise ValueError("strategy deve ser dense ou hybrid")
+    if query_filters and strategy != "hybrid":
+        raise ValueError("query_filters exige strategy=hybrid; a ablação densa permanece pura")
+    filtros_extraidos: dict[str, Any] = {}
+    if query_filters:
+        from src.query_analysis import analisar_query, filtros_para_retrieve
+        filtros_extraidos = {
+            caso.id: filtros_para_retrieve(analisar_query(caso.pergunta, modo="regras").filtros)
+            for caso in casos
+        }
     posicoes: dict[str, list[Any]] = {referencia.rotulo: [], novo.rotulo: []}
     por_caso: list[dict[str, Any]] = []
     regressoes: list[dict[str, Any]] = []
@@ -69,15 +84,15 @@ def medir_regressao(
 
     for alvo in (referencia, novo):
         for caso in casos:
-            ranking = dense_retrieve(
-                caso.pergunta,
-                top_k=top_k,
-                embed_fn=embed_fn,
-                index_dir=alvo.index_dir,
-                documents_file=alvo.documents_file,
-                bases=caso.bases,
-                escopos=("oficial",),
-            )
+            comum = dict(top_k=top_k, embed_fn=embed_fn, index_dir=alvo.index_dir,
+                         documents_file=alvo.documents_file, escopos=("oficial",))
+            if query_filters:
+                comum["filters"] = filtros_extraidos[caso.id]
+            if strategy == "hybrid":
+                ranking = retrieve(caso.pergunta, {"bases": caso.bases}, reranker=reranker,
+                                   fetch_k=fetch_k, **comum)
+            else:
+                ranking = dense_retrieve(caso.pergunta, bases=caso.bases, **comum)
             posicoes[alvo.rotulo].append(posicao_do_primeiro_relevante(caso, ranking))
 
     for indice, caso in enumerate(casos):
@@ -103,6 +118,12 @@ def medir_regressao(
 
     return {
         "total": len(casos),
+        "configuracao": {"strategy": strategy, "top_k": top_k, "fetch_k": fetch_k,
+                         "rerank": reranker is not None,
+                         "escopos": ["oficial"], "rotas": "gabarito de recuperação",
+                         "encoding": "produção (embedding_query_text)" if embed_fn is None else "embed_fn injetada",
+                         "query_analysis": "regras" if query_filters else "não executada",
+                         "filtros_por_caso": json.loads(json.dumps(filtros_extraidos, default=str))},
         "resumos": {
             referencia.rotulo: resumir(posicoes[referencia.rotulo]),
             novo.rotulo: resumir(posicoes[novo.rotulo]),
@@ -120,7 +141,9 @@ def render_markdown(relatorio: dict[str, Any]) -> str:
     linhas = [
         "# Regressão de recuperação — corpus de referência × novo",
         "",
-        f"{relatorio['total']} casos de `eval/retrieval_set.jsonl` (recuperação densa pura)",
+        f"{relatorio['total']} casos; configuração idêntica nos dois snapshots: "
+        f"`{relatorio.get('configuracao', {}).get('strategy', 'dense')}`; "
+        f"rerank={relatorio.get('configuracao', {}).get('rerank', False)}.",
         "",
         "| corpus | " + " | ".join(chaves) + " |",
         "| --- | " + " | ".join("---" for _ in chaves) + " |",
@@ -156,17 +179,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--top-k", type=int, default=DEFAULT_TOP_K)
     args = parser.parse_args(argv)
 
-    from src.create_embeddings import _configured_embed_batch
-
-    provider = config.EMBEDDING_PROVIDER
-    endpoint, api_key, modelo = config.embedding_endpoint(provider)
-    embed_fn = _configured_embed_batch(provider, endpoint, api_key, modelo)
-
+    # O encoder/cache padrão aplica a mesma instrução de consulta da produção.
     relatorio = medir_regressao(
         carregar_casos(args.casos),
         referencia=Alvo("v6", args.antigo_documents, args.antigo_index),
         novo=Alvo("v7", args.novo_documents, args.novo_index),
-        embed_fn=embed_fn,
         top_k=args.top_k,
     )
     args.saida.mkdir(parents=True, exist_ok=True)

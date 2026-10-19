@@ -46,6 +46,39 @@ def test_health() -> None:
     assert response.json() == {"status": "ok"}
 
 
+def test_readiness_separado_retorna_503_sem_manifesto(monkeypatch) -> None:
+    monkeypatch.setattr(api_module.config, "SNAPSHOT_MANIFEST", "")
+
+    response = client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": {"ready": False, "reason": "manifesto_nao_configurado"}}
+
+
+def test_readiness_nao_expoe_excecoes_ou_caminhos(monkeypatch) -> None:
+    from src.snapshot import SnapshotValidationError
+
+    monkeypatch.setattr(api_module.snapshot, "readiness",
+                        lambda: {"ready": False, "reason": SnapshotValidationError("hash_divergente").code})
+
+    response = client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": {"ready": False, "reason": "hash_divergente"}}
+    assert "path" not in response.text and "C:/" not in response.text
+
+
+def test_readiness_ready_devolve_apenas_capacidades_publicas(monkeypatch) -> None:
+    monkeypatch.setattr(api_module.snapshot, "readiness", lambda: {
+        "ready": True, "snapshot_id": "v7-test", "schema_version": "7", "capabilities": ["pca"],
+    })
+
+    response = client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.json()["capabilities"] == ["pca"]
+
+
 def test_query_delega_ao_pipeline(monkeypatch) -> None:
     calls = []
 
