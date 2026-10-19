@@ -358,3 +358,45 @@ A rodada foi registrada e preservada em artefatos do projeto, sem alteração de
 - Utilizei assistentes de IA como apoio na verificação do estado do repositório, validação dos artefatos do benchmark, leitura do relatório, análise das falhas e organização do resumo de acompanhamento.
 
 - As conclusões finais foram conferidas contra o relatório oficial gerado pelo próprio runner do Golden Set e contra o estado atual do repositório, sem modificar a lógica produzida ou o benchmark avaliado.
+
+## Encontro 14 — 2026-10-16
+
+### Relato individual — Diogo Oliveira
+
+**Tarefa do dia:**
+
+Corrigir o aumento indevido da confiança em respostas com evidência parcial e investigar a falha do caso `P4.2` na rodada `20261018T231542Z`, sem alterar o Golden Set, os critérios de avaliação ou os relatórios históricos.
+
+**O que fiz hoje:**
+
+- Inspecionei o estado do Git e confirmei a branch `main`, preservando alterações preexistentes de outros arquivos.
+
+- Analisei o fluxo de confiança em `src/generate.py`. Confirmei que `_aplicar_recorte()` combinava a confiança do LLM com a do recorte SQL usando `max()` quando o recorte era considerado sólido, permitindo que o resultado SQL elevasse uma confiança baixa ou média do LLM.
+
+- Alterei a combinação para usar o menor nível entre o declarado pelo LLM e o limite do recorte. Assim, o SQL pode limitar a confiança quando a execução é parcial ou o cálculo não é verificável, mas não eleva a confiança declarada pelo modelo. O caminho determinístico permanece inalterado e continua usando a confiança calculada diretamente do recorte.
+
+- Atualizei e acrescentei testes de regressão em `tests/test_generate.py`, cobrindo LLM com confiança baixa e recorte completo de confiança alta, resposta que declara evidência parcial, execução SQL parcial, recusa e ausência de recorte. Os testes existentes também verificam que resultados determinísticos com dados continuam podendo ter confiança alta.
+
+- Executei `tests/test_generate.py` e `tests/test_numerical_validation.py`: **113 testes aprovados**. Executei também os testes de P4.2 e P4.3 em `tests/test_eval.py`: **9 aprovados**. `git diff --check` passou. Não executei uma avaliação completa.
+
+- Investiguei os relatórios e os logs da rodada `20261018T231542Z`. A rodada teve **2/3 acertos**; P4.1 e P4.3 passaram e P4.2 falhou na validação de conteúdo. Rota e citações foram aceitas, mas a resposta de P4.2 afirmou que pregão era predominante e saiu com confiança `alta`, contrariando os critérios do caso.
+
+- Confirmei nos logs que a etapa SQL de P4.1 filtrou contratos assinados em 2025 com os termos `manutencao` e `computador`, retornando os três registros esperados, todos com modalidade não informada nos resultados registrados.
+
+- Para P4.2, confirmei que a etapa de consulta SQL foi pulada como `nao_aplicavel`. A busca recuperou três documentos sobre outros objetos — arquivos deslizantes, instalações civis/elétricas e centrais telefônicas — cujos amparos legais mencionavam pregão. O LLM usou esses documentos para atribuir modalidade aos contratos de manutenção de computadores, embora não fossem os mesmos contratos.
+
+- Verifiquei que o detector atual não reconhece “predominante” como pedido de agrupamento e, para a pergunta exata, não gera consulta estruturada. A alteração de termos SQL do Renato já está integrada no histórico da branch; ela funciona para P4.1, mas não resolve a ausência de consulta em P4.2.
+
+- Não alterei `structured_query.py`, o Golden Set, os critérios ou os relatórios históricos. Não fiz commit nem push.
+
+**Resultado:**
+
+A correção da confiança foi implementada e passou nos testes pertinentes. A falha de P4.2 foi diagnosticada como falha de consulta/escopo e geração, não como falha de roteamento ou citação: o SQL não foi executado, a recuperação trouxe evidências de outros contratos e a resposta generalizou indevidamente a modalidade. A correção de confiança não intercepta esse caminho sem SQL e, por si só, não impede que um LLM declare confiança alta.
+
+O próximo teste recomendado é fazer com que a pergunta de P4.2 acione uma consulta agrupada por modalidade, com os mesmos filtros de P4.1, e validar que os três registros retornados mostram modalidade ausente, que a resposta reconhece a insuficiência e que a confiança não ultrapassa `MEDIA`.
+
+### Uso de assistentes de IA:
+
+- Utilizei assistentes de IA como apoio à análise do fluxo de confiança, implementação da alteração e elaboração dos testes de regressão.
+
+- Também utilizei apoio para correlacionar o relatório da rodada P4.2 com os logs de recuperação, consulta SQL e geração. As conclusões foram conferidas contra o código, os testes e os artefatos locais; não houve alteração do Golden Set ou dos relatórios históricos.
