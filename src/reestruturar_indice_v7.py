@@ -15,20 +15,23 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.index import REQUIRED_METADATA_FIELDS, _chunk_metadata, _relative, _write_faiss_index
+from src.schema import ChunkMetadata
 
 
 def reestruturar(
     index_dir: Path,
     documents_file: Path,
 ) -> dict[str, Any]:
-    import faiss
-    import gc
+    global_manifest = json.loads((index_dir / "manifest.json").read_text(encoding="utf-8"))
 
     # 1. Build chunk_id → base_id map from documents
     chunk_base: dict[str, str] = {}
@@ -38,6 +41,16 @@ def reestruturar(
             if not line.strip():
                 continue
             chunk = json.loads(line)
+            # Não deixar o default legado do adaptador transformar classificação
+            # perdida em "publico". Validar antes de sobrescrever qualquer base.
+            declared = chunk.get("metadata", chunk)
+            if not declared.get("sensitivity"):
+                raise ValueError(f"chunk {chunk.get('chunk_id')} sem sensitivity explícita")
+            metadata = _chunk_metadata(chunk)
+            missing = {key for key in REQUIRED_METADATA_FIELDS if not metadata.get(key)}
+            if missing:
+                raise ValueError(f"chunk {chunk.get('chunk_id')} sem metadado obrigatório: {sorted(missing)}")
+            ChunkMetadata.model_validate(metadata)
             base_id = chunk.get("base_id", "unknown")
             cid = chunk["chunk_id"]
             chunk_base[cid] = base_id
@@ -86,38 +99,27 @@ def reestruturar(
                     "embedding": emb,
                     "source_file": doc.get("source_file", ""),
                     "sha256": doc.get("sha256", ""),
-                    "metadata": {
-                        "chunk_id": cid,
-                        "document_id": doc.get("document_id", ""),
-                        "base_id": base_id,
-                        "natureza": doc.get("natureza", ""),
-                        "escopo": "oficial",
-                        "data_vigencia": doc.get("data_vigencia", ""),
-                        "status_extracao": doc.get("status_extracao", ""),
-                    },
+                    "metadata": _chunk_metadata(doc),
                 }
                 f.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
 
         # FAISS
         if vecs:
-            mat = np.array([emb for _, emb in vecs], dtype=np.float32)
-            faiss.normalize_L2(mat)
-            idx = faiss.IndexFlatIP(mat.shape[1])
-            idx.add(mat)
-            faiss.write_index(idx, str(base_dir / "vectors.faiss"))
-            del mat, idx
-            gc.collect()
+            _write_faiss_index(base_dir / "vectors.faiss", [emb for _, emb in vecs])
 
         # Manifest
         manifest = {
             "base_id": base_id,
-            "embedding_model": "Qwen3-Embedding-0.6B.Q8_0",
-            "dimension": 1024,
+            "embedding_model": global_manifest["embedding_model"],
+            "dimension": global_manifest["dimension"],
             "faiss_index": "vectors.faiss",
             "total_chunks": len(chunks),
             "total_vectors": len(vecs),
-            "source_file": str(Path(documents_file).resolve().relative_to(PROJECT_ROOT)),
+            "source_file": _relative(documents_file),
         }
+        for key in ("encoding_config", "embedding_provider", "embedding_endpoint", "projecao_embedding"):
+            if key in global_manifest:
+                manifest[key] = global_manifest[key]
         (base_dir / "manifest.json").write_text(
             json.dumps(manifest, ensure_ascii=False, indent=1) + "\n",
             encoding="utf-8",
@@ -126,7 +128,6 @@ def reestruturar(
         print(f"  {base_id}: {len(chunks)} chunks, {len(vecs)} vetores", flush=True)
 
     # 4. Update global manifest
-    global_manifest = json.loads((index_dir / "manifest.json").read_text(encoding="utf-8"))
     global_manifest["bases"] = [
         {"base_id": bid} for bid in sorted(stats.keys())
     ]

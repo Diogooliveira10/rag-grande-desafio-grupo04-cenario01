@@ -19,7 +19,7 @@ from src.generate import ClienteLLM, gerar_resposta, pode_responder_sql
 from src.query_analysis import analisar_query, filtros_para_retrieve
 from src.reformulacao import Reformulacao, reformular_pergunta
 from src.rerank import reranker_padrao
-from src.retrieve import DEFAULT_TOP_K, RerankFn, RetrievalResult, retrieve
+from src.retrieve import DEFAULT_TOP_K, RerankFn, RetrievalResult, _filtro_opcional, retrieve
 from src.router import inferir_motivo_recusa, rotear_pergunta
 from src.schema import Chunk, ChunkMetadata
 from src.structured_query import consultar_estruturado, pode_consultar_sql_direto
@@ -262,6 +262,8 @@ def _responder(
                     "total_intencoes": len(analise.intencoes),
                     "subpergunta": intent.pergunta, "operacao": intent.operacao,
                     "tipo_valor_solicitado": intent.filtros.tipo_valor,
+                    "tipo_medida_solicitada": intent.filtros.tipo_medida,
+                    "granularidade_solicitada": intent.filtros.granularidade,
                     "calculo_disponivel": calculo_disponivel if intent.operacao != "buscar" else None}
                 relaxed = chunk.metadata.extras.get("filtros_relaxados")
                 if relaxed:
@@ -296,7 +298,7 @@ def _responder(
                     query, decisao, top_k=top_k, filters=filtros,
                     escopos=escopos, run_id=run_id, query_id=query_id,
                 )
-        if filtros and not resultados and not sql_suficiente:
+        if filtros and all(_filtro_opcional(value) for value in filtros.values()) and not resultados and not sql_suficiente:
             # Os filtros são heurísticos; se zeraram tudo, a busca sem eles
             # ainda dá evidência ao generate (que decide se basta).
             with log_details(tentativa_busca=2, motivo="filtros_sem_resultado"):
@@ -319,7 +321,9 @@ def _responder(
         for chunk in sql_chunks + chunks:
             chunk.metadata.extras = {**chunk.metadata.extras,
                 "calculo_disponivel": bool(sql_chunks) if requer_calculo(query) else None,
-                "tipo_valor_solicitado": analise.filtros.tipo_valor}
+                "tipo_valor_solicitado": analise.filtros.tipo_valor,
+                "tipo_medida_solicitada": analise.filtros.tipo_medida,
+                "granularidade_solicitada": analise.filtros.granularidade}
         chunks = sql_chunks + chunks
     else:
         refusal_reason_hint = inferir_motivo_recusa(decisao.justificativa)

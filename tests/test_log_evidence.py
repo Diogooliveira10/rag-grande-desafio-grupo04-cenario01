@@ -104,10 +104,8 @@ def test_complete_sql_audit_keeps_lines_beyond_summary(tmp_path, monkeypatch):
     documents = tmp_path / "documents.jsonl"
     documents.write_text("", encoding="utf-8")
     banco = structured_db.Banco(sqlite_path=tmp_path / "facts.sqlite")
-    import sqlite3
-    sqlite3.connect(banco.sqlite_path).close()
+    structured_db.construir_banco(documents, banco)
     lines = [f"Órgão {i}: total R$ 100,00" for i in range(50)]
-    monkeypatch.setattr(structured_db, "garantir_banco", lambda *a, **k: None)
     monkeypatch.setattr(structured_query, "executar_consulta", lambda *a, **k: ("SELECT test", "Amostra", lines))
     chunks = structured_query.consultar_estruturado("Qual o valor total dos contratos por órgão?",
         QueryFilters(), [Natureza.ESTRUTURADA], banco=banco, documents_file=documents)

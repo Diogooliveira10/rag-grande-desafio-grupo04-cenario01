@@ -39,7 +39,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
 import config
-from src import pipeline, rerank, retrieve
+from src import pipeline, rerank, retrieve, snapshot
 from app import catalog
 from app.catalog_models import ContratacaoRecord, DocumentoRecord, OfficialSource, OrgaoRecord, ProjectSummary
 from src.history_store import ConsultaNaoEncontrada, default_store as historico
@@ -296,7 +296,17 @@ async def query_validation_error(request: Request, error: RequestValidationError
 
 @app.get("/health")
 def health() -> dict[str, str]:
+    """Liveness only; not a promise that analytical snapshots are ready."""
     return {"status": "ok"}
+
+
+@app.get("/ready")
+def ready() -> dict[str, Any]:
+    """Read-only bundle readiness, distinct from process liveness."""
+    result = snapshot.readiness()
+    if not result["ready"]:
+        raise HTTPException(status_code=503, detail=result)
+    return result
 
 
 @app.post("/api/v1/query", response_model=QueryResponse)
