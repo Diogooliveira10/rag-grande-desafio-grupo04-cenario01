@@ -122,6 +122,21 @@ def _consultar(pergunta, base, bases=ESTRUTURADA, **filtros):
     return sq.consultar_estruturado(pergunta, QueryFilters(**filtros), bases, **base)
 
 
+def _texto_sql(chunks):
+    """Confere o pacote completo, sem pressupor um único chunk de evidência."""
+    assert chunks
+    assert len({c.metadata.chunk_id for c in chunks}) == len(chunks)
+    recorte = chunks[0].metadata.extras["resultado_sql"]["recorte"]
+    for indice, chunk in enumerate(chunks, 1):
+        extras = chunk.metadata.extras
+        assert extras["parte"] == indice and extras["partes"] == len(chunks)
+        assert extras["resultado_sql"]["recorte"] == recorte
+        assert chunk.metadata.source_file == chunks[0].metadata.source_file
+        assert chunk.content.splitlines()[1:] == extras["resultado_sql"]["linhas"]
+        assert len(chunk.content) <= sq.config.GENERATION_CHUNK_CHARS
+    return "\n".join(c.content for c in chunks)
+
+
 # --------------------------------------------------------------------------
 # Filtros vindos do query_analysis
 # --------------------------------------------------------------------------
@@ -169,9 +184,11 @@ def test_periodo_aberto_de_contratos_usa_ano_da_assinatura():
 
 
 def test_periodo_filtra_as_linhas_do_sql(base):
-    [chunk] = _consultar("Qual a mediana das contratações?", base, ano=2024, ano_final=2025)
-    assert "ano de 2024 a 2025" in chunk.content
-    assert "Geral: 4 registros" in chunk.content
+    chunks = _consultar("Qual a mediana das contratações?", base, ano=2024, ano_final=2025)
+    texto = _texto_sql(chunks)
+    assert "ano de 2024 a 2025" in texto
+    assert texto.count("Geral: 4 registros") == 1
+    assert chunks[0].metadata.extras["resultado_sql"]["recorte"]["registros_correspondentes"] == 4
 
 
 def test_consulta_exata_por_identificador_pncp_e_parametrizada(tmp_path):
@@ -292,9 +309,95 @@ def test_pergunta_sobre_pca_vai_para_a_tabela_de_planos():
     assert consulta.tabela == "pca_planos"
 
 
-# --------------------------------------------------------------------------
-# Execução
-# --------------------------------------------------------------------------
+def _base_pca_com_colisao_de_orgao_unidade(tmp_path):
+    secretaria = _plano("P-UNIT", valor=3008.0, unidade="SECRET ESTADO SAUDE")
+    outro_setor = _plano("P-OTHER", valor=7000.0, unidade="SECRET ESTADO EDUCACAO")
+    orgao_secretaria = _plano("P-ORG", valor=9000.0, unidade="UNIDADE ADMINISTRATIVA")
+    orgao_secretaria["razaoSocial"] = "SECRETARIA DE ESTADO DE SAUDE"
+    documents = escrever_documents(tmp_path / "documents-pca-roles.jsonl",
+                                   planos=[secretaria, outro_setor, orgao_secretaria])
+    banco = Banco(sqlite_path=tmp_path / "pca-roles.sqlite")
+    structured_db.construir_banco(documents, banco)
+    return {"banco": banco, "documents_file": documents}
+
+
+@pytest.mark.parametrize("question,role,column,expected", [
+    ("Qual o total planejado pela Secretaria de Estado de Saúde no plano de contratações de 2025?",
+     "unidade", "unidade_nome", "R$ 3.008,00"),
+    ("Qual o total planejado pelo órgão Secretaria de Estado de Saúde no PCA de 2025?",
+     "orgao", "orgao_nome", "R$ 9.000,00"),
+])
+def test_sql_pca_nao_confunde_orgao_com_unidade(question, role, column, expected, tmp_path):
+    from src.query_analysis import analisar_query
+    base = _base_pca_com_colisao_de_orgao_unidade(tmp_path)
+    filters = analisar_query(question, modo="regras").filtros
+    consulta = sq.detectar_consulta(question, filters, AGREGADA)
+    recorte = {}
+
+    sql, _header, rows = sq.executar_consulta(consulta, base["banco"], recorte)
+
+    assert filters.papel_orgao == role
+    assert f"{column} IN" in sql
+    assert ("unidade_nome IN" in sql) == (role == "unidade")
+    assert "1 registros" in rows[0] and expected in rows[0]
+    assert recorte["registros_correspondentes"] == 1
+
+
+@pytest.mark.parametrize("question,role,column,expected", [
+    ("Qual o total planejado pela Secretaria de Estado de Saúde no plano de contratações de 2025?",
+     "unidade", "unidade_nome", "R$ 3.008,00"),
+    ("Qual o total planejado pelo órgão Secretaria de Estado de Saúde no PCA de 2025?",
+     "orgao", "orgao_nome", "R$ 9.000,00"),
+])
+def test_sql_tipado_pca_filtra_somente_o_papel_resolvido(question, role, column, expected, tmp_path):
+    from src.query_analysis import analisar_query
+    from src.schema import QueryIntent
+    filters = analisar_query(question, modo="regras").filtros
+    intent = QueryIntent(pergunta=question, bases=AGREGADA, operacao="estatistica", filtros=filters)
+    consulta = sq.consulta_da_intencao(intent)
+    base = _base_pca_com_colisao_de_orgao_unidade(tmp_path)
+    recorte = {}
+
+    sql, _header, rows = sq.executar_consulta(consulta, base["banco"], recorte)
+
+    assert filters.papel_orgao == role
+    assert f"{column} IN" in sql
+    assert ("unidade_nome IN" in sql) == (role == "unidade")
+    assert ("orgao_nome IN" in sql) == (role == "orgao")
+    assert "1 registros" in rows[0] and expected in rows[0]
+    assert recorte["registros_correspondentes"] == 1
+
+def test_sql_pca_media_unitaria_calcula_corretamente(tmp_path):
+    from src.query_analysis import analisar_query
+    from src.schema import QueryIntent
+    # Cenário: 2 planos, um com 10 itens (1000 reais) e outro com 20 itens (2000 reais)
+    # Média esperada: (1000 + 2000) / (10 + 20) = 100 reais por item
+    plano1 = _plano("P-UNIT-1", valor=1000.0, quantidade=10)
+    plano2 = _plano("P-UNIT-2", valor=2000.0, quantidade=20)
+
+    documents = escrever_documents(tmp_path / "documents-pca-unit.jsonl",
+                                   planos=[plano1, plano2])
+    banco = Banco(sqlite_path=tmp_path / "pca-unit.sqlite")
+    structured_db.construir_banco(documents, banco)
+    base = {"banco": banco, "documents_file": documents}
+
+    question = "Qual o valor médio por item nos planos de contratações de 2025?"
+    # Força a métrica para testar o caminho SQL tipado
+    filters = analisar_query(question, modo="regras").filtros
+    filters.metrica = "media_unitaria"
+    filters.tipo_medida = "unitaria"
+    filters.granularidade = "item"
+    filters.referencia_temporal = "pca"
+
+    intent = QueryIntent(pergunta=question, bases=AGREGADA, operacao="estatistica", filtros=filters)
+    consulta = sq.consulta_da_intencao(intent)
+    recorte = {}
+
+    sql, _header, rows = sq.executar_consulta(consulta, base["banco"], recorte)
+
+    assert "SUM(valor_total)" in sql and "quantidade_itens" in sql
+    assert "R$ 100,00" in rows[0]
+    assert "Média por item" in rows[0]
 
 
 def test_ranking_ordena_por_valor_e_respeita_filtro_de_ano(base):
@@ -322,10 +425,11 @@ def test_objeto_inexistente_nao_calcula_sobre_outro_assunto(base):
 
 
 def test_termos_sem_combinacao_exata_caem_para_ou_entre_os_que_existem(base):
-    [chunk] = _consultar("Qual o valor total de ambulâncias e pavimentação?", base)
-
-    assert "objeto contém ambulancia ou pavimentacao" in chunk.content
-    assert "Geral: 4 registros" in chunk.content
+    chunks = _consultar("Qual o valor total de ambulâncias e pavimentação?", base)
+    texto = _texto_sql(chunks)
+    assert "objeto contém ambulancia ou pavimentacao" in texto
+    assert texto.count("Geral: 4 registros") == 1
+    assert chunks[0].metadata.extras["resultado_sql"]["recorte"]["execucao"] == "parcial"
 
 
 def test_agrupamento_conta_por_modalidade(base):
@@ -359,6 +463,7 @@ def test_resultado_grande_e_dividido_em_chunks_que_cabem_no_prompt(tmp_path, mon
         contratacoes=[_contratacao(f"C-{i}", valor_estimado=float(i), objeto="x" * 80) for i in range(1, 16)],
     )
     banco = Banco(sqlite_path=tmp_path / "base.sqlite")
+    structured_db.construir_banco(documents, banco)
 
     chunks = sq.consultar_estruturado("Quais as quinze maiores contratações?", QueryFilters(), ESTRUTURADA,
                                       banco=banco, documents_file=documents)
@@ -368,6 +473,11 @@ def test_resultado_grande_e_dividido_em_chunks_que_cabem_no_prompt(tmp_path, mon
     assert len({c.metadata.chunk_id for c in chunks}) == len(chunks)
     assert all(c.metadata.doc_type == "sql" and c.metadata.chunk_id.startswith("sql:") for c in chunks)
     assert chunks[1].content.startswith("(continuação da consulta SQL")
+    _texto_sql(chunks)
+    linhas = [linha for c in chunks for linha in c.metadata.extras["resultado_sql"]["linhas"]]
+    assert len(linhas) == 15
+    assert [linha.split(". ", 1)[0] for linha in linhas] == [str(i) for i in range(1, 16)]
+    assert "R$ 15,00" in linhas[0] and "R$ 1,00" in linhas[-1]
 
 
 def test_consulta_registra_stage_consulta_sql_com_o_sql(base):
@@ -627,9 +737,13 @@ def test_listagem_devolve_registros_com_orgao_fornecedor_e_modalidade(base):
     consulta = _detectar("Quais contratos de ambulâncias foram publicados?")
     assert consulta.tipo == "listagem"
 
-    [chunk] = _consultar("Quais contratações de ambulâncias existem em 2025?", base, ano=2025)
-    assert "3 registros atendem aos filtros" in chunk.content  # M-1, M-2 e E-1
-    assert "fornecedor:" in chunk.content and "modalidade: Concorrência - Eletrônica" in chunk.content
+    chunks = _consultar("Quais contratações de ambulâncias existem em 2025?", base, ano=2025)
+    texto = _texto_sql(chunks)
+    assert "3 registros atendem aos filtros" in texto  # M-1, M-2 e E-1
+    assert "fornecedor:" in texto and "modalidade: Concorrência - Eletrônica" in texto
+    linhas = [linha for c in chunks for linha in c.metadata.extras["resultado_sql"]["linhas"]]
+    assert len(linhas) == 4  # resumo + três registros, sem perda na divisão
+    assert sum("PNCP " in linha for linha in linhas) == 3
 
 
 def test_listagem_multi_base_isola_objeto_da_clausula_de_contratacoes():
@@ -717,9 +831,9 @@ def test_contagem_pelo_menos_n_contratos_cria_agregacao_por_fornecedor():
 
 
 def test_palavra_solta_da_pergunta_nao_entra_no_ou(base):
-    [chunk] = _consultar("Qual o total de ambulâncias e pavimentação desse período?", base)
-
-    assert "objeto contém ambulancia ou pavimentacao" in chunk.content
+    texto = _texto_sql(_consultar("Qual o total de ambulâncias e pavimentação desse período?", base))
+    assert "objeto contém ambulancia ou pavimentacao" in texto
+    assert "objeto contém periodo" not in texto
 
 
 def test_agente_da_passiva_nao_vira_agrupamento():
@@ -880,7 +994,7 @@ def test_compra_e_contrato_da_mesma_contratacao_contam_uma_vez(tmp_path):
 
     # Sem deduplicar seriam 3 registros (1.000 + 900 + 50); fica o contrato.
     assert "Geral: 2 registros; total R$ 950,00" in chunk.content
-    assert "conta uma vez (pelo contrato)" in chunk.content
+    assert "Contratos/empenhos distintos são preservados" in chunk.content
 
 
 def test_pergunta_de_modalidade_mantem_a_compra_e_tira_o_contrato(tmp_path):
@@ -900,6 +1014,39 @@ def test_base_sem_a_coluna_nova_roda_sem_deduplicar(tmp_path):
     consulta = sq.detectar_consulta("Qual o total das compras de ambulância em 2025?", QueryFilters(ano=2025), ESTRUTURADA)
 
     assert sq._resolver_valores(consulta, base["banco"]).deduplicar is False
+
+
+def test_vinculo_fora_do_periodo_nao_apaga_compra_do_recorte(tmp_path):
+    from contextlib import closing
+    base = _base_compra_e_contrato(tmp_path)
+    with closing(base["banco"].conectar(somente_leitura=False)) as connection, connection:
+        connection.execute("UPDATE contratacoes SET ano_publicacao=2024 WHERE tipo_registro='contrato_assinado'")
+    recorte = {}
+    sq.executar_consulta(sq.Consulta(tabela="contratacoes", tipo="estatistica", ano=2025,
+                                   metrica="contagem"), base["banco"], recorte)
+    assert recorte["registros_correspondentes"] == 2
+
+
+def test_contagem_um_para_muitos_preserva_contratos_e_distingue_empenho(tmp_path):
+    compra = _contratacao("111-1-000001/2025")
+    instrumentos = []
+    for numero in range(1, 4):
+        contrato = _contratacao(f"111-2-{numero:06d}/2025", modalidade=None)
+        contrato.update(dataAssinatura="2025-03-01", valorGlobal=100 * numero,
+                        numeroControlePncpCompra=compra["numeroControlePNCP"])
+        instrumentos.append(contrato)
+    docs = escrever_documents(tmp_path / "documents.jsonl", contratacoes=[compra, *instrumentos])
+    rows = [json.loads(line) for line in docs.read_text(encoding="utf-8").splitlines()]
+    rows[-1]["extras"] = {"tipo_instrumento": "empenho"}
+    docs.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    banco = Banco(sqlite_path=tmp_path / "base.sqlite")
+    structured_db.construir_banco(docs, banco)
+    for opcoes, esperado in [({"so_contratos": True}, 2),
+                             ({"filtros_analiticos": (("tipo_registro", "empenho"),)}, 1)]:
+        recorte = {}
+        sq.executar_consulta(sq.Consulta(tabela="contratacoes", tipo="estatistica", metrica="contagem",
+                                       **opcoes), banco, recorte)
+        assert recorte["registros_correspondentes"] == esperado
 
 
 def test_orgao_com_estado_e_rio_nao_casa_com_orgao_federal_nem_com_outra_prefeitura(tmp_path):
@@ -1029,7 +1176,28 @@ def test_mediana_por_veiculo_nao_compila_calculo_sobre_global():
     question = 'Compare a mediana do valor por veículo em 2025.'
     filters = analisar_query(question, modo='regras').filtros
     assert filters.tipo_valor == 'unitario'
+    assert filters.tipo_medida == 'unitaria' and filters.granularidade == 'item'
     assert sq.detectar_consulta(question, filters, ESTRUTURADA + AGREGADA) is None
+
+
+def test_preco_unitario_homologado_nao_compila_soma_global():
+    from src.query_analysis import analisar_query
+    from src.schema import QueryIntent
+    question = 'Qual a mediana do preço unitário homologado de serviço de engenharia?'
+    filters = analisar_query(question, modo='regras').filtros
+    intent = QueryIntent(pergunta=question, bases=AGREGADA, operacao='estatistica', filtros=filters)
+
+    assert filters.tipo_valor == 'homologado'
+    assert filters.tipo_medida == 'unitaria' and filters.granularidade == 'item'
+    assert sq.consulta_da_intencao(intent) is None
+    assert sq.detectar_consulta(question, filters, ESTRUTURADA + AGREGADA) is None
+
+
+def test_plano_llm_rejeita_preco_unitario_sem_grao_de_item():
+    from src.schema import QueryIntent
+    with pytest.raises(ValueError, match='grão de item'):
+        QueryIntent(pergunta='preço unitário', bases=AGREGADA, operacao='estatistica',
+                    filtros=QueryFilters(tipo_medida='unitaria', metrica='mediana'))
 
 
 # --------------------------------------------------------------------------
@@ -1084,9 +1252,24 @@ def test_listagem_pelo_cnpj_do_fornecedor(pergunta, base_cnpj):
     assert all("PRIME CONSULTORIA" in linha for linha in linhas[1:])
 
 
+def test_papel_cnpj_explicito_nao_colide_com_a_outra_entidade(base_cnpj):
+    from src.query_analysis import analisar_query
+    pergunta = "Quais contratos tem fornecedor de CNPJ 30.381.552/0001-58?"
+    filtros = analisar_query(pergunta).filtros
+    consulta = sq.detectar_consulta(pergunta, filtros, ESTRUTURADA)
+
+    assert filtros.papel_cnpj == "fornecedor"
+    assert consulta.papel_cnpj == "fornecedor"
+    where, params = sq._where(consulta, ())
+    assert "fornecedor_cnpj = ?" in where and "orgao_cnpj = ?" not in where
+    assert "30381552000158" in params
+    _sql, _header, rows = sq.executar_consulta(consulta, base_cnpj["banco"])
+    assert rows[0].startswith("0 registros atendem aos filtros")
+
+
 def test_soma_pelo_cnpj_do_orgao(base_cnpj):
     from src.query_analysis import analisar_query
-    pergunta = "Qual o valor total dos contratos do CNPJ 29.131.075/0001-93 em 2025?"
+    pergunta = "Qual o valor total dos contratos do órgão CNPJ 29.131.075/0001-93 em 2025?"
     consulta = sq.detectar_consulta(pergunta, analisar_query(pergunta).filtros, ESTRUTURADA)
 
     _, _, linhas = sq.executar_consulta(consulta, base_cnpj["banco"])

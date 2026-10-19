@@ -46,6 +46,48 @@ def test_optional_missing_fields_cannot_hide_empty_scoped_result():
     assert ignored == {"contratos_estruturado": {"nenhum_chunk_passou": ["valor"]}}
 
 
+def test_temporal_fields_are_scoped_to_their_domain():
+    from src.retrieve import _matches_filters
+
+    rule = {"optional": False, "operator": ">=", "value": "2025-01-01"}
+    assert _matches_filters({"natureza": "estruturada", "data_assinatura": "2025-01-02"},
+                            {"data_assinatura": rule})
+    assert _matches_filters({"natureza": "normativa", "data_vigencia": "2025-01-02"},
+                            {"data_assinatura": rule})
+    assert not _matches_filters({"natureza": "estruturada", "data_assinatura": "2024-12-31"},
+                                {"data_assinatura": rule})
+
+
+def test_explicit_supplier_cnpj_does_not_match_only_organization_cnpj():
+    from src.retrieve import _matches_filters
+
+    record = {"natureza": "estruturada", "orgao_cnpj": "30381552000158",
+              "fornecedor_cnpj": "15064270000133"}
+    condition = {"optional": False, "operator": "contains", "value": "30381552000158"}
+
+    assert not _matches_filters(record, {"fornecedor_cnpj": condition})
+    assert _matches_filters(record, {"orgao_cnpj": condition})
+
+
+def test_pca_entity_role_filters_only_the_named_unit_or_organization():
+    from src.query_analysis import analisar_query, filtros_para_retrieve
+    from src.retrieve import _matches_filters
+
+    unit_query = "Quanto a Secretaria de Estado de Saúde planejou no plano de contratações de 2025?"
+    org_query = "Qual o total planejado pelo órgão Secretaria de Estado de Saúde no PCA de 2025?"
+    unit_filter = filtros_para_retrieve(analisar_query(unit_query).filtros)
+    org_filter = filtros_para_retrieve(analisar_query(org_query).filtros)
+    unit_record = {"base_id": "pca_agregado", "natureza": "agregada", "ano_pca": 2025,
+                   "unidade_nome": "SECRET ESTADO SAUDE", "orgao": "ESTADO DO RIO DE JANEIRO"}
+    org_record = {"base_id": "pca_agregado", "natureza": "agregada", "ano_pca": 2025,
+                  "unidade_nome": "UNIDADE ADMINISTRATIVA", "orgao": "SECRETARIA DE ESTADO DE SAUDE"}
+
+    assert _matches_filters(unit_record, unit_filter)
+    assert not _matches_filters(org_record, unit_filter)
+    assert not _matches_filters(unit_record, org_filter)
+    assert _matches_filters(org_record, org_filter)
+
+
 def _record(
     chunk_id: str,
     *,
@@ -1030,8 +1072,7 @@ def test_filtro_de_faixa_combinado_com_condicao_de_igualdade_em_outra_chave():
 
 
 # --------------------------------------------------------------------------
-# retrieve() aplica os filtros base a base: um filtro que a base não tem, ou
-# que zeraria a base, é ignorado — caso real do índice sem valor/data_vigencia.
+# Só filtros explicitamente opcionais podem ser ampliados base a base.
 # --------------------------------------------------------------------------
 
 
@@ -1065,7 +1106,7 @@ def test_retrieve_ignora_filtro_de_campo_que_a_base_nao_tem(tmp_path, monkeypatc
     ]
     comum = _grava_indice(tmp_path, registros)
 
-    results = retrieve("software", None, filters={"valor": {"operator": ">=", "value": 500000}}, **comum)
+    results = retrieve("software", None, filters={"valor": {"operator": ">=", "value": 500000, "optional": True}}, **comum)
 
     assert {item.chunk_id for item in results} == {"c1", "c2"}
     [log] = _logs_de_retrieval()
@@ -1080,7 +1121,7 @@ def test_retrieve_ignora_filtro_que_zeraria_a_base(tmp_path, monkeypatch):
     ]
     comum = _grava_indice(tmp_path, registros)
 
-    results = retrieve("software", None, filters={"valor": {"operator": ">=", "value": 500000}}, **comum)
+    results = retrieve("software", None, filters={"valor": {"operator": ">=", "value": 500000, "optional": True}}, **comum)
 
     assert {item.chunk_id for item in results} == {"c1", "c2"}
     [log] = _logs_de_retrieval()
@@ -1136,12 +1177,18 @@ def test_retrieve_mantem_filtro_onde_ele_existe_e_ignora_nas_outras_bases(tmp_pa
     ]
     comum = _grava_indice(tmp_path, registros, documentos_planos=True)
 
-    results = retrieve("software", None, filters={"valor": {"operator": ">=", "value": 500000}}, **comum)
+    results = retrieve("software", None, filters={"valor": {"operator": ">=", "value": 500000, "optional": True}}, **comum)
 
     assert {item.chunk_id for item in results} == {"caro", "lei"}
     assert all(item.sparse_score is not None for item in results)
     [log] = _logs_de_retrieval()
     assert log["extra"]["filtros_ignorados"] == {"editais_normativo": {"sem_campo": ["valor"]}}
+
+
+@pytest.mark.parametrize("extras", [{}, {"valor": 100}])
+def test_filtro_obrigatorio_nao_e_removido_quando_nao_ha_resultado(tmp_path, extras):
+    comum = _grava_indice(tmp_path, [_record("c1", text="software", embedding=[1.0, 0.0], metadata_extra=extras)])
+    assert retrieve("software", None, filters={"valor": {"operator": ">=", "value": 500000}}, **comum) == []
 
 
 def test_retrieve_sem_filtro_nao_registra_filtros_ignorados(tmp_path, monkeypatch):
@@ -1217,6 +1264,28 @@ def test_cnpj_no_comeco_do_numero_de_controle_nao_vira_identificador_proprio():
     assert retrieve_module._identificadores_pncp("Contrato 00394429000100-2-001108/2024") == [
         "00394429000100-2-001108/2024"
     ]
+
+
+def test_filtros_de_publicacao_e_orgao_aplicam_se_a_normas():
+    from src.retrieve import _matches_filters
+
+    assert not _matches_filters(
+        {"base_id": "editais_normativo", "data_publicacao": "2020-01-01"},
+        {"data_publicacao": {"operator": ">=", "value": "2025-01-01", "optional": False}},
+    )
+    assert not _matches_filters(
+        {"base_id": "editais_normativo", "extras": {"orgao": "Outro órgão"}},
+        {"orgao": {"operator": "contains", "value": "Secretaria X", "optional": False}},
+    )
+
+
+def test_filtros_de_valor_nao_se_aplicam_a_normas():
+    from src.retrieve import _matches_filters
+
+    assert _matches_filters(
+        {"base_id": "editais_normativo"},
+        {"valor": {"operator": ">=", "value": 100000, "optional": False}},
+    )
 # --------------------------------------------------------------------------
 # Embeddings de consulta por provedor (config.embedding_endpoint)
 # --------------------------------------------------------------------------
