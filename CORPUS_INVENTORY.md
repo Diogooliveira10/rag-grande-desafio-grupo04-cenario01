@@ -1,49 +1,80 @@
 # Inventário do corpus
 
-> Este inventário cobre a base ativa **v6** (1.400 arquivos de 2026-09-30),
-> vinculada ao manifesto [`archive/corpus_manifest_v6.yaml`](archive/corpus_manifest_v6.yaml)
-> (sha256 `2df44cd1…582057`). O censo **v7** (contratos e publicações de 2025)
-> é construído em paralelo, tem inventário próprio em
-> `data/v7_direto/inventario_direto.json` e entra no lugar da v6 apenas após
-> regressão e re-auditoria do golden set
-> ([`docs/PLANO_POSSIVEL_CORPUS_V7.md`](docs/PLANO_POSSIVEL_CORPUS_V7.md)).
+> Inventário do corpus ativo **v7-reparo** (censo de contratos e publicações
+> de 2025 do RJ), vinculado ao manifesto
+> [`corpus_manifest.yaml`](corpus_manifest.yaml) versão `2026-10-13`.
+> O snapshot v6 original (1.400 arquivos) foi preservado em
+> `data/backup_v6_20261018_224104/`.
 
 - Tipo: `manifest`
 - Oficial: `True`
 - Vinculado ao manifesto: `True`
 - Cenário: `contratacoes-rj`
-- Versão: `v6`
-- Coletado em: `2026-09-30T17:08:01+00:00`
+- Versão: `v7-reparo`
+- Coletado em: `2026-10-18T21:14:05+00:00`
 - Completo: **True**
-- Arquivos: **1400**
-- Itens/registros: **1400**
-- Bytes: **33466471**
-- Falhas: **0**
+- Chunks normalizados: **144.112**
+- Bytes (documents.jsonl): **629 MB**
+- Vetores FAISS: **143.299**
+- Schema SQL: **7**
 
 ## Bases
 
-| Base | Escopo | Natureza | Status | Arquivos | Itens | Formatos | Bytes | Alvo | Divergência |
-|---|---|---|---|---:|---:|---|---:|---:|---:|
-| `contratos_estruturado` | oficial | estruturada | complete | 625 | 625 | json: 625 | 1335165 | 625 | 0 |
-| `editais_normativo` | oficial | normativa | complete | 13 | 13 | pdf: 9, html: 4 | 8285989 | 13 | 0 |
-| `atas_conversacional` | oficial | conversacional | complete | 376 | 376 | json: 336, pdf: 40 | 21953983 | 376 | 0 |
-| `pca_agregado` | oficial | agregada | complete | 386 | 386 | json: 386 | 1891334 | 386 | 0 |
+| Base | Escopo | Natureza | Chunks | Vetores | FAISS | Formatos |
+|---|---|---|---:|---:|---:|---|
+| `contratos_estruturado` | oficial | estruturada | 106.666 | 105.917 | 414 MB | json |
+| `atas_conversacional` | oficial | conversacional | 34.953 | 34.889 | 136 MB | json, pdf |
+| `editais_normativo` | oficial | normativa | 1.557 | 1.557 | 6 MB | html, pdf |
+| `pca_agregado` | oficial | agregada | 911 | 911 | 4 MB | json |
+| `emails_sinteticos` | oficial | conversacional | 25 | 25 | 0 MB | json |
+
+## Base estruturada SQL
+
+| Tabela | Registros | Schema |
+|---|---:|---|
+| `contratacoes` | 106.667 | v7 |
+| `pca_planos` | 1 | v7 |
 
 ## Suplemento sintético conversacional
 
-O inventário acima continua sendo o snapshot público **v6**, sem alterações.
-A base ativa também inclui `emails_sinteticos`, separadamente:
+25 e-mails sintéticos (20 públicas, 5 restritas), integrados em 2026-10-05.
+Fonte: `conversacional_sintetica.zip`, gerado pelo tutor.
+Proveniência: [docs/emails_sinteticos.md](docs/emails_sinteticos.md).
 
-| Base | Escopo | Natureza | Arquivos | Conversas | Mensagens | Chunks | Sensibilidade |
-|---|---|---|---:|---:|---:|---:|---|
-| `emails_sinteticos` | oficial | conversacional | 25 JSON | 25 | 45 | 25 | 20 públicas, 5 restritas |
+## Diferenças em relação à v6
 
-- Fonte: `conversacional_sintetica.zip`, gerado pelo tutor e integrado ao projeto por João em 2026-10-05 (52.963 bytes nos JSONs canônicos).
-- Canonização: somente JSON individual; TXT e JSONL consolidados são cópias, não novas conversas.
-- Base ativa: **1.425 arquivos de origem** e **5.115 chunks normalizados e indexados** (5.090 da v6 + 25 sintéticos). A recuperação OCR de 2026-10-07 reprocessou as 52 páginas de atas e decodificou os cabeçalhos de 7 páginas de decretos: **zero trechos ilegíveis**. A quantidade de chunks mudou porque o texto recuperado é segmentado novamente, sem criar uma nova coleta. Relatórios em [data/inventory/qualidade_v6.json](data/inventory/qualidade_v6.json) e [eval/runs/v6-ocr-recovery.json](eval/runs/v6-ocr-recovery.json).
-- Não é uma nova coleta PNCP nem uma versão v7. O suplemento tem coleta local própria.
-- Proveniência, classificação e reconstrução: [docs/emails_sinteticos.md](docs/emails_sinteticos.md).
+| Métrica | v6 | v7 |
+|---|---:|---:|
+| Contratos | 810 | 106.667 |
+| PCA | 1 | 1 |
+| Chunks totais | 5.115 | 144.112 |
+| Vetores | ~5.000 | 143.299 |
+
+## Limitações conhecidas
+
+- **Vetores com linhagem mista:** Q4_K_M (105.917) + Q8_0 (37.382). Busca semântica
+  funciona, mas encoding não é homogêneo.
+- **813 documentos sem vetor:** ficam fora da busca densa (BM25 ainda encontra).
+- **Encoding provenance não comprovado:** `snapshot.py` rejeitaria o bundle por
+  `proveniencia_incompleta`. Pipeline direto funciona normalmente.
+- **PCA:** apenas 1 plano (Secretaria de Estado de Saúde, 2025). Censo completo
+  depende de nova coleta.
+
+## Como reconstruir
+
+```bash
+# 1. Baixar dados do PNCP (lento, ~2h+)
+python -m src.fetch_corpus fetch --manifest corpus_manifest.yaml
+
+# 2. Construir SQLite
+python -m src.structured_db build
+
+# 3. Gerar embeddings (requer endpoint ECOA)
+python -m src.create_embeddings
+```
+
+Ou copiar os arquivos pré-construídos de `data/v7_recuperacao/2026-10-15/candidato_07_reparo/`.
 
 ## Falhas
 
-Nenhuma falha registrada.
+Nenhuma falha registrada na coleta v7.
