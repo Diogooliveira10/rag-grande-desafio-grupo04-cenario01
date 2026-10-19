@@ -350,7 +350,7 @@ Hoje fiz perguntas do golden set que dependem da anterior e casos de CNPJ e a co
   - Criei dois casos de CNPJ, com o gabarito conferido no banco: I3 (contratos da DATAPREV pelo CNPJ do fornecedor) e I4 (compras do Ministério das Relações Exteriores pelo CNPJ do órgão). O golden set passou de 29 para 31 casos.
   - Com o LLM, P1.3, I3 e I4 passaram. A P4.2 deu uma resposta certa com palavras que não estavam no gabarito; com o OK do Renato, acrescentei dois sinônimos, com teste mostrando que respostas erradas continuam reprovadas. A P4.2 e a P4.3 ainda falham por confiança alta, que é o item 22.
 
-  - README: a tabela tem 810 linhas, não 809 (conferi no banco), e o golden set já tem gabarito de conteúdo.
+
   - Guia de execução local: a branch é a `main`, o CORS do frontend local já vem liberado e troquei o exemplo de recusa por um que funciona.
   - Índice da pasta docs: faltavam 9 documentos, e o passo a passo dos e-mails sintéticos não funcionava mais.
   - Também pus o `RERANK_PRELOAD` no `.env.example` e atualizei o número de testes no ARQUITETURA.
@@ -361,3 +361,22 @@ Hoje fiz perguntas do golden set que dependem da anterior e casos de CNPJ e a co
 ### Uso de assistentes de IA:
 
 - Usei o Claude Code para implementar o histórico no avaliador e os testes, conferir os gabaritos no banco, rodar as perguntas com o LLM, testar o frontend com o backend e revisar a documentação.
+
+## Encontro 15 - 2026-10-19
+
+### Relato individual - Pâmela de Freitas
+
+Hoje fiz o item 22 na P4.2: o LLM dizia que a modalidade era "pregão", deduzindo pelo amparo legal.
+
+- Pus uma regra no prompt: a modalidade de um contrato só vem do campo de modalidade do próprio registro. O LLM não pode deduzir pelo amparo legal nem copiar de outro contrato que veio na busca, de outro assunto (foi o que o Diogo viu na P4.2).
+- Corrigi também um conflito que ficou grande no v7: muitos contratos ganharam a modalidade pela compra vinculada, e o cabeçalho do trecho mostrava "modalidade = Pregão (da compra vinculada)", mas o registro dizia "modalidade não informada". Agora o registro mostra a mesma modalidade do cabeçalho.
+- Testei com o LLM no v7 as perguntas que falam de modalidade e norma: com a mudança, P3.2, P4.2, P4.3 e P6.3 passaram (4 de 4); sem ela, 2 de 4. O "pregão" da P4.2 não se repetiu no v7 (o erro foi no v6), então deixei um teste automático com esse caso.
+- O gabarito da P4.2 ficou da v6: no v7 são 12 contratos de manutenção de computadores em 2025, e 10 têm modalidade. Avisei que ele precisa ser revisto.
+- Para testar, baixei os dados do v7 do Google Drive, porque o pull tirou os dados do repositório. O arquivo de vetores dos contratos (2,5 GB) não vinha no "Baixar tudo" e foi baixado separado; conferi que ele tem os 105.917 vetores do índice.
+- O Renato juntou a minha branch na dele para levar à main. Suíte: 1.911 testes passando; a única falha é um teste do v7 que só quebra no Windows (acentos lidos sem UTF-8).
+- Também estudei como funciona o log (etapas, resumo da consulta e session_id) para a apresentação.
+
+
+### Uso de assistentes de IA:
+
+- Usei o Claude Code para investigar a falha da P4.2, fazer a regra, a correção e os testes, conferir os dados do v7 e comparar as respostas do LLM com e sem a mudança.
