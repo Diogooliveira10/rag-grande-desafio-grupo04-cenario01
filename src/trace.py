@@ -19,6 +19,7 @@ import json
 import logging
 import re
 import sqlite3
+from collections import Counter
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -176,6 +177,40 @@ def montar_trace(query_id: str, logs_dir: Optional[Path] = None) -> Optional[dic
     return _sem_endereco_de_banco(_trace_dos_registros(query_id, registros))
 
 
+_MARCOS = {
+    Stage.REQUISICAO_INICIO.value: "início da requisição",
+    Stage.PIPELINE_INICIO.value: "início do pipeline",
+}
+
+
+def _saida_da_etapa(registro: dict[str, Any]) -> Any:
+    """``output`` da etapa no trace, sem ``null`` onde o log tem o que mostrar.
+
+    Marco de início não produz saída, e etapa pulada guarda o motivo nos
+    detalhes; no trace os dois apareciam com ``output: null``. O resumo da
+    consulta já vai inteiro no ``resumo`` do topo: aqui fica só a referência.
+    """
+    saida = registro.get("output")
+    extra = registro.get("extra") or {}
+    stage = registro.get("stage")
+    if stage == Stage.RESUMO_CONSULTA.value and isinstance(saida, dict):
+        return "ver o campo resumo, no topo do trace"
+    if saida is not None:
+        return saida
+    if stage in _MARCOS:
+        contexto = extra.get("contexto_execucao") or {}
+        marco: dict[str, Any] = {"marco": _MARCOS[stage]}
+        if contexto.get("git_revision"):
+            marco["versao_codigo"] = str(contexto["git_revision"])[:7]
+        parametros = {chave: extra[chave] for chave in ("top_k", "escopos") if chave in extra}
+        if parametros:
+            marco["parametros"] = parametros
+        return marco
+    if registro.get("status") == "pulado" or extra.get("outcome") == "pulado":
+        return {"pulado": extra.get("motivo") or "sem motivo registrado"}
+    return None
+
+
 def _trace_dos_registros(query_id: str, registros: list[dict[str, Any]]) -> dict[str, Any]:
 
     etapas = [
@@ -188,18 +223,18 @@ def _trace_dos_registros(query_id: str, registros: list[dict[str, Any]]) -> dict
             # Logs de antes de 25/09 gravavam a latência com casas decimais.
             "latencia_ms": round(registro.get("latencia_ms") or 0),
             "input": registro.get("input"),
-            "output": registro.get("output"),
+            "output": _saida_da_etapa(registro),
             "tokens": registro.get("tokens"),
             "modelo": registro.get("modelo"),
             "detalhes": registro.get("extra") or {},
         }
         for ordem, registro in enumerate(registros, start=1)
     ]
-    resumo = next(
-        (etapa["output"] for etapa in reversed(etapas)
-         if etapa["stage"] == Stage.RESUMO_CONSULTA.value and isinstance(etapa["output"], dict)),
+    resumo = dict(next(
+        (registro["output"] for registro in reversed(registros)
+         if registro.get("stage") == Stage.RESUMO_CONSULTA.value and isinstance(registro.get("output"), dict)),
         None,
-    ) or _resumo_derivado(etapas)
+    ) or _resumo_derivado(etapas))
     # Feedback can arrive days later; it is not part of query latency/completion.
     core = [r for r in registros if r.get("stage") != Stage.FEEDBACK.value] or registros
     starts = [r for r in core if r.get("stage") == Stage.REQUISICAO_INICIO.value]
@@ -220,9 +255,13 @@ def _trace_dos_registros(query_id: str, registros: list[dict[str, Any]]) -> dict
         method, status, complete = "soma_etapas_legado", None, None
     if terminal:
         details = terminal.get("extra") or {}
-        for key in ("etapas", "history_saved", "http_status", "logging_errors", "tokens_reportados", "cobertura_tokens"):
+        for key in ("history_saved", "http_status", "logging_errors", "tokens_reportados", "cobertura_tokens"):
             if key in details:
                 resumo[key] = details[key]
+    # A lista ``etapas`` já traz cada etapa; o resumo repetia todas de novo
+    # (``etapas`` do resumo_consulta e do fim da requisição). Fica a contagem.
+    resumo = {chave: valor for chave, valor in resumo.items() if chave != "etapas"}
+    resumo["situacao_das_etapas"] = dict(Counter(str(etapa["status"]) for etapa in etapas))
     pergunta = next((r["input"] for r in core if isinstance(r.get("input"), str)), None)
     return {
         "query_id": query_id,
