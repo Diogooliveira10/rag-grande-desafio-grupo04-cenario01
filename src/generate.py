@@ -1241,11 +1241,30 @@ def gerar_resposta(
         return resposta
 
     resposta_sql = _resposta_sql_deterministica(query, chunks, bases_consultadas)
-    if resposta_sql is not None:
+    if resposta_sql is not None and config.SQL_APRESENTACAO_LLM:
         return _gerar_com_template_sql(
             query, chunks, resposta_sql, cliente=cliente, run_id=run_id,
             query_id=query_id, inicio=inicio, sensibilidade=sensibilidade,
         )
+    if resposta_sql is not None:
+        # Padrão: a resposta do SQL sai sem LLM. A apresentação pelo LLM
+        # (SQL_APRESENTACAO_LLM) levava as consultas ao vivo de ~2,5 s para
+        # 7-25 s e as fazia depender do ECOA, para acrescentar só uma frase.
+        answer, mascaramentos_resposta = mascarar(resposta_sql.answer)
+        resposta_sql = resposta_sql.model_copy(update={"answer": answer})
+        fontes_sql = [source.chunk_id for source in resposta_sql.sources_used]
+        if auditoria_completa():
+            usados = [c for c in chunks if c.metadata.chunk_id in fontes_sql]
+            sensibilidade["auditoria_evidencias"] = auditar_geracao(chunks, usados, metodo="sql_deterministico")
+        _logar_evento(run_id, query_id, "ok", inicio, resposta_sql,
+                      metodo="sql_deterministico", llm_called=False,
+                      evidencias_usadas=fontes_sql, chunks_no_prompt=0,
+                      chunks_fora_do_orcamento=0, prompt_chunk_ids=[], prompt=[],
+                      **sensibilidade)
+        _logar_validacao(run_id, query_id, time.monotonic(), resposta_sql,
+                        erro_parsing=None, citacoes_descartadas=[], chaves_alias=[],
+                        mascaramentos_resposta=mascaramentos_resposta)
+        return resposta_sql
 
     chunks_prompt = _chunks_no_orcamento(chunks, bases_requeridas=bases_consultadas)
     sensibilidade["chunks_no_prompt"] = len(chunks_prompt)

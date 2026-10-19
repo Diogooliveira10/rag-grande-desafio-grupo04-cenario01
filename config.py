@@ -62,6 +62,10 @@ GENERATION_MAX_RETRIES = int(_env("GENERATION_MAX_RETRIES", "1"))
 # 2026-10-16, a mesma pergunta caiu de 15 s para 2 s. Só o ECOA recebe; o
 # OpenRouter usa o padrão de cada modelo.
 GENERATION_REASONING_EFFORT = _env("GENERATION_REASONING_EFFORT", "").strip()
+# Resposta que sai do SQL redigida pelo LLM (só a apresentação; números e
+# fontes continuam do SQL). Desligado por padrão: medido em 2026-10-19, as
+# consultas ao vivo iam de ~2,5 s para 7-25 s e passavam a depender do ECOA.
+SQL_APRESENTACAO_LLM = _env("SQL_APRESENTACAO_LLM", "false").lower() in {"1", "true", "sim", "yes"}
 # Rerank (src/rerank.py). "local" (padrão) = cross-encoder local (RERANK_MODEL
 # aceita qualquer CrossEncoder do sentence-transformers); "ecoa" = endpoint
 # /api/rerank do servidor da turma, com o local de reserva. Na ablação de

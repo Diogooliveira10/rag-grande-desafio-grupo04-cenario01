@@ -28,6 +28,8 @@ def local_sql(tmp_path, monkeypatch):
     "Qual o valor total dos contratos assinados em 2024?",
 ])
 def test_pure_analytics_does_not_load_or_call_retrieval(local_sql, monkeypatch, query):
+    from src import generate
+    monkeypatch.setattr(generate.config, "SQL_APRESENTACAO_LLM", True)  # conta a chamada de apresentação
     monkeypatch.setattr(pipeline, "retrieve", lambda *a, **k: pytest.fail("retrieval must be skipped"))
     monkeypatch.setattr(pipeline, "reranker_padrao", lambda: pytest.fail("cross-encoder must not be loaded"))
     calls = []

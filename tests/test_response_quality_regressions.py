@@ -145,7 +145,9 @@ def test_cabecalho_modalidade_nao_contradiz_compra_vinculada():
         extras={"modalidade_fonte": "compra_vinculada", "modalidade": "Pregão - Eletrônico"},
     ))
     preparado = gen._chunks_no_orcamento([chunk])[0]
-    assert json.loads(preparado.content)["modalidade_licitacao"] == "Pregão - Eletrônico"
+    # O corpo leva a procedência, como o cabeçalho (teste da Pâmela em
+    # test_generate.py): a modalidade é da compra, não do próprio contrato.
+    assert json.loads(preparado.content)["modalidade_licitacao"].startswith("Pregão - Eletrônico")
     assert "não informada" not in preparado.content
 
 

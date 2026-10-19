@@ -9,6 +9,13 @@ from src.schema import Natureza, QueryFilters
 from src.sql_markdown import tabela_markdown, texto_markdown
 from tests.test_numerical_validation import contract, modelo_template_sql
 from tests.test_pipeline_observability import event
+
+
+@pytest.fixture(autouse=True)
+def _apresentacao_pelo_llm_ligada(monkeypatch):
+    # Estes testes cobrem a apresentação pelo LLM, desligada por padrão
+    # (config.SQL_APRESENTACAO_LLM).
+    monkeypatch.setattr(generate.config, "SQL_APRESENTACAO_LLM", True)
 from tests.test_structured_db import escrever_documents
 
 

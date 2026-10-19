@@ -11,6 +11,13 @@ from tests.test_pipeline_observability import event
 from tests.test_sql_fast_path import local_sql  # isolated SQLite fixture
 
 
+@pytest.fixture(autouse=True)
+def _apresentacao_pelo_llm_ligada(monkeypatch):
+    # Estes testes cobrem a apresentação pelo LLM, desligada por padrão
+    # (config.SQL_APRESENTACAO_LLM).
+    monkeypatch.setattr(generate.config, "SQL_APRESENTACAO_LLM", True)
+
+
 def template_model(answer="Confira o resultado para o recorte solicitado:\n\n{{sql}}"):
     return lambda _: json.dumps({"answer": answer})
 
@@ -177,3 +184,16 @@ def test_complete_audit_distinguishes_inserted_sql_from_prompt(monkeypatch):
     assert "300,01" not in json.dumps(audit["prompt_completo"])
     assert audit["evidencias"][0]["selecionado"] is True
     assert extra["prompt_chunk_ids"] == []
+
+
+def test_padrao_responde_o_sql_sem_chamar_o_llm(monkeypatch):
+    monkeypatch.setattr(generate.config, "SQL_APRESENTACAO_LLM", False)
+    chamadas = []
+
+    resposta = generate.gerar_resposta("Qual o valor total dos contratos assinados em 2025?",
+                                       [sql_chunk(1, ["Total R$ 300,01"])],
+                                       [Natureza.ESTRUTURADA], cliente=lambda m: chamadas.append(m))
+
+    assert chamadas == []
+    assert resposta.sources_used and not resposta.is_refusal
+
