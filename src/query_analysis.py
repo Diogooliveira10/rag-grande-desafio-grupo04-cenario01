@@ -1132,7 +1132,12 @@ _GENERICAS_DE_FORNECEDOR = frozenset(
     "ltda epp eireli sa me comercio industria produtos servicos assessoria "
     "representacoes distribuicao importacao exportacao consultoria engenharia "
     "construcoes equipamentos sistemas solucoes participacoes empreendimentos "
-    "negocios grupo empresa fornecedor".split()
+    "negocios grupo empresa fornecedor "
+    # Palavras de órgão público: sozinhas não nomeiam um fornecedor. Na v7,
+    # "Qual órgão, município/UF..." virava fornecedor "MUNICIPIO DE CASIMIRO
+    # DE ABREU", o único com "municipio" no nome (A1 e A2 do golden set).
+    "municipio municipios prefeitura prefeituras estado estadual governo secretaria "
+    "camara fundo uf".split()
 )
 
 # Palavra que anuncia que o que vem depois é o nome de um fornecedor. Sem uma
