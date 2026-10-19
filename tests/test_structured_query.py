@@ -1370,6 +1370,18 @@ def test_listagem_direta_so_dispensa_o_llm_quando_ha_registros(tmp_path):
     assert not any(c.metadata.extras["geracao_deterministica"] for c in chunks(("helicoptero",)))
 
 
+def test_ranking_sem_modalidade_mostra_nao_informada_e_nao_none(tmp_path):
+    documents = tmp_path / "documents.jsonl"
+    escrever_documents(documents, contratacoes=[_contratacao("R-1", modalidade=None, objeto="Aquisição de ambulância")])
+    banco = Banco(sqlite_path=tmp_path / "base.sqlite")
+    structured_db.construir_banco(documents, banco)
+    consulta = sq.Consulta(tabela="contratacoes", tipo="ranking", termos_objeto=("ambulancia",))
+
+    _, _, linhas = sq.executar_consulta(consulta, banco)
+
+    assert "None" not in linhas[0] and "modalidade: não informada" in linhas[0]
+
+
 def test_pergunta_da_f1_nao_traz_houver_como_termo_do_objeto():
     pergunta = (
         "Em 2025, órgãos estaduais do Rio de Janeiro pagaram mais por ambulâncias tipo D do que os "
