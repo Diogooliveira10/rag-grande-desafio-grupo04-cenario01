@@ -1419,3 +1419,52 @@ def test_pre_carregar_indices_deixa_os_arquivos_no_cache(tmp_path, monkeypatch):
     assert retrieve_module.pre_carregar_indices(tmp_path / "index", documents) == 2
     assert str(base / "vectors.jsonl") in retrieve_module._JSONL_CACHE
     assert str(documents) in retrieve_module._JSONL_CACHE
+
+
+def test_indice_com_faiss_e_lido_sem_o_vetor(tmp_path):
+    base = tmp_path / "contratos_estruturado"
+    base.mkdir()
+    (base / "vectors.jsonl").write_text(
+        '{"chunk_id": "a", "embedding": [0.1, 0.2], "metadata": {"base_id": "contratos_estruturado"}}\n',
+        encoding="utf-8")
+
+    assert "embedding" in retrieve_module._registros_do_indice(base / "vectors.jsonl")[0]
+
+    (base / "vectors.faiss").write_bytes(b"")
+    registro = retrieve_module._registros_do_indice(base / "vectors.jsonl")[0]
+
+    assert "embedding" not in registro
+    assert registro["chunk_id"] == "a" and registro["metadata"]["base_id"] == "contratos_estruturado"
+
+
+def _bm25_antigo(query, textos):
+    """Fórmula de antes do cache de termos, para comparar o ranking."""
+    import math
+    from collections import Counter
+    termos = retrieve_module._tokens(query)
+    tokenizados = [retrieve_module._tokens(t) for t in textos]
+    media = sum(len(t) for t in tokenizados) / len(tokenizados)
+    df = Counter(term for tokens in tokenizados for term in set(tokens))
+    notas = []
+    for tokens in tokenizados:
+        contagem, nota = Counter(tokens), 0.0
+        for term in termos:
+            if term in contagem:
+                idf = math.log(1 + (len(tokenizados) - df[term] + 0.5) / (df[term] + 0.5))
+                nota += idf * contagem[term] * 2.5 / (contagem[term] + 1.5 * (0.25 + 0.75 * len(tokens) / media))
+        notas.append(nota)
+    return notas
+
+
+def test_bm25_com_cache_de_termos_da_o_mesmo_ranking():
+    textos = ["Locação de veículos para a secretaria", "Aquisição de ambulância tipo D",
+              "Locação de ambulância e veículos de apoio", "Serviço de limpeza predial"]
+    registros = [{"chunk_id": f"c{i}", "text": t, "metadata": {"base_id": "b"}} for i, t in enumerate(textos)]
+    notas = _bm25_antigo("locação de veículos e ambulância", textos)
+
+    resultado = retrieve_module.bm25_retrieve("locação de veículos e ambulância", records=registros, top_k=2)
+
+    esperado = sorted((i for i, n in enumerate(notas) if n > 0), key=lambda i: (-notas[i], f"c{i}"))[:2]
+    assert [r.chunk_id for r in resultado] == [f"c{i}" for i in esperado]
+    assert [r.score for r in resultado] == pytest.approx([notas[i] for i in esperado])
+

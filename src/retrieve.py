@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import heapq
 import json
 import math
 import re
@@ -84,17 +85,24 @@ class RetrievalResult:
 _JSONL_CACHE: dict[str, tuple[int, int, list[dict[str, Any]]]] = {}
 
 
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+_RE_EMBEDDING = re.compile(r'"embedding":\s*\[[^\]]*\]\s*,?\s*')
+
+
+def _read_jsonl(path: Path, *, sem_vetor: bool = False) -> list[dict[str, Any]]:
     """Registros do arquivo, lidos uma vez enquanto ele não muda.
 
     Os dicts são compartilhados entre as chamadas: quem precisar alterar um
     registro copia antes (``dict(record)``), como ``_records_for`` já faz.
+
+    ``sem_vetor`` descarta o campo ``embedding`` antes de decodificar a linha:
+    com o FAISS ao lado, o vetor não é usado na consulta. Na v7, os vetores dos
+    contratos passam de ~4 GB e 3 min para ~700 MB e 12 s.
     """
     try:
         stat = path.stat()
     except FileNotFoundError:
         return []
-    chave = str(path)
+    chave = f"{path}|sem_vetor" if sem_vetor else str(path)
     guardado = _JSONL_CACHE.get(chave)
     if guardado and guardado[0] == stat.st_mtime_ns and guardado[1] == stat.st_size:
         return list(guardado[2])
@@ -102,9 +110,18 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     with path.open(encoding="utf-8") as handle:
         for line in handle:
             if line.strip():
-                records.append(json.loads(line))
+                records.append(json.loads(_RE_EMBEDDING.sub("", line, count=1) if sem_vetor else line))
     _JSONL_CACHE[chave] = (stat.st_mtime_ns, stat.st_size, records)
     return list(records)
+
+
+def _registros_do_indice(vectors_path: Path) -> list[dict[str, Any]]:
+    """Registros de uma base do índice, na ordem do FAISS.
+
+    Com ``vectors.faiss`` ao lado, os vetores ficam no FAISS e o JSON é lido
+    sem eles; sem o FAISS, o vetor é necessário para montar o índice em memória.
+    """
+    return _read_jsonl(vectors_path, sem_vetor=(vectors_path.parent / "vectors.faiss").exists())
 
 
 @lru_cache(maxsize=4)
@@ -427,7 +444,7 @@ def _records_for(
             and (allowed_scopes is None
                  or declarations[path.parent.name].get("escopo", "oficial") in allowed_scopes)
         )]
-        raw = [record for path in paths for record in _read_jsonl(path)]
+        raw = [record for path in paths for record in _registros_do_indice(path)]
     else:
         raw = [dict(record) for record in records]
     filtered: list[dict[str, Any]] = []
@@ -822,7 +839,7 @@ def pre_carregar_indices(
     lidos = 0
     try:
         for vectors_path in sorted(index_dir.glob("*/vectors.jsonl")):
-            _read_jsonl(vectors_path)
+            _registros_do_indice(vectors_path)
             lidos += 1
             faiss_path = vectors_path.parent / "vectors.faiss"
             if faiss_path.exists():
@@ -832,6 +849,9 @@ def pre_carregar_indices(
             if path.exists():
                 _read_jsonl(path)
                 lidos += 1
+        # Tokeniza os chunks para o BM25 agora, e não na primeira pergunta.
+        for record in _read_jsonl(documents_file):
+            _termos(str(record.get("text", "")))
     except Exception as erro:
         import logging
 
@@ -946,13 +966,18 @@ def dense_retrieve(
     indexed_by_base: dict[str, list[dict[str, Any]]] = {}
     index_paths: dict[str, Path] = {}
     if records is None:
+        # Só as bases que têm candidatos: com a v7, ler todas custava 3,4 GB
+        # de JSON (2,5 GB só dos contratos) para uma pergunta sobre normas.
         for vectors_path in sorted(index_dir.glob("*/vectors.jsonl")):
             base_id = vectors_path.parent.name
-            indexed_by_base[base_id] = _read_jsonl(vectors_path)
+            if base_id not in candidates_by_base:
+                continue
+            indexed_by_base[base_id] = _registros_do_indice(vectors_path)
             index_paths[base_id] = vectors_path.parent / "vectors.faiss"
     else:
         indexed_by_base = {base_id: group for base_id, group in candidates_by_base.items()}
 
+    bases_com_faiss = {base_id for base_id, caminho in index_paths.items() if caminho.exists()}
     normalized_text = {
         str(item.get("chunk_id")): str(item.get("text", ""))
         for item in _read_jsonl(documents_file)
@@ -967,6 +992,12 @@ def dense_retrieve(
         chunk_id = str(record.get("chunk_id") or (
             metadata.get("chunk_id", "") if isinstance(metadata, Mapping) else ""
         ))
+        base_do_registro = _record_base_id(record, metadata if isinstance(metadata, Mapping) else {})
+        if "embedding" not in record and base_do_registro in bases_com_faiss:
+            # Lido sem o vetor (_registros_do_indice): o FAISS tem o vetor e
+            # confere a dimensão em _faiss_scores.
+            compatible_candidates_by_base.setdefault(base_do_registro, []).append(record)
+            continue
         if embedding is None:
             missing_embeddings.append({"chunk_id": chunk_id})
             continue
@@ -1035,6 +1066,21 @@ def _tokens(text: str) -> list[str]:
     return [token.lower() for token in _TOKEN_RE.findall(sem_acento)]
 
 
+# Texto do chunk -> (contagem dos termos, número de termos). O BM25 tokenizava
+# todos os candidatos a cada pergunta: com os 106.667 contratos da v7, ~2 min.
+# A chave é o próprio texto, que vem dos registros já guardados em cache.
+_TERMOS_CACHE: dict[str, tuple[Counter[str], int]] = {}
+
+
+def _termos(text: str) -> tuple[Counter[str], int]:
+    guardado = _TERMOS_CACHE.get(text)
+    if guardado is None:
+        tokens = _tokens(text)
+        guardado = (Counter(tokens), len(tokens))
+        _TERMOS_CACHE[text] = guardado
+    return guardado
+
+
 def bm25_retrieve(
     query: str,
     *,
@@ -1058,22 +1104,28 @@ def bm25_retrieve(
     query_terms = _tokens(query)
     if not query_terms or not documents:
         return []
-    tokenized = [(record, text, _tokens(text)) for record, text in documents]
-    average_length = sum(len(tokens) for _, _, tokens in tokenized) / len(tokenized)
-    document_frequency = Counter(term for _, _, tokens in tokenized for term in set(tokens))
-    scored: list[RetrievalResult] = []
-    for record, text, tokens in tokenized:
-        counts = Counter(tokens)
+    tokenized = [(record, text, *_termos(text)) for record, text in documents]
+    average_length = sum(length for _, _, _, length in tokenized) / len(tokenized)
+    # Só os termos da pergunta entram na conta: a frequência é a mesma que a
+    # contagem sobre todos os termos daria para eles.
+    document_frequency = {term: sum(1 for _, _, counts, _ in tokenized if term in counts)
+                          for term in set(query_terms)}
+    scored: list[tuple[float, str, Mapping[str, Any], str]] = []
+    for record, text, counts, length in tokenized:
         score = 0.0
         for term in query_terms:
             if term not in counts:
                 continue
             idf = math.log(1 + (len(tokenized) - document_frequency[term] + 0.5) / (document_frequency[term] + 0.5))
-            denominator = counts[term] + 1.5 * (1 - 0.75 + 0.75 * len(tokens) / (average_length or 1))
+            denominator = counts[term] + 1.5 * (1 - 0.75 + 0.75 * length / (average_length or 1))
             score += idf * counts[term] * 2.5 / denominator
         if score > 0:
-            scored.append(_result(record, score, text))
-    return sorted(scored, key=lambda item: (-item.score, item.chunk_id))[:top_k]
+            chunk_id = str(record.get("chunk_id") or _metadata_of(record).get("chunk_id", ""))
+            scored.append((score, chunk_id, record, text))
+    # Só os top_k viram RetrievalResult: com a v7, quase todos os 106 mil
+    # contratos pontuam e montar o resultado de cada um custava ~3 s.
+    melhores = heapq.nsmallest(top_k, scored, key=lambda item: (-item[0], item[1]))
+    return [_result(record, score, text) for score, _, record, text in melhores]
 
 
 def reciprocal_rank_fusion(

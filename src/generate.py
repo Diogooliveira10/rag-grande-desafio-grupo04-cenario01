@@ -139,6 +139,10 @@ ele sustenta; não escreva chunk_id, nome de base nem outros identificadores no 
 Categoria do processo (ex.: Compras, Informática) NÃO é modalidade de licitação.
 Quando modalidade não estiver no registro, diga que não está informada. amparoLegal.nome
 é uma referência legal explícita; não declare inexistência de norma se ela está citada.
+A modalidade de um registro vem só do campo de modalidade dele (modalidade_licitacao ou
+modalidade= no cabeçalho, que pode vir da compra vinculada). Não a deduza do amparo legal,
+que é a norma citada, nem a copie de registro de outro objeto ou processo; sem esse campo,
+a modalidade daquele registro não está informada.
 Não associe regras de dispensa a um pregão ou de outro processo ao registro em análise.
 Relacione cada norma à modalidade explicitamente identificada pela fonte.
 Cláusula que prevê atraso, penalidade ou cancelamento não comprova ocorrência desses
@@ -182,6 +186,13 @@ def _natureza_label(metadata: ChunkMetadata) -> str:
     return metadata.natureza.value if metadata.natureza is not None else metadata.doc_type
 
 
+def _modalidade_vinculada(metadata: ChunkMetadata) -> Optional[str]:
+    """Modalidade que o contrato herda da compra vinculada (src/qualidade_corpus.py)."""
+    if metadata.extras.get("modalidade_fonte") == "compra_vinculada" and metadata.extras.get("modalidade"):
+        return f"{metadata.extras['modalidade']} (da compra vinculada)"
+    return None
+
+
 def _cabecalho(metadata: ChunkMetadata, evidence_id: str | None = None) -> str:
     evidence_id = evidence_id or metadata.chunk_id
     campos = [
@@ -202,8 +213,9 @@ def _cabecalho(metadata: ChunkMetadata, evidence_id: str | None = None) -> str:
         campos.append(f"vigente_desde={metadata.extras['data_vigencia_inicio']}")
     if metadata.extras.get("valor_simbolico"):
         campos.append("valor_simbolico=true; R$ 0,00 ou R$ 0,01 no PNCP não é o custo real")
-    if metadata.extras.get("modalidade_fonte") == "compra_vinculada":
-        campos.append(f"modalidade={metadata.extras['modalidade']} (da compra vinculada)")
+    modalidade = _modalidade_vinculada(metadata)
+    if modalidade:
+        campos.append(f"modalidade={modalidade}")
     if metadata.extras.get("subpergunta"):
         campos.append(f"intencao={metadata.extras['intencao']}: {metadata.extras['subpergunta']}")
     if metadata.extras.get("filtros_relaxados"):
@@ -251,8 +263,13 @@ def _compactar(conteudo: str) -> str:
     return json.dumps(dados, ensure_ascii=False, separators=(",", ":"))
 
 
-def _representar_registro(conteudo: str) -> str:
-    """Visão compacta dos campos relevantes, sem alterar o documento original."""
+def _representar_registro(conteudo: str, modalidade_vinculada: Optional[str] = None) -> str:
+    """Visão compacta dos campos relevantes, sem alterar o documento original.
+
+    ``modalidade_vinculada`` é a modalidade da compra ligada ao contrato
+    (src/qualidade_corpus.py). Sem ela, o campo dizia "não informada" enquanto o
+    cabeçalho do mesmo trecho trazia a modalidade.
+    """
     try:
         registro = json.loads(conteudo)
     except (ValueError, TypeError):
@@ -274,7 +291,8 @@ def _representar_registro(conteudo: str) -> str:
         "orgaoEntidade", "unidadeOrgao", "municipio", "uf", "esfera", "categoriaProcesso", "tipoContrato", "modalidadeNome")
     view = {k: registro[k] for k in campos if k in registro and registro[k] is not None}
     if "categoriaProcesso" in registro or "objetoContrato" in registro or "objetoCompra" in registro:
-        view["modalidade_licitacao"] = registro.get("modalidadeNome") or "não informada neste registro"
+        view["modalidade_licitacao"] = (registro.get("modalidadeNome") or modalidade_vinculada
+                                        or "não informada neste registro")
     return json.dumps(view, ensure_ascii=False, separators=(",", ":")) if view else conteudo
 
 
@@ -351,7 +369,7 @@ def _chunks_no_orcamento(
         conteudo = (_representar_conversa(chunk.content, config.GENERATION_CHUNK_CHARS)
                     if chunk.metadata.extras.get("sintetico") else None)
         if conteudo is None:
-            conteudo = _representar_registro(_compactar(chunk.content))
+            conteudo = _representar_registro(_compactar(chunk.content), _modalidade_vinculada(chunk.metadata))
         if len(conteudo) > config.GENERATION_CHUNK_CHARS:
             conteudo = conteudo[:config.GENERATION_CHUNK_CHARS].rstrip() + " [...]"
         preparados.append(chunk.model_copy(update={"content": conteudo}))

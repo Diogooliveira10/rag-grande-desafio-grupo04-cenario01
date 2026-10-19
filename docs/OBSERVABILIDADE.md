@@ -348,6 +348,8 @@ a descoberta dos arquivos continua proporcional à quantidade de arquivos.
 | `latencia_metodo` | `requisicao_monotonica`, `pipeline_monotonico`, `parcial` ou `soma_etapas_legado` |
 | `completo` | `true` se existe evento terminal, mesmo encerrado com erro; `false` se há início sem fim; `null` para legado sem envelope |
 | `status` | Estado terminal, `incompleto` ou `null` para legado |
+| `resumo` | Conclusão da pergunta (bases, evidências, fontes, confiança) e `situacao_das_etapas`, a contagem das etapas por status; a lista das etapas fica só em `etapas` |
+| `etapas[].output` | Saída da etapa. Marco de início traz `{"marco", "versao_codigo"}`, etapa pulada traz `{"pulado": motivo}`, e o `resumo_consulta` aponta para o `resumo` do topo |
 
 Não some durações de etapas: geração inclui validação e envelopes contêm as
 etapas internas. Para legado sem envelope, a soma é mantida somente como

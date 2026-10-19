@@ -198,6 +198,24 @@ def test_trace_monta_o_caminho_da_pergunta_em_ordem(pipeline_com_indice):
     assert trace["resumo"]["consultou_sql"] is False
 
 
+def test_trace_nao_tem_saida_nula_sem_motivo_nem_repete_as_etapas(pipeline_com_indice):
+    pipeline.responder("Quais contratos de ambulancias foram publicados? Explique o objeto.",
+                       cliente=lambda m: _resposta_sdk(), query_id="q_saidas")
+
+    trace = montar_trace("q_saidas")
+    etapas = {e["stage"]: e for e in trace["etapas"]}
+
+    # Marco de início e etapa pulada não aparecem mais com output null.
+    assert etapas["pipeline_inicio"]["output"]["marco"] == "início do pipeline"
+    assert etapas["reformulacao"]["output"] == {"pulado": "sem_historico"}
+    assert all(e["output"] is not None for e in trace["etapas"] if e["status"] in {"iniciado", "pulado"})
+    # O resumo fica só no topo; a lista de etapas não se repete dentro dele.
+    assert etapas["resumo_consulta"]["output"] == "ver o campo resumo, no topo do trace"
+    assert "etapas" not in trace["resumo"]
+    assert sum(trace["resumo"]["situacao_das_etapas"].values()) == len(trace["etapas"])
+    assert trace["resumo"]["consultou_vetorial"] is True
+
+
 def test_trace_de_log_antigo_sem_resumo_deduz_as_bases():
     for stage in (obs.Stage.ROTEAMENTO, obs.Stage.CONSULTA_SQL, obs.Stage.GERACAO):
         obs.registrar(run_id="run1", query_id="q_antigo", stage=stage, status="ok", latencia_ms=5,
@@ -205,7 +223,8 @@ def test_trace_de_log_antigo_sem_resumo_deduz_as_bases():
 
     trace = montar_trace("q_antigo")
 
-    assert trace["resumo"] == {"caminho": None, "consultou_sql": True, "consultou_vetorial": False}
+    assert trace["resumo"] == {"caminho": None, "consultou_sql": True, "consultou_vetorial": False,
+                               "situacao_das_etapas": {"ok": 3}}
     assert trace["latencia_total_ms"] == 15
     assert [e["base"] for e in trace["etapas"]] == [None, "sql", None]
 
