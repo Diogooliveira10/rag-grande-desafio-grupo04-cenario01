@@ -2,7 +2,8 @@
 
 A busca semântica encontra *qual* registro fala de ambulância, mas não ordena
 por valor nem calcula mediana. Este módulo carrega os registros JSON do PNCP
-que já estão em ``data/normalized/documents.jsonl`` (bases
+em ``data/normalized/documents.jsonl`` (ou no snapshot versionado
+``data/normalized/v6/documents.jsonl`` quando o arquivo sem versão não existe; bases
 ``contratos_estruturado`` e ``pca_agregado``) em tabelas SQL, para
 ``src/structured_query.py`` responder ranking, estatística e agrupamento.
 
@@ -42,6 +43,9 @@ import config
 
 SQLITE_PATH = config.ROOT_DIR / "data" / "structured" / "base_estruturada.sqlite"
 DOCUMENTS_FILE = config.NORMALIZED_DATA_DIR / "documents.jsonl"
+_DOCUMENTS_FILE_V6 = config.NORMALIZED_DATA_DIR / "v6" / "documents.jsonl"
+if not DOCUMENTS_FILE.is_file() and _DOCUMENTS_FILE_V6.is_file():
+    DOCUMENTS_FILE = _DOCUMENTS_FILE_V6
 
 BASE_CONTRATACOES = "contratos_estruturado"
 BASE_PCA = "pca_agregado"

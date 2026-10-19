@@ -420,9 +420,12 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
 
     Devolve ``None`` quando a pergunta não é de ranking/estatística/comparação/
     evolução/agrupamento, ou quando o roteador não escolheu base estruturada
-    nem agregada: aí a busca normal responde sozinha.
+    nem agregada: aí a busca normal responde sozinha. Para valor unitário sem
+    campo disponível, devolve uma listagem dos registros, nunca uma conta sobre
+    o valor global.
     """
-    if (filtros.tipo_valor == "unitario" or filtros.tipo_medida == "unitaria"
+    valor_unitario_indisponivel = filtros.tipo_valor == "unitario"
+    if ((filtros.tipo_medida == "unitaria" and not valor_unitario_indisponivel)
             or filtros.referencia_temporal in {"resultado", "vigencia", "propostas"}):
         return None
     bases = set(bases)
@@ -457,7 +460,9 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
     texto_agrupamento = _RE_AGENTE.sub(" ", texto)
     orgaos_e_total = bool(re.search(r"\bquais orgaos\b", texto)
                           and re.search(r"\b(?:total|soma)\b", texto))
-    if orgaos_e_total:
+    if valor_unitario_indisponivel:
+        tipo = "listagem"
+    elif orgaos_e_total:
         tipo = "agrupamento"
     elif _RE_EVOLUCAO.search(texto):
         tipo = "evolucao"
@@ -541,6 +546,8 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
     modalidade_termos: tuple[str, ...] = ()
     texto_objeto = texto
     if tabela == "contratacoes":
+        if valor_unitario_indisponivel:
+            texto_objeto = re.sub(r"\b(?:valor|preco)\s+por\s+(?:veiculos?|ambulancias?|unidades?)\b", " ", texto_objeto)
         pedida = analiticos.get("modalidade")
         for padrao, termos in _MODALIDADES:
             if padrao.search(pedida if pedida else sem_normas):
@@ -579,6 +586,10 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
     # Contrato conta pela assinatura, salvo quando a pergunta pede a publicação.
     referencia_temporal = filtros.referencia_temporal or ("assinatura" if so_contratos else None)
     termos_objeto = _termos_do_objeto(texto_objeto) if tabela == "contratacoes" else ()
+    if valor_unitario_indisponivel:
+        termos_objeto = tuple(t for t in termos_objeto if t not in {
+            "veiculo", "grupo", "diga", "explicitamente",
+        })
     # O CNPJ citado também delimita o pedido ("contratos do fornecedor de CNPJ X").
     if (tipo == "listagem" and not termos_objeto and not modalidade_termos and not orgao_termos
             and not analiticos and primeiro_ano is None and ultimo_ano is None
@@ -617,7 +628,8 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
         so_contratos=so_contratos,
         norma_citada=bool(_RE_NORMA_NUMERADA.search(texto)),
         pagamento_citado=bool(_RE_PAGAMENTO.search(texto)),
-        listagem_direta=(tipo == "listagem" and not _RE_NORMA_NUMERADA.search(texto)
+        listagem_direta=(tipo == "listagem" and not valor_unitario_indisponivel
+                         and not _RE_NORMA_NUMERADA.search(texto)
                          and not _RE_PEDIDO_ALEM_DA_LISTA.search(texto)),
         incluir_total_geral=orgaos_e_total,
     )
@@ -626,13 +638,17 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
 def consulta_da_intencao(intent: QueryIntent) -> Optional[Consulta]:
     """Compila o plano tipado para operações disponíveis no SQLite existente."""
     f = intent.filtros
+    valor_unitario_indisponivel = f.tipo_valor == "unitario"
     pca_media_unitaria = (f.tipo_medida == "unitaria" and f.metrica == "media_unitaria"
                          and f.referencia_temporal == "pca")
-    if (intent.operacao == "buscar" or f.tipo_valor == "unitario"
-            or (f.tipo_medida == "unitaria" and not pca_media_unitaria)
+    if ((intent.operacao == "buscar" and not valor_unitario_indisponivel)
+            or (f.tipo_medida == "unitaria" and not pca_media_unitaria
+                and not valor_unitario_indisponivel)
             or f.referencia_temporal in {"resultado", "vigencia", "propostas"}):
         return None
     tabela = "pca_planos" if f.referencia_temporal == "pca" else "contratacoes"
+    if valor_unitario_indisponivel and not intent.termos_objeto:
+        return None
     if not set(intent.bases) & {Natureza.ESTRUTURADA, Natureza.AGREGADA}:
         return None
     fields = structured_db._TABELAS[tabela]
@@ -659,7 +675,8 @@ def consulta_da_intencao(intent: QueryIntent) -> Optional[Consulta]:
     referencia = f.referencia_temporal or ("assinatura" if so_contratos else None)
     primeiro_ano, ultimo_ano = f.intervalo_de_anos()
     metrica = f.metrica or "contagem"
-    return Consulta(tabela=tabela, tipo=intent.operacao, limite=intent.limite,
+    return Consulta(tabela=tabela, tipo="listagem" if valor_unitario_indisponivel else intent.operacao,
+        limite=intent.limite,
         plano_tipado=True,
         so_contratos=so_contratos, modalidade_termos=modalidade_termos, orgao_termos=orgao_termos,
         ordem="ASC" if f.metrica == "minimo" else "DESC",
@@ -1540,11 +1557,20 @@ def _chunks(consulta: Consulta, sql: str, cabecalho: str, linhas: list[str], ban
                             "média, mediana, mínimo e máximo consideram valores >= R$ 1,00. "
                             "Campos ausentes não são zero. Esta amostra não é um censo do RJ.",
                             "recorte": recorte},
+                        "calculo_disponivel": (
+                            False if recorte and recorte.get("tipo_resultado") == "calculo_indisponivel"
+                            else None
+                        ),
+                        "valor_unitario_indisponivel": bool(
+                            recorte and recorte.get("valor_unitario_indisponivel")
+                        ),
                         # Listagem vazia não dispensa a busca: o objeto pode
                         # estar com outra palavra ("UTI móvel"), e a busca
                         # semântica ainda acha; o LLM recebe o zero e os trechos.
                         "geracao_deterministica": (consulta.tipo in {"estatistica", "ranking", "agrupamento", "evolucao"}
-                                                   or (consulta.listagem_direta and not sem_registros))
+                                                   or (consulta.listagem_direta and not sem_registros)
+                                                   or (recorte and recorte.get("valor_unitario_indisponivel")
+                                                       and not sem_registros))
                         and not consulta.norma_citada,
                         # Nada atendeu aos filtros: é ausência na amostra, não um número calculado.
                         "sem_registros": sem_registros},
@@ -1612,6 +1638,19 @@ def consultar_estruturado(
                 with banco.sessao():
                     tabelas: list[str] = []
                     sql, cabecalho, linhas = executar_consulta(consulta, banco, recorte, markdown=tabelas)
+                valor_unitario_indisponivel = filtros.tipo_valor == "unitario" or (
+                    intencao is not None and intencao.filtros.tipo_valor == "unitario"
+                )
+                if valor_unitario_indisponivel:
+                    recorte.update({
+                        "calculo_disponivel": False,
+                        "tipo_resultado": "calculo_indisponivel",
+                        "valor_unitario_indisponivel": True,
+                        "calculo_motivo": (
+                            "o preço por unidade não está disponível nos dados; "
+                            "o valor total do contrato não pode substituí-lo"
+                        ),
+                    })
             markdown = "\n\n".join(tabelas)
             chunks = _chunks(consulta, sql, cabecalho, linhas, banco, recorte, markdown=markdown)
             span.extra.update({

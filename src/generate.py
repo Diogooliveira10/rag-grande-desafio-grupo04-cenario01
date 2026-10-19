@@ -150,6 +150,10 @@ eventos. Para afirmar ocorrência, cite relato, decisão ou registro do fato.
 Valor global/estimado/contratado não é preço unitário nem pagamento realizado.
 Zero registrado é zero, não ausência de informação. Quando houver valorGlobal=0
 e valorInicial positivo, informe os dois campos com seus nomes e significados distintos.
+Se tipo_valor_solicitado=unitario e calculo_disponivel=false, uma listagem pode
+confirmar a existência do contrato, mas não informa preço por veículo. Informe
+essa insuficiência e que a mediana unitária não pode ser calculada; nunca use o
+valor total do contrato, inclusive R$ 0,00, como preço por veículo.
 Tipo, variante e unidade pedidos precisam constar na fonte: uma ambulância genérica
 não comprova tipo D, nem manutenção de sistemas comprova manutenção de computadores.
 Responda cada parte de uma pergunta composta em frase completa, explicando o que
@@ -759,10 +763,19 @@ def pode_responder_sql(chunks: list[Chunk], bases: list[Natureza]) -> bool:
            and c.metadata.extras.get("geracao_deterministica")]
     if not sql or any(c.metadata.doc_type == "sql" and c not in sql for c in permitidos):
         return False
+    valor_unitario_indisponivel = all(
+        c.metadata.extras.get("valor_unitario_indisponivel") for c in sql
+    )
     for chunk in chunks:
         extra = chunk.metadata.extras
-        if extra.get("operacao") == "buscar" or extra.get("calculo_disponivel") is False:
+        if (extra.get("operacao") == "buscar"
+                or (extra.get("calculo_disponivel") is False
+                    and not extra.get("valor_unitario_indisponivel"))):
             return False
+    if valor_unitario_indisponivel and any(
+        c.metadata.doc_type != "sql" for c in permitidos
+    ):
+        return False
     numero_intencoes = max((c.metadata.extras.get("total_intencoes", 0) for c in chunks), default=0)
     if numero_intencoes and len({c.metadata.extras.get("intencao") for c in sql}) != numero_intencoes:
         return False
@@ -867,6 +880,32 @@ def _resposta_sql_deterministica(
                                 source_file=chunk.metadata.source_file))
     if not fontes:
         return None
+    recorte = next((c.metadata.extras["resultado_sql"].get("recorte")
+                    for c in sql if c.metadata.extras.get("resultado_sql", {}).get("recorte")), {})
+    if any(c.metadata.extras.get("valor_unitario_indisponivel") for c in sql):
+        correspondentes = int(recorte.get("registros_correspondentes") or 0)
+        linhas = [linha for chunk in sql for linha in _linhas_sql_reais(chunk)]
+        if correspondentes < 1 or not linhas:
+            return None
+        primeiro = "um registro correspondente" if correspondentes == 1 else (
+            f"{correspondentes} registros correspondentes"
+        )
+        partes.insert(0, f"A consulta encontrou {primeiro}. [1]")
+        if re.search(r"\bR\$\s*0,00\b", " ".join(linhas)):
+            explicacao_valor = (
+                "O R$ 0,00 exibido é o valor total/global registrado, não o preço por veículo."
+            )
+        else:
+            explicacao_valor = (
+                "O valor monetário registrado, quando exibido, é global/total e não representa "
+                "o preço por veículo."
+            )
+        partes.append(
+            explicacao_valor + " O preço por veículo não está informado nos dados disponíveis; "
+            "por isso, não é possível calcular a mediana solicitada. [1]"
+        )
+    # Todos os recortes contam (João); o preço unitário ausente (Diogo) já
+    # marca o recorte como cálculo indisponível.
     confianca, avisos = _confianca_dos_recortes(sql)
     return RAGResponse(query=query, answer="\n\n".join(partes), bases_consultadas=bases,
                        sources_used=fontes, confidence_level=confianca,

@@ -607,3 +607,44 @@ João Pedro Félix Reis e Eduarda não participaram deste encontro por questões
 
 - Foram utilizados assistentes de IA para apoiar a análise e implementação de correções, criação de testes, revisão de código e documentação, avaliação do corpus, comparação de estratégias de recuperação, investigação de desempenho e preparação do plano de contingência do Demo Day.
 - As alterações e conclusões foram verificadas por meio do código, dos testes, dos logs e dos relatórios. As avaliações parciais foram mantidas distintas da suíte completa, e a v7 não foi promovida sem validação.
+
+**Encontro 15 — 2026-10-19**
+
+**Entregamos hoje:**
+
+- **Correções no Golden Set:** Diogo corrigiu o caso P2.2 para recuperar o contrato de ambulância sem interpretar o valor global de R$ 0,00 como preço por veículo. A resposta agora reconhece a insuficiência de dados para calcular a mediana e limita a confiança a baixa. P2.1 permaneceu aprovado. A avaliação direcionada passou com **2/2 acertos**, e os testes relacionados totalizaram 705 aprovações.
+
+- **Confiança e modalidade dos contratos:** Pâmela implementou uma regra para impedir que o LLM deduza a modalidade de um contrato a partir do amparo legal ou de documentos de outros contratos. P3.2, P4.2, P4.3 e P6.3 passaram nos testes com LLM na v7. Renato complementou a regra de confiança para limitar a média respostas que reconhecem falta de dados, por meio do PR #54.
+
+- **Migração e desempenho da v7:** a versão mais recente do corpus foi integrada à `main`, com os dados mantidos fora do Git e distribuídos pelo Google Drive. Renato otimizou a recuperação para carregar somente as bases necessárias, evitando a leitura de todos os vetores e o recálculo integral do BM25 a cada pergunta. A busca por contratos caiu de 46–82 segundos para aproximadamente 6 segundos por consulta, com consumo de cerca de 4,6 GB de memória na inicialização do backend.
+
+- **Avaliação do Golden Set na v7:** a primeira rodada obteve 19/31 acertos, contra 24/31 na v6. Duas falhas causadas por um filtro incorreto de fornecedor foram corrigidas, elevando o resultado para **21/31**. Quatro casos — P2.1, P4.1, I4 e F1 — possuem gabaritos associados aos dados da v6 e precisam ser revistos para a v7.
+
+- **Backend, rastreabilidade e demonstração:** Renato corrigiu a montagem do trace para eliminar a repetição de etapas e tornar mais claros os motivos de etapas ignoradas. O backend e o frontend local foram reativados e as cinco consultas do roteiro foram repetidas com respostas equivalentes às da demonstração anterior. Na v7, as consultas ao vivo ficaram entre 0,4 e 4,9 segundos.
+
+- **Interface e transparência:** foram otimizados o carregamento da tela **Explorar Acervo**, de 15,17 para 0,87 segundo na primeira chamada medida, e a exibição dos dados da página **Transparência da IA**, que passou a identificar a v7-reparo a partir de metadados verificados por hash. Os testes de backend passaram (78 testes), e o frontend teve 46 testes Vitest e 8 testes Node aprovados, além de build concluído sem erros.
+
+- **Recuperação e qualidade das respostas:** foram implementadas melhorias na consulta SQL, apresentação determinística de tabelas, recuperação de normas, identificação de fornecedores e tratamento de perguntas sobre a origem dos dados. Também foram atualizadas documentações, contratos de API, variáveis de ambiente e testes de regressão.
+
+- **Documentação e preparação para a defesa:** Marco investigou P6.3, que passou na execução completa, sem alteração de código. A equipe avançou na preparação do plano de contingência do Demo Day e do guia de leitura do código para a apresentação ao tutor.
+
+**Ficou pendente:**
+
+- Executar nova avaliação do Golden Set na v7 após revisar os gabaritos que dependem dos dados da v6 e investigar as falhas restantes.
+- Continuar a validação de P2.2 e dos casos de modalidade na versão ativa, separando problemas de recuperação, conteúdo e confiança.
+- Avaliar as regressões de recuperação da v7 em comparação com a v6 e verificar se o desempenho e o consumo de memória são aceitáveis para a demonstração.
+- Concluir a configuração do backend no frontend publicado; o site ainda depende da integração pendente do endereço do backend.
+- Avaliar a necessidade de gerar `data/inventory/v7.json` para manter o inventário máquina-legível alinhado à documentação.
+- Atualizar o guia de leitura do código e fechar os itens restantes antes do freeze e do ensaio final do Demo Day.
+
+**Bloqueios em aberto:**
+
+- **Golden Set na v7:** o resultado de 21/31 ainda é inferior ao da v6, e parte dos gabaritos precisa ser atualizada para refletir o novo corpus.
+- **Desempenho e recursos:** embora a busca tenha sido acelerada, a inicialização ainda consome cerca de 4,6 GB de memória e leva aproximadamente um minuto.
+- **Publicação:** o frontend publicado ainda não está integrado ao backend ativo, exigindo uso local para a demonstração.
+- **Confiabilidade das respostas:** as correções de confiança e de modalidade avançaram, mas os casos restantes precisam ser reavaliados na versão definitiva do corpus.
+
+**Uso de assistentes de IA:**
+
+- A equipe utilizou assistentes de IA para investigar falhas, implementar correções e testes, comparar respostas com e sem alterações, otimizar recuperação e desempenho, revisar documentação e preparar os materiais de apresentação.
+- As alterações foram verificadas por testes automatizados, execução do pipeline, logs e avaliações do Golden Set. Os resultados da v6 e da v7 foram mantidos separados, e as decisões sobre promoção do corpus, escopo das correções e preparação da demonstração foram tomadas pela equipe.
