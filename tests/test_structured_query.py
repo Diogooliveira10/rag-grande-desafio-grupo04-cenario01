@@ -1183,11 +1183,108 @@ def test_lista_publicada_por_orgaos_nao_dispara_agrupamento():
 
 def test_mediana_por_veiculo_nao_compila_calculo_sobre_global():
     from src.query_analysis import analisar_query
-    question = 'Compare a mediana do valor por veículo em 2025.'
+    question = 'Compare a mediana do valor por veículo em ambulâncias tipo D em 2025.'
     filters = analisar_query(question, modo='regras').filtros
     assert filters.tipo_valor == 'unitario'
     assert filters.tipo_medida == 'unitaria' and filters.granularidade == 'item'
-    assert sq.detectar_consulta(question, filters, ESTRUTURADA + AGREGADA) is None
+    consulta = sq.detectar_consulta(question, filters, ESTRUTURADA + AGREGADA)
+    assert consulta.tipo == 'listagem'
+    assert "tipo d" in consulta.termos_objeto
+    assert "ambulancia" in consulta.termos_objeto
+    assert "veiculo" not in consulta.termos_objeto
+    assert not sq.pode_consultar_sql_direto(question, filters, ESTRUTURADA + AGREGADA)
+
+
+def test_consulta_unitaria_p2_2_lista_o_contrato_tipo_d_com_valor_total_zero(tmp_path):
+    from src.query_analysis import analisar_query
+
+    question = (
+        'Considerando os registros de ambulância tipo D disponíveis no corpus para municípios '
+        'e órgãos estaduais do Rio de Janeiro em 2025, qual é a mediana do valor por veículo '
+        'em cada grupo e o que os dados mostram sobre a comparação? Se houver insuficiência '
+        'de dados, diga isso explicitamente.'
+    )
+    contrato = {
+        "numeroControlePNCP": "3303302-2-000001/2025",
+        "dataPublicacaoPncp": "2025-03-10T10:00:00",
+        "dataAssinatura": "2025-03-10",
+        "objetoContrato": "REMOÇÃO DE PACIENTES EM AMBULÂNCIA TIPO D",
+        "valorGlobal": 0.0,
+        "nomeRazaoSocialFornecedor": "PROTEGER SERVIÇOS LTDA",
+        "orgaoEntidade": {
+            "cnpj": "111", "razaoSocial": "FUNDO MUNICIPAL DE SAUDE",
+            "esferaId": "M", "poderId": "E",
+        },
+        "unidadeOrgao": {
+            "ufSigla": "RJ", "municipioNome": "Niterói", "codigoIbge": "3303302",
+            "nomeUnidade": "FUNDO MUNICIPAL DE SAUDE",
+        },
+    }
+    documents = escrever_documents(tmp_path / "documents.jsonl", contratacoes=[contrato])
+    banco = Banco(sqlite_path=tmp_path / "base.sqlite")
+    structured_db.construir_banco(documents, banco)
+    filtros = analisar_query(question, modo="regras").filtros
+    consulta = sq.detectar_consulta(question, filtros, AGREGADA)
+
+    assert consulta.tipo == "listagem"
+    assert "tipo d" in consulta.termos_objeto
+    assert "ambulancia" in consulta.termos_objeto
+    assert "veiculo" not in consulta.termos_objeto
+    chunks = sq.consultar_estruturado(
+        question, filtros, AGREGADA, banco=banco, documents_file=documents
+    )
+
+    assert len(chunks) == 1
+    texto = chunks[0].content
+    assert "3303302-2-000001/2025" in texto
+    assert "FUNDO MUNICIPAL DE SAUDE" in texto
+    assert "PROTEGER SERVIÇOS LTDA" in texto
+    assert "R$ 0,00" in texto
+    assert chunks[0].metadata.extras["calculo_disponivel"] is False
+    recorte = chunks[0].metadata.extras["resultado_sql"]["recorte"]
+    assert recorte["tipo_resultado"] == "calculo_indisponivel"
+    assert "preço por unidade" in recorte["calculo_motivo"]
+    assert "valor total do contrato não pode substituí-lo" in recorte["calculo_motivo"]
+    from src.generate import _confianca_do_recorte
+    from src.schema import ConfidenceLevel
+    confianca, _ = _confianca_do_recorte(recorte)
+    assert confianca == ConfidenceLevel.BAIXA
+
+    from src import generate
+    chamadas_llm = []
+
+    def cliente_teste(mensagens):
+        chamadas_llm.append(mensagens)
+        raise AssertionError("A resposta unitária indisponível deve ser determinística.")
+
+    resposta = generate.gerar_resposta(
+        question, chunks, AGREGADA, cliente=cliente_teste,
+    )
+    assert chamadas_llm == []
+    assert "A consulta encontrou um registro correspondente" in resposta.answer
+    assert "R$ 0,00" in resposta.answer
+    assert "valor total/global registrado, não o preço por veículo" in resposta.answer
+    assert "preço por veículo não está informado" in resposta.answer
+    assert "não é possível calcular a mediana solicitada" in resposta.answer
+    assert resposta.confidence_level == ConfidenceLevel.BAIXA
+
+
+def test_mediana_unitaria_tipificada_recupera_registros_sem_agregar_valor_global():
+    from src.schema import QueryIntent
+
+    intent = QueryIntent(
+        pergunta="Qual a mediana do valor por ambulância tipo D?",
+        bases=AGREGADA,
+        operacao="estatistica",
+        termos_objeto=["ambulancia", "tipo d"],
+        filtros=QueryFilters(
+            tipo_valor="unitario", tipo_medida="unitaria", granularidade="item",
+            metrica="mediana",
+        ),
+    )
+    consulta = sq.consulta_da_intencao(intent)
+
+    assert consulta.tipo == "listagem"
 
 
 def test_preco_unitario_homologado_nao_compila_soma_global():

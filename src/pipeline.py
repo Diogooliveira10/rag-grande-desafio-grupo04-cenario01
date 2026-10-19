@@ -264,7 +264,10 @@ def _responder(
                     "tipo_valor_solicitado": intent.filtros.tipo_valor,
                     "tipo_medida_solicitada": intent.filtros.tipo_medida,
                     "granularidade_solicitada": intent.filtros.granularidade,
-                    "calculo_disponivel": calculo_disponivel if intent.operacao != "buscar" else None}
+                    "calculo_disponivel": (
+                        False if intent.filtros.tipo_valor == "unitario"
+                        else calculo_disponivel if intent.operacao != "buscar" else None
+                    )}
                 relaxed = chunk.metadata.extras.get("filtros_relaxados")
                 if relaxed:
                     filtros_relaxados[chunk.metadata.base_id] = relaxed
@@ -320,7 +323,10 @@ def _responder(
         from src.structured_query import requer_calculo
         for chunk in sql_chunks + chunks:
             chunk.metadata.extras = {**chunk.metadata.extras,
-                "calculo_disponivel": bool(sql_chunks) if requer_calculo(query) else None,
+                "calculo_disponivel": (
+                    False if analise.filtros.tipo_valor == "unitario"
+                    else bool(sql_chunks) if requer_calculo(query) else None
+                ),
                 "tipo_valor_solicitado": analise.filtros.tipo_valor,
                 "tipo_medida_solicitada": analise.filtros.tipo_medida,
                 "granularidade_solicitada": analise.filtros.granularidade}
