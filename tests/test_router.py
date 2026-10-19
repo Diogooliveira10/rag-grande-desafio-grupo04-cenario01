@@ -119,6 +119,30 @@ def test_recusa_carrega_o_motivo_certo_na_justificativa(pergunta, motivo):
     assert inferir_motivo_recusa(decisao.justificativa) == motivo
 
 
+@pytest.mark.parametrize("pergunta", [
+    "O que a Lei 14.133 prevê para prevenir fraudes em licitações?",
+    "Quais sanções a lei prevê para licitante que fraudar a licitação?",
+    "O que é contratação ilegal segundo a norma?",
+    "Como identificar fraude em licitação segundo a lei?",
+])
+def test_pergunta_sobre_o_que_a_norma_diz_de_fraude_nao_e_recusada(pergunta):
+    assert Natureza.NORMATIVA in rotear_pergunta(pergunta).bases_selecionadas
+
+
+@pytest.mark.parametrize("pergunta", [
+    "Esses contratos e registros comprovam que algum dos fornecedores fraudou licitações ou agiu de forma ilegal?",
+    "Esse contrato de ambulâncias tipo D foi fraude?",
+    "Segundo a lei, esse contrato é ilegal?",
+    "Houve fraude nos contratos de ambulância?",
+    "A lei diz que a Cristália fraudou?",
+])
+def test_juizo_sobre_conduta_concreta_continua_recusado_mesmo_citando_a_lei(pergunta):
+    decisao = rotear_pergunta(pergunta)
+
+    assert decisao.bases_selecionadas == []
+    assert inferir_motivo_recusa(decisao.justificativa) == RefusalReason.JUIZO_LEGALIDADE
+
+
 def test_edital_e_especificacao_tecnica_vao_para_a_normativa():
     decisao = rotear_pergunta("Quais editais tratam das especificações técnicas das ambulâncias contratadas?")
 

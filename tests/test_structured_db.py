@@ -210,6 +210,21 @@ def test_garantir_banco_remonta_so_quando_o_documents_muda(documents, banco, mon
     assert banco.consultar("SELECT numero_controle_pncp AS n FROM contratacoes") == [{"n": "B-1"}]
 
 
+def test_garantir_banco_confere_uma_vez_enquanto_o_documents_nao_muda(documents, banco, monkeypatch):
+    structured_db.garantir_banco(documents, banco)
+    aberturas = []
+    original = Banco.conectar
+    monkeypatch.setattr(Banco, "conectar", lambda self, **k: aberturas.append(1) or original(self, **k))
+
+    structured_db.garantir_banco(documents, banco)
+    assert aberturas == []
+
+    escrever_documents(documents, contratacoes=[_contratacao("C-1")])
+    structured_db.garantir_banco(documents, banco)
+    assert aberturas
+    assert banco.consultar("SELECT numero_controle_pncp AS n FROM contratacoes") == [{"n": "C-1"}]
+
+
 def test_garantir_banco_sem_documents_falha_claramente(tmp_path, banco):
     with pytest.raises(FileNotFoundError):
         structured_db.garantir_banco(tmp_path / "nao-existe.jsonl", banco)

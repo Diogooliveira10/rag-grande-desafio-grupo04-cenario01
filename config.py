@@ -57,6 +57,11 @@ GENERATION_CHUNK_CHARS = int(_env("GENERATION_CHUNK_CHARS", "900"))
 # A geração normal leva de 20 a 90 s no servidor da turma.
 GENERATION_TIMEOUT = float(_env("GENERATION_TIMEOUT", "180"))
 GENERATION_MAX_RETRIES = int(_env("GENERATION_MAX_RETRIES", "1"))
+# ``reasoning_effort`` mandado ao LLM do ECOA. Vazio = padrão do servidor (o
+# Qwen3 pensa antes de responder). ``none`` desliga o raciocínio: medido em
+# 2026-10-16, a mesma pergunta caiu de 15 s para 2 s. Só o ECOA recebe; o
+# OpenRouter usa o padrão de cada modelo.
+GENERATION_REASONING_EFFORT = _env("GENERATION_REASONING_EFFORT", "").strip()
 # Rerank (src/rerank.py). "local" (padrão) = cross-encoder local (RERANK_MODEL
 # aceita qualquer CrossEncoder do sentence-transformers); "ecoa" = endpoint
 # /api/rerank do servidor da turma, com o local de reserva. Na ablação de
@@ -72,6 +77,9 @@ RERANK_MAX_LENGTH = int(_env("RERANK_MAX_LENGTH", "512"))
 # o carregamento leva ~15 s (69 s se ainda precisar baixar o modelo) e o
 # rerank em si menos de 1 s (medido em 2026-10-14).
 RERANK_PRELOAD = _env("RERANK_PRELOAD", "true").lower() in {"1", "true", "sim", "yes"}
+# Ler os índices (vectors.jsonl, FAISS e documents.jsonl, ~150 MB) quando a API
+# sobe: a busca guarda o que leu, e a primeira pergunta deixa de pagar ~3 s.
+INDEX_PRELOAD = _env("INDEX_PRELOAD", "true").lower() in {"1", "true", "sim", "yes"}
 OLLAMA_LOCAL_URL = _env("OLLAMA_LOCAL_URL", "http://localhost:11434/v1")
 OLLAMA_LOCAL_API_KEY = _env("OLLAMA_LOCAL_API_KEY", "ollama")
 OLLAMA_LOCAL_EMBEDDING_MODEL = _env("OLLAMA_LOCAL_EMBEDDING_MODEL", EMBEDDING_MODEL)

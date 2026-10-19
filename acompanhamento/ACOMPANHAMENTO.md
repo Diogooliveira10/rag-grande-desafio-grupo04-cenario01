@@ -571,3 +571,39 @@ João Pedro Félix Reis e Eduarda não participaram deste encontro por questões
 - Também utilizei assistência de IA na investigação da F1, na implementação e nos testes da regra de insuficiência de dados, na preparação da documentação de qualidade dos dados e na revisão das alterações do corpus.
 
 - As decisões de integração, as regras de confiança, a escolha do provedor principal e da alternativa, a retirada do roteiro interno do repositório público e a distribuição das tarefas foram revisadas e decididas por mim. Executei os commits, merges, pushes e testes correspondentes, conferindo os resultados antes de registrar as entregas.
+
+## Encontro 14 — 2026-10-16
+
+## Entregamos hoje:
+
+- **Confiança das respostas (Diogo):** corrigida a combinação de confiança em `src/generate.py` para impedir que o recorte SQL eleve a confiança declarada pelo LLM. O ajuste mantém o caminho determinístico existente. Foram aprovados 113 testes em `test_generate.py` e `test_numerical_validation.py`, além de 9 testes relacionados a P4.2 e P4.3. A avaliação completa ainda não foi executada.
+
+- **Golden Set e histórico (Pâmela):** adicionados os casos I3 e I4, relacionados a consultas por CNPJ, elevando o Golden Set de 29 para 31 casos. O avaliador passou a fornecer o histórico necessário às perguntas dependentes. P1.3, I3 e I4 passaram nos testes com LLM; P4.2 e P4.3 continuaram apresentando problemas de confiança. A suíte completa na `main` registrou 1.704 testes aprovados.
+
+- **Corpus v7 e recuperação (João):** avançada a coleta e a reconciliação territorial, com 32.956 atas com evidência cadastral do RJ. O candidato v7 foi montado com 142.026 vetores, utilizando o modelo local Qwen3-Embedding-0.6B Q8_0. Na avaliação com 47 casos, a busca densa da v7 obteve hit@10 de 0,6170, contra 0,7872 da v6. A busca híbrida alcançou 0,7021, mas apresentou regressões. A v7 permaneceu em staging, sem substituir a base ativa.
+
+- **Correções e desempenho do backend (Renato):** reduzido o tempo de leitura dos índices de aproximadamente 3,6 s para 0,35 s por consulta e o tempo do caminho SQL no Neon de 3,3 s para 2,1 s. Também foram corrigidos problemas na extração de termos SQL, na busca por variações de palavras e no guardrail de perguntas sobre legislação. A suíte registrou 1.704 testes aprovados.
+
+- **Preparação para o Demo Day:** validado o acesso externo ao backend pelo túnel, incluindo `/health`, CORS e uma consulta real respondida em 4,3 s. Foi preparado um plano B com capturas das sete consultas do roteiro, incluindo respostas e traces, além de procedimentos de contingência para falhas de conexão, backend ou provedor de LLM.
+
+- **Documentação e integração:** atualizados README, guia de execução local, índice de documentos, `.env.example` e `ARQUITETURA.md`. As alterações de coleta, indexação, avaliação e backend foram integradas conforme os respectivos históricos de branch e PR.
+
+## Ficou pendente:
+
+- Executar nova rodada do Golden Set após a correção de confiança e validar P4.2 e P4.3, garantindo que perguntas sobre modalidade acionem a consulta estruturada correta e não generalizem evidências de outros contratos.
+- Investigar as regressões de recuperação da v7, auditar a consistência entre documentos, SQL, índices e vetores e reavaliar o Golden Set sobre o candidato.
+- Validar o rollback com a aplicação funcionando e decidir explicitamente sobre a promoção da v7. A v6 continua ativa.
+- Configurar o endereço do backend no deploy do frontend publicado.
+- Investigar a instabilidade e a latência do LLM, especialmente nas consultas sobre a Lei 14.133.
+- Concluir as validações finais antes do freeze do Demo Day.
+
+## Bloqueios em aberto:
+
+- **P4.2 e P4.3:** a consulta SQL não é acionada adequadamente; a recuperação traz documentos de outros contratos e a resposta generaliza a modalidade, podendo apresentar confiança alta indevida.
+- **Corpus v7:** os resultados de recuperação ainda são inferiores aos da v6 em métricas importantes, sem evidência suficiente para autorizar a substituição da base ativa.
+- **Publicação e demonstração:** o frontend publicado ainda precisa receber a configuração do backend, e consultas que dependem do LLM podem exceder o tempo limite.
+
+### Uso de assistentes de IA:
+
+- Foram utilizados assistentes de IA para apoiar a análise e implementação de correções, criação de testes, revisão de código e documentação, avaliação do corpus, comparação de estratégias de recuperação, investigação de desempenho e preparação do plano de contingência do Demo Day.
+- As alterações e conclusões foram verificadas por meio do código, dos testes, dos logs e dos relatórios. As avaliações parciais foram mantidas distintas da suíte completa, e a v7 não foi promovida sem validação.

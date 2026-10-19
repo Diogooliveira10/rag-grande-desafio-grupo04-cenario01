@@ -78,15 +78,33 @@ class RetrievalResult:
         }
 
 
+# Arquivo lido -> (mtime, tamanho, registros). Cada pergunta lia de novo os
+# vectors.jsonl e o documents.jsonl (~150 MB de JSON), uns 3 s por consulta;
+# a assinatura do arquivo invalida a entrada quando ele é regravado.
+_JSONL_CACHE: dict[str, tuple[int, int, list[dict[str, Any]]]] = {}
+
+
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
+    """Registros do arquivo, lidos uma vez enquanto ele não muda.
+
+    Os dicts são compartilhados entre as chamadas: quem precisar alterar um
+    registro copia antes (``dict(record)``), como ``_records_for`` já faz.
+    """
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
         return []
+    chave = str(path)
+    guardado = _JSONL_CACHE.get(chave)
+    if guardado and guardado[0] == stat.st_mtime_ns and guardado[1] == stat.st_size:
+        return list(guardado[2])
     records: list[dict[str, Any]] = []
     with path.open(encoding="utf-8") as handle:
         for line in handle:
             if line.strip():
                 records.append(json.loads(line))
-    return records
+    _JSONL_CACHE[chave] = (stat.st_mtime_ns, stat.st_size, records)
+    return list(records)
 
 
 @lru_cache(maxsize=4)
@@ -793,6 +811,52 @@ def _embed_fn_com_uso(uso: list[TokenUsage], estatisticas: dict[str, int] | None
     return embed
 
 
+def pre_carregar_indices(
+    index_dir: Path = config.INDEX_DIR,
+    documents_file: Path = config.NORMALIZED_DATA_DIR / "documents.jsonl",
+) -> int:
+    """Lê os índices antes da primeira pergunta; devolve quantos arquivos leu.
+
+    Falha só vira aviso: a primeira pergunta lê pelo caminho normal.
+    """
+    lidos = 0
+    try:
+        for vectors_path in sorted(index_dir.glob("*/vectors.jsonl")):
+            _read_jsonl(vectors_path)
+            lidos += 1
+            faiss_path = vectors_path.parent / "vectors.faiss"
+            if faiss_path.exists():
+                _ler_indice_faiss(faiss_path)
+                lidos += 1
+        for path in (documents_file, QUERY_CACHE_PATH):
+            if path.exists():
+                _read_jsonl(path)
+                lidos += 1
+    except Exception as erro:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Pré-carregamento dos índices falhou (%s); a primeira pergunta lê do disco", type(erro).__name__)
+    return lidos
+
+
+_FAISS_CACHE: dict[str, tuple[int, int, Any]] = {}
+
+
+def _ler_indice_faiss(index_path: Path) -> Any:
+    """Índice persistido, lido do disco só quando o arquivo muda."""
+    import faiss
+
+    stat = index_path.stat()
+    chave = str(index_path)
+    guardado = _FAISS_CACHE.get(chave)
+    if guardado and guardado[0] == stat.st_mtime_ns and guardado[1] == stat.st_size:
+        return guardado[2]
+    index = faiss.read_index(chave)
+    _FAISS_CACHE[chave] = (stat.st_mtime_ns, stat.st_size, index)
+    return index
+
+
 def _faiss_scores(
     query_vector: Sequence[float],
     candidates: list[dict[str, Any]],
@@ -811,7 +875,7 @@ def _faiss_scores(
 
     candidate_ids = {str(record.get("chunk_id", "")) for record in candidates}
     if index_path is not None and index_path.exists():
-        index = faiss.read_index(str(index_path))
+        index = _ler_indice_faiss(index_path)
         if index.ntotal != len(indexed_records):
             raise RuntimeError(
                 f"índice FAISS desatualizado em {index_path}; regenere com src.index"

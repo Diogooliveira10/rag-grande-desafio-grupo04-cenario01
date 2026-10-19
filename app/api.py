@@ -39,7 +39,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
 import config
-from src import pipeline, rerank
+from src import pipeline, rerank, retrieve
 from app import catalog
 from app.catalog_models import ContratacaoRecord, DocumentoRecord, OfficialSource, OrgaoRecord, ProjectSummary
 from src.history_store import ConsultaNaoEncontrada, default_store as historico
@@ -260,6 +260,8 @@ async def _ciclo_de_vida(_app: FastAPI):
     # já aceitar requisições, e antes da primeira pergunta de verdade.
     if config.RERANK_ENABLED and config.RERANK_PRELOAD:
         threading.Thread(target=rerank.pre_carregar, name="rerank-preload", daemon=True).start()
+    if config.INDEX_PRELOAD:
+        threading.Thread(target=retrieve.pre_carregar_indices, name="index-preload", daemon=True).start()
     yield
 
 

@@ -827,12 +827,23 @@ def _resposta_llm(nivel, avisos=()):
                        refusal_reason=None, avisos=list(avisos))
 
 
-def test_zero_exaustivo_nao_e_rebaixado_por_ser_zero():
-    """O LLM pode dar 'baixa' para um zero; o recorte completo sustenta 'alta'."""
+def test_recorte_completo_nao_eleva_confianca_baixa_do_llm():
+    """O recorte completo não deve sobrepor a confiança explicitada pelo LLM."""
     chunk = _chunk_com_recorte(_recorte(registros_correspondentes=0,
                                         tipo_resultado="sem_correspondencia"))
     saida = gen._aplicar_recorte(_resposta_llm(ConfidenceLevel.BAIXA), [chunk])
-    assert saida.confidence_level == ConfidenceLevel.ALTA
+    assert saida.confidence_level == ConfidenceLevel.BAIXA
+
+
+def test_evidencia_parcial_declarada_pelo_llm_nao_elevada_para_alta():
+    chunk = _chunk_com_recorte(_recorte())
+    resposta = _resposta_llm(ConfidenceLevel.MEDIA).model_copy(update={
+        "answer": "A evidência disponível é parcial; não permite confirmar todos os dados."
+    })
+
+    saida = gen._aplicar_recorte(resposta, [chunk])
+
+    assert saida.confidence_level == ConfidenceLevel.MEDIA
 
 
 def test_execucao_parcial_limita_o_que_o_llm_afirmar():

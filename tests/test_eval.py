@@ -90,6 +90,7 @@ def test_matching_de_identificador_pncp_completo_preserva_pontuacao():
     caso = replace(
         next(case for case in load_golden_set(GOLDEN_SET) if case.id == "I2"),
         deve_conter=[identificador],
+        deve_conter_qualquer=[],
         nao_deve_conter=[],
     )
 
@@ -714,6 +715,12 @@ def test_negacao_em_uma_frase_nao_anula_a_seguinte():
     """"Campos ausentes não são zero. Nenhum fornecedor tem 3" — o "não" é da
     frase anterior e não pode anular a afirmação seguinte."""
     assert _termo_afirmado("nenhum fornecedor", "Campos ausentes nao sao zero. Nenhum fornecedor tem 3") is True
+
+
+def test_negacao_de_um_campo_do_registro_nao_anula_o_campo_seguinte():
+    linha = "modalidade: não informada | fornecedor: PROTEGER SERVIÇOS LTDA | REMOÇÃO DE PACIENTES"
+    assert _termo_afirmado("PROTEGER SERVIÇOS LTDA", linha) is True
+    assert _termo_afirmado("modalidade informada", "modalidade não informada | fornecedor: X") is False
 
 
 def test_negacao_na_mesma_frase_continua_valendo():

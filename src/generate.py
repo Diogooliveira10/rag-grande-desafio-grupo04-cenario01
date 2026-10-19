@@ -852,9 +852,9 @@ def _aplicar_recorte(resposta: RAGResponse, chunks: list[Chunk]) -> RAGResponse:
     """Mesma política de confiança da resposta determinística, no caminho do LLM.
 
     O recorte **limita** o nível por razão própria (execução parcial, cálculo não
-    verificável) e **sustenta** o que é exaustivo: uma consulta completa que
-    deu zero não é rebaixada só por dar zero. Recusa não ganha confiança e o
-    texto do LLM não é alterado.
+    verificável), mas não eleva a confiança declarada pelo LLM. Respostas
+    determinísticas usam diretamente a confiança do recorte. Recusa não ganha
+    confiança e o texto do LLM não é alterado.
     """
     if resposta.is_refusal:
         return resposta
@@ -865,10 +865,7 @@ def _aplicar_recorte(resposta: RAGResponse, chunks: list[Chunk]) -> RAGResponse:
     atual = resposta.confidence_level
     if atual == ConfidenceLevel.RECUSADO:
         return resposta
-    solido = (recorte.get("execucao") == "completa" and recorte.get("calculo_disponivel") is not False
-              and recorte.get("tipo_resultado") != "comparacao_insuficiente")
-    nivel = max(atual, nivel_recorte, key=lambda n: _NIVEIS.get(n, 0)) if solido else min(
-        atual, nivel_recorte, key=lambda n: _NIVEIS.get(n, 0))
+    nivel = min(atual, nivel_recorte, key=lambda n: _NIVEIS.get(n, 0))
     return resposta.model_copy(update={
         "confidence_level": nivel,
         "avisos": list(dict.fromkeys([*resposta.avisos, *avisos])),

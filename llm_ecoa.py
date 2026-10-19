@@ -80,9 +80,14 @@ def completar_chat(mensagens: list[dict], *, response_format: dict | None = None
         primary = client.with_options(
             timeout=config.GENERATION_TIMEOUT, max_retries=config.GENERATION_MAX_RETRIES
         ) if hasattr(client, "with_options") else client
+        argumentos_ecoa = dict(arguments)
+        if config.GENERATION_REASONING_EFFORT:
+            argumentos_ecoa["extra_body"] = {**argumentos_ecoa.get("extra_body", {}),
+                                             "reasoning_effort": config.GENERATION_REASONING_EFFORT}
+            info["reasoning_effort"] = config.GENERATION_REASONING_EFFORT
         try:
             response = observar_chamada(
-                lambda: primary.chat.completions.create(model=GENERATION_MODEL, **arguments),
+                lambda: primary.chat.completions.create(model=GENERATION_MODEL, **argumentos_ecoa),
                 provider="ecoa", model=GENERATION_MODEL,
                 sdk_max_retries=config.GENERATION_MAX_RETRIES, diagnosticos=info)
         except Exception as error:

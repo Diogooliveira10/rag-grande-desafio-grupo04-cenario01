@@ -40,6 +40,30 @@ _REFUSAL_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
     ),
 )
 
+_JUIZO_LEGALIDADE = _REFUSAL_RULES[2][1]
+
+# Pergunta sobre o que a norma diz a respeito de fraude ou ilegalidade ("o que a
+# Lei 14.133 prevê para prevenir fraudes?") não pede juízo sobre ninguém: vai à
+# base normativa. A recusa fica para quando há conduta concreta a julgar.
+_PERGUNTA_SOBRE_A_NORMA = re.compile(
+    r"\b(?:lei|leis|norma|normas|decreto|decretos|legislacao|artigo|art|regra|regras)\b"
+    r"|\bo que (?:e|sao|significa|caracteriza|preve|preveem|define|diz|dizem)\b"
+    r"|\bquais (?:sancoes|penalidades|punicoes|medidas|regras|condutas|hipoteses)\b"
+    r"|\bcomo (?:prevenir|evitar|combater|identificar|denunciar)\b"
+)
+_CONDUTA_CONCRETA = re.compile(
+    r"\b(?:esse|essa|esses|essas|este|esta|estes|estas|desse|dessa|desses|dessas|nesse|nessa|neste|nesta|"
+    r"aquele|aquela|algum|alguma|alguns|algumas)\s+(?:\w+\s+)?"
+    r"(?:contratos?|fornecedor(?:es)?|empresas?|orgaos?|pregoes?|pregao|licitac\w*|registros?|compras?|atas?)\b"
+    r"|\b(?:comprova\w*|indica\w*|demonstra\w*|houve|cometeu|cometeram|agiu|agiram|fraudou|fraudaram|"
+    r"foi fraude|foi ilegal|e ilegal|sao ilegais|esta irregular)\b"
+)
+
+
+def _pergunta_normativa_sobre_ilegalidade(text: str) -> bool:
+    return bool(_PERGUNTA_SOBRE_A_NORMA.search(text)) and not _CONDUTA_CONCRETA.search(text)
+
+
 _OUT_OF_SCOPE_PATTERNS = (
     r"\bproximo mes\b",
     r"\bvao vencer\b",
@@ -221,6 +245,8 @@ def _rotear(query: str) -> RouteDecision:
     text = _normalize(query)
 
     for patterns, justificativa in _REFUSAL_RULES:
+        if justificativa == _JUIZO_LEGALIDADE and _pergunta_normativa_sobre_ilegalidade(text):
+            continue
         if _contains_pattern(text, patterns):
             return RouteDecision(
                 bases_selecionadas=[],

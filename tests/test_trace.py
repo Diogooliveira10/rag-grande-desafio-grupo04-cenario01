@@ -175,13 +175,14 @@ def test_log_mascara_dado_pessoal_dentro_de_dicionarios_e_listas():
 
 
 def test_trace_monta_o_caminho_da_pergunta_em_ordem(pipeline_com_indice):
-    pipeline.responder("Quais contratos de ambulancias foram publicados?",
-                       cliente=lambda m: _resposta_sdk(), query_id="q_trace")
+    # "Explique": a listagem pura sai do SQL; esta pergunta precisa da busca.
+    pergunta = "Quais contratos de ambulancias foram publicados? Explique o objeto."
+    pipeline.responder(pergunta, cliente=lambda m: _resposta_sdk(), query_id="q_trace")
 
     trace = montar_trace("q_trace")
 
     assert trace["query_id"] == "q_trace"
-    assert trace["pergunta"] == "Quais contratos de ambulancias foram publicados?"
+    assert trace["pergunta"] == pergunta
     assert [e["stage"] for e in trace["etapas"]] == [
         "pipeline_inicio", "reformulacao", "interacao", "query_analysis", "roteamento",
         "retrieval_denso", "retrieval_bm25", "fusao_rrf", "rerank", "consulta_sql",

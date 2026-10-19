@@ -155,6 +155,16 @@ def test_expressao_de_filtro_nao_vira_termo_do_objeto(pergunta):
     assert consulta.termos_objeto == ()
 
 
+@pytest.mark.parametrize("pergunta", [
+    "Qual o valor de todos os contratos de 2025?",
+    "Quanto deram os contratos de ambulância somados em 2025?",
+])
+def test_valor_de_todos_e_somados_pedem_a_soma(pergunta):
+    from src.query_analysis import _analisar
+
+    assert sq.detectar_consulta(pergunta, _analisar(pergunta), ESTRUTURADA).tipo == "estatistica"
+
+
 def test_maior_que_como_filtro_nao_vira_ranking():
     from src.query_analysis import _analisar
 
@@ -1313,6 +1323,51 @@ def test_firmar_nao_vira_termo_do_objeto(verbo):
 @pytest.mark.parametrize("verbo", ["se houver", "se houve", "havendo", "havia", "haja", "se houvesse"])
 def test_haver_nao_vira_termo_do_objeto(verbo):
     assert sq._termos_do_objeto(f"contratos de ambulancia {verbo}") == ("ambulancia",)
+
+
+@pytest.mark.parametrize("complemento", [
+    "e seus fornecedores", "e suas modalidades", "e os valores deles", "e seus respectivos valores",
+    "que o orgao publicou", "que publicaram", "e quanto custaram",
+])
+def test_pronome_e_verbo_da_pergunta_nao_viram_termo_do_objeto(complemento):
+    assert sq._termos_do_objeto(f"contratos de ambulancia {complemento}") == ("ambulancia",)
+
+
+@pytest.mark.parametrize("palavra", ["passagem", "passagens"])
+def test_gem_e_gens_viram_o_mesmo_radical(palavra):
+    assert sq._termos_do_objeto(f"contratos de {palavra} aerea") == ("passage", "aerea")
+
+
+def test_termo_no_singular_acha_objeto_no_plural(tmp_path):
+    documents = tmp_path / "documents.jsonl"
+    escrever_documents(documents, contratacoes=[
+        _contratacao("P-1", objeto="Fornecimento de passagens aéreas"),
+        _contratacao("P-2", objeto="Agenciamento de passagem aérea nacional"),
+    ])
+    banco = Banco(sqlite_path=tmp_path / "base.sqlite")
+    structured_db.construir_banco(documents, banco)
+    consulta = sq.Consulta(tabela="contratacoes", tipo="listagem",
+                           termos_objeto=sq._termos_do_objeto("contratos de passagem"))
+
+    _, _, linhas = sq.executar_consulta(consulta, banco)
+
+    assert linhas[0].startswith("2 registros atendem aos filtros")
+
+
+def test_listagem_direta_so_dispensa_o_llm_quando_ha_registros(tmp_path):
+    documents = tmp_path / "documents.jsonl"
+    escrever_documents(documents, contratacoes=[_contratacao("L-1", objeto="Locação de ambulância")])
+    banco = Banco(sqlite_path=tmp_path / "base.sqlite")
+    structured_db.construir_banco(documents, banco)
+
+    def chunks(termos):
+        consulta = sq.Consulta(tabela="contratacoes", tipo="listagem", termos_objeto=termos, listagem_direta=True)
+        sql, cabecalho, linhas = sq.executar_consulta(consulta, banco)
+        return sq._chunks(consulta, sql, cabecalho, linhas, banco)
+
+    assert all(c.metadata.extras["geracao_deterministica"] for c in chunks(("ambulancia",)))
+    # Zero pode ser sinônimo ("UTI móvel"): a busca semântica ainda tem chance.
+    assert not any(c.metadata.extras["geracao_deterministica"] for c in chunks(("helicoptero",)))
 
 
 def test_pergunta_da_f1_nao_traz_houver_como_termo_do_objeto():

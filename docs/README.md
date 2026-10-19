@@ -22,8 +22,20 @@ Este diretório reúne guias de uso e referências do projeto.
   1.731 testes, pendências e bloqueios de promoção.
 - [Guia de comandos da CLI](CLI.md): instalação, coleta, inventário, curadoria,
   preparação, busca local e embeddings.
-- [Emails sintéticos em Markdown](#emails-sintéticos-em-markdown): fixture de
-  exemplo e fluxo para preparar uma base local.
+- [Guia de execução local](GUIA_INTEGRACAO_LOCAL_FRONTEND_BACKEND.md): backend e
+  frontend rodando juntos numa máquina Windows nova.
+- [Contrato HTTP](FRONTEND_API_CONTRACT.md): endpoints, schemas e erros que o
+  frontend consome.
+- [Suplemento conversacional sintético](emails_sinteticos.md): as 25 conversas
+  fictícias do tutor (20 públicas e 5 restritas), proveniência, segurança,
+  reconstrução e casos do golden set.
+- [Qualidade dos dados](QUALIDADE_DOS_DADOS.md): cobertura de cada campo, o que
+  falta na fonte e o que o sistema faz quando o dado falta.
+- [Validação numérica](NUMERICAL_VALIDATION.md): números da CLI e do frontend
+  conferidos contra os JSONs brutos.
+- [Ablação do rerank](ABLACAO_RERANK.md): medição do estágio de rerank e a
+  decisão tomada.
+- [Email sintético em Markdown](#email-sintético-em-markdown): exemplo de formato.
 - [Arquitetura atual e alvo](../ARQUITETURA.md): o que já está implementado e o
   que ainda é parte do desenho do Adaptive RAG.
 - [Observabilidade das consultas](OBSERVABILIDADE.md): funcionamento do SQL
@@ -33,65 +45,23 @@ Este diretório reúne guias de uso e referências do projeto.
   ativa; o censo v7 tem inventário próprio em
   `data/v7_direto/inventario_direto.json`.
 - [Registro da v6](registro_execucao_v6.md): distribuição, embeddings, avaliação
-  e limitações das respostas.
+  e limitações das respostas; [registro da v3](registro_execucao_v3.md).
+- Análises de 30/09/2026 (histórico): [cobertura do corpus v6 para as
+  personas](analise_corpus_v6_personas.md) e [qualidade das consultas da
+  v6](qualidade_consultas_v6.md).
 - [Personas e perguntas de referência](../PERSONAS.md).
 - [Enunciado completo do Grande Desafio](../GRANDE_DESAFIO_CENARIOS.md).
 
-## Emails sintéticos em Markdown
+## Email sintético em Markdown
 
-O arquivo [email_sintetico_exemplo.md](email_sintetico_exemplo.md) demonstra um
+O arquivo [email_sintetico_exemplo.md](email_sintetico_exemplo.md) mostra um
 email fictício com cabeçalho, corpo e mensagem citada. Use endereços reservados
 como `example.com` e deixe claro que o conteúdo é sintético.
 
-### Preparar uma pasta sem criar versão do corpus
-
-Coloque um arquivo `.md` por mensagem ou por conversa em uma pasta. O
-`prepare_documents` percorre a pasta recursivamente; se houver outros formatos
-suportados nela, eles também serão preparados. Para conferir sem gravar JSONL,
-relatório ou estado incremental, use `--dry-run`:
-
-```powershell
-py -m src.prepare_documents `
-  --input "docs" `
-  --manifest corpus_manifest.yaml `
-  --base-id emails_sinteticos `
-  --output "data/normalized/emails-preview.jsonl" `
-  --report "data/normalized/emails-preview-report.json" `
-  --dry-run
-```
-
-Para preparar só os emails, aponte `--input` para uma pasta que contenha apenas
-os arquivos daquela base. Remova `--dry-run` quando quiser gravar o JSONL, o
-relatório e o estado incremental. Essa etapa não cria uma versão de coleta.
-
-### Registrar e coletar uma base local versionada
-
-A base `emails_sinteticos` já está declarada em `corpus_manifest.yaml` e aponta
-para o arquivo de exemplo deste diretório. Para trocar por uma coleção, altere
-`acesso.origem` para o caminho da pasta que contém os `.md`. Então execute a
-coleta experimental:
-
-```powershell
-py -m src.fetch_corpus fetch `
-  --manifest corpus_manifest.yaml `
-  --data-root data/emails-sinteticos `
-  --base-id emails_sinteticos
-```
-
-Essa coleta cria uma versão e um inventário sob `data/emails-sinteticos/`.
-Depois, prepare os documentos a partir do inventário mais recente dessa raiz:
-
-```powershell
-py -m src.prepare_documents `
-  --latest `
-  --data-root "data/emails-sinteticos" `
-  --manifest corpus_manifest.yaml `
-  --base-id emails_sinteticos
-```
-
-A saída fica em `data/emails-sinteticos/normalized/vN/emails_sinteticos/`,
-com a versão e o inventário identificados no relatório.
-
-`fetch` é a etapa que versiona e inventaria os arquivos. Use-a quando quiser
-incorporar a coleção ao histórico do corpus; para uma prévia local, basta o
-primeiro comando com `--dry-run`.
+É só um exemplo de formato. A base `emails_sinteticos` do projeto não usa
+Markdown: ela é feita das 25 conversas em JSON entregues pelo tutor
+(`data/synthetic/conversacional_sintetica/`), e a preparação dessa base só
+aceita esse formato. Um arquivo `.md` preparado com `--base-id
+emails_sinteticos` falha (conferido em 2026-10-16). Proveniência, preparação,
+indexação e reconstrução da base estão em
+[emails_sinteticos.md](emails_sinteticos.md).
