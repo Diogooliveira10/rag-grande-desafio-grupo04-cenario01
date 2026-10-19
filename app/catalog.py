@@ -10,10 +10,13 @@ import hashlib
 import json
 import math
 import re
+import sqlite3
 import unicodedata
 from collections import Counter
+from contextlib import closing
 from functools import lru_cache
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 import config
@@ -23,6 +26,8 @@ from src.sensitivity import mascarar
 DOCUMENTS_FILE = config.NORMALIZED_DATA_DIR / "documents.jsonl"
 INVENTORY_DIR = config.ROOT_DIR / "data/inventory"
 MANIFEST_FILE = config.ROOT_DIR / "corpus_manifest.yaml"
+STRUCTURED_FILE = config.ROOT_DIR / "data/structured/base_estruturada.sqlite"
+INDEX_MANIFEST = config.INDEX_DIR / "manifest.json"
 DOCUMENT_TYPES = {"editais_normativo": "Normativo", "contratos_estruturado": "Contrato",
                   "atas_conversacional": "Ata de Registro", "pca_agregado": "PCA",
                   "emails_sinteticos": "Conversa sintética"}
@@ -40,25 +45,162 @@ def _read_json(path: Path) -> dict[str, Any]:
     return payload
 
 
-@lru_cache(maxsize=2)
-def _load_snapshot(signatures: tuple[tuple[str, int, int], ...]) -> tuple[dict, dict, list[dict]]:
+# O catálogo guarda só metadados por arquivo e por contrato (um arquivo de
+# origem pode conter vários contratos). Nunca retém textos/vetores.
+# O lock evita leituras simultâneas do JSONL no primeiro acesso (lru_cache sozinho
+# pode executar a mesma carga mais de uma vez em threads concorrentes).
+_SNAPSHOT_LOCK = RLock()
+_PAYLOAD_FIELDS = ("numeroControlePNCP", "numeroContratoEmpenho", "orgaoEntidade",
+                   "unidadeOrgao", "nomeRazaoSocialFornecedor", "objetoContrato",
+                   "objetoCompra", "objetoAta", "valorGlobal", "dataHomologacao",
+                   "modalidadeNome", "situacaoCompraNome", "anoContrato", "anoPca")
+_EXTRA_FIELDS = ("orgao", "orgao_cnpj", "fornecedor", "objeto", "modalidade", "esfera",
+                 "municipio", "titulo_documento", "title", "titulo", "creation_date",
+                 "data_publicacao")
+
+
+@lru_cache(maxsize=1)
+def _load_metadata(signatures: tuple[tuple[str, int, int], ...]) -> tuple[dict, dict]:
     manifest = load_manifest(Path(signatures[0][0]))
-    inventories = [_read_json(Path(signature[0])) for signature in signatures[2:]]
-    inventory = next((item for item in reversed(inventories)
-                      if item.get("official") is True and item.get("completo") is True), None)
-    if inventory is None:
-        raise ValueError("inventário oficial completo indisponível")
-    with Path(signatures[1][0]).open(encoding="utf-8") as handle:
-        rows = [json.loads(line) for line in handle if line.strip()]
-    if any(not isinstance(row, dict) for row in rows):
-        raise ValueError("documentos ativos inválidos")
-    return manifest, inventory, rows
+    # Não carregar todos os inventários históricos (dezenas de MB) para usar só um.
+    for signature in reversed(signatures[1:]):
+        inventory = _read_json(Path(signature[0]))
+        if inventory.get("official") is True and inventory.get("completo") is True:
+            return manifest, inventory
+    raise ValueError("inventário oficial completo indisponível")
+
+
+def _metadata_signatures() -> tuple[tuple[str, int, int], ...]:
+    inventories = sorted((path for path in INVENTORY_DIR.glob("v*.json")
+                          if re.fullmatch(r"v\d+", path.stem)), key=lambda path: int(path.stem[1:]))
+    return tuple(_signature(path) for path in [MANIFEST_FILE, *inventories])
+
+
+def _active_metadata(source_hash: str) -> dict:
+    """Identidade só é confiável quando vinculada ao hash do JSONL ativo.
+
+    Consulta apenas meta, em mode=ro: nunca valida/reconstrói o banco ou índice.
+    Contagens de chunks/arquivos são observadas no JSONL, não inferidas da v6.
+    """
+    active: dict[str, Any] = {"versao": None, "snapshot_id": None, "construido_em": None,
+                              "total_vetores": None, "chunks_sem_vetor": None,
+                              "bytes_documents": None, "schema_sql": None,
+                              "vetores_por_base": {}, "avisos": []}
+    if STRUCTURED_FILE.is_file():
+        try:
+            with closing(sqlite3.connect(STRUCTURED_FILE.resolve().as_uri() + "?mode=ro", uri=True)) as conn:
+                meta = dict(conn.execute("SELECT chave, valor FROM meta"))
+            if meta.get("source_sha256") == source_hash:
+                active["versao"] = meta.get("corpus_version")
+                active["construido_em"] = meta.get("built_at")
+                active["schema_sql"] = meta.get("schema_version")
+            else:
+                active["avisos"].append("A proveniência do banco estruturado não corresponde ao JSONL ativo.")
+        except (OSError, sqlite3.Error):
+            active["avisos"].append("Não foi possível verificar a versão do banco estruturado.")
+    if INDEX_MANIFEST.is_file():
+        try:
+            index = _read_json(INDEX_MANIFEST)
+            if index.get("source_sha256") == source_hash:
+                active["snapshot_id"] = index.get("snapshot_id")
+                chunks, vectors = index.get("total_chunks"), index.get("total_vectors")
+                if type(vectors) is int and vectors >= 0:
+                    active["total_vetores"] = vectors
+                if type(chunks) is int and type(vectors) is int and 0 <= vectors <= chunks:
+                    active["chunks_sem_vetor"] = chunks - vectors
+                por_base = index.get("por_base") or {}
+                if isinstance(por_base, dict):
+                    active["vetores_por_base"] = {
+                        base: sum(value for value in counts.values() if type(value) is int)
+                        for base, counts in por_base.items() if isinstance(counts, dict)
+                    }
+                if index.get("homogeneidade_modelo_comprovada") is False:
+                    active["avisos"].append("O índice possui linhagem de modelos de embedding mista; homogeneidade não comprovada.")
+                if index.get("proveniencia_encoding_completa") is False:
+                    active["avisos"].append("A proveniência de encoding dos vetores não está completamente comprovada.")
+                if index.get("promocao_autorizada") is False:
+                    active["avisos"].append("O manifesto do índice não declara autorização de promoção para produção.")
+            else:
+                active["avisos"].append("A proveniência do índice não corresponde ao JSONL ativo.")
+        except (OSError, ValueError):
+            active["avisos"].append("Não foi possível verificar os metadados do índice ativo.")
+    if not active["versao"]:
+        active["avisos"].append("A versão do corpus ativo não pôde ser verificada; o inventário de coleta é informado separadamente.")
+    try:
+        active["bytes_documents"] = DOCUMENTS_FILE.stat().st_size
+    except OSError:
+        pass
+    return active
+
+
+@lru_cache(maxsize=1)
+def _load_snapshot(signatures: tuple[tuple[str, int, int], ...],
+                   runtime_signatures: tuple[tuple[str, int, int], ...] = ()) -> tuple[dict, dict, list[dict]]:
+    manifest, inventory = _load_metadata((signatures[0], *signatures[2:]))
+    bases = _official_bases(manifest)
+    compact: dict[tuple[str, str, str], dict] = {}
+    chunks_by_base: Counter = Counter()
+    source_files: set[tuple[str, str]] = set()
+    source_hash = hashlib.sha256()
+    with Path(signatures[1][0]).open("rb") as handle:
+        for line in handle:
+            source_hash.update(line)
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if not isinstance(row, dict):
+                raise ValueError("documentos ativos inválidos")
+            base_id = row.get("base_id")
+            if base_id not in bases:
+                continue
+            chunks_by_base[base_id] += 1
+            source_files.add((base_id, str(row.get("source_file"))))
+            payload = _payload(row) if base_id == "contratos_estruturado" and _public(row) else {}
+            identifier = str(payload.get("numeroControlePNCP") or row.get("logical_id") or row.get("chunk_id"))
+            key = (base_id, str(row.get("source_file")),
+                   identifier if base_id == "contratos_estruturado" and _public(row) else "")
+            previous = compact.get(key)
+            # Preserva o primeiro chunk público por documento/contrato, sem
+            # confundir arquivo de coleta (pode ser um lote) com um contrato.
+            # Restritos contam no inventário, não na UI.
+            if previous is not None and (_public(previous) or not _public(row)):
+                continue
+            if not payload and _public(row):
+                payload = _payload(row)
+            extras = row.get("extras") or {}
+            compact[key] = {
+                **{field: row.get(field) for field in (
+                    "base_id", "source_file", "sha256", "chunk_id", "logical_id",
+                    "sensitivity", "origem", "formato", "doc_type")},
+                "extras": {field: extras[field] for field in _EXTRA_FIELDS if field in extras},
+                "_catalog_payload": {field: payload[field] for field in _PAYLOAD_FIELDS if field in payload},
+            }
+    active = _active_metadata(source_hash.hexdigest())
+    active.update(total_chunks=sum(chunks_by_base.values()), total_documentos=len(source_files))
+    if active["total_vetores"] is not None and active["total_vetores"] <= active["total_chunks"]:
+        active["chunks_sem_vetor"] = active["total_chunks"] - active["total_vetores"]
+    if active["chunks_sem_vetor"]:
+        active["avisos"].append("Há trechos sem vetor; a cobertura da busca vetorial é parcial.")
+    return manifest, {**inventory, "_corpus_ativo": active,
+                      "_chunks_por_base": dict(chunks_by_base),
+                      "_arquivos_por_base": dict(Counter(base for base, _ in source_files))}, list(compact.values())
 
 
 def _snapshot() -> tuple[dict, dict, list[dict]]:
-    inventories = sorted((path for path in INVENTORY_DIR.glob("v*.json")
-                          if re.fullmatch(r"v\d+", path.stem)), key=lambda path: int(path.stem[1:]))
-    return _load_snapshot(tuple(_signature(path) for path in [MANIFEST_FILE, DOCUMENTS_FILE, *inventories]))
+    metadata = _metadata_signatures()
+    signatures = (metadata[0], _signature(DOCUMENTS_FILE), *metadata[1:])
+    runtime = tuple(_signature(path) for path in (STRUCTURED_FILE, INDEX_MANIFEST) if path.is_file())
+    with _SNAPSHOT_LOCK:
+        return _load_snapshot(signatures, runtime)
+
+
+def prewarm() -> None:
+    """Pré-carrega o snapshot no boot; erro deixa para a primeira requisição reportar."""
+    try:
+        _snapshot()
+    except Exception:  # noqa: BLE001 - aquecimento nunca derruba o servidor
+        _load_snapshot.cache_clear()
+        _load_metadata.cache_clear()
 
 
 def _official_bases(manifest: dict) -> dict[str, dict]:
@@ -71,6 +213,8 @@ def _public(row: dict) -> bool:
 
 
 def _payload(row: dict) -> dict:
+    if "_catalog_payload" in row:
+        return row["_catalog_payload"]
     try:
         value = json.loads(row.get("text", ""))
         return value if isinstance(value, dict) else {}
@@ -94,6 +238,8 @@ def _fold(value: Any) -> str:
 
 
 def _matches(row: dict, query: str | None, fields: tuple[str, ...]) -> bool:
+    if not query or not query.strip():
+        return True
     searchable = _fold(" ".join(str(row.get(field) or "") for field in fields))
     return all(term in searchable for term in _fold(query or "").split())
 
@@ -120,20 +266,21 @@ def _id(base: str, value: str) -> str:
     return f"{base}:{hashlib.sha256(value.encode()).hexdigest()[:24]}"
 
 
-def contracts(busca: str | None = None, orgao: str | None = None,
-              limit: int = 24, offset: int = 0) -> list[dict]:
+def _contracts() -> dict[str, dict]:
     manifest, _, rows = _snapshot()
     if "contratos_estruturado" not in _official_bases(manifest):
-        return []
+        return {}
     result: dict[str, dict] = {}
     for row in rows:
         if row.get("base_id") != "contratos_estruturado" or not _public(row):
             continue
         payload, extras = _payload(row), row.get("extras") or {}
         identifier = str(payload.get("numeroControlePNCP") or row.get("logical_id") or row["chunk_id"])
+        if identifier in result:
+            continue
         entity = payload.get("orgaoEntidade") or {}
         unit = payload.get("unidadeOrgao") or {}
-        result.setdefault(identifier, _safe({
+        result[identifier] = {
             "id": identifier, "numero_contrato": str(payload.get("numeroContratoEmpenho") or identifier),
             "orgao": extras.get("orgao") or entity.get("razaoSocial"),
             "orgao_cnpj": extras.get("orgao_cnpj") or entity.get("cnpj"),
@@ -144,11 +291,17 @@ def contracts(busca: str | None = None, orgao: str | None = None,
             "modalidade": extras.get("modalidade") or payload.get("modalidadeNome"),
             "fonte_oficial": "PNCP", "status": payload.get("situacaoCompraNome"),
             "esfera": extras.get("esfera"), "municipio": extras.get("municipio") or unit.get("municipioNome"),
-        }))
-    filtered = [record for _, record in sorted(result.items())
+        }
+    return result
+
+
+def contracts(busca: str | None = None, orgao: str | None = None,
+              limit: int = 24, offset: int = 0) -> list[dict]:
+    filtered = [record for _, record in sorted(_contracts().items())
                 if _matches(record, busca, ("id", "numero_contrato", "orgao", "fornecedor", "objeto", "municipio"))
                 and _matches(record, orgao, ("orgao", "orgao_cnpj"))]
-    return filtered[offset:offset + limit]
+    # Mascarar apenas a página publicada, não milhares de registros descartados.
+    return _safe(filtered[offset:offset + limit])
 
 
 def documents(busca: str | None = None, tipo: str | None = None,
@@ -181,7 +334,7 @@ def documents(busca: str | None = None, tipo: str | None = None,
                  or extras.get("objeto") or record.get("logical_id") or identifier)
         if synthetic:
             title = f"[Sintético] {title}"
-        result[identifier] = _safe({
+        result[identifier] = {
             "id": identifier, "titulo": str(title), "tipo": DOCUMENT_TYPES.get(base_id, base.get("natureza")),
             "orgao": extras.get("orgao"),
             "ano": _year(extras.get("creation_date"), extras.get("data_publicacao"), payload.get("anoContrato"), payload.get("anoPca")),
@@ -190,7 +343,7 @@ def documents(busca: str | None = None, tipo: str | None = None,
             "link": None if synthetic else _http_url(record.get("origem") or public.get("origem")),
             "base_id": base_id, "natureza": base["natureza"],
             "formato": record.get("tipo") or public.get("formato"),
-        })
+        }
 
     for record in inventory.get("arquivos", []):
         base_id = record.get("base_id")
@@ -206,13 +359,13 @@ def documents(busca: str | None = None, tipo: str | None = None,
     filtered = [record for _, record in sorted(result.items())
                 if (not tipo or record["tipo"] == tipo)
                 and _matches(record, busca, ("titulo", "orgao", "descricao", "base_id"))]
-    return filtered[offset:offset + limit]
+    return _safe(filtered[offset:offset + limit])
 
 
 def organizations(busca: str | None = None, limit: int = 24, offset: int = 0) -> list[dict]:
     grouped: dict[str, dict] = {}
     # A lista de órgãos representa apenas registros reais de contratações.
-    for contract in contracts(limit=10**9):
+    for contract in _contracts().values():
         name, cnpj = contract["orgao"], contract["orgao_cnpj"]
         if not name:
             continue
@@ -232,11 +385,13 @@ def organizations(busca: str | None = None, limit: int = 24, offset: int = 0) ->
         record["principais_fornecedores"] = [name for name, _ in record.pop("_suppliers").most_common(5)]
         if _matches(record, busca, ("nome", "cnpj", "municipio")):
             result.append(record)
-    return result[offset:offset + limit]
+    return _safe(result[offset:offset + limit])
 
 
 def sources() -> list[dict]:
-    manifest, _, _ = _snapshot()
+    # Fontes dependem só do manifesto/inventário, não dos 629 MB de documentos.
+    with _SNAPSHOT_LOCK:
+        manifest, _ = _load_metadata(_metadata_signatures())
     result = []
     for base_id, base in _official_bases(manifest).items():
         access = base.get("acesso") or {}
@@ -270,13 +425,25 @@ def summary() -> dict:
             status = "complete" if documents_count == base.get("volume_alvo") else "partial"
             supplemental_items += documents_count
         summaries.append({"base_id": base_id, "natureza": base["natureza"], "escopo": base["escopo"],
-                          "status": status, "documentos": documents_count, "formatos": formats})
+                          "status": status, "documentos": documents_count, "formatos": formats,
+                          "documentos_ativos": inventory["_arquivos_por_base"].get(base_id, 0),
+                          "chunks_ativos": inventory["_chunks_por_base"].get(base_id, 0)})
     totals = inventory.get("totais") or {}
     has_supplement = any(base.get("dados_sinteticos") for base in bases.values())
+    inventory_version = str(inventory["version"]) + (" + suplemento sintético" if has_supplement else "")
+    active = inventory["_corpus_ativo"]
+    for item in summaries:
+        item["vetores_ativos"] = active["vetores_por_base"].get(item["base_id"])
+    backups = sorted(path.name for path in (config.ROOT_DIR / "data").glob("backup_v*") if path.is_dir())
+    snapshot_anterior = {"versao": inventory_version, "coletado_em": inventory.get("coletado_em"),
+                         "arquivos": int(totals.get("arquivos", 0)),
+                         "backup": f"data/{backups[-1]}" if backups else None}
     return {"projeto": "NEXO RJ — Adaptive RAG", "scenario_id": manifest["scenario_id"],
         "descricao": (manifest.get("description") or "") + ("; inclui suplemento de conversas sintéticas, não fatos reais." if has_supplement else ""),
         "versao_manifesto": str(manifest.get("version")) if manifest.get("version") else None,
-        "versao_corpus": str(inventory["version"]) + (" + suplemento sintético" if has_supplement else ""),
+        "versao_corpus": active["versao"] or inventory_version,
+        "versao_inventario": inventory_version, "corpus_ativo": _safe(active),
+        "snapshot_anterior": _safe(snapshot_anterior),
         "coletado_em": inventory.get("coletado_em"),
         "inventario_completo": inventory.get("completo") is True and all(base["status"] == "complete" for base in summaries),
         "total_documentos": sum(base["documentos"] for base in summaries),
