@@ -400,3 +400,41 @@ O próximo teste recomendado é fazer com que a pergunta de P4.2 acione uma cons
 - Utilizei assistentes de IA como apoio à análise do fluxo de confiança, implementação da alteração e elaboração dos testes de regressão.
 
 - Também utilizei apoio para correlacionar o relatório da rodada P4.2 com os logs de recuperação, consulta SQL e geração. As conclusões foram conferidas contra o código, os testes e os artefatos locais; não houve alteração do Golden Set ou dos relatórios históricos.
+
+## Encontro 15 — 2026-10-19
+
+### Relato individual — Diogo Oliveira
+
+**Tarefa do dia:**
+
+Corrigir o caso `P2.2` do Golden Set para que a solicitação de mediana do valor por veículo recupere os registros relevantes sem tratar o valor global do contrato como preço unitário, declare a insuficiência dos dados e limite adequadamente a confiança, preservando o comportamento do caso `P2.1`.
+
+**O que fiz hoje:**
+
+- Inspecionei o estado do Git antes de editar e confirmei que o worktree estava limpo. Revisei os casos `P2.1` e `P2.2` do Golden Set e os fluxos de análise da pergunta, construção da consulta estruturada, execução SQL e definição da confiança.
+
+- Confirmei a causa raiz: quando `query_analysis` identificava `tipo_valor="unitario"`, `detectar_consulta()` retornava `None`. Dessa forma, a execução estruturada era descartada, mesmo havendo no corpus um contrato municipal de ambulância tipo D com valor global registrado de R$ 0,00.
+
+- Ajustei a consulta para recuperar uma listagem dos registros relevantes quando o pedido é de valor unitário indisponível. A alteração preserva os filtros de ano e objeto, remove termos da solicitação de cálculo que não descrevem o objeto contratado e não calcula a mediana a partir do valor global.
+
+- Propaguei a indisponibilidade do cálculo até a geração da resposta e implementei uma resposta determinística para esse cenário: ela reconhece o registro encontrado, apresenta R$ 0,00 somente como valor total/global efetivamente retornado pelo SQL, esclarece que esse valor não é o preço por veículo e informa que a mediana solicitada não pode ser calculada. A confiança final fica baixa por causa da insuficiência de dados para a agregação.
+
+- Ajustei o caminho padrão dos documentos para usar o snapshot local `data/normalized/v6/documents.jsonl` quando o arquivo normalizado sem versão estiver ausente. Preparei a base SQLite local para executar a avaliação; essa etapa resolveu a ausência do corpus apontada na primeira execução.
+
+- Acrescentei testes de regressão para classificação e construção da consulta unitária, recuperação do registro de ambulância tipo D com valor global zero, distinção entre registro existente e preço unitário indisponível, resposta determinística sem chamada ao LLM e confiança baixa. Também mantive verificações para consultas unitárias que não devem passar a agregar valores globais.
+
+- Executei os testes relacionados de consulta estruturada, análise de perguntas, pipeline, geração e rota rápida: **705 testes aprovados**. Foi emitido um aviso não bloqueante durante a limpeza de um arquivo SQLite temporário em uso; os testes foram concluídos com sucesso. `git diff --check` também passou.
+
+- Executei a avaliação direcionada `P2.1`/`P2.2`. A primeira execução não passou porque o caminho configurado para os documentos não existia e o banco local não estava preparado; após corrigir o fallback para o snapshot e construir a base local, repeti a avaliação e obtive **2/2 acertos**. `P2.1` permaneceu aprovado com confiança alta. `P2.2` reconheceu um registro correspondente, distinguiu o valor total de R$ 0,00 do preço por veículo, declarou que a mediana não pode ser calculada e recebeu confiança baixa.
+
+- Mantive `eval/golden_set.jsonl`, os critérios de avaliação e os relatórios históricos sem alterações. Não fiz commit nem push.
+
+**Resultado:**
+
+O caso `P2.2` passou a recuperar o contrato existente e a explicitar que os dados disponíveis não informam o preço por veículo, portanto não sustentam a mediana solicitada. O valor total registrado de R$ 0,00 não é interpretado como preço unitário. O caso `P2.1` continuou aprovado. A avaliação direcionada terminou com **2/2 acertos**.
+
+### Uso de assistentes de IA:
+
+- Utilizei assistentes de IA como apoio à inspeção do código, análise da causa raiz, implementação da correção e elaboração dos testes de regressão.
+
+- Conferi os resultados contra o SQL executado sobre o snapshot local, os testes automatizados e o relatório da avaliação direcionada. Não alterei o Golden Set, os critérios ou os relatórios históricos.
