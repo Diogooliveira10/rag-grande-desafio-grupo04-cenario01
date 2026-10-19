@@ -941,3 +941,37 @@ def test_representar_registro_continua_compactando_campos_desnecessarios():
     assert "linkSistemaOrigem" not in saida
     assert "chaveSemUso" not in saida
     assert "Compra de teste" in saida
+
+
+def _resposta_do_llm(texto: str, nivel: ConfidenceLevel = ConfidenceLevel.ALTA) -> RAGResponse:
+    return RAGResponse(query="q", answer=texto, bases_consultadas=[Natureza.NORMATIVA], confidence_level=nivel)
+
+
+@pytest.mark.parametrize("texto", [
+    "Quando a modalidade não puder ser identificada, a amostra seria insuficiente para responder.",
+    "Não há menção explícita à participação em pregão na Lei nº 14.133/2021.",
+    "Os objetos não mencionam explicitamente manutenção de computadores, limitando a conclusão.",
+    "Não há dados suficientes para concluir a predominância.",
+    "Não é possível determinar a modalidade predominante.",
+])
+def test_resposta_que_admite_falta_de_dados_nao_sai_com_confianca_alta(texto):
+    resposta = gen._limitar_confianca_pela_ressalva(_resposta_do_llm(texto))
+
+    assert resposta.confidence_level == ConfidenceLevel.MEDIA
+    assert gen._AVISO_RESSALVA in resposta.avisos
+
+
+@pytest.mark.parametrize("texto", [
+    "O município de Maricá tem 5 registros, total R$ 66.000,00 [1].",
+    "A Lei 14.133/2021 estabelece normas gerais de licitação e contratos [1].",
+    "Não há registros que atendam aos filtros; essa ausência não comprova que não existam contratações.",
+])
+def test_resposta_sem_ressalva_mantem_a_confianca(texto):
+    assert gen._limitar_confianca_pela_ressalva(_resposta_do_llm(texto)).confidence_level == ConfidenceLevel.ALTA
+
+
+def test_ressalva_nao_sobe_confianca_baixa():
+    resposta = gen._limitar_confianca_pela_ressalva(_resposta_do_llm("Os dados são insuficientes.", ConfidenceLevel.BAIXA))
+
+    assert resposta.confidence_level == ConfidenceLevel.BAIXA and resposta.avisos == []
+
