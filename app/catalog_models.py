@@ -66,6 +66,30 @@ class ProjectBaseSummary(BaseModel):
     status: str | None = None
     documentos: int = 0
     formatos: dict[str, int] = {}
+    documentos_ativos: int | None = None
+    chunks_ativos: int | None = None
+    vetores_ativos: int | None = None
+
+
+class ActiveCorpusSummary(BaseModel):
+    versao: str | None = None
+    snapshot_id: str | None = None
+    construido_em: str | None = None
+    total_documentos: int
+    total_chunks: int
+    total_vetores: int | None = None
+    chunks_sem_vetor: int | None = None
+    bytes_documents: int | None = None
+    schema_sql: str | None = None
+    vetores_por_base: dict[str, int] = {}
+    avisos: list[str] = []
+
+
+class SnapshotAnterior(BaseModel):
+    versao: str
+    coletado_em: str | None = None
+    arquivos: int = 0
+    backup: str | None = None
 
 
 class ProjectSummary(BaseModel):
@@ -74,6 +98,9 @@ class ProjectSummary(BaseModel):
     descricao: str | None = None
     versao_manifesto: str | None = None
     versao_corpus: str
+    versao_inventario: str | None = None
+    corpus_ativo: ActiveCorpusSummary | None = None
+    snapshot_anterior: SnapshotAnterior | None = None
     coletado_em: str | None = None
     inventario_completo: bool
     total_documentos: int

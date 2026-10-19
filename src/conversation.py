@@ -101,6 +101,10 @@ _CAPABILITIES = (
 _PERGUNTA_FACTUAL = re.compile(
     r"(?:qual|quais|quem|quando|onde|quanto|quantos|quantas|em que ano|em que data|que dia)\b")
 _SOBRE_O_SISTEMA = re.compile(r"\b(?:nexo|voce|sistema|projeto|acervo|site|assistente|rag)\b")
+_PROVENIENCIA = re.compile(
+    r"(?:de onde (?:vem|veem|v[êe]m|sao) (?:os )?dados(?: d(?:este|esse|o) (?:sistema|projeto|acervo))?"
+    r"|qual (?:e )?a (?:origem|fonte) dos dados(?: d(?:este|esse|o) (?:sistema|projeto|acervo))?)"
+)
 
 
 def resposta_conversacional(query: str, *, run_id: str = "sem-run-id",
@@ -118,13 +122,24 @@ def resposta_conversacional(query: str, *, run_id: str = "sem-run-id",
         answer = "De nada! Se quiser, faça outra pergunta ou explore os documentos do acervo."
     elif _GOODBYE.fullmatch(normalized):
         answer = "Até mais! Estarei aqui quando quiser consultar o acervo novamente."
+    elif _PROVENIENCIA.fullmatch(normalized):
+        answer = (
+            "O acervo do NEXO RJ reúne registros de contratações do PNCP relacionados ao Rio de Janeiro, "
+            "atas e documentos normativos de fontes públicas. Também há conversas sintéticas: "
+            "cenários fictícios de teste, não comprovação de fatos reais. As consultas usam um snapshot "
+            "local, não uma atualização em tempo real nem um censo de todas as contratações. "
+            "Conversas dos usuários não são fonte documental do PNCP. Nas respostas factuais, "
+            "as fontes indicam os registros usados."
+        )
     elif normalized in _HELP:
         answer = "Sou o NEXO RJ, assistente de consulta ao acervo do projeto. " + _CAPABILITIES
     else:
         route = _rotear(query)
         reason = inferir_motivo_recusa(route.justificativa)
         if reason in {RefusalReason.DADOS_BANCARIOS, RefusalReason.CREDENCIAIS_VAZADAS,
-                      RefusalReason.JUIZO_LEGALIDADE, RefusalReason.FORA_DE_ESCOPO}:
+                      RefusalReason.JUIZO_LEGALIDADE} or (
+            reason == RefusalReason.FORA_DE_ESCOPO and route.confidence >= 0.9
+        ):
             return None
         # Consultas curtas já reconhecidas seguem diretamente para o RAG.
         if CONVERSATION_MODE != "llm" or (len(query) < 160 and route.bases_selecionadas):

@@ -1,4 +1,4 @@
-"""Lifecycle regression tests: real pipeline/SQLite, isolated data, no model calls."""
+"""Lifecycle regression tests: real pipeline/SQLite, isolated data, mocked models."""
 import json
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
@@ -28,6 +28,8 @@ def event(stage):
 
 
 def model_response(messages):
+    if "{{sql}}" in messages[0]["content"]:
+        return json.dumps({'answer': 'Confira o resultado:\n\n{{sql}}'})
     return json.dumps({'answer': 'Há contratos de ambulâncias.', 'is_refusal': False,
                        'confidence_level': 'alta', 'sources_used': ['E1']})
 
@@ -79,9 +81,11 @@ def test_factual_api_trace_follows_evidence_to_prompt_to_final_response(local_pi
     assert sql['status'] == 'ok' and sql['extra']['resultado']
     assert sql['extra']['execucao_sql']['consultas'][-1]['sql']
     generation = event('geracao')
-    assert generation['extra']['metodo'] == 'sql_deterministico'
-    assert generation['extra']['llm_called'] is False
-    assert generation['extra']['prompt'] == []
+    assert generation['extra']['metodo'] == 'sql_template'
+    assert generation['extra']['llm_called'] is True
+    assert '{{sql}}' in generation['extra']['prompt'][0]['content']
+    assert generation['extra']['chunks_no_prompt'] == 0
+    assert '{{sql}}' not in body['answer']
     assert generation['extra']['evidencias_usadas'][0].startswith('sql:')
     assert generation['extra']['resposta']['answer'] == body['answer']
     assert event('persistencia_historico')['output'] == {'saved': True}

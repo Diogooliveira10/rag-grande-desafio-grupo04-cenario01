@@ -62,6 +62,10 @@ GENERATION_MAX_RETRIES = int(_env("GENERATION_MAX_RETRIES", "1"))
 # 2026-10-16, a mesma pergunta caiu de 15 s para 2 s. Só o ECOA recebe; o
 # OpenRouter usa o padrão de cada modelo.
 GENERATION_REASONING_EFFORT = _env("GENERATION_REASONING_EFFORT", "").strip()
+# Resposta que sai do SQL redigida pelo LLM (só a apresentação; números e
+# fontes continuam do SQL). Desligado por padrão: medido em 2026-10-19, as
+# consultas ao vivo iam de ~2,5 s para 7-25 s e passavam a depender do ECOA.
+SQL_APRESENTACAO_LLM = _env("SQL_APRESENTACAO_LLM", "false").lower() in {"1", "true", "sim", "yes"}
 # Rerank (src/rerank.py). "local" (padrão) = cross-encoder local (RERANK_MODEL
 # aceita qualquer CrossEncoder do sentence-transformers); "ecoa" = endpoint
 # /api/rerank do servidor da turma, com o local de reserva. Na ablação de
@@ -102,6 +106,12 @@ CUSTOM_EMBEDDING_MODEL = _env("CUSTOM_EMBEDDING_MODEL", EMBEDDING_MODEL)
 # não são reembedados por causa disso. A chave do cache de query inclui endpoint
 # e modelo, então vetores de um provedor não valem para o outro.
 EMBEDDING_PROVIDER = _env("EMBEDDING_PROVIDER", "ecoa").lower()
+# Consulta somente: não muda o encoder nem regrava vetores do índice.
+QUERY_EMBEDDING_TIMEOUT = max(0.1, float(_env("QUERY_EMBEDDING_TIMEOUT", "8")))
+QUERY_EMBEDDING_COOLDOWN = max(0.0, float(_env("QUERY_EMBEDDING_COOLDOWN", "30")))
+DENSE_RETRIEVAL_ENABLED = _env("DENSE_RETRIEVAL_ENABLED", "true").lower() in {"1", "true", "sim", "yes"}
+# Aviso de conferência na origem; nunca remove/corrige valores do snapshot.
+VALUE_REVIEW_THRESHOLD = max(1.0, float(_env("VALUE_REVIEW_THRESHOLD", "1000000000")))
 
 
 def embedding_endpoint(provider: str | None = None) -> tuple[str, str, str]:

@@ -6,7 +6,7 @@ import pytest
 from src import pipeline, structured_db, structured_query
 from src.schema import Natureza, QueryAnalysisResult, QueryFilters, QueryIntent
 from src.trace import montar_trace
-from tests.test_numerical_validation import contract
+from tests.test_numerical_validation import contract, modelo_template_sql
 from tests.test_structured_db import escrever_documents
 
 
@@ -28,9 +28,16 @@ def local_sql(tmp_path, monkeypatch):
     "Qual o valor total dos contratos assinados em 2024?",
 ])
 def test_pure_analytics_does_not_load_or_call_retrieval(local_sql, monkeypatch, query):
+    from src import generate
+    monkeypatch.setattr(generate.config, "SQL_APRESENTACAO_LLM", True)  # conta a chamada de apresentação
     monkeypatch.setattr(pipeline, "retrieve", lambda *a, **k: pytest.fail("retrieval must be skipped"))
     monkeypatch.setattr(pipeline, "reranker_padrao", lambda: pytest.fail("cross-encoder must not be loaded"))
-    response = pipeline.responder(query, cliente=lambda _: pytest.fail("SQL result must not call a model"), query_id="q_sql_direct")
+    calls = []
+    def model(messages):
+        calls.append(messages)
+        return modelo_template_sql(messages)
+    response = pipeline.responder(query, cliente=model, query_id="q_sql_direct")
+    assert len(calls) == 1  # somente apresentação; números são inseridos pelo backend
     assert not response["is_refusal"]
     trace = montar_trace("q_sql_direct")
     assert trace["resumo"]["consultou_sql"]
@@ -56,7 +63,7 @@ def test_typed_multiple_analytics_skip_retrieval_for_each_intent(local_sql, monk
         ("Qual a média dos contratos assinados em 2025?", "media")]]
     monkeypatch.setattr(pipeline, "analisar_query", lambda *a, **k: QueryAnalysisResult(query_original=a[0], filtros=QueryFilters(), intencoes=intents))
     monkeypatch.setattr(pipeline, "retrieve", lambda *a, **k: pytest.fail("both SQL intents are sufficient"))
-    result = pipeline.responder("Qual o total e a média dos contratos assinados em 2025?", cliente=lambda _: pytest.fail("no model"))
+    result = pipeline.responder("Qual o total e a média dos contratos assinados em 2025?", cliente=modelo_template_sql)
     assert "R$ 300,00" in result["answer"] and "R$ 150,00" in result["answer"]
 
 

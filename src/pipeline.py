@@ -226,12 +226,15 @@ def _responder(
     def buscar(pergunta: str, route: Any, **kwargs: Any):
         nonlocal reranker, reranker_resolvido
         # Um cálculo SQL suficiente não precisa carregar o cross-encoder.
+        # A geração pode chamar a LLM apenas para o template {{sql}}.
         if not reranker_resolvido:
             reranker = reranker_padrao()
             reranker_resolvido = True
         return retrieve(pergunta, route, reranker=reranker, **kwargs)
 
     def pular_busca_sql() -> None:
+        # Pula recuperação, não apresentação: o backend injeta os resultados
+        # no marcador {{sql}} após uma única chamada de template à LLM.
         for stage in (Stage.RETRIEVAL_DENSO, Stage.RETRIEVAL_BM25, Stage.FUSAO_RRF, Stage.RERANK):
             registrar_pulo(run_id=run_id, query_id=query_id, stage=stage, query=query,
                            motivo="calculo_sql_suficiente")
