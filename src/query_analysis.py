@@ -48,7 +48,7 @@ from src.sensitivity import mascarar
 
 ANALYSIS_MODE = os.getenv("QUERY_ANALYSIS_MODE", "regras")
 ANALYSIS_CACHE = config.ROOT_DIR / "data" / "runs" / "query-analysis-cache.jsonl"
-PROMPT_VERSION = "intencoes-v6-explicit-value-kind"
+PROMPT_VERSION = "intencoes-v7-semantic-entity-roles"
 _PROMPT = """Analise necessidades de evidência de uma pergunta sobre contratações públicas do RJ.
 Não responda à pergunta e não escreva SQL. Retorne JSON {\"intencoes\":[...]} com até 4 intenções.
 Cada intenção: pergunta (subpergunta fiel), bases, filtros, operacao, termos_objeto, limite.
@@ -60,9 +60,9 @@ intenções separadas, por exemplo regras de participação e oportunidades aber
 operacao: buscar, ranking, estatistica, agrupamento, evolucao. termos_objeto: palavras do objeto,
 sem órgão, ano ou valor. Não invente sinônimos técnicos nem equivalência entre produtos.
 filtros opcionais: ano, ano_final, valor_min, valor_max, valor_min_exclusivo, valor_max_exclusivo,
-orgao (somente um nome específico, não 'órgãos estaduais'), filtros_analiticos,
+orgao (somente um nome específico, não 'órgãos estaduais'), papel_orgao (orgao,unidade), filtros_analiticos,
 metrica (contagem,soma,media,mediana,minimo,maximo), agrupamentos, referencia_temporal,
-tipo_valor (contratado,estimado,homologado,unitario), minimo_por_grupo.
+tipo_valor (contratado,estimado,homologado), tipo_medida (global,unitaria), granularidade (contrato,item,pca), papel_cnpj (orgao,fornecedor), minimo_por_grupo.
 Campos analíticos: esfera,municipio,uf,modalidade,fornecedor,orgao_nome,unidade_nome,categoria,
 classe,mes_assinatura,mes_publicacao. esfera use estadual,municipal,federal; uf use RJ.
 referencia_temporal: assinatura para contrato firmado/assinado ou valor contratado;
@@ -70,7 +70,7 @@ publicacao para compra publicada; resultado para homologação; pca para plano;
 vigencia para normas; propostas para oportunidades abertas. Ano de número de lei não é filtro.
 Use limites numéricos explícitos: acima de é exclusivo, a partir de é inclusivo.
 Maior total por fornecedor é agrupamento com soma, não ranking de contratos individuais.
-Uma média/mediana por unidade exige tipo_valor unitario. Não use valor global como unitário.
+Uma média/mediana por unidade exige tipo_medida=unitaria e granularidade=item; mantenha tipo_valor=homologado quando pedido. Não use valor global como unitário.
 Exemplo de formato: {"intencoes":[{"pergunta":"Liste contratos", "bases":["estruturada"],
 "filtros":{"ano":2025,"filtros_analiticos":{"uf":"RJ","esfera":"estadual"}},
 "operacao":"buscar","termos_objeto":[],"limite":10}]}.
@@ -82,6 +82,8 @@ Toda operação de total/média/mediana/contagem exige operacao analítica, não
 Frequência/mais usada exige agrupamento e contagem, com recorte comprovável.
 Referências como 'nessas contratações' sem contexto anterior não identificam um conjunto:
 não invente objeto, órgão ou ano para completar a referência.
+Em perguntas sobre PCA, Secretaria citada sem papel explícito é a unidade responsável;
+se a pergunta disser explicitamente órgão, use o órgão. Não invente nomes de órgão/unidade.
 Não filtre esfera ao comparar estadual com municipal. Não transforme contagem mínima de contratos
 em valor monetário. Campos ausentes ficam ausentes. Não acrescente campos fora deste contrato."""
 
@@ -168,6 +170,12 @@ def _analisar_llm(query: str, cliente: Any, span: Any) -> QueryAnalysisResult:
             normalized.append("filtros.termos_objeto")
         filtros["filtros_analiticos"] = analiticos
         explicit = _analisar(row.get("pergunta", query))
+        if explicit.orgao:
+            filtros["orgao"] = explicit.orgao
+            filtros["papel_orgao"] = explicit.papel_orgao
+            normalized.append("orgao_papel_explicito")
+        elif filtros.get("orgao"):
+            raise ValueError("Filtro de órgão/unidade não explícito na pergunta")
         if ("estruturada" in row.get("bases", []) and filtros.get("referencia_temporal") is None
                 and explicit.referencia_temporal is not None):
             filtros["referencia_temporal"] = explicit.referencia_temporal
@@ -182,6 +190,12 @@ def _analisar_llm(query: str, cliente: Any, span: Any) -> QueryAnalysisResult:
             valor = intent.filtros.filtros_analiticos.get(campo)
             if valor and _normalize(str(valor)) not in original:
                 raise ValueError(f"Filtro {campo} não explícito na pergunta")
+        cnpj_modelo = intent.filtros.filtros_analiticos.get("cnpj")
+        cnpj_explicito = explicit.filtros_analiticos.get("cnpj")
+        if cnpj_modelo and cnpj_modelo != cnpj_explicito:
+            raise ValueError("Filtro CNPJ não explícito na pergunta")
+        if intent.filtros.papel_cnpj and intent.filtros.papel_cnpj != explicit.papel_cnpj:
+            raise ValueError("Papel do CNPJ não explícito na pergunta")
         if intent.filtros.ano is not None and str(intent.filtros.ano) not in query:
             raise ValueError("Ano não explícito na pergunta")
         intents.append(intent)
@@ -198,9 +212,10 @@ def _schema_analise() -> dict:
     intent = QueryIntent.model_json_schema()
     defs = intent.pop("$defs", {})
     groups = ["esfera", "municipio", "uf", "modalidade", "fornecedor", "orgao_nome", "unidade_nome", "categoria", "classe", "mes_assinatura", "mes_publicacao"]
+    filter_fields = [*groups, "cnpj"]
     filters = defs["QueryFilters"]["properties"]
     filters["filtros_analiticos"] = {"type": "object", "additionalProperties": False,
-        "properties": {field: {"type": "string"} for field in groups}}
+        "properties": {field: {"type": "string"} for field in filter_fields}}
     filters["metrica"] = {"anyOf": [{"enum": ["contagem", "soma", "media", "mediana", "minimo", "maximo"]}, {"type": "null"}]}
     filters["referencia_temporal"] = {"anyOf": [{"enum": ["assinatura", "publicacao", "resultado", "pca", "vigencia", "propostas"]}, {"type": "null"}]}
     filters["agrupamentos"] = {"type": "array", "items": {"enum": groups}}
@@ -1195,7 +1210,7 @@ def _sem_marcador_de_cidade(texto: str, span: Span, valor: str) -> bool:
     """True quando "Rio de Janeiro" é citado sem sinal de que é a cidade."""
     if _normalize(valor) not in _NOME_DUPLICADO_ESTADO_CIDADE:
         return False
-    janela = texto[max(0, span[0] - 12):span[1] + 4]
+    janela = texto[max(0, span[0] - 40):span[1] + 4]
     return not any(_normalize(p) in _MARCADOR_DE_CIDADE for p in janela.split())
 
 
@@ -1605,6 +1620,11 @@ def _extrair_orgao(query_original: str) -> tuple[Optional[str], Optional[str]]:
         gatilho = _normalize(bruto.strip(_PONTUACAO))
         if gatilho not in _GATILHOS_ORGAO:
             continue
+        anterior = _normalize(tokens[indice - 1].strip(_PONTUACAO)) if indice else ""
+        if gatilho in {"municipio", "cidade"} and anterior in {"no", "na", "em", "nos", "nas"}:
+            # "no município do Rio" é dimensão territorial; não o órgão
+            # MUNICIPIO DE RIO DE JANEIRO.
+            continue
         depois = [_normalize(t.strip(_PONTUACAO)) for t in tokens[indice + 1: indice + 3]]
         if gatilho in _GATILHO_EXIGE and (not depois or depois[0] not in _GATILHO_EXIGE[gatilho]):
             continue
@@ -1715,11 +1735,15 @@ def _analisar_com_trechos(query: str) -> tuple[QueryFilters, str, list[Span]]:
     # Métrica, agrupamento e referência saem do texto sem as expressões que já
     # viraram filtro: em "no máximo 50 mil" o "máximo" é filtro, não métrica.
     resto = _sem_trechos(texto, trechos)
-    metrica = next((valor for padrao, valor in (
-        (r"\bmediana\b", "mediana"), (r"\b(?:media|medio)\b", "media"),
-        (r"\b(?:soma|total)\b", "soma"), (r"\bvalor\b", "soma"), (r"\b(?:quantos|quantas|quantidade)\b", "contagem"),
-        (r"\b(?:maior|maiores|maximo)\b", "maximo"), (r"\b(?:menor|menores|minimo)\b", "minimo"),
-    ) if re.search(padrao, resto)), None)
+    media_unitaria = bool(re.search(r"\b(?:media|medio)\b.*\b(?:por|unidade|item)\b", resto))
+    if media_unitaria:
+        metrica = "media_unitaria"
+    else:
+        metrica = next((valor for padrao, valor in (
+            (r"\bmediana\b", "mediana"), (r"\b(?:media|medio)\b", "media"),
+            (r"\b(?:soma|total)\b", "soma"), (r"\bvalor\b", "soma"), (r"\b(?:quantos|quantas|quantidade)\b", "contagem"),
+            (r"\b(?:maior|maiores|maximo)\b", "maximo"), (r"\b(?:menor|menores|minimo)\b", "minimo"),
+        ) if re.search(padrao, resto)), None)
     agrupamentos = [campo for termo, campo in (
         ("modalidade", "modalidade"), ("municipio", "municipio"), ("orgao", "orgao_nome"),
         ("unidade", "unidade_nome"), ("categoria", "categoria"), ("classe", "classe"),
@@ -1777,6 +1801,16 @@ def _analisar_com_trechos(query: str) -> tuple[QueryFilters, str, list[Span]]:
         # "contratos da SEEDUC": o órgão vira o nome por extenso, e a sigla sai
         # do texto para não ser lida como objeto do contrato.
         trechos = trechos + [m.span() for m in re.finditer(rf"\b{re.escape(sigla)}\b", texto)]
+    medida_unitaria = bool(re.search(
+        r"\b(?:preco|valor)\s+unitari[oa]s?\b|\b(?:media|mediana|valor|preco)\b.*\bpor\s+(?:veiculo|ambulancia|quilo|quilograma|kg|unidade)s?\b",
+        texto,
+    ))
+    etapa_valor = next((tipo for padrao, tipo in (
+        (r"\bvalor(?:es)?\s+contratad[oa]s?\b", "contratado"),
+        (r"\bvalor(?:es)?\s+estimad[oa]s?\b", "estimado"),
+        (r"\b(?:valor|preco)(?:\s+unitari[oa]s?)?\s+homologad[oa]s?\b", "homologado"),
+        (r"\bvalor(?:es)?\s+homologad[oa]s?\b", "homologado"),
+    ) if re.search(padrao, texto)), None)
     filtros = QueryFilters(
         ano=periodo.ano,
         ano_final=periodo.ano_final,
@@ -1789,17 +1823,41 @@ def _analisar_com_trechos(query: str) -> tuple[QueryFilters, str, list[Span]]:
         agrupamentos=agrupamentos,
         referencia_temporal=referencia,
         filtros_analiticos=analiticos,
+        papel_orgao=_papel_orgao(query, orgao),
         valor_min_exclusivo=valores.valor_min_exclusivo,
         valor_max_exclusivo=valores.valor_max_exclusivo,
-        tipo_valor=("unitario" if re.search(
-            r"\b(?:valor|preco|media|medio|mediana)\b.*\bpor\s+(?:veiculo|ambulancia|quilo|quilograma|kg|unidade)s?\b", texto
-        ) else next((tipo for padrao, tipo in (
-            (r"\bvalor(?:es)?\s+contratad[oa]s?\b", "contratado"),
-            (r"\bvalor(?:es)?\s+estimad[oa]s?\b", "estimado"),
-            (r"\bvalor(?:es)?\s+homologad[oa]s?\b", "homologado"),
-        ) if re.search(padrao, texto)), None)),
+        tipo_valor=etapa_valor or ("unitario" if medida_unitaria else None),
+        tipo_medida="unitaria" if medida_unitaria else ("global" if etapa_valor else None),
+        granularidade="item" if medida_unitaria else None,
+        papel_cnpj=(_papel_cnpj(texto, expr_cnpj[0]) if len(cnpjs) == 1 else None),
     )
     return filtros, texto, trechos
+
+
+def _papel_orgao(query: str, orgao: Optional[str]) -> Optional[str]:
+    """Determina o papel da entidade em PCA quando a pergunta dá evidência."""
+    if not orgao:
+        return None
+    texto = _normalize(query)
+    if re.search(r"\borgaos?\b", texto):
+        return "orgao"
+    if re.search(r"\b(?:unidade(?:s)?(?:\s+responsave(?:l|is))?)\b", texto):
+        return "unidade"
+    pca = bool(re.search(r"\b(?:pca|plano\s+(?:anual\s+)?de\s+contratacoes)\b", texto))
+    if pca and re.search(r"\bsecretarias?\b", texto):
+        return "unidade"
+    return None
+
+
+def _papel_cnpj(texto: str, trecho: Span) -> Optional[str]:
+    """Retorna o papel só quando a pergunta o associa expressamente ao CNPJ."""
+    inicio, fim = trecho
+    contexto = texto[max(0, inicio - 60):min(len(texto), fim + 40)]
+    fornecedor = bool(re.search(r"\b(?:fornecedor(?:a)?|empresa|contratada)\b", contexto))
+    orgao = bool(re.search(r"\b(?:orgao|contratante|unidade responsavel)\b", contexto))
+    if fornecedor == orgao:  # nenhum papel ou menção contraditória
+        return None
+    return "fornecedor" if fornecedor else "orgao"
 
 
 def _sem_trechos(texto: str, trechos: Sequence[Span]) -> str:
@@ -1811,6 +1869,59 @@ def _sem_trechos(texto: str, trechos: Sequence[Span]) -> str:
 
 def _analisar(query: str) -> QueryFilters:
     return _analisar_com_trechos(query)[0]
+
+
+def resolver_referencia_temporal(query: str, filtros: QueryFilters) -> QueryFilters:
+    """Resolve uma única vez o default temporal de domínio antes dos executores.
+
+    Referências explícitas sempre prevalecem. "Vigente" sem referência
+    contratual explícita permanece separado; PCA usa seu ano próprio.
+    """
+    if not any(value is not None for value in (filtros.ano, filtros.ano_desde, filtros.ano_ate)):
+        return filtros
+    texto = _normalize(query)
+    explicita = _analisar(query).referencia_temporal
+    if explicita is not None:
+        referencia = explicita
+    elif re.search(r"\b(?:pca|plano\s+(?:anual\s+)?de\s+contratacoes)\b", texto):
+        referencia = "pca"
+    elif re.search(r"\b(?:vigentes?|vigencias?|em vigor)\b", texto):
+        referencia = None  # Vigência de contratos/atas, distinta da assinatura.
+    elif re.search(r"\b(?:contratos?|contratados?|assinados?)\b", texto):
+        referencia = "assinatura"
+    elif re.search(r"\b(?:contratacoes?|compras?|publicacoes?)\b", texto):
+        referencia = "publicacao"
+    else:
+        # Não atribuir silenciosamente um ano sem contexto de domínio nem
+        # conservar uma referência inventada pelo analisador LLM.
+        referencia = None
+    return filtros.model_copy(update={"referencia_temporal": referencia})
+
+
+def _resolver_referencias_analise(resultado: QueryAnalysisResult) -> QueryAnalysisResult:
+    """Materializa a referência resolvida no filtro legado e em cada intenção."""
+    intencoes = [item.model_copy(update={
+        "filtros": _resolver_papeis_entidade(
+            item.pergunta, resolver_referencia_temporal(item.pergunta, item.filtros)),
+    }) for item in resultado.intencoes]
+    filtros = _resolver_papeis_entidade(
+        resultado.query_original,
+        resolver_referencia_temporal(resultado.query_original, resultado.filtros))
+    if intencoes:
+        filtros = intencoes[0].filtros
+    return resultado.model_copy(update={"filtros": filtros, "intencoes": intencoes})
+
+
+def _resolver_papeis_entidade(query: str, filtros: QueryFilters) -> QueryFilters:
+    """Alinha papéis de órgão/unidade e CNPJ à menção explícita da pergunta."""
+    atualizados: dict[str, Any] = {}
+    if filtros.filtros_analiticos.get("cnpj"):
+        atualizados["papel_cnpj"] = _analisar(query).papel_cnpj
+    if filtros.orgao:
+        atualizados["papel_orgao"] = _analisar(query).papel_orgao
+    if not atualizados:
+        return filtros
+    return filtros.model_copy(update=atualizados)
 
 
 def texto_sem_filtros(query: str) -> str:
@@ -1864,7 +1975,7 @@ def analisar_query(
     ) as span:
         if (modo or ANALYSIS_MODE) == "llm" and isinstance(query, str) and query.strip():
             try:
-                result = _analisar_llm(query, cliente, span)
+                result = _resolver_referencias_analise(_analisar_llm(query, cliente, span))
                 span.set_result(_para_o_log(result.model_dump(mode="json")))
                 return result
             except Exception as error:
@@ -1873,11 +1984,13 @@ def analisar_query(
                 span.extra["error_type"] = type(error).__name__
                 span.extra["fallback"] = _para_o_log(f"{type(error).__name__}: {error}")
                 if cliente is None and isinstance(error, (ValueError, KeyError)):
-                    result = QueryAnalysisResult(query_original=query, filtros=_analisar(query))
+                    result = _resolver_referencias_analise(
+                        QueryAnalysisResult(query_original=query, filtros=_analisar(query)))
                     _gravar_cache(query, result, span.extra.get("llm", {}), span.extra["fallback"])
-        filtros = _analisar(query)
-        span.set_result(_para_o_log(filtros.model_dump(exclude_none=True)))
-        return QueryAnalysisResult(query_original=query, filtros=filtros)
+        result = _resolver_referencias_analise(
+            QueryAnalysisResult(query_original=query, filtros=_analisar(query)))
+        span.set_result(_para_o_log(result.filtros.model_dump(exclude_none=True)))
+        return result
 
 
 def filtros_para_retrieve(filtros: QueryFilters) -> dict[str, Any]:
@@ -1891,7 +2004,8 @@ def filtros_para_retrieve(filtros: QueryFilters) -> dict[str, Any]:
     """
     resultado: dict[str, Any] = {}
     if filtros.orgao:
-        resultado["orgao"] = {"operator": "contains", "value": filtros.orgao}
+        chave_orgao = "unidade_nome" if filtros.papel_orgao == "unidade" else "orgao"
+        resultado[chave_orgao] = {"operator": "contains", "value": filtros.orgao}
     if filtros.valor_min is not None and filtros.valor_max is not None:
         resultado["valor"] = [
             {"operator": ">" if filtros.valor_min_exclusivo else ">=", "value": filtros.valor_min},
@@ -1901,9 +2015,9 @@ def filtros_para_retrieve(filtros: QueryFilters) -> dict[str, Any]:
         resultado["valor"] = {"operator": ">" if filtros.valor_min_exclusivo else ">=", "value": filtros.valor_min}
     elif filtros.valor_max is not None:
         resultado["valor"] = {"operator": "<" if filtros.valor_max_exclusivo else "<=", "value": filtros.valor_max}
-    # O ano filtra a data que a pergunta cita (assinatura, resultado,
-    # publicação, PCA); sem referência, a vigência. None = sem limite daquele
-    # lado ("a partir de 2024", "até 2025").
+    # O ano filtra a referência temporal já resolvida pelo plano semântico.
+    # ``None`` aqui mantém compatibilidade com QueryFilters construído à mão;
+    # perguntas analisadas resolvem contrato/compra/PCA antes desta tradução.
     primeiro_ano, ultimo_ano = filtros.intervalo_de_anos()
     if filtros.referencia_temporal == "pca":
         anos = []
@@ -1936,22 +2050,25 @@ def filtros_para_retrieve(filtros: QueryFilters) -> dict[str, Any]:
 
         if filtros.filtros_analiticos.get(campo) is not None:
             resultado[campo] = {"operator": "==", "value": filtros.filtros_analiticos[campo]}
+    if filtros.filtros_analiticos.get("cnpj"):
+        chave_cnpj = f"{filtros.papel_cnpj}_cnpj" if filtros.papel_cnpj else "cnpj"
+        resultado[chave_cnpj] = {"operator": "contains", "value": filtros.filtros_analiticos["cnpj"]}
     if filtros.filtros_analiticos.get("modalidade"):
         # No PNCP a modalidade vem como "Pregão - Eletrônico": contém cada palavra.
         resultado["modalidade"] = [
             {"operator": "contains", "value": palavra}
             for palavra in filtros.filtros_analiticos["modalidade"].split()
         ]
-    # Filtros vindos da pergunta são opcionais: chunk sem o campo continua na
-    # busca (ex.: indicador do PCA sem data_vigencia); só sai quem tem o campo
-    # com valor fora do filtro.
-    return {chave: _marcar_opcional(condicao) for chave, condicao in resultado.items()}
+    # O recorte explícito é obrigatório na natureza à qual se aplica. A busca
+    # distingue inaplicabilidade (ex.: valor contratual em norma) de falta do
+    # campo em um registro estruturado; esta última não autoriza relaxamento.
+    return {chave: _marcar_obrigatorio(condicao) for chave, condicao in resultado.items()}
 
 
-def _marcar_opcional(condicao: Any) -> Any:
+def _marcar_obrigatorio(condicao: Any) -> Any:
     if isinstance(condicao, list):
-        return [{**item, "optional": True} for item in condicao]
-    return {**condicao, "optional": True}
+        return [{**item, "optional": False} for item in condicao]
+    return {**condicao, "optional": False}
 
 
 __all__ = ["analisar_query", "filtros_para_retrieve", "texto_sem_filtros"]
