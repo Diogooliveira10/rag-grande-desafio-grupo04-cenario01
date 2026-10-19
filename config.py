@@ -102,6 +102,12 @@ CUSTOM_EMBEDDING_MODEL = _env("CUSTOM_EMBEDDING_MODEL", EMBEDDING_MODEL)
 # não são reembedados por causa disso. A chave do cache de query inclui endpoint
 # e modelo, então vetores de um provedor não valem para o outro.
 EMBEDDING_PROVIDER = _env("EMBEDDING_PROVIDER", "ecoa").lower()
+# Consulta somente: não muda o encoder nem regrava vetores do índice.
+QUERY_EMBEDDING_TIMEOUT = max(0.1, float(_env("QUERY_EMBEDDING_TIMEOUT", "8")))
+QUERY_EMBEDDING_COOLDOWN = max(0.0, float(_env("QUERY_EMBEDDING_COOLDOWN", "30")))
+DENSE_RETRIEVAL_ENABLED = _env("DENSE_RETRIEVAL_ENABLED", "true").lower() in {"1", "true", "sim", "yes"}
+# Aviso de conferência na origem; nunca remove/corrige valores do snapshot.
+VALUE_REVIEW_THRESHOLD = max(1.0, float(_env("VALUE_REVIEW_THRESHOLD", "1000000000")))
 
 
 def embedding_endpoint(provider: str | None = None) -> tuple[str, str, str]:

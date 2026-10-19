@@ -4,6 +4,7 @@ import heapq
 import json
 import math
 import re
+import time
 import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field, replace
@@ -37,6 +38,11 @@ EmbedFn = Callable[[list[str]], list[list[float]]]
 RerankFn = Callable[[str, list["RetrievalResult"]], Sequence[Any]]
 QUERY_INSTRUCTION = "Given a public procurement question, retrieve relevant passages that answer the query"
 QUERY_CACHE_PATH = config.ROOT_DIR / "data" / "embeddings" / "query_cache.jsonl"
+_EMBEDDING_FAILURES: dict[tuple[str, str], float] = {}
+
+
+class EmbeddingUnavailable(ConnectionError):
+    """Endpoint em cooldown ou busca densa desabilitada explicitamente."""
 
 
 def embedding_query_text(query: str) -> str:
@@ -724,6 +730,105 @@ def _promover_identificadores_exatos(
     return ordenados[:limite]
 
 
+_NORMA_RE = re.compile(
+    r"\b(lei(?: complementar)?|decreto|portaria|resolucao)\s*"
+    r"(?:(?:federal|estadual|municipal)\s+)?(?:n(?:o|umero)?[.°º]?\s*)?(\d[\d.]*)"
+)
+
+
+def _normas_mencionadas(texto: str) -> set[tuple[str, str]]:
+    return {(m.group(1), m.group(2).replace(".", ""))
+            for m in _NORMA_RE.finditer(_sem_caixa_e_acento(texto))}
+
+
+def _norma_do_documento(metadata: Mapping[str, Any]) -> set[tuple[str, str]]:
+    # Só identidade declarada, nunca uma menção incidental no corpo de um
+    # decreto, edital ou catálogo de links para legislação.
+    extras = metadata.get("extras") or {}
+    return _normas_mencionadas(str(extras.get("numero_norma") or extras.get("titulo_documento") or ""))
+
+
+_VISAO_GERAL_NORMA = "âmbito aplicação princípios objetivos normas gerais"
+_ARTIGO_INICIAL = re.compile(r"^\s*art\.?\s*(\d+)(?!\d|\.\d)", re.I)
+
+
+def _ordenar_candidatos_norma(query: str, candidatos: Sequence[RetrievalResult]) -> list[RetrievalResult]:
+    topico = _consulta_topica_norma(query)
+    visao_geral = topico == _VISAO_GERAL_NORMA
+    pede_fases = bool(re.search(r"\b(?:fases|etapas)\b", topico))
+    artigo_pedido = re.search(r"\bart(?:igo)?\.?\s*(\d+)\b", _sem_caixa_e_acento(query))
+
+    def prioridade(item: RetrievalResult):
+        texto = _sem_caixa_e_acento(item.content)
+        artigo = _ARTIGO_INICIAL.match(texto)
+        numero = int(artigo.group(1)) if artigo else None
+        if artigo_pedido:
+            return (numero != int(artigo_pedido.group(1)),)
+        if visao_geral:
+            # Visão geral: disposições iniciais antes de alterações de outras
+            # leis no fim do texto; a pontuação original desempata.
+            return (numero is None, numero if numero is not None else 100000)
+        definicao_fases = pede_fases and bool(re.search(r"\bseguintes (?:fases|etapas)\b", texto))
+        return (not definicao_fases, not bool(re.search(r"\bart\.?\s*\d|§", texto)))
+
+    ordenados = sorted(candidatos, key=prioridade)
+    if visao_geral:
+        diversos, repetidos, vistos = [], [], set()
+        for item in ordenados:
+            artigo = _ARTIGO_INICIAL.match(_sem_caixa_e_acento(item.content))
+            chave = (tuple(sorted(_norma_do_documento(item.metadata))), artigo.group(1)) if artigo else None
+            if chave is not None and chave in vistos:
+                repetidos.append(item)
+            else:
+                diversos.append(item)
+                vistos.add(chave)
+        ordenados = diversos + repetidos
+    return ordenados
+
+
+def _consulta_topica_norma(query: str) -> str:
+    texto = _sem_caixa_e_acento(query)
+    texto = _NORMA_RE.sub(" ", texto)
+    texto = re.sub(r"/\s*\d{4}\b", " ", texto)
+    vazias = {"o", "a", "os", "as", "que", "qual", "quais", "estabelece", "diz", "sobre", "segundo",
+              "conforme", "de", "do", "da", "dos", "das", "em", "no", "na", "e", "cite", "fontes",
+              "corpus", "acervo", "resuma", "resumo", "explique", "ano"}
+    termos = [t for t in _tokens(texto) if t not in vazias and not re.fullmatch(r"\d{4}", t)]
+    # A identidade já delimitou os documentos: repetir número/ano no BM25
+    # favorecia capas, cabeçalhos de impressão e catálogos, não os artigos.
+    return " ".join(termos) or _VISAO_GERAL_NORMA
+
+
+def _priorizar_norma_solicitada(
+    query: str, resultados: Sequence[RetrievalResult],
+    candidatos_norma: Sequence[RetrievalResult], limite: int,
+) -> list[RetrievalResult]:
+    pedidas = _normas_mencionadas(query)
+    if not pedidas or not candidatos_norma:
+        return list(resultados[:limite])
+    por_id = {r.chunk_id: r for r in candidatos_norma}
+    # Mantém o score do reranker quando ele recebeu o candidato.
+    por_id.update({r.chunk_id: r for r in resultados if r.chunk_id in por_id})
+    primarios = [por_id[r.chunk_id] for r in resultados if r.chunk_id in por_id]
+    vistos = {r.chunk_id for r in primarios}
+    primarios += [r for r in candidatos_norma if r.chunk_id not in vistos]
+    # Uma fonte de cada norma explicitamente citada antes de repetir a mesma.
+    primeiros, demais, cobertas = [], [], set()
+    for item in primarios:
+        identidades = _norma_do_documento(item.metadata) & pedidas
+        if identidades - cobertas:
+            primeiros.append(item)
+            cobertas.update(identidades)
+        else:
+            demais.append(item)
+    primarios = _ordenar_candidatos_norma(query, primeiros + demais)
+    reserva = min(len(primarios), max(1, limite - 1), limite)
+    escolhidos = primarios[:reserva]
+    ids = {r.chunk_id for r in escolhidos}
+    escolhidos += [r for r in resultados if r.chunk_id not in ids]
+    return escolhidos[:limite]
+
+
 def _registrar_evidencias(
     span: Any, resultados: Sequence[RetrievalResult], *,
     antes_do_top_k: Sequence[RetrievalResult] | None = None,
@@ -798,17 +903,35 @@ def _embed_fn_com_uso(uso: list[TokenUsage], estatisticas: dict[str, int] | None
                     if estatisticas is not None:
                         estatisticas["cache_hits"] += 1
                     return vectors
+        # O cache continua disponível durante a indisponibilidade. Nunca usar
+        # outro encoder automaticamente: mesma dimensão não garante compatibilidade.
+        endpoint_key = (endpoint, modelo)
+        if time.monotonic() < _EMBEDDING_FAILURES.get(endpoint_key, 0):
+            raise EmbeddingUnavailable("Embedding em cooldown após falha de disponibilidade")
         # Cliente criado só na chamada: sem candidatos, dense_retrieve nem embeda.
         from openai import OpenAI
+        import httpx
         from src.obs import aguardar_modelo
 
         aguardar_modelo()
-        client = OpenAI(base_url=endpoint, api_key=chave_api, timeout=60.0, max_retries=0)
+        client = OpenAI(base_url=endpoint, api_key=chave_api,
+                        timeout=httpx.Timeout(config.QUERY_EMBEDDING_TIMEOUT,
+                                              connect=min(3.0, config.QUERY_EMBEDDING_TIMEOUT)),
+                        max_retries=0)
         from src.model_observation import observar_chamada
         diagnostics: dict = {}
+        if estatisticas is not None:
+            estatisticas["calls"] += 1
         try:
             response = observar_chamada(lambda: client.embeddings.create(model=modelo, input=encoded),
                 provider=config.EMBEDDING_PROVIDER, model=modelo, sdk_max_retries=0, diagnosticos=diagnostics)
+        except Exception as error:
+            from llm_ecoa import erro_de_disponibilidade
+            if erro_de_disponibilidade(error):
+                _EMBEDDING_FAILURES[endpoint_key] = time.monotonic() + config.QUERY_EMBEDDING_COOLDOWN
+            raise
+        else:
+            _EMBEDDING_FAILURES.pop(endpoint_key, None)
         finally:
             if observacoes is not None:
                 observacoes.extend(diagnostics.get("chamadas_modelo", []))
@@ -821,8 +944,6 @@ def _embed_fn_com_uso(uso: list[TokenUsage], estatisticas: dict[str, int] | None
         QUERY_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
         with QUERY_CACHE_PATH.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps({"key": chave, "vectors": vectors}, ensure_ascii=False) + "\n")
-        if estatisticas is not None:
-            estatisticas["calls"] += 1
         return vectors
 
     return embed
@@ -1277,6 +1398,8 @@ def retrieve(
     recuperacao_degradada = False
     with _span(Stage.RETRIEVAL_DENSO) as span:
         try:
+            if not config.DENSE_RETRIEVAL_ENABLED:
+                raise EmbeddingUnavailable("Busca densa desabilitada por configuração; usando BM25")
             dense = dense_retrieve(
                 query,
                 index_dir=index_dir,
@@ -1298,7 +1421,9 @@ def retrieve(
             recuperacao_degradada = True
             span.status = "degradado"
             span.extra.update({"degraded": True, "fallback": "bm25", "error_type": type(error).__name__,
-                               "status_code": getattr(error, "status_code", None)})
+                               "status_code": getattr(error, "status_code", None),
+                               "embedding_cooldown": isinstance(error, EmbeddingUnavailable),
+                               "dense_enabled": config.DENSE_RETRIEVAL_ENABLED})
         span.set_result(_resumo(dense))
         _registrar_evidencias(span, dense)
         span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(query, dense)
@@ -1330,6 +1455,32 @@ def retrieve(
             records=sparse_records,
             escopos=escopos,
         )
+        candidatos_norma: list[RetrievalResult] = []
+        pedidas = _normas_mencionadas(query)
+        if pedidas:
+            elegiveis = sparse_records if sparse_records is not None else _records_for(
+                index_dir, bases, route_filters, _read_jsonl(documents_file), escopos,
+            )
+            primarios = [r for r in elegiveis
+                         if _record_natureza(r, _metadata_of(r)) == Natureza.NORMATIVA.value
+                         and _norma_do_documento(_metadata_of(r)) & pedidas]
+            if primarios:
+                candidatos_norma = bm25_retrieve(
+                    _consulta_topica_norma(query), records=primarios, top_k=fetch_k,
+                    index_dir=index_dir, documents_file=documents_file,
+                )
+                # Se há conteúdo articulado, capas/cabeçalhos ficam depois.
+                candidatos_norma = _ordenar_candidatos_norma(query, candidatos_norma)
+                vistos_textos: set[str] = set()
+                distintos = []
+                for item in candidatos_norma:
+                    assinatura = " ".join(item.content.split()).casefold()
+                    if assinatura not in vistos_textos:
+                        distintos.append(item)
+                        vistos_textos.add(assinatura)
+                candidatos_norma = distintos
+                sparse = _priorizar_norma_solicitada(query, sparse, candidatos_norma, fetch_k)
+                span.extra["normas_primarias_priorizadas"] = [r.chunk_id for r in candidatos_norma[:top_k]]
         span.set_result(_resumo(sparse))
         _registrar_evidencias(span, sparse)
         span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(query, sparse)
@@ -1351,6 +1502,9 @@ def retrieve(
         rerank_k = max(top_k, rerank_k if rerank_k is not None else config.RERANK_CANDIDATES)
     with _span(Stage.FUSAO_RRF, rrf_k=DEFAULT_RRF_K) as span:
         fused = reciprocal_rank_fusion([dense, sparse], top_k=rerank_k if reranker is not None else top_k)
+        fused = _priorizar_norma_solicitada(
+            query, fused, candidatos_norma, rerank_k if reranker is not None else top_k,
+        )
         fused = _promover_identificadores_exatos(
             fused,
             identificadores_exatos,
@@ -1403,6 +1557,7 @@ def retrieve(
                 if not reranked:
                     raise ValueError("Reranker vazio")
                 antes_do_top_k = reranked
+                reranked = _priorizar_norma_solicitada(query, reranked, candidatos_norma, top_k)
                 reranked = _promover_identificadores_exatos(reranked, identificadores_exatos, top_k)
                 span.set_result(_resumo(reranked))
                 _registrar_evidencias(span, reranked, antes_do_top_k=antes_do_top_k)

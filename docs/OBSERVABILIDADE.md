@@ -43,7 +43,7 @@ requisicao_fim
 O caminho varia: cortesia não consulta o acervo, guardrails podem recusar,
 intenções podem repetir a busca/SQL e filtros podem exigir uma segunda busca.
 Perguntas exclusivamente analíticas tentam SQL primeiro. Se o resultado é
-suficiente para a resposta determinística, busca densa, BM25, RRF e rerank ficam
+suficiente para a resposta, busca densa, BM25, RRF e rerank ficam
 com `status=pulado`, `attempted=false` e `motivo=calculo_sql_suficiente`;
 `consultou_vetorial=false`. Nem embeddings nem cross-encoder são carregados
 nesse caminho. SQL ausente/insuficiente mantém a busca como fallback; perguntas
@@ -75,15 +75,29 @@ Pergunta -> análise dos filtros -> roteamento -> tentativa SQL
                                           /                 \
                                         sim                 não
                                          |                   |
-                              resposta determinística   recuperação normal
-                              com fontes SQL            e geração/guardrails
+                              LLM: template {{sql}}     recuperação normal
+                                         |              e geração/guardrails
+                              backend insere resultado
+                              com fontes SQL
 ```
 
 `src/structured_query.py` identifica operações analíticas suportadas e executa
 SQL fixo e parametrizado; o LLM não escreve a consulta. O resultado precisa
 atender ao critério de suficiência compartilhado com `src/generate.py`.
-Nesse caso, `src/pipeline.py` pula a recuperação e a geração apenas formata os
-resultados SQL com citações, sem pedir ao LLM para reescrever os números.
+Nesse caso, `src/pipeline.py` pula a recuperação. A geração chama a LLM apenas
+para produzir uma apresentação neutra com `{{sql}}`, sem enviar os resultados.
+O backend substitui o marcador literalmente pelos resultados completos com
+citações. `extra.metodo=sql_template` identifica esse caminho;
+`sql_injetado_chunk_ids` e `evidencias_usadas` identificam as fontes inseridas,
+com `chunks_no_prompt=0`. Template inválido ou erro do modelo mantém o resultado
+SQL determinístico, com `metodo=sql_template_fallback`, `fallback_motivo` e
+`status=degradado`. Não há segunda chamada ao modelo para tratar o resultado.
+
+As tabelas são Markdown GFM produzido pelo código. O log preserva o Markdown
+completo e mascarado em `consulta_sql.extra.resultado_markdown` e no bloco final
+`geracao.extra.resultado_sql_markdown`, independentemente dos limites do resumo
+de linhas/`answer`. O trace expõe os mesmos campos em `detalhes`. Metacaracteres
+nos dados são escapados; o Markdown não é gerado nem recalculado pelo modelo.
 
 No exemplo, “contratos de 2025” considera assinatura; “publicados em 2025”
 considera publicação. O resultado continua limitado à amostra presente no corpus,
@@ -148,7 +162,12 @@ não é estimativa de custo nem contabilização de tentativas internas do SDK.
 `modelo` identifica o modelo efetivo retornado pelo provedor quando disponível,
 inclusive em `interacao` e `reformulacao`. Sem chamada de modelo, `null` é normal;
 uma leitura de cache pode identificar o modelo associado ao resultado em cache.
-`llm_called=false` na geração SQL significa que o texto não passou pelo LLM.
+No caminho `sql_template`, `llm_called=true` indica uma chamada de apresentação:
+a LLM não recebeu as evidências SQL. A ausência de prompt de evidências não é
+ausência de fontes: elas são inseridas pelo backend. No fallback, o campo indica
+se houve tentativa de chamar o cliente; falha na inicialização pode deixá-lo
+`false`. Logs históricos com `sql_deterministico` e `llm_called=false` continuam
+válidos para a implementação anterior.
 
 Os contadores `tokens.prompt`, `completion` e `total` continuam inteiros,
 compatíveis com os leitores existentes. Agora `extra.uso_tokens.status` distingue:
@@ -268,7 +287,8 @@ use `LOG_EVIDENCE_DETAIL=resumo` e reinicie novamente. O campo aditivo
 - todas as linhas do resultado SQL, além das primeiras 20 do resumo;
 - evidências disponíveis à geração, texto original mascarado e texto selecionado,
   seleção/exclusão por orçamento e prompt completo mascarado;
-- na geração SQL, evidências usadas na resposta e ausência de prompt de LLM.
+- na geração SQL, evidências inseridas na resposta pelo backend e o prompt de
+  apresentação com `{{sql}}`, que não contém essas evidências.
 
 Isso não aumenta o contexto enviado ao modelo nem muda respostas. As mesmas
 regras de mascaramento/sensibilidade continuam válidas; conteúdo restrito não

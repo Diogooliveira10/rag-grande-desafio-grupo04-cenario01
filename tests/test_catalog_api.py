@@ -59,6 +59,8 @@ def local_catalog(tmp_path, monkeypatch):
     monkeypatch.setattr(catalog, "DOCUMENTS_FILE", documents)
     monkeypatch.setattr(catalog, "INVENTORY_DIR", inventory_dir)
     monkeypatch.setattr(catalog, "MANIFEST_FILE", manifest)
+    monkeypatch.setattr(catalog, "STRUCTURED_FILE", tmp_path / "structured.sqlite")
+    monkeypatch.setattr(catalog, "INDEX_MANIFEST", tmp_path / "index-manifest.json")
     catalog._load_snapshot.cache_clear()
     yield documents
     catalog._load_snapshot.cache_clear()
@@ -130,6 +132,162 @@ def test_missing_acervo_returns_503_without_paths_or_mock_success(local_catalog)
     response = client.get("/api/v1/project/summary")
     assert response.status_code == 503
     assert str(local_catalog) not in response.text
+
+
+def test_compact_snapshot_keeps_every_contract_in_a_batch_file(local_catalog):
+    # Uma página da coleta PNCP pode conter muitos contratos distintos.
+    with local_catalog.open("a", encoding="utf-8") as handle:
+        for number in range(50):
+            row = _chunk("contratos_estruturado", f"batch-{number}", json.dumps({
+                "numeroControlePNCP": f"batch-{number:03d}", "valorGlobal": number,
+                "objetoContrato": f"Objeto {number}",
+            }), {"orgao": "Órgão do lote", "orgao_cnpj": "11222333000181"})
+            row["source_file"] = "raw/mesma-pagina-pncp.json"
+            handle.write(json.dumps(row) + "\n")
+    records = catalog.contracts(limit=100)
+    assert len(records) == 52
+    batch = [record for record in records if record["id"].startswith("batch-")]
+    assert len(batch) == 50 and sum(record["valor_global"] for record in batch) == 1225
+    assert catalog.contracts(busca="Objeto 49")[0]["id"] == "batch-049"
+    assert len(catalog.contracts(limit=24, offset=24)) == 24
+    org = catalog.organizations(busca="Órgão do lote")[0]
+    assert org["total_contratacoes"] == 50 and org["valor_total"] == 1225
+    _, _, rows = catalog._snapshot()
+    assert all("text" not in row for row in rows)
+
+
+def test_contracts_mask_only_the_requested_page(local_catalog, monkeypatch):
+    with local_catalog.open("a", encoding="utf-8") as handle:
+        for number in range(60):
+            handle.write(json.dumps(_chunk("contratos_estruturado", f"c{number}", json.dumps({
+                "numeroControlePNCP": f"c{number:03d}", "objetoContrato": "CPF 120.456.789-28",
+            }))) + "\n")
+    masked_ids = []
+    original = catalog._safe
+
+    def spy(value):
+        if isinstance(value, dict) and "id" in value:
+            masked_ids.append(value["id"])
+        return original(value)
+
+    monkeypatch.setattr(catalog, "_safe", spy)
+    result = catalog.contracts(limit=3, offset=2)
+    assert len(result) == len(masked_ids) == 3
+    assert all("120.456.789-28" not in json.dumps(row) for row in result)
+    assert all("[CPF omitido]" in row["objeto"] for row in result)
+
+
+def test_concurrent_catalog_requests_load_documents_only_once(local_catalog, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    barrier = Barrier(6)
+    reads = []
+    original = Path.open
+
+    def spy(path, *args, **kwargs):
+        if path == local_catalog:
+            reads.append(path)
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", spy)
+
+    def request(_):
+        barrier.wait(timeout=10)
+        return catalog.contracts()
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        pages = list(pool.map(request, range(6)))
+    assert all(len(page) == 2 for page in pages)
+    assert len(reads) == 1
+
+
+def test_sources_need_no_documents_and_inventory_reads_stop_at_latest_complete(local_catalog, monkeypatch):
+    catalog._load_metadata.cache_clear()
+    reads = []
+    original = catalog._read_json
+
+    def spy(path):
+        reads.append(path.name)
+        return original(path)
+
+    monkeypatch.setattr(catalog, "_read_json", spy)
+    # Um inventário antigo inválido não deve ser lido se v6 já é completo.
+    (catalog.INVENTORY_DIR / "v5.json").write_text("invalid", encoding="utf-8")
+    local_catalog.unlink()
+    assert len(catalog.sources()) == 5
+    assert reads == ["v7.json", "v6.json"]
+
+
+def test_compact_snapshot_prefers_public_chunk_but_never_exposes_restricted(local_catalog):
+    with local_catalog.open("a", encoding="utf-8") as handle:
+        for sensitivity, title in [("restrito", "Segredo"), ("publico", "Visível"),
+                                   ("publico", "Página duplicada"), ("restrito", "Outro segredo")]:
+            handle.write(json.dumps(_chunk("emails_sinteticos", "mixed", extras={"title": title},
+                                           sensitivity=sensitivity)) + "\n")
+    records = catalog.documents(tipo="Conversa sintética", busca="Visível")
+    assert len(records) == 1 and records[0]["titulo"] == "[Sintético] Visível"
+    assert not catalog.documents(busca="Segredo")
+    assert not catalog.documents(busca="Página duplicada")
+
+
+def _active_metadata_fixture(local_catalog, *, matching=True):
+    import hashlib
+    import sqlite3
+
+    source_hash = hashlib.sha256(local_catalog.read_bytes()).hexdigest() if matching else "divergente"
+    with sqlite3.connect(catalog.STRUCTURED_FILE) as conn:
+        conn.execute("CREATE TABLE meta (chave TEXT, valor TEXT)")
+        conn.executemany("INSERT INTO meta VALUES (?, ?)", [
+            ("corpus_version", "v7-reparo"), ("source_sha256", source_hash),
+            ("built_at", "2026-10-18T21:14:05+00:00"), ("schema_version", "7"),
+        ])
+    catalog.INDEX_MANIFEST.write_text(json.dumps({
+        "source_sha256": source_hash, "snapshot_id": "candidato_teste", "total_chunks": 9,
+        "total_vectors": 8, "por_base": {"contratos_estruturado": {"candidato": 3, "recuperacao": 2}},
+        "homogeneidade_modelo_comprovada": False,
+        "proveniencia_encoding_completa": False, "promocao_autorizada": False,
+    }), encoding="utf-8")
+
+
+def test_summary_separates_verified_active_v7_from_historical_v6(local_catalog):
+    _active_metadata_fixture(local_catalog)
+    body = client.get("/api/v1/project/summary").json()
+    assert sum(base["vetores_ativos"] or 0 for base in body["bases"]) == 5
+    assert body["versao_corpus"] == "v7-reparo"
+    assert body["versao_inventario"] == "v6 + suplemento sintético"
+    active = body["corpus_ativo"]
+    assert active["versao"] == "v7-reparo" and active["snapshot_id"] == "candidato_teste"
+    assert active["total_chunks"] == 9 and active["total_documentos"] == 7
+    assert active["total_vetores"] == 8 and active["chunks_sem_vetor"] == 1
+    assert active["schema_sql"] == "7" and active["bytes_documents"] == local_catalog.stat().st_size
+    assert active["vetores_por_base"] == {"contratos_estruturado": 5}
+    assert body["snapshot_anterior"]["versao"] == "v6 + suplemento sintético"
+    assert body["snapshot_anterior"]["arquivos"] == 5
+    assert any("mista" in warning for warning in active["avisos"])
+    assert any("parcial" in warning for warning in active["avisos"])
+    assert any("produção" in warning for warning in active["avisos"])
+    assert body["total_documentos"] == 7  # contrato antigo preservado
+    assert sum(base["chunks_ativos"] for base in body["bases"]) == 9
+    assert sum(base["documentos_ativos"] for base in body["bases"]) == 7
+    assert str(catalog.STRUCTURED_FILE) not in json.dumps(body)
+
+
+def test_summary_does_not_claim_v7_when_source_hashes_differ(local_catalog):
+    _active_metadata_fixture(local_catalog, matching=False)
+    active = catalog.summary()["corpus_ativo"]
+    assert active["versao"] is None and active["snapshot_id"] is None
+    assert active["total_vetores"] is None and active["chunks_sem_vetor"] is None
+    assert sum("não corresponde" in warning for warning in active["avisos"]) == 2
+
+
+def test_summary_cache_invalidates_when_active_index_metadata_changes(local_catalog):
+    _active_metadata_fixture(local_catalog)
+    assert catalog.summary()["corpus_ativo"]["total_vetores"] == 8
+    value = json.loads(catalog.INDEX_MANIFEST.read_text(encoding="utf-8"))
+    value["total_vectors"] = 7
+    catalog.INDEX_MANIFEST.write_text(json.dumps(value), encoding="utf-8")
+    assert catalog.summary()["corpus_ativo"]["total_vetores"] == 7
 
 
 def test_snapshot_cache_invalidates_when_active_documents_change(local_catalog):

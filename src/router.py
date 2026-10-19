@@ -280,9 +280,14 @@ def _rotear(query: str) -> RouteDecision:
         bases = [base for base in bases if base != Natureza.ESTRUTURADA]
 
     if not bases:
+        no_dominio = bool(re.search(
+            r"\b(?:pncp|licit\w*|contrat\w*|compr\w*|preg\w*|dispensa\w*|fornece\w*|"
+            r"orcamento\w*|preco\w*|custo\w*|material\w*|servico\w*|corpus|acervo)\b", text,
+        ))
         return RouteDecision(
             bases_selecionadas=[],
-            justificativa="Nao foi identificado um tipo de evidencia do corpus.",
+            justificativa=("Nao foi identificado um tipo de evidencia do corpus." if no_dominio
+                           else "A pergunta esta fora do corpus de contratacoes publicas do RJ."),
             confidence=0.3,
         )
 

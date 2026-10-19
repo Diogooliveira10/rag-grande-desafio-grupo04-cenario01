@@ -24,7 +24,7 @@ Escolhemos o cenário de Contratações Públicas pela disponibilidade de dados 
 - `geracao`
 - `validacao`
 
-Quando o resultado SQL já responde a pergunta inteira (cálculo pronto), a busca vetorial e lexical é pulada e a resposta sai direto do SQL, sem chamar o LLM. Ao fim, `resumo_consulta` registra o que foi tentado e o que retornou em cada caminho (SQL e vetorial).
+Quando o resultado SQL já responde a pergunta inteira (cálculo pronto), a busca vetorial e lexical é pulada. A LLM escreve somente uma apresentação neutra com `{{sql}}`, e o backend substitui esse marcador pelo resultado SQL completo, com fontes e avisos. Os números não são enviados à LLM; template inválido ou falha do modelo preserva o resultado determinístico como fallback. Ao fim, `resumo_consulta` registra o que foi tentado e o que retornou em cada caminho (SQL e vetorial).
 
 O estágio `feedback` roda fora do pipeline de resposta (é acionado por `POST /api/v1/feedback`, depois que o cliente já recebeu a resposta), mas já está integrado à API e à observabilidade.
 
@@ -36,7 +36,9 @@ flowchart TD
     X --> A[query_analysis]
     A --> B[roteamento]
     B -. pergunta de conta .-> K[consulta_sql]
-    K -. cálculo pronto: resposta sem LLM .-> H[validacao]
+    K -. cálculo pronto .-> T[LLM: template de apresentação]
+    T --> U[Backend: insere resultado SQL]
+    U --> H[validacao]
     K -. cálculo parcial .-> C[retrieval_denso]
     B --> C
     B --> D[retrieval_bm25]
