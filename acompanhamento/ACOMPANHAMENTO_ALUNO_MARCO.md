@@ -186,3 +186,13 @@ Só o 446bcb7 entrou na main (PR #41), porque o merge do PR foi feito antes do p
 Depois do merge, o Diogo roda o golden set completo (item 4) com essa correção.
 
 Uso de IA: usei o Claude pra investigar a causa do F1 e propor uma correção. Rodei a suíte e o F1, fiz os commits e os pushes e abri o PR.
+
+## Encontro 14 — 19/10/2026
+
+Contexto: recebi o item 26 da lista de pendências (P6.3), que dizia que a LC 123 não chega ao prompt na pergunta que mistura norma e contratações. O item veio só com essa frase, sem run id, relatório nem diagnóstico, e ninguém do grupo tinha o run em que a falha apareceu.
+
+O que fiz:
+
+Li o caminho que a pergunta percorre (src/router.py, src/pipeline.py, src/retrieve.py e src/generate.py) e rodei a P6.3 com o pipeline completo (py .\eval\run_eval.py run --pipeline eval.adapters:pipeline_completo --ids P6.3), na main atual. A P6.3 passou (OK, run 20261019T192712Z, 404 s). Depois li o log da execução, estágio por estágio, pra ver o que de fato chegava ao prompt. O roteador mandou a pergunta pras bases normativa e estruturada, a busca vetorial devolveu só chunks da base normativa, e a parte de contratações veio pelo SQL, num chunk separado. No rerank ficaram 10 chunks normativos e só 3 couberam no prompt, mais o chunk do SQL: a janela de contexto é de 3500 caracteres (GENERATION_CONTEXT_CHARS no meu .env, modo local), então 7 dos 10 ficaram de fora. Os 3 que entraram são da LC 123: o art. 48 (licitação exclusiva até R$ 80.000, subcontratação e cota de 25%), o art. 44 (desempate) e o art. 74 (Juizado Especial, que não tem relação com licitação).
+
+Minha primeira hipótese estava errada: achei que o documento principal da base normativa fosse a Lei 14.133 e que a LC 123 ficaria de fora por causa do orçamento do prompt. O texto do prompt mostrou que esse documento é a própria LC 123, então ela chega. Como o item não se reproduz, não alterei código. Anotei duas melhorias possíveis, que ainda não são um item: o art. 74 ocupa espaço no prompt sem ser relevante, e o art. 48 é cortado em 900 caracteres, no meio da cota de 25%.
