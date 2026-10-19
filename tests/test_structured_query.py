@@ -808,7 +808,10 @@ def test_listagem_so_roda_com_base_estruturada_e_assunto():
         "Quais regras se aplicam às microempresas?",
         bases=[Natureza.NORMATIVA, Natureza.ESTRUTURADA],
     ) is None
-    assert _detectar("Quais contratos existem em 2025?", ano=2025) is None
+    # Período explícito já delimita uma listagem SQL verificável; não precisa
+    # inventar assunto nem pagar busca vetorial para trazer exemplos aleatórios.
+    assert _detectar("Quais contratos existem em 2025?", ano=2025).tipo == "listagem"
+    assert _detectar("Quais contratos existem?") is None
 
 
 def test_contagem_pelo_menos_n_contratos_cria_agregacao_por_fornecedor():

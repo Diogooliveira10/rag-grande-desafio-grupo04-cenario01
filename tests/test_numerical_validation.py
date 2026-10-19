@@ -68,13 +68,17 @@ def sql_chunk(part, lines, *, kind="estatistica"):
                                   "linhas": lines, "recorte": recorte}}))
 
 
-def test_deterministic_answer_keeps_all_sql_parts_outside_llm_budget(monkeypatch):
+def modelo_template_sql(_):
+    return json.dumps({"answer": "{{sql}}"})
+
+
+def test_sql_template_keeps_all_sql_parts_outside_llm_budget(monkeypatch):
     monkeypatch.setattr(generate.config, "GENERATION_CONTEXT_CHARS", 50)
     chunks = [sql_chunk(1, ["Geral: 455 registros; total R$ 2.546.786.958,21"]),
               sql_chunk(2, ["Esfera municipal: total R$ 534.883.349,11"])]
     response = generate.gerar_resposta("Qual o total de contratos de 2025?", chunks,
         [Natureza.ESTRUTURADA, Natureza.AGREGADA],
-        cliente=lambda _: pytest.fail("ready SQL calculations must not call the LLM"))
+        cliente=modelo_template_sql)
     assert "R$ 2.546.786.958,21 [1]" in response.answer
     assert "R$ 534.883.349,11 [2]" in response.answer
     assert "sql:" not in response.answer and "contratacoes" not in response.answer
@@ -117,7 +121,7 @@ def test_sql_sem_registros_e_conclusao_no_recorte_com_ressalva_de_escopo():
     # (confiança do recorte); o escopo fica no texto e nos avisos.
     vazio = sql_chunk(1, ["(nenhum registro)"])
     response = generate.gerar_resposta("Quantos contratos de ambulância em 2024?", [vazio],
-        [Natureza.ESTRUTURADA], cliente=lambda _: pytest.fail("cálculo pronto não chama o LLM"))
+        [Natureza.ESTRUTURADA], cliente=modelo_template_sql)
     assert response.confidence_level.value == "alta"
     assert any(aviso.startswith("Escopo") for aviso in response.avisos)
     assert "amostra do corpus" in response.answer
@@ -130,7 +134,7 @@ def test_sql_sem_registros_e_conclusao_no_recorte_com_ressalva_de_escopo():
 def test_sql_com_registros_continua_com_confianca_alta():
     response = generate.gerar_resposta("Quantos contratos de ambulância em 2025?",
         [sql_chunk(1, ["Geral: 13 registros; total R$ 8.266.940,37"])],
-        [Natureza.ESTRUTURADA], cliente=lambda _: pytest.fail("cálculo pronto não chama o LLM"))
+        [Natureza.ESTRUTURADA], cliente=modelo_template_sql)
     assert response.confidence_level.value == "alta"
     assert "13 registros" in response.answer
     assert "R$ 8.266.940,37" in response.answer
@@ -145,7 +149,7 @@ def test_parte_sql_vazia_nao_rebaixa_outras_partes_com_resultados():
             sql_chunk(2, ["Geral: 13 registros; total R$ 8.266.940,37"]),
         ],
         [Natureza.ESTRUTURADA],
-        cliente=lambda _: pytest.fail("resultado SQL pronto não chama o LLM"),
+        cliente=modelo_template_sql,
     )
     assert response.confidence_level.value == "alta"
     assert "R$ 8.266.940,37" in response.answer
@@ -173,7 +177,7 @@ def test_perguntas_p21_sem_resultados_trazem_a_ressalva_da_amostra(pergunta):
         pergunta,
         [sql_chunk(1, ["(nenhum registro)"])],
         [Natureza.ESTRUTURADA],
-        cliente=lambda _: pytest.fail("consulta vazia determinística não chama o LLM"),
+        cliente=modelo_template_sql,
     )
     assert "não comprova" in response.answer
 
@@ -209,7 +213,7 @@ def test_intencao_vazia_nao_rebaixa_a_outra_com_resultado():
         _intencao(sql_chunk(1, ["(nenhum registro)"], kind="ranking"), 2, sem_registros=True),
     ]
     response = generate.gerar_resposta("Quantos contratos de ambulância em 2025 e quem mais vendeu?", chunks,
-        [Natureza.ESTRUTURADA], cliente=lambda _: pytest.fail("cálculo pronto não chama o LLM"))
+        [Natureza.ESTRUTURADA], cliente=modelo_template_sql)
     assert response.confidence_level.value == "alta"
     assert "R$ 8.266.940,37" in response.answer
     # A ressalva fica só na intenção que não achou nada.
@@ -228,5 +232,8 @@ def test_resposta_llm_com_uma_intencao_vazia_nao_ganha_ressalva_de_ausencia():
         cliente=lambda _: json.dumps({"answer": "Foram 13 contratos, R$ 8.266.940,37 [E1].",
                                       "is_refusal": False, "confidence_level": "alta", "sources_used": ["E1"]}),
     )
-    assert response.confidence_level.value == "alta"
+    # A conta da primeira parte continua válida, mas a pergunta composta não
+    # pode ter confiança alta quando a segunda parte não tem fonte citada.
+    assert response.confidence_level.value == "media"
+    assert any("Parte sem fonte citada" in aviso for aviso in response.avisos)
     assert "não comprova" not in response.answer
