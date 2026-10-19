@@ -922,7 +922,7 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
             ]
         return sql, [
             f"{i}. {_brl(l['valor'])} | {l['data_referencia']} | {l['orgao_nome']} ({l['esfera']}, {l['municipio']}) | "
-            f"{l['modalidade']} | {_resumir(l['objeto'], 60)}"
+            f"modalidade: {l['modalidade'] or 'não informada'} | {_resumir(l['objeto'], 60)}"
             for i, l in enumerate(linhas, 1)
         ]
 
