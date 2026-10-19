@@ -65,7 +65,9 @@ def local_pipeline(tmp_path, monkeypatch):
     return TestClient(api.app)
 
 
-def test_factual_api_trace_follows_evidence_to_prompt_to_final_response(local_pipeline):
+def test_factual_api_trace_follows_evidence_to_prompt_to_final_response(local_pipeline, monkeypatch):
+    # Segue a evidência até o prompt da apresentação pelo LLM, desligada por padrão.
+    monkeypatch.setattr(config, 'SQL_APRESENTACAO_LLM', True)
     response = local_pipeline.post('/api/v1/query', json={
         'query': 'Qual o valor total de contratos de ambulâncias?', 'top_k': 5})
     assert response.status_code == 200

@@ -11,8 +11,13 @@ from src import retrieve as ret
 
 
 @pytest.fixture(autouse=True)
-def reset_circuit():
+def reset_circuit(monkeypatch):
     ret._EMBEDDING_FAILURES.clear()
+    # Os testes congelam time.monotonic (o módulo global). Com o horário da
+    # última chamada real deixado por testes anteriores, aguardar_modelo
+    # calculava ~14 h de espera e a suíte completa travava aqui.
+    from src import obs
+    monkeypatch.setattr(obs, "aguardar_modelo", lambda: None)
     yield
     ret._EMBEDDING_FAILURES.clear()
 
