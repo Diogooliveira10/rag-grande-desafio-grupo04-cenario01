@@ -1388,3 +1388,13 @@ def test_nome_sem_marcador_nao_estreita_o_recorte():
 def test_outros_municipios_continuam_sendo_municipio():
     filtros = qa.analisar_query("Contratos de Volta Redonda", modo="regras").filtros
     assert filtros.filtros_analiticos.get("municipio") == "Volta Redonda"
+
+
+def test_municipio_uf_na_pergunta_nao_vira_fornecedor():
+    from src.query_analysis import _analisar
+
+    pergunta = ("Qual órgão, município/UF, data de assinatura, início e fim de vigência e objeto da ata "
+                "de registro de preços com identificador 28741080000155-1-000001/2023-000001?")
+
+    assert "fornecedor" not in _analisar(pergunta).filtros_analiticos
+
