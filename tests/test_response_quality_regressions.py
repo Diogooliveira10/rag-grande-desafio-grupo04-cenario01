@@ -258,3 +258,30 @@ def test_publicacao_explicita_e_distinta_da_data_de_captura():
     assert "publicacao_informada=2021-04-01" in cabecalho
     assert "20/04/2021" not in cabecalho
     assert "cabeçalhos de impressão" in gen._SYSTEM_PROMPT
+
+
+def test_comparacao_entre_esferas_tambem_recebe_o_alerta_de_valor_extremo(base_respostas, monkeypatch):
+    # A comparação fica com métrica "contagem", mas a tabela dela mostra total,
+    # média e máximo: sem o alerta, um valor fora do padrão passava calado.
+    monkeypatch.setattr(sq.config, "VALUE_REVIEW_THRESHOLD", 250)
+    resposta = responder_sql("Compare os gastos federais e estaduais em 2025.", base_respostas)
+    assert "Alerta de qualidade" in resposta.answer
+
+
+def test_comparacao_entre_esferas_citadas_mostra_so_elas_na_tabela(tmp_path):
+    records = []
+    for i, (esfera, valor) in enumerate([("F", 100), ("F", 200), ("F", 300), ("E", 400), ("E", 500),
+                                         ("E", 600), ("M", 700), ("N", 800)]):
+        row = _contrato(f"11111111000191-2-{i+1:06d}/2025", "00000000000000", "EMPRESA", valor)
+        row["objetoContrato"] = "Serviços de informática"
+        row["orgaoEntidade"]["esferaId"] = esfera
+        records.append(row)
+    documents = escrever_documents(tmp_path / "documents.jsonl", contratacoes=records)
+    banco = structured_db.Banco(sqlite_path=tmp_path / "base.sqlite")
+    structured_db.construir_banco(documents, banco)
+    resposta = responder_sql("Compare os gastos federais e estaduais em 2025.",
+                             {"banco": banco, "documents_file": documents})
+    tabela = resposta.answer[resposta.answer.index("| Recorte"):]
+    assert "| Todas as esferas | 8 registros |" in tabela
+    assert "| federal | 3 registros |" in tabela and "| estadual | 3 registros |" in tabela
+    assert "| municipal |" not in tabela and "nao_se_aplica" not in tabela

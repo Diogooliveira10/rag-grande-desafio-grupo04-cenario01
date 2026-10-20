@@ -14,7 +14,7 @@ from typing import Any, Optional, Sequence
 from src.obs import (Stage, bounded_log_value, lifecycle, new_query_id, new_run_id,
                      registrar, registrar_pulo, sessao)
 from src.log_context import current_execution, execution, log_details
-from src.conversation import resposta_conversacional
+from src.conversation import resposta_conversacional, tentativa_de_injecao
 from src.generate import ClienteLLM, gerar_resposta, pode_responder_sql
 from src.query_analysis import analisar_query, filtros_para_retrieve
 from src.reformulacao import Reformulacao, reformular_pergunta
@@ -148,7 +148,13 @@ def responder(
                               "cliente_injetado": cliente is not None,
                               "reranker_injetado": reranker is not None}) as flow:
             try:
-                if historico:
+                if historico and tentativa_de_injecao(query):
+                    # Sem reformulação: o LLM reescrevia a injeção como a pergunta
+                    # anterior, e a resposta fixa da conversa não era dada.
+                    registrar_pulo(run_id=run_id, query_id=query_id, stage=Stage.REFORMULACAO,
+                                   query=query, motivo="tentativa_de_injecao")
+                    reformulacao = Reformulacao(query, False, "tentativa_de_injecao")
+                elif historico:
                     reformulacao = reformular_pergunta(query, historico, run_id=run_id, query_id=query_id)
                 else:
                     registrar_pulo(run_id=run_id, query_id=query_id, stage=Stage.REFORMULACAO,

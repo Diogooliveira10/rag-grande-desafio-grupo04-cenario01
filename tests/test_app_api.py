@@ -46,6 +46,27 @@ def test_health() -> None:
     assert response.json() == {"status": "ok"}
 
 
+def test_respostas_levam_cabecalhos_de_seguranca() -> None:
+    response = client.get("/health")
+
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["X-Frame-Options"] == "DENY"
+    assert response.headers["Referrer-Policy"] == "no-referrer"
+    assert response.headers["Cache-Control"] == "no-store"
+
+
+def test_preflight_do_site_continua_liberado_com_os_cabecalhos() -> None:
+    response = TestClient(app).options(
+        "/api/v1/query",
+        headers={"Origin": "https://etuarda.github.io", "Access-Control-Request-Method": "POST",
+                 "Access-Control-Request-Headers": "content-type,ngrok-skip-browser-warning"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "https://etuarda.github.io"
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+
+
 def test_readiness_separado_retorna_503_sem_manifesto(monkeypatch) -> None:
     monkeypatch.setattr(api_module.config, "SNAPSHOT_MANIFEST", "")
 

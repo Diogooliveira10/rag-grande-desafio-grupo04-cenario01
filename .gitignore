@@ -70,3 +70,6 @@ eval/runs/*
 
 # Claude
 .claude/
+
+# Configuração local do editor
+.vscode/

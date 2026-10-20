@@ -24,8 +24,12 @@ _REFUSAL_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
     ),
     (
         (
-            r"\bcredenciais?\b",
+            # "credenciais?" não pegava o singular "credencial".
+            r"\bcredenci(?:al|ais)\b",
             r"\bsenhas?\b",
+            r"\b(?:chave|token)s? (?:de |da )?api\b",
+            r"\bapi[ _-]?keys?\b",
+            r"\btokens? de acesso\b",
         ),
         "A pergunta pede credenciais de acesso; nenhuma base deve ser consultada.",
     ),
@@ -70,6 +74,11 @@ _OUT_OF_SCOPE_PATTERNS = (
     r"\bprovavelmente vencerao\b",
     r"\bprever\b",
     r"\bprevisao\b",
+    # "Quem vai ganhar a próxima licitação?" é previsão: ia ao LLM (22 s) em
+    # vez de ser recusada como fora do corpus.
+    r"\b(?:vai|vao) (?:ganhar|vencer)\b",
+    r"\b(?:ganhara|ganharao|vencera|vencerao)\b",
+    r"\bproxim[ao]s? (?:licitac|contrat|pregao|pregoes|compra)",
 )
 
 _NORMATIVE_PATTERNS = (
@@ -116,6 +125,8 @@ _STRUCTURED_PATTERNS = (
     # "Qual foi o valor pago à empresa X?": o PNCP não registra pagamento, mas a
     # base de contratos responde com o valor contratado e diz que não é o pago.
     r"\bpag(?:o|os|a|as|ou|aram|amentos?)\b",
+    # "Compare os gastos federais e estaduais": gasto é valor de contratação.
+    r"\bgast(?:o|os|ou|aram)\b",
 )
 
 _CONVERSATIONAL_PATTERNS = (
@@ -234,6 +245,17 @@ def rotear_pergunta(
                 bases_selecionadas=[Natureza.ESTRUTURADA, *decisao.bases_selecionadas],
                 justificativa=decisao.justificativa + " Fornecedor ou CNPJ citado: base estruturada incluída.",
                 confidence=decisao.confidence)
+        # Sem nenhuma palavra de contratação ("Quanto a Dataprev recebeu?"), o
+        # roteador caía no "fora do corpus" de baixa confiança. Um fornecedor ou
+        # CNPJ reconhecido basta para ir à base estruturada; as recusas de
+        # confiança alta (previsão, dado bancário, legalidade) continuam.
+        elif (not decisao.bases_selecionadas and decisao.confidence < 0.9
+                and inferir_motivo_recusa(decisao.justificativa) == RefusalReason.FORA_DE_ESCOPO
+                and (analiticos.get("fornecedor") or analiticos.get("cnpj"))):
+            decisao = RouteDecision(
+                bases_selecionadas=[Natureza.ESTRUTURADA],
+                justificativa="Fornecedor ou CNPJ citado: base estruturada.",
+                confidence=0.8)
         span.set_result(
             {
                 "bases": [base.value for base in decisao.bases_selecionadas],

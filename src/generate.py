@@ -119,8 +119,12 @@ de contratações públicas do RJ (fora_de_escopo), ou quando NENHUM trecho do c
 relação com a pergunta (sem_evidencia).
 
 Com evidência parcial, responda o que os trechos mostram, diga o que falta e use confiança \
-baixa ou media. Trecho "sql:" é evidência: use seus números; se diz que nenhum registro \
-atende, responda isso citando-o.
+baixa ou media. Nesse caso, declare a lacuna numa frase explícita, como "os dados são \
+insuficientes para ..." ou "não há dados suficientes para ...", em vez de só insinuá-la; \
+quando a pergunta pede itens que atendam a um critério e nenhum atende, diga "nenhum ... \
+atende" com essas palavras. Se a evidência responde a pergunta inteira, não acrescente \
+ressalva de insuficiência. Trecho "sql:" é evidência: use seus números; se diz que nenhum \
+registro atende, responda isso citando-o.
 
 Responda SEMPRE e SOMENTE com um objeto JSON, sem nenhum texto antes ou depois, no formato:
 {"answer": "...", "is_refusal": false, "refusal_reason": null, \
@@ -396,7 +400,21 @@ def _chunks_no_orcamento(
     if len(naturezas) > 1:
         reservas = [next(i for i, chunk in enumerate(ordem) if chunk.metadata.natureza == natureza)
                     for natureza in naturezas if any(chunk.metadata.natureza == natureza for chunk in ordem)]
-    indices = reservas + [i for i in range(len(ordem)) if i not in reservas]
+    resto = [i for i in range(len(ordem)) if i not in reservas]
+    if len(naturezas) > 1:
+        # Depois da reserva, as naturezas se alternam: o 2º trecho de cada uma
+        # entra antes do 3º de qualquer outra. Sem isso, as partes do resultado
+        # SQL, que vêm primeiro, ocupavam a janela de 3.500 caracteres e só 1
+        # trecho normativo cabia nas perguntas mistas (P6.3).
+        filas: dict[Any, list[int]] = {}
+        for i in resto:
+            filas.setdefault(ordem[i].metadata.natureza, []).append(i)
+        resto = []
+        while any(filas.values()):
+            for fila in filas.values():
+                if fila:
+                    resto.append(fila.pop(0))
+    indices = reservas + resto
     escolhidos, usados = [], 0
     for i in indices:
         chunk = ordem[i]

@@ -139,7 +139,7 @@ execução PostgreSQL e trilha de e-mails continuam pendências próprias.
 ## Evidências e limites
 
 - [PERSONAS.md](../PERSONAS.md): fonte das perguntas e dos perfis.
-- [Análise quantitativa](../eval/runs/quality-v6/corpus-personas-analysis.json):
+- `eval/runs/quality-v6/corpus-personas-analysis.json` (arquivo local, fora do Git):
   contagens por arquivo, padrões lexicais, metadados, hashes e interseções.
 - [Qualidade de consultas](qualidade_consultas_v6.md): avaliação CLI, revisão
   factual e retestes; rodada completa e reparos são resultados separados.
@@ -183,7 +183,7 @@ no corpus. A consulta de modalidades em P4.2 retornou três registros com
 modalidade não informada. Essas pendências permanecem abertas, sem transformar
 falta de campo em inferência de modalidade.
 
-Detalhes em [auditoria do estado atual](../eval/runs/quality-v6/current-state-audit.json)
+Detalhes em `eval/runs/quality-v6/current-state-audit.json` (arquivo local, fora do Git)
 e `eval/runs/quality-v6/tests-current-adjustments.txt`. As compilações SQL nessa
 auditoria são sondagens locais; não representam integração do novo caminho
 PostgreSQL ao pipeline. As rodadas anteriores de respostas continuam separadas.

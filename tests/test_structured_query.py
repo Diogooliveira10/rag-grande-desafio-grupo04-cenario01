@@ -1433,6 +1433,15 @@ def test_pronome_e_verbo_da_pergunta_nao_viram_termo_do_objeto(complemento):
     assert sq._termos_do_objeto(f"contratos de ambulancia {complemento}") == ("ambulancia",)
 
 
+@pytest.mark.parametrize("pergunta,termos", [
+    ("compare os gastos federais e estaduais em 2025", ()),
+    ("quais os gastos com merenda escolar", ("merenda", "escolar")),
+    ("despesas com ambulancia", ("ambulancia",)),
+])
+def test_gasto_e_despesa_nao_viram_termo_do_objeto(pergunta, termos):
+    assert sq._termos_do_objeto(pergunta) == termos
+
+
 @pytest.mark.parametrize("palavra", ["passagem", "passagens"])
 def test_gem_e_gens_viram_o_mesmo_radical(palavra):
     assert sq._termos_do_objeto(f"contratos de {palavra} aerea") == ("passage", "aerea")
@@ -1769,3 +1778,53 @@ def test_contagem_mostra_o_total_so_quando_a_pergunta_pede(pergunta, mostra):
     tabela = sq._tabela_metricas(consulta, [{"rotulo": "Recorte", "n": 2, "total": 300.0}], "Recorte")
     assert ("Total registrado" in tabela) is mostra
 
+
+def test_cnpj_do_fornecedor_sai_do_sql_formatado(base_cnpj):
+    filtros = QueryFilters(filtros_analiticos={"fornecedor": "PRIME CONSULTORIA"})
+    consulta = sq.detectar_consulta("Qual o CNPJ da Prime Consultoria?", filtros, ESTRUTURADA)
+    assert consulta.tipo == "cnpj_fornecedor"
+    assert sq.pode_consultar_sql_direto("Qual o CNPJ da Prime Consultoria?", filtros, ESTRUTURADA)
+
+    chunks = sq.consultar_estruturado("Qual o CNPJ da Prime Consultoria?", filtros, ESTRUTURADA, **base_cnpj)
+    assert "05.340.639/0001-30" in chunks[0].content and "2 registros" in chunks[0].content
+    assert all(c.metadata.extras["geracao_deterministica"] for c in chunks)
+
+
+@pytest.mark.parametrize("pergunta", [
+    "Quantos contratos a Prime Consultoria tem e qual o CNPJ?",
+    "Qual o valor total da Prime Consultoria e o CNPJ?",
+])
+def test_cnpj_junto_de_uma_conta_segue_o_caminho_da_conta(pergunta):
+    filtros = QueryFilters(filtros_analiticos={"fornecedor": "PRIME CONSULTORIA"})
+    assert sq.detectar_consulta(pergunta, filtros, ESTRUTURADA).tipo != "cnpj_fornecedor"
+
+
+@pytest.mark.parametrize("pergunta", [
+    "Contratos acima de 50 milhões em 2025",
+    "Contratações de merenda em Niterói",
+])
+def test_frase_nominal_de_contratos_e_listagem_direta(pergunta):
+    consulta = sq.detectar_consulta(pergunta, QueryFilters(ano=2025), ESTRUTURADA)
+    assert consulta.tipo == "listagem" and consulta.listagem_direta
+
+
+def test_cnpj_sem_verbo_tambem_e_pedido_de_cnpj():
+    filtros = QueryFilters(filtros_analiticos={"fornecedor": "PRIME CONSULTORIA"})
+    assert sq.detectar_consulta("CNPJ da Prime Consultoria?", filtros, ESTRUTURADA).tipo == "cnpj_fornecedor"
+
+
+def test_quais_modalidades_dos_contratos_e_agrupamento_por_modalidade():
+    pergunta = ("Considerando os contratos de manutenção de computadores encontrados em 2025, quais modalidades "
+                "aparecem nos registros e há dados suficientes para concluir uma modalidade predominante?")
+    consulta = sq.detectar_consulta(pergunta, QueryFilters(ano=2025), ESTRUTURADA)
+    assert consulta.tipo == "agrupamento" and consulta.agrupar_por == "modalidade"
+    assert consulta.termos_objeto == ("manutencao", "computador")
+
+
+@pytest.mark.parametrize("pergunta", [
+    "Que modalidades de licitação a Lei 14.133 prevê?",
+    "Quais as modalidades de licitação previstas nas normas?",
+])
+def test_quais_modalidades_da_norma_nao_vira_consulta_sql(pergunta):
+    bases = [Natureza.NORMATIVA, Natureza.ESTRUTURADA]
+    assert sq.detectar_consulta(pergunta, QueryFilters(), bases) is None

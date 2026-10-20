@@ -61,6 +61,6 @@ Normativa e Conversacional foram preservadas da v2 nesta execução: as quatro f
 
 - Inventário promovido: [`data/inventory/v3.json`](../data/inventory/v3.json)
 - Diferença v2→v3: [`data/inventory/DIFF_v2_v3.md`](../data/inventory/DIFF_v2_v3.md)
-- Log da execução: [`data/runs/update-20260928T144609Z-436900.jsonl`](../data/runs/update-20260928T144609Z-436900.jsonl)
-- Checkpoint: [`data/inventory/checkpoints/v3.json`](../data/inventory/checkpoints/v3.json)
+- Log da execução: `data/runs/update-20260928T144609Z-436900.jsonl` (arquivo local, fora do Git)
+- Checkpoint: `data/inventory/checkpoints/v3.json` (arquivo local, fora do Git)
 - Coletor: [`src/fetch_corpus.py`](../src/fetch_corpus.py)

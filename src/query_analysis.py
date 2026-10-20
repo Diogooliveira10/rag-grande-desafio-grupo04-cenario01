@@ -1254,6 +1254,17 @@ def _extrair_municipio(texto: str) -> tuple[Optional[str], Optional[Span]]:
     return valor, _estender_para_tras(texto, span)
 
 
+# Apelidos que não coincidem com a razão social, com a grafia exata da v7
+# (conferida no SQLite em 2026-10-19). Só fornecedores com uma única grafia na
+# base: o filtro compara o nome exato, e "Light", "Correios" e "CEDAE" têm
+# várias, o que deixaria a resposta incompleta.
+_APELIDOS_DE_FORNECEDOR = {
+    "removip": "REMOVIP SERVICO MEDICO LTDA",
+    "dataprev": "EMPRESA DE TECNOLOGIA E INFORMACOES DA PREVIDENCIA S.A. - DATAPREV",
+    "fiotec": "FIOTEC - FUNDACAO PARA O DESENVOLVIMENTO CIENTIFICO E TECNOLOGICO EM SAUDE",
+    "embratel": "EMBRATEL TVSAT TELECOMUNICACOES SA",
+}
+
 # Artigo ou contração logo antes do nome: "da Medshore", "a Cristália recebeu".
 _ARTIGOS_ANTES_DE_NOME = frozenset("da do das dos a o as os pela pelo pelas pelos".split())
 
@@ -1316,6 +1327,12 @@ def _extrair_fornecedor(texto: str, bloqueados: Sequence[Span] = ()) -> tuple[Op
     reconhecidos como outra coisa (o município, por exemplo): sem isso, "do
     Município de Maricá" acharia um fornecedor que também é município.
     """
+    if texto:
+        for achado in re.finditer(r"\w+", texto):
+            apelido = _APELIDOS_DE_FORNECEDOR.get(_normalize(achado.group()))
+            if apelido and not any(comeca < achado.end() and achado.start() < termina
+                                   for comeca, termina in bloqueados):
+                return apelido, achado.span()
     catalogo = _catalogo_de_orgaos()
     if not catalogo or not texto:
         return None, None
@@ -1810,7 +1827,8 @@ def _analisar_com_trechos(query: str) -> tuple[QueryFilters, str, list[Span]]:
         metrica = next((valor for padrao, valor in (
             (r"\bmediana\b", "mediana"), (r"\b(?:media|medio)\b", "media"),
             (r"\b(?:quantos|quantas|quantidade)\b", "contagem"),
-            (r"\b(?:soma|total)\b", "soma"),
+            # "Quanto a Fiotec recebeu/gastou?" pede valor, não contagem.
+            (r"\b(?:soma|total|quanto)\b", "soma"),
             (r"\b(?:maior|maiores|maximo)\b", "maximo"), (r"\b(?:menor|menores|minimo)\b", "minimo"),
             (r"\bvalor\b", "soma"),
         ) if re.search(padrao, resto)), None)

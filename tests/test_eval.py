@@ -996,9 +996,25 @@ def test_p22_aceita_insuficiencia_em_outras_palavras():
     assert _content_ok(caso, resposta) is True
 
 
-def test_p42_aceita_resposta_honesta_do_lote19():
-    '''Resposta real (lote19): reconhece o gap de modalidade e a
-    insuficiência com outras palavras.'''
+def test_p42_aceita_a_resposta_da_v7():
+    '''Na v7 são 12 contratos assinados (6 pregão eletrônico, 3 dispensa, 1
+    inexigibilidade e 2 sem modalidade): a resposta do SQL mostra as
+    modalidades e os registros sem informação.'''
+    caso = _caso_golden("P4.2")
+    resposta = {
+        "answer": (
+            "| Modalidade | Registros |\n| Pregão - Eletrônico | 6 registros |\n"
+            "| Dispensa | 3 registros |\n| Inexigibilidade | 1 registros |\n"
+            "(2 registros sem informação de modalidade ficaram fora dos grupos.)"
+        ),
+        "confidence_level": "alta",
+    }
+    assert _content_ok(caso, resposta) is True
+
+
+def test_p42_reprova_a_resposta_da_v6_na_v7():
+    '''A resposta da v6 ("nenhum registro informa a modalidade") não vale na
+    v7, em que 10 dos 12 contratos têm a modalidade.'''
     caso = _caso_golden("P4.2")
     resposta = {
         "answer": (
@@ -1008,7 +1024,7 @@ def test_p42_aceita_resposta_honesta_do_lote19():
         ),
         "confidence_level": "baixa",
     }
-    assert _content_ok(caso, resposta) is True
+    assert _content_ok(caso, resposta) is False
 
 
 def test_p42_reprova_modalidade_inventada():
@@ -1033,14 +1049,15 @@ def test_p42_reprova_quando_falta_reconhecer_o_gap_de_modalidade():
     assert _content_ok(caso, resposta) is False
 
 
-def test_p42_teto_de_confianca_continua_valendo():
+def test_p42_reprova_resposta_sem_contratos_do_assunto():
+    '''Falha da rodada de 2026-10-20: a busca semântica trouxe contratos de
+    outro assunto, e a resposta disse que não havia contratos.'''
     caso = _caso_golden("P4.2")
-    base = {
-        "answer": "Modalidade não informada nos três contratos; "
-        "não é possível concluir predominância.",
+    resposta = {
+        "answer": "Não há contratos de manutenção de computadores nos registros apresentados.",
+        "confidence_level": "baixa",
     }
-    assert _content_ok(caso, dict(base, confidence_level="media")) is True
-    assert _content_ok(caso, dict(base, confidence_level="alta")) is False
+    assert _content_ok(caso, resposta) is False
 
 
 def test_p42_bases_esperadas_e_so_estruturada():

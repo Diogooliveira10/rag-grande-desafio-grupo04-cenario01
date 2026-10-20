@@ -67,7 +67,7 @@ class Reformulacao:
     pergunta: str
     reescrita: bool
     # sem_historico | modo_desligado | autossuficiente | reescrita | troca_de_ano
-    # | llm_falhou | saida_invalida
+    # | llm_falhou | saida_invalida | tentativa_de_injecao
     # Em llm_falhou e saida_invalida a pergunta vem com a anterior anexada.
     motivo: str
 
