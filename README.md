@@ -256,7 +256,7 @@ Depois de ter os dados:
 .venv\Scripts\python -m uvicorn app.api:app --host 127.0.0.1 --port 8080
 ```
 
-Com a v7, a API leva cerca de 1 minuto para ficar pronta depois de subir: ela
+Com a v7, a API leva cerca de 2 minutos para ficar pronta depois de subir: ela
 lê os índices e prepara o BM25 em segundo plano (`INDEX_PRELOAD`), e ocupa
 ~4,6 GB de RAM (medido em 2026-10-19 numa máquina de 16 GB). Feche o que não
 for necessário antes da demonstração e faça uma pergunta de aquecimento.
@@ -679,11 +679,17 @@ frontend de novo.
 Configuração do `.env` usada na demo (ECOA como modelo principal, OpenRouter de
 reserva). Medido em 2026-10-14: com o padrão de 180 s e uma nova tentativa, uma
 consulta esperou até 400 s no ECOA; com o limite de 60 s, as consultas lentas
-ficaram entre 69 e 101 s, abaixo do limite de 240 s do site:
+ficaram entre 69 e 101 s, abaixo do limite de 240 s do site. Cada chamada ao
+OpenRouter também tem prazo total (`OPENROUTER_TIMEOUT`, 60 s por padrão): o
+timeout do SDK é entre pacotes, e o OpenRouter manda sinais de processamento
+enquanto gera, então uma resposta lenta chegou a levar 277 s (golden de
+2026-10-20). Com os dois limites, o pior caso fica em ~200 s:
 
 ```env
 GENERATION_TIMEOUT=60
 GENERATION_MAX_RETRIES=0
+OPENROUTER_TIMEOUT=60
+API_DOCS=false
 OPENROUTER_API_KEY=<chave>
 OPENROUTER_MODEL=nvidia/nemotron-3-super-120b-a12b:free
 OPENROUTER_MODEL_FALLBACK=google/gemma-4-31b-it:free
@@ -692,7 +698,7 @@ OPENROUTER_MODEL_FALLBACK=google/gemma-4-31b-it:free
 # também passam pelo LLM e as consultas ao vivo vão de ~2 s para 7-25 s
 ```
 
-Com a v7, a API leva cerca de 1 minuto para ficar pronta e ocupa ~4,6 GB de
+Com a v7, a API leva cerca de 2 minutos para ficar pronta e ocupa ~4,6 GB de
 RAM. Faça uma pergunta de aquecimento antes de abrir para o público.
 
 ### Endpoint de modelos (compartilhado com toda a turma)

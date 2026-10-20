@@ -1778,3 +1778,22 @@ def test_contagem_mostra_o_total_so_quando_a_pergunta_pede(pergunta, mostra):
     tabela = sq._tabela_metricas(consulta, [{"rotulo": "Recorte", "n": 2, "total": 300.0}], "Recorte")
     assert ("Total registrado" in tabela) is mostra
 
+
+def test_cnpj_do_fornecedor_sai_do_sql_formatado(base_cnpj):
+    filtros = QueryFilters(filtros_analiticos={"fornecedor": "PRIME CONSULTORIA"})
+    consulta = sq.detectar_consulta("Qual o CNPJ da Prime Consultoria?", filtros, ESTRUTURADA)
+    assert consulta.tipo == "cnpj_fornecedor"
+    assert sq.pode_consultar_sql_direto("Qual o CNPJ da Prime Consultoria?", filtros, ESTRUTURADA)
+
+    chunks = sq.consultar_estruturado("Qual o CNPJ da Prime Consultoria?", filtros, ESTRUTURADA, **base_cnpj)
+    assert "05.340.639/0001-30" in chunks[0].content and "2 registros" in chunks[0].content
+    assert all(c.metadata.extras["geracao_deterministica"] for c in chunks)
+
+
+@pytest.mark.parametrize("pergunta", [
+    "Quantos contratos a Prime Consultoria tem e qual o CNPJ?",
+    "Qual o valor total da Prime Consultoria e o CNPJ?",
+])
+def test_cnpj_junto_de_uma_conta_segue_o_caminho_da_conta(pergunta):
+    filtros = QueryFilters(filtros_analiticos={"fornecedor": "PRIME CONSULTORIA"})
+    assert sq.detectar_consulta(pergunta, filtros, ESTRUTURADA).tipo != "cnpj_fornecedor"

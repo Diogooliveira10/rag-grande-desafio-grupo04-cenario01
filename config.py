@@ -34,6 +34,10 @@ OPENROUTER_MODEL = _env("OPENROUTER_MODEL", "openrouter/free")
 # timeout, 404/408/429/5xx). Erros de entrada não trocam de modelo.
 OPENROUTER_MODEL_FALLBACK = _env("OPENROUTER_MODEL_FALLBACK", "openrouter/free")
 OPENROUTER_MAX_TOKENS = int(_env("OPENROUTER_MAX_TOKENS", "4096"))
+# Prazo total de cada chamada ao OpenRouter, em segundos. O timeout do SDK é
+# entre pacotes, e o OpenRouter manda sinais de "processando" enquanto gera:
+# no golden de 20/10 uma chamada levou 277 s com timeout de 60 s.
+OPENROUTER_TIMEOUT = float(_env("OPENROUTER_TIMEOUT", "60"))
 LLM_PROVIDER_MODE = _env("LLM_PROVIDER_MODE", "auto")
 EMBEDDING_MODEL = _env("EMBEDDING_MODEL", "xagi/qwen3-embedding:0.6b-q4_k_m")
 # Respiro entre lotes de embedding quando o encoder é o endpoint compartilhado

@@ -126,6 +126,10 @@ _RE_OBJETO_CONTRATACAO = re.compile(
     r"\bcontrat(?:a(?:cao|coes)|os?)\s+de\s+(.+?)"
     r"(?=\s+(?:do corpus|da base|que|usam|utilizam|foram|sao|existem|em)\b|[,;?.!]|$)"
 )
+_RE_PEDIDO_DE_CNPJ = re.compile(r"\b(?:qual|quais|informe|mostre|diga|me de)\b.*\bcnpjs?\b")
+# Pedido de CNPJ junto de uma conta ("quantos contratos e qual o CNPJ") segue
+# o caminho da conta.
+_RE_CNPJ_COM_CONTA = re.compile(r"\b(?:quantos|quantas|quanto|valor|total|soma|media|maior|maiores|ranking)\b")
 _RE_NUMERO_CONTROLE_PNCP = re.compile(
     r"(?<!\d)\d{14}-\d-\d{6}/\d{4}(?:-\d{6})?(?!\d)"
 )
@@ -446,6 +450,19 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
                 tipo="identificador",
                 limite=1,
                 numero_controle_pncp=identificador.group(0),
+            )
+        # "Qual o CNPJ da Cristália?": o CNPJ está no registro do fornecedor.
+        # Sem este caminho, a pergunta ia à busca e ao LLM, que levava 90 s e
+        # respondia com o CNPJ do órgão contratante.
+        fornecedor = (filtros.filtros_analiticos or {}).get("fornecedor")
+        pergunta = structured_db.normalizar(query)
+        if (fornecedor and not (filtros.filtros_analiticos or {}).get("cnpj")
+                and _RE_PEDIDO_DE_CNPJ.search(pergunta) and not _RE_CNPJ_COM_CONTA.search(pergunta)):
+            return Consulta(
+                tabela="contratacoes",
+                tipo="cnpj_fornecedor",
+                limite=5,
+                filtros_analiticos=(("fornecedor", fornecedor),),
             )
     # Sem as expressões que já viraram filtro: em "média dos contratos com valor
     # maior que 2000", o "maior" não pede ranking, e "acima"/"milhão" não
@@ -853,6 +870,13 @@ def _descrever_termo(termo: str) -> str:
     return f"{termo} (TI: tecnologia da informação, informática, software, TIC)" if termo == "tecnologia" else termo
 
 
+def _formatar_cnpj(cnpj: Any) -> str:
+    digitos = re.sub(r"\D", "", str(cnpj))
+    if len(digitos) != 14:
+        return str(cnpj)
+    return f"{digitos[:2]}.{digitos[2:5]}.{digitos[5:8]}/{digitos[8:12]}-{digitos[12:]}"
+
+
 def _brl(valor: Optional[float]) -> str:
     if valor is None:
         return "sem valor"
@@ -969,6 +993,25 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
             f"{_resumir(linha['objeto'], 220)}"
             for linha in linhas
         ] or [f"Nenhum contrato encontrado para o controle PNCP {consulta.numero_controle_pncp}."]
+
+    if consulta.tipo == "cnpj_fornecedor":
+        # Um fornecedor pode ter mais de um CNPJ (matriz e filiais): mostra os
+        # mais frequentes, com quantos registros cada um tem.
+        sql = (
+            f"SELECT fornecedor, fornecedor_cnpj, COUNT(*) AS n FROM {consulta.tabela}{where} "
+            f"GROUP BY fornecedor, fornecedor_cnpj ORDER BY n DESC, fornecedor_cnpj LIMIT {int(consulta.limite)}"
+        )
+        linhas = banco.consultar(sql, parametros)
+        if markdown is not None and linhas:
+            markdown.append(tabela_markdown(["Fornecedor", "CNPJ", "Registros"],
+                [[l["fornecedor"], _formatar_cnpj(l["fornecedor_cnpj"]) if l["fornecedor_cnpj"] else "não informado",
+                  f"{l['n']} registro{'s' if l['n'] != 1 else ''}"] for l in linhas], numericas=[2]))
+        return sql, [
+            f"Fornecedor {l['fornecedor']} | CNPJ: "
+            f"{_formatar_cnpj(l['fornecedor_cnpj']) if l['fornecedor_cnpj'] else 'não informado'} | "
+            f"{l['n']} registro{'s' if l['n'] != 1 else ''}"
+            for l in linhas
+        ] or ["Nenhum registro do fornecedor encontrado."]
 
     if consulta.tipo in ("ranking", "listagem"):
         # Listagem mostra também registros sem valor (depois dos com valor) e
@@ -1196,12 +1239,18 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
         if insuficiente:
             resultado.append(insuficiente)
     if markdown is not None and todas:
-        registros = [{"rotulo": "Recorte solicitado", **_metricas_tabela(
+        # Com esferas citadas ("federais e estaduais"), a tabela mostra só elas;
+        # a primeira linha continua sendo o recorte inteiro, com todas as esferas.
+        rotulo_geral = ("Todas as esferas" if consulta.comparacao_esferas and consulta.esferas_comparadas
+                        else "Recorte solicitado")
+        registros = [{"rotulo": rotulo_geral, **_metricas_tabela(
             [float(l['valor']) for l in todas if l['valor'] is not None], n=len(todas))}]
         if consulta.comparacao_esferas:
-            for esfera in sorted({l['esfera'] or 'não informada' for l in todas}):
+            esferas = (consulta.esferas_comparadas
+                       or sorted({l['esfera'] or 'não informada' for l in todas}))
+            for esfera in esferas:
                 grupo = [l for l in todas if (l['esfera'] or 'não informada') == esfera]
-                registros.append({"rotulo": esfera, **_metricas_tabela(
+                registros.append({"rotulo": esfera.replace("nao_se_aplica", "não se aplica"), **_metricas_tabela(
                     [float(l['valor']) for l in grupo if l['valor'] is not None], n=len(grupo))})
         markdown.append(_tabela_metricas(consulta, registros, "Recorte"))
         if ausentes or simbolicos:
@@ -1600,6 +1649,7 @@ def _chunks(consulta: Consulta, sql: str, cabecalho: str, linhas: list[str], ban
                         # estar com outra palavra ("UTI móvel"), e a busca
                         # semântica ainda acha; o LLM recebe o zero e os trechos.
                         "geracao_deterministica": (consulta.tipo in {"estatistica", "ranking", "agrupamento", "evolucao"}
+                                                   or (consulta.tipo == "cnpj_fornecedor" and not sem_registros)
                                                    or (consulta.listagem_direta and not sem_registros)
                                                    or (recorte and recorte.get("valor_unitario_indisponivel")
                                                        and not sem_registros))
@@ -1621,7 +1671,7 @@ def pode_consultar_sql_direto(
     if not bases or not set(bases) <= {Natureza.ESTRUTURADA, Natureza.AGREGADA}:
         return False
     consulta = consulta_da_intencao(intencao) if intencao is not None else detectar_consulta(query, filtros, bases)
-    return bool(consulta and (consulta.tipo in {"estatistica", "ranking", "agrupamento", "evolucao"}
+    return bool(consulta and (consulta.tipo in {"estatistica", "ranking", "agrupamento", "evolucao", "cnpj_fornecedor"}
                               or consulta.listagem_direta)
                 and not consulta.norma_citada)
 

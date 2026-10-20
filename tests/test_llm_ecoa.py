@@ -244,3 +244,34 @@ def test_openrouter_registra_proveniencia_dos_modelos_tentados(monkeypatch, prov
     ]
     assert [item["status"] for item in info["chamadas_modelo"]] == ["erro", "ok"]
     assert "test-key" not in str(info)
+
+
+def test_openrouter_lento_e_cortado_pelo_prazo_total(monkeypatch, providers):
+    import threading
+    import time
+
+    calls, response = providers
+    liberar = threading.Event()
+
+    def travado(**_):
+        liberar.wait(5)  # o OpenRouter "processando" sem nunca responder
+        return response
+
+    def primary(**_):
+        raise TimeoutError("ecoa offline")
+
+    monkeypatch.setattr(llm_ecoa, "OpenAI", lambda **_: client_for(travado))
+    monkeypatch.setattr(llm_ecoa, "client", client_for(primary))
+    monkeypatch.setattr(config, "OPENROUTER_TIMEOUT", 0.2)
+    monkeypatch.setattr(config, "MODEL_MIN_INTERVAL_SECONDS", 0)
+    inicio = time.monotonic()
+    try:
+        with pytest.raises(TimeoutError, match="OpenRouter sem resposta"):
+            llm_ecoa.completar_chat([], diagnosticos={})
+    finally:
+        liberar.set()
+    assert time.monotonic() - inicio < 2
+
+
+def test_com_prazo_devolve_o_resultado_quando_chega_a_tempo():
+    assert llm_ecoa._com_prazo(lambda: 42, 1) == 42

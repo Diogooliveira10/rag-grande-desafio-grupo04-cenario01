@@ -1,3 +1,6 @@
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as _PrazoDaThread
+
 from openai import APIConnectionError, APIStatusError, OpenAI
 
 import config
@@ -25,6 +28,22 @@ def erro_de_disponibilidade(error: Exception) -> bool:
     )
 
 
+def _com_prazo(chamada, segundos: float):
+    """Executa ``chamada`` com prazo total de relógio; estourado, TimeoutError.
+
+    A thread abandonada termina sozinha quando a resposta chegar; o pipeline
+    não espera por ela.
+    """
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="openrouter")
+    futuro = executor.submit(chamada)
+    try:
+        return futuro.result(timeout=segundos)
+    except _PrazoDaThread:
+        raise TimeoutError(f"OpenRouter sem resposta em {segundos:.0f} s") from None
+    finally:
+        executor.shutdown(wait=False)
+
+
 def completar_chat(mensagens: list[dict], *, response_format: dict | None = None,
                    diagnosticos: dict | None = None, **parametros):
     """Modo auto: ECOA com fallback Free; modo openrouter: sem chamadas ao LLM ECOA."""
@@ -45,7 +64,7 @@ def completar_chat(mensagens: list[dict], *, response_format: dict | None = None
         if not config.OPENROUTER_API_KEY:
             raise ValueError("OPENROUTER_API_KEY não configurada")
         fallback = OpenAI(base_url=config.OPENROUTER_BASE_URL, api_key=config.OPENROUTER_API_KEY,
-                          timeout=60.0, max_retries=0)
+                          timeout=config.OPENROUTER_TIMEOUT, max_retries=0)
         fallback_arguments = {**arguments, "max_tokens": min(arguments.get("max_tokens", config.OPENROUTER_MAX_TOKENS), config.OPENROUTER_MAX_TOKENS),
                               "extra_body": {"provider": {"require_parameters": True}}}
         # Modelo preferido e, só se ele estiver indisponível, a reserva. Quando
@@ -62,7 +81,9 @@ def completar_chat(mensagens: list[dict], *, response_format: dict | None = None
             aguardar_modelo()
             try:
                 return observar_chamada(
-                    lambda modelo=modelo: fallback.chat.completions.create(model=modelo, **fallback_arguments),
+                    lambda modelo=modelo: _com_prazo(
+                        lambda: fallback.chat.completions.create(model=modelo, **fallback_arguments),
+                        config.OPENROUTER_TIMEOUT),
                     provider="openrouter", model=modelo,
                     sdk_max_retries=0, diagnosticos=info)
             except Exception as fallback_error:

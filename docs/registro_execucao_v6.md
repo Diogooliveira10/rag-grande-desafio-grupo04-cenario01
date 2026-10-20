@@ -1977,6 +1977,27 @@ rodada anterior, falharam com rota e conteúdo iguais: em P2.2 o LLM escreveu
 resposta saiu sem citação. Nenhuma das mudanças passa por esses dois casos: é a
 variação do LLM entre rodadas (de 31 a 33 acertos com o mesmo código de geração).
 
+**Três rodadas com o código final (`golden-2026-10-20-v7-36-final-1` a `-3`).**
+Entraram ainda: o CNPJ de um fornecedor citado respondido pelo SQL ("Qual o
+CNPJ da Cristália?" levava 94 s pelo LLM e trazia o CNPJ do órgão contratante),
+a tabela da comparação entre esferas só com as esferas citadas e "impede o
+cálculo" aceito como insuficiência na P2.2.
+
+| Rodada | Acertos | Falhas |
+|---|---|---|
+| `final-1` | 31/36 | P1.2, P2.3, P4.2, P4.3, P6.1 |
+| `final-2` | 33/36 | P1.2, P4.2, P6.1 |
+| `final-3` | 31/36 | P1.2, P2.3, P4.2, P4.3, P6.1 |
+
+Média de 31,7 acertos. P1.2, P4.2 e P6.1 falham sempre; P2.3 e P4.3 dependem
+da redação do LLM; P2.2 passou nas três. Rota 97,2% e recusa 100% nas três.
+
+Na `final-2`, a P3.1 levou 337 s: o ECOA estourou os 60 s e o OpenRouter levou
+277 s, porque o timeout do SDK conta entre pacotes e o OpenRouter manda sinais
+de processamento enquanto gera. Cada chamada ao OpenRouter passou a ter prazo
+total de relógio (`OPENROUTER_TIMEOUT`, 60 s), e o pior caso de uma pergunta
+fica em ~200 s, abaixo dos 240 s que o site espera.
+
 Recuperação, no mesmo dia (`eval/medir_regressao_v7.py`, 47 casos de
 `eval/retrieval_set.jsonl`, índice v6 de referência contra o v7):
 
