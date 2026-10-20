@@ -692,8 +692,10 @@ GENERATION_MAX_RETRIES=0
 OPENROUTER_TIMEOUT=60
 API_DOCS=false
 OPENROUTER_API_KEY=<chave>
-OPENROUTER_MODEL=nvidia/nemotron-3-super-120b-a12b:free
-OPENROUTER_MODEL_FALLBACK=google/gemma-4-31b-it:free
+# Trocados em 2026-10-21: o nemotron-3-super gratuito passou a devolver 404 e o
+# gemma-4-31b, limite de uso no provedor. Os gratuitos mudam: conferir antes.
+OPENROUTER_MODEL=nvidia/nemotron-3.5-super-vl:free
+OPENROUTER_MODEL_FALLBACK=minimax/minimax-m3.1-flash:free
 # DATABASE_URL vazio: SQLite local com a v7 (mesmas respostas do Neon, mais rápido)
 # SQL_APRESENTACAO_LLM fica desligada (padrão): com ela, as respostas do SQL
 # também passam pelo LLM e as consultas ao vivo vão de ~2 s para 7-25 s

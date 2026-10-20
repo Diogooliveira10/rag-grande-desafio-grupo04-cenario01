@@ -776,6 +776,22 @@ def test_p61_nao_exige_clausula_condicional_de_dados_insuficientes():
     assert _content_ok(caso, resposta) is True
 
 
+def test_p61_aceita_regra_confirmada_com_confianca_alta():
+    '''Resposta real das rodadas de 2026-10-20: certa e com a LC 123/2006 citada.
+    O teto "média" do gabarito reprovava só pela confiança; com a regra
+    explícita no corpus, confiança alta é coerente.'''
+    caso = _caso_golden("P6.1")
+    resposta = {
+        "answer": (
+            "Sim, uma microempresa pode participar de pregão eletrônico conforme o art. 42 da "
+            "Lei Complementar nº 123/2006, que prevê que, em caso de pregão, a microempresa ou "
+            "empresa de pequeno porte mais bem classificada será convocada para apresentar nova proposta [1]."
+        ),
+        "confidence_level": "alta",
+    }
+    assert _content_ok(caso, resposta) is True
+
+
 def test_p61_aceita_o_ramo_de_dados_insuficientes():
     caso = _caso_golden("P6.1")
     resposta = {

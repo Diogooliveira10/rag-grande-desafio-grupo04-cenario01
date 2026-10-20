@@ -2045,6 +2045,32 @@ máximo de 104 s, abaixo do prazo de ~200 s. A P4.2 passou, agora pelo SQL e com
 gabarito da v7. Falharam P1.2 e P6.1 (as de sempre) e P2.3 e P3.2, que oscilam
 com a redação do LLM entre rodadas.
 
+**Auditoria de 2026-10-21 (manhã).**
+
+- **Sem internet:** com toda conexão externa bloqueada no processo, as perguntas
+  do SQL (Maricá, Cristália, ambulância, CNPJ), a recusa de conta bancária e a
+  saudação responderam em 0,1 a 2,7 s, sem nenhuma tentativa de conexão.
+- **Dados pessoais no log:** CPF e e-mail digitados na pergunta ficaram mascarados
+  nos 15 registros do log daquela consulta.
+- **ECOA fora do ar (simulado):** o OpenRouter gratuito falhou em parte das
+  chamadas: `nemotron-3-super-120b-a12b:free` com 404 ("Function not found for
+  account", do provedor), `gemma-4-31b-it:free` com 429, e depois 502, 404 e uma
+  resposta HTTP 200 vazia com `finish_reason=error`. Os modelos do `.env` da demo
+  passaram a `nemotron-3.5-super-vl:free` e `minimax-m3.1-flash:free`, e a
+  resposta vazia do provedor passou a acionar o modelo reserva (antes virava
+  "falha no serviço de geração" direto). Com o ECOA simulado fora do ar, três
+  de quatro perguntas de norma foram respondidas (45 a 119 s); a reserva gratuita
+  não é garantida.
+- **ECOA real:** respondeu às perguntas da Lei 14.133 e das atas em 20 a 33 s de
+  geração, com confiança alta.
+- **Identificador interno no texto:** os modelos de reserva escreviam "O trecho E2
+  prevê…", sem `=`; agora vira "O trecho [2] prevê…" ("a classe E1", sem
+  rótulo, continua como texto comum).
+- **P6.1:** saiu o teto de confiança "média" do gabarito. A regra está explícita
+  no corpus (LC 123/2006, art. 42) e a resposta certa era reprovada só pela
+  confiança alta; os testes do caso já diziam que confirmar com base normativa é
+  a resposta certa.
+
 Recuperação, no mesmo dia (`eval/medir_regressao_v7.py`, 47 casos de
 `eval/retrieval_set.jsonl`, índice v6 de referência contra o v7):
 

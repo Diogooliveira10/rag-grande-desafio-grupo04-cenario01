@@ -275,3 +275,31 @@ def test_openrouter_lento_e_cortado_pelo_prazo_total(monkeypatch, providers):
 
 def test_com_prazo_devolve_o_resultado_quando_chega_a_tempo():
     assert llm_ecoa._com_prazo(lambda: 42, 1) == 42
+
+
+def test_resposta_vazia_com_erro_do_provedor_passa_para_a_reserva(monkeypatch, providers):
+    """HTTP 200 com finish_reason "error" e sem texto (nemotron, 2026-10-21):
+    antes, virava "falha no serviço de geração" sem tentar o modelo reserva."""
+    vazia = SimpleNamespace(model="m1", choices=[SimpleNamespace(
+        finish_reason="error", message=SimpleNamespace(content=""))])
+    boa = SimpleNamespace(model="m2", choices=[SimpleNamespace(
+        finish_reason="stop", message=SimpleNamespace(content='{"answer": "ok"}'))])
+    chamadas = []
+
+    def create(**arguments):
+        chamadas.append(arguments["model"])
+        return vazia if arguments["model"] == "modelo-principal" else boa
+
+    def primary(**_):
+        raise TimeoutError("ecoa offline")
+
+    monkeypatch.setattr(config, "OPENROUTER_MODEL", "modelo-principal")
+    monkeypatch.setattr(config, "OPENROUTER_MODEL_FALLBACK", "modelo-reserva")
+    monkeypatch.setattr(config, "MODEL_MIN_INTERVAL_SECONDS", 0)
+    monkeypatch.setattr(llm_ecoa, "OpenAI", lambda **_: client_for(create))
+    monkeypatch.setattr(llm_ecoa, "client", client_for(primary))
+    info = {}
+
+    assert llm_ecoa.completar_chat([], diagnosticos=info) is boa
+    assert chamadas == ["modelo-principal", "modelo-reserva"]
+    assert info["fallback_error_type"] == "resposta_vazia_do_provedor"

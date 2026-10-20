@@ -1378,6 +1378,12 @@ _RE_GRUPO_IDS = re.compile(
     re.IGNORECASE,
 )
 # Fora de grupo, só o que não tem como ser texto comum: rótulo explícito ou id completo.
+# "O trecho E2 prevê", sem "=" nem ":": os modelos de reserva escrevem assim,
+# apesar do prompt (o ECOA não). Só com o rótulo: "a classe E1" é texto comum.
+_RE_E_SEM_SEPARADOR = re.compile(
+    r"(?P<rotulo>\b(?:trechos?|evid[eê]ncias?|fontes?)\s+)(?P<id>E\d{1,3})\b(?![\w-])",
+    re.IGNORECASE,
+)
 _RE_ID_SOLTO = re.compile(
     rf"(?:{_ROTULO_ID}\s*[=:]\s*{_ID_INTERNO}|sql:[a-z_]+(?::[\w.-]+)+|[a-z_]+:[0-9a-f]{{8,}}(?::[\w-]+)+)",
     re.IGNORECASE,
@@ -1420,8 +1426,19 @@ def _numerar_citacoes(resposta: RAGResponse, chunks: list[Chunk]) -> tuple[RAGRe
         n = numero(match.group(0))
         return f"[{n}]" if n is not None else ""
 
+    def e_solto(match: re.Match) -> str:
+        # "O trecho E2 prevê", "o E3 trata": só troca se E<n> for uma fonte
+        # citada; senão o texto fica como veio.
+        nonlocal trocas
+        n = numero(match.group("id"))
+        if n is None:
+            return match.group(0)
+        trocas += 1
+        return f"{match.group('rotulo') or ''}[{n}]"
+
     texto = _RE_GRUPO_IDS.sub(grupo, resposta.answer)
     texto = _RE_ID_SOLTO.sub(solto, texto)
+    texto = _RE_E_SEM_SEPARADOR.sub(e_solto, texto)
     if not trocas:
         return resposta, 0
     texto = re.sub(r"[ \t]{2,}", " ", texto)

@@ -683,6 +683,8 @@ def _responder_com(answer, fontes, chunks):
     ("Vale o Decreto 48.816/2023 (chunks 10-f8902f79c194 e 1-7303119b4364).",
      "Vale o Decreto 48.816/2023 [2, 3]."),
     ("Total de R$ 3 bi [E1] e ata vigente [E2].", "Total de R$ 3 bi [1] e ata vigente [2]."),
+    # Modelo de reserva do OpenRouter (2026-10-21): rótulo sem "=" nem ":".
+    ("O trecho E2 prevê a convocação da microempresa.", "O trecho [2] prevê a convocação da microempresa."),
     # chunk_id de ata com página tem um segmento a mais.
     ("No chunk_id=" + _ATA_PAGINA + ", o fornecedor atrasou.", "No [2], o fornecedor atrasou."),
 ])

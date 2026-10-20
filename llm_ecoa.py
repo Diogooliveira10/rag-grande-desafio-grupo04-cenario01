@@ -28,6 +28,15 @@ def erro_de_disponibilidade(error: Exception) -> bool:
     )
 
 
+def _resposta_vazia_do_provedor(resposta) -> bool:
+    """Resposta sem texto ou com ``finish_reason == "error"``."""
+    escolhas = getattr(resposta, "choices", None) or []
+    if not escolhas:
+        return False
+    conteudo = getattr(getattr(escolhas[0], "message", None), "content", None) or ""
+    return getattr(escolhas[0], "finish_reason", None) == "error" or not conteudo.strip()
+
+
 def _com_prazo(chamada, segundos: float):
     """Executa ``chamada`` com prazo total de relógio; estourado, TimeoutError.
 
@@ -80,12 +89,19 @@ def completar_chat(mensagens: list[dict], *, response_format: dict | None = None
                 info["fallback_used"] = True
             aguardar_modelo()
             try:
-                return observar_chamada(
+                resposta = observar_chamada(
                     lambda modelo=modelo: _com_prazo(
                         lambda: fallback.chat.completions.create(model=modelo, **fallback_arguments),
                         config.OPENROUTER_TIMEOUT),
                     provider="openrouter", model=modelo,
                     sdk_max_retries=0, diagnosticos=info)
+                # HTTP 200 sem texto e com finish_reason "error": o provedor
+                # falhou no meio da geração (visto em 2026-10-21). Conta como
+                # indisponibilidade e passa para a reserva, se ainda houver.
+                if _resposta_vazia_do_provedor(resposta) and indice < len(modelos) - 1:
+                    info["fallback_error_type"] = "resposta_vazia_do_provedor"
+                    continue
+                return resposta
             except Exception as fallback_error:
                 ultimo_erro = fallback_error
                 info["fallback_error_type"] = type(fallback_error).__name__
