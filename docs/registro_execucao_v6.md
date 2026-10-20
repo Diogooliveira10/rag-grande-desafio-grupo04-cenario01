@@ -2070,6 +2070,31 @@ com a redação do LLM entre rodadas.
   no corpus (LC 123/2006, art. 42) e a resposta certa era reprovada só pela
   confiança alta; os testes do caso já diziam que confirmar com base normativa é
   a resposta certa.
+- **P1.2:** o gabarito também era da v6. Na v7 a premissa se confirma: a consulta
+  SQL que o sistema já fazia (agrupamento por fornecedor com no mínimo 3
+  registros, órgãos estaduais, 2025, acima de R$ 500 mil, objeto de TI) acha a
+  Extreme Digital (3 contratos) e a 3Structure IT (7), e nenhuma ata desses dois
+  menciona atraso, descumprimento de prazo ou problema de fornecimento (busca nos
+  documentos das atas). O gabarito pedia "nenhum fornecedor" e "a premissa não
+  se confirma"; passou a pedir que a resposta diga que não há menção a atraso e
+  a reprovar a premissa da v6. As respostas das quatro rodadas de 2026-10-20
+  passam no gabarito novo.
+- **Plural:** as tabelas mostram "1 registro" (antes, "1 registros").
+- **Apelidos:** "Light" e "Correios" viram o fornecedor, pelo trecho comum às
+  grafias da v7 (101 registros da Light somando "S A" e "SA"). "light" minúsculo
+  ("lâmpadas light") não vira fornecedor. A CEDAE ficou de fora: também é órgão
+  do catálogo, e com o apelido os dois filtros juntos zeravam "contratos da
+  CEDAE", que já respondia como órgão contratante.
+- **Identificador interno:** "no registro E3" e "na contratação E1", escritos
+  também pelo ECOA, viram "no registro [3]" e "na contratação [1]".
+
+**Rodada com essas mudanças (`golden-2026-10-21-v7-36`): 35/36 (97%).** Rota
+97,2%, recusa 100%, conteúdo 97,2%, citação 100%, sem erro de provedor; mediana
+de 5 s. Só a P3.2 falhou, a que oscila com a redação do LLM (passou em quatro
+das cinco rodadas anteriores; nesta, o modelo escreveu "a amostra não é
+insuficiente"). O máximo, 174 s, foi a P1.2: é a primeira pergunta da rodada
+que passa pela busca e paga o carregamento do rerank (102 s) no processo novo da
+avaliação; no backend, o rerank é pré-carregado ao subir.
 
 Recuperação, no mesmo dia (`eval/medir_regressao_v7.py`, 47 casos de
 `eval/retrieval_set.jsonl`, índice v6 de referência contra o v7):

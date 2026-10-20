@@ -1381,7 +1381,8 @@ _RE_GRUPO_IDS = re.compile(
 # "O trecho E2 prevê", sem "=" nem ":": os modelos de reserva escrevem assim,
 # apesar do prompt (o ECOA não). Só com o rótulo: "a classe E1" é texto comum.
 _RE_E_SEM_SEPARADOR = re.compile(
-    r"(?P<rotulo>\b(?:trechos?|evid[eê]ncias?|fontes?)\s+)(?P<id>E\d{1,3})\b(?![\w-])",
+    r"(?P<rotulo>\b(?:trechos?|evid[eê]ncias?|fontes?|registros?|contrata(?:ç|c)(?:ão|ao|ões|oes))\s+)"
+    r"(?P<id>E\d{1,3})\b(?![\w-])",
     re.IGNORECASE,
 )
 _RE_ID_SOLTO = re.compile(

@@ -685,6 +685,9 @@ def _responder_com(answer, fontes, chunks):
     ("Total de R$ 3 bi [E1] e ata vigente [E2].", "Total de R$ 3 bi [1] e ata vigente [2]."),
     # Modelo de reserva do OpenRouter (2026-10-21): rótulo sem "=" nem ":".
     ("O trecho E2 prevê a convocação da microempresa.", "O trecho [2] prevê a convocação da microempresa."),
+    # ECOA na P3.2 (golden de 2026-10-20): "registro E3", "contratação E1".
+    ("A Lei 14.133 vale no registro E3; na contratação E1, a modalidade não consta.",
+     "A Lei 14.133 vale no registro [3]; na contratação [1], a modalidade não consta."),
     # chunk_id de ata com página tem um segmento a mais.
     ("No chunk_id=" + _ATA_PAGINA + ", o fornecedor atrasou.", "No [2], o fornecedor atrasou."),
 ])

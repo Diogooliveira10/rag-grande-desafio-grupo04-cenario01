@@ -1263,7 +1263,16 @@ _APELIDOS_DE_FORNECEDOR = {
     "dataprev": "EMPRESA DE TECNOLOGIA E INFORMACOES DA PREVIDENCIA S.A. - DATAPREV",
     "fiotec": "FIOTEC - FUNDACAO PARA O DESENVOLVIMENTO CIENTIFICO E TECNOLOGICO EM SAUDE",
     "embratel": "EMBRATEL TVSAT TELECOMUNICACOES SA",
+    # Grafias variadas na v7: o filtro de fornecedor casa por trecho (LIKE), então
+    # o apelido aponta para a parte comum a todas ("S A"/"SA", "TELEGRAFOS"/
+    # "TELÉGRAFOS"). A CEDAE fica de fora: também é órgão do catálogo, e
+    # "contratos da CEDAE" já responde como órgão contratante.
+    "light": "LIGHT SERVICOS DE ELETRICIDADE S",
+    "correios": "EMPRESA BRASILEIRA DE CORREIOS E TEL",
 }
+# Apelido que também é palavra comum: só vale com inicial maiúscula na pergunta
+# ("a Light recebeu"), não em "lâmpadas light".
+_APELIDOS_SO_COM_MAIUSCULA = {"light": re.compile(r"\b(?:Light|LIGHT)\b")}
 
 # Artigo ou contração logo antes do nome: "da Medshore", "a Cristália recebeu".
 _ARTIGOS_ANTES_DE_NOME = frozenset("da do das dos a o as os pela pelo pelas pelos".split())
@@ -1319,7 +1328,8 @@ def _nome_curto_de_fornecedor(palavra: str, todas: Sequence[tuple[str, int, int]
     return total == 0 or do_fornecedor / total >= _PARCELA_MINIMA_DO_PROPRIO_FORNECEDOR
 
 
-def _extrair_fornecedor(texto: str, bloqueados: Sequence[Span] = ()) -> tuple[Optional[str], Optional[Span]]:
+def _extrair_fornecedor(texto: str, bloqueados: Sequence[Span] = (), *,
+                        original: Optional[str] = None) -> tuple[Optional[str], Optional[Span]]:
     """Fornecedor do snapshot citado na pergunta, e o trecho que o citou.
 
     Aceita nome parcial sem as palavras genéricas ("empresa Cristália"). Se
@@ -1329,7 +1339,11 @@ def _extrair_fornecedor(texto: str, bloqueados: Sequence[Span] = ()) -> tuple[Op
     """
     if texto:
         for achado in re.finditer(r"\w+", texto):
-            apelido = _APELIDOS_DE_FORNECEDOR.get(_normalize(achado.group()))
+            chave = _normalize(achado.group())
+            apelido = _APELIDOS_DE_FORNECEDOR.get(chave)
+            exige_maiuscula = _APELIDOS_SO_COM_MAIUSCULA.get(chave)
+            if apelido and exige_maiuscula and original is not None and not exige_maiuscula.search(original):
+                continue
             if apelido and not any(comeca < achado.end() and achado.start() < termina
                                    for comeca, termina in bloqueados):
                 return apelido, achado.span()
@@ -1866,7 +1880,7 @@ def _analisar_com_trechos(query: str) -> tuple[QueryFilters, str, list[Span]]:
     # objeto. O fornecedor não olha dentro do que já é município/órgão.
     municipio, trecho_municipio = _extrair_municipio(texto)
     fornecedor, trecho_fornecedor = _extrair_fornecedor(
-        texto, [s for s in (trecho_municipio,) if s])
+        texto, [s for s in (trecho_municipio,) if s], original=query)
     if fornecedor and orgao and trecho_fornecedor and re.search(
         r"\b(?:fornecedor(?:a)?|empresa|contratada)\s+(?:(?:a|o|da|do|de|e)\s+)*$",
         texto[:trecho_fornecedor[0]],
