@@ -124,6 +124,19 @@ _RESPOSTA_A_INJECAO = (
 )
 
 
+def tentativa_de_injecao(query: str) -> bool:
+    """True se a mensagem pede para mostrar ou mudar as instruções internas.
+
+    O pipeline consulta isto antes da reformulação: no meio de uma conversa, o
+    LLM reescrevia a injeção como continuação da pergunta anterior.
+    """
+    if not isinstance(query, str):
+        return False
+    normalized = "".join(character for character in unicodedata.normalize("NFKD", query.casefold())
+                         if not unicodedata.combining(character))
+    return bool(_TENTATIVA_DE_INJECAO.search(" ".join(re.sub(r"[^\w\s]", " ", normalized).split())))
+
+
 def resposta_conversacional(query: str, *, run_id: str = "sem-run-id",
                            query_id: str = "sem-query-id") -> RAGResponse | None:
     if not isinstance(query, str):
