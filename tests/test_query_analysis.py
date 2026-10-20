@@ -1436,9 +1436,22 @@ def test_nome_curto_sem_a_base_nao_vira_fornecedor(monkeypatch):
     ("Quais contratos a Removip assinou?", "REMOVIP SERVICO MEDICO LTDA"),
     ("Quanto a Fiotec recebeu?", "FIOTEC - FUNDACAO PARA O DESENVOLVIMENTO CIENTIFICO E TECNOLOGICO EM SAUDE"),
     ("Quais contratos da Dataprev?", "EMPRESA DE TECNOLOGIA E INFORMACOES DA PREVIDENCIA S.A. - DATAPREV"),
+    # Trecho comum às grafias da v7 ("S A"/"SA", "TELEGRAFOS"/"TELÉGRAFOS").
+    ("Quanto a Light recebeu em 2025?", "LIGHT SERVICOS DE ELETRICIDADE S"),
+    ("Quantos contratos os Correios têm?", "EMPRESA BRASILEIRA DE CORREIOS E TEL"),
 ])
 def test_apelido_de_fornecedor_vira_a_razao_social(pergunta, fornecedor):
     assert qa._analisar(pergunta).filtros_analiticos.get("fornecedor") == fornecedor
+
+
+def test_light_minusculo_e_palavra_comum_nao_fornecedor():
+    assert "fornecedor" not in qa._analisar("Contratos de iluminação com lâmpadas light").filtros_analiticos
+
+
+def test_cedae_continua_como_orgao_e_nao_fornecedor():
+    # Também é órgão do catálogo: com apelido, os dois filtros juntos zeravam a resposta.
+    filtros = qa._analisar("Qual o valor total dos contratos da CEDAE?")
+    assert "fornecedor" not in filtros.filtros_analiticos and filtros.orgao
 
 
 @pytest.mark.parametrize("pergunta,metrica", [

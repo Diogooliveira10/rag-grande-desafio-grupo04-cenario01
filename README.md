@@ -575,7 +575,7 @@ py app/cli.py perguntar                                                    # sem
 py app/cli.py perguntar --incluir-experimentais "Quais sanções a norma prevê para o fornecedor que não recolher a multa?"
 ```
 
-Com o endpoint compartilhado, a maior parte do tempo é a geração: na rodada do golden set de 2026-10-19 (36 casos, v7) a resposta levou 5 s na mediana e 18 s na média, com o máximo de 84 s (com `GENERATION_TIMEOUT=60` e sem nova tentativa). As perguntas que saem do SQL não passam pelo LLM e respondem em 0,3 a 2 s. Na primeira pergunta de um processo, o rerank leva ~15 s a mais para carregar o modelo.
+Com o endpoint compartilhado, a maior parte do tempo é a geração: na rodada do golden set de 2026-10-21 (36 casos, v7) a resposta levou 5 s na mediana e 23 s na média, com o máximo de 174 s na primeira pergunta que passa pela busca, porque a avaliação roda num processo novo e carrega o rerank nela (no backend ele é carregado ao subir) (com `GENERATION_TIMEOUT=60` e sem nova tentativa). As perguntas que saem do SQL não passam pelo LLM e respondem em 0,3 a 2 s. Na primeira pergunta de um processo, o rerank leva ~15 s a mais para carregar o modelo.
 
 **8. Rodar a avaliação (golden set das personas)**
 
@@ -592,6 +592,8 @@ py .\eval\ablacao_rerank.py --candidatos 10 30                 # ablação da re
 `eval/adapters.py:rota_apenas` avalia só o estágio de roteamento, sem chamar o LLM — útil para checar regressão rápida. `src/pipeline.py:responder` roda o pipeline completo (roteamento + recuperação híbrida via `retrieve.py` + geração via `generate.py`), chamando o LLM de verdade a cada pergunta do golden set.
 
 O relatório (`eval/runs/<run_id>/REPORT.md`) traz rota e recusa (o que define o acerto), citação, confiança, latência e tokens, e o texto de cada resposta. Um caso que dá erro aparece como ERRO sem interromper a rodada. Além de rota, recusa e citação, cada caso pode ter critérios de conteúdo (`deve_conter`, `deve_conter_qualquer`, `nao_deve_conter`, critérios numéricos, fonte esperada e teto de confiança). A rodada auditada mais recente e a análise de cada caso estão em [docs/registro_execucao_v6.md](docs/registro_execucao_v6.md), e o resultado vigente em [ARQUITETURA.md](ARQUITETURA.md). Os casos `G1`–`G3` testam os guardrails do cenário (dados bancários, credenciais em e-mail, juízo de fraude), e `E1`–`E3` os e-mails sintéticos: um e-mail público encontrado com os dados pessoais mascarados e duas recusas de conteúdo restrito (dados bancários e credencial). `I1`–`I4` buscam por identificador: número de controle de contrato e de ata e CNPJ de fornecedor e de órgão. P1.3, P4.2 e P4.3 continuam a pergunta anterior ("esses contratos", "os mesmos contratos"): declaram `depende_de`, e o avaliador manda as perguntas anteriores da persona como `historico` a `pipeline_completo`, como o frontend faz. A ablação do rerank usa outro conjunto, [eval/retrieval_set.jsonl](eval/retrieval_set.jsonl), com o trecho relevante de cada pergunta rotulado; resultado e decisão em [docs/ABLACAO_RERANK.md](docs/ABLACAO_RERANK.md).
+
+**Resultado mais recente (2026-10-21, v7): 35/36 (97%).** Rota 97%, recusa 100%, conteúdo 97% e citação 100%; a única falha (P3.2) oscila com a redação do LLM entre rodadas. Os gabaritos da P1.2, da P4.2 e da P6.1 foram refeitos para a v7, depois de conferidos no SQLite: pediam números e premissas da v6. Histórico das rodadas em [docs/registro_execucao_v6.md](docs/registro_execucao_v6.md).
 
 **9. Subir a API HTTP (backend do frontend)**
 
@@ -692,8 +694,10 @@ GENERATION_MAX_RETRIES=0
 OPENROUTER_TIMEOUT=60
 API_DOCS=false
 OPENROUTER_API_KEY=<chave>
-OPENROUTER_MODEL=nvidia/nemotron-3-super-120b-a12b:free
-OPENROUTER_MODEL_FALLBACK=google/gemma-4-31b-it:free
+# Trocados em 2026-10-21: o nemotron-3-super gratuito passou a devolver 404 e o
+# gemma-4-31b, limite de uso no provedor. Os gratuitos mudam: conferir antes.
+OPENROUTER_MODEL=nvidia/nemotron-3.5-super-vl:free
+OPENROUTER_MODEL_FALLBACK=minimax/minimax-m3.1-flash:free
 # DATABASE_URL vazio: SQLite local com a v7 (mesmas respostas do Neon, mais rápido)
 # SQL_APRESENTACAO_LLM fica desligada (padrão): com ela, as respostas do SQL
 # também passam pelo LLM e as consultas ao vivo vão de ~2 s para 7-25 s

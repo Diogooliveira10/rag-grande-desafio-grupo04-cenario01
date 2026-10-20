@@ -64,7 +64,7 @@ def test_statistics_preserve_count_cents_and_informative_value_policy(facts, met
     result = generate.gerar_resposta('Resultado?', chunks, [Natureza.ESTRUTURADA], cliente=modelo_template_sql)
     assert '| Recorte | Registros |' in result.answer
     assert expected in result.answer
-    assert '1 registros sem valor informado' in result.answer
+    assert '1 registro sem valor informado' in result.answer
     assert 'Fonte: [1]' in result.answer
     assert len(result.sources_used) == 1
     assert '{{sql}}' not in result.answer

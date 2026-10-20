@@ -881,6 +881,11 @@ def _descrever_termo(termo: str) -> str:
     return f"{termo} (TI: tecnologia da informação, informática, software, TIC)" if termo == "tecnologia" else termo
 
 
+def _n_registros(n: Any) -> str:
+    """"1 registro", "2 registros": as tabelas mostravam "1 registros"."""
+    return f"{n} registro" if n == 1 else f"{n} registros"
+
+
 def _formatar_cnpj(cnpj: Any) -> str:
     digitos = re.sub(r"\D", "", str(cnpj))
     if len(digitos) != 14:
@@ -977,7 +982,7 @@ def _tabela_metricas(consulta: Consulta, registros: list[dict], rotulo: str) -> 
               else [{"soma": "total"}.get(consulta.metrica, consulta.metrica)])
     campos = [c for c in campos if c in nomes]
     return tabela_markdown([rotulo, "Registros", *(nomes[c] for c in campos)],
-        [[r["rotulo"], f"{r['n']} registros", *(_brl(r.get(c)) for c in campos)] for r in registros],
+        [[r["rotulo"], _n_registros(r['n']), *(_brl(r.get(c)) for c in campos)] for r in registros],
         numericas=range(1, len(campos) + 2))
 
 
@@ -1151,7 +1156,7 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
             grupos = [f"Nenhum dos {sem_campo} registros que atendem aos filtros informa {coluna}{motivo}: "
                       f"com estes dados não é possível dizer qual {coluna} é a mais frequente."]
         elif sem_campo:
-            grupos.append(f"({sem_campo} registros sem informação de {coluna} ficaram fora dos grupos.)")
+            grupos.append(f"({_n_registros(sem_campo)} sem informação de {coluna} ficaram fora dos grupos.)")
         if consulta.incluir_total_geral:
             # Total de TODO o recorte, não só dos grupos que cabem no LIMIT.
             totais = banco.consultar(
@@ -1204,7 +1209,7 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
         sql = f"SELECT COUNT(*) AS n FROM {consulta.tabela}{where}"
         n = banco.consultar(sql, parametros)[0]['n']
         if markdown is not None:
-            markdown.append(tabela_markdown(["Métrica", "Resultado"], [["Contagem no recorte solicitado", f"{n} registros"]], numericas=[1]))
+            markdown.append(tabela_markdown(["Métrica", "Resultado"], [["Contagem no recorte solicitado", _n_registros(n)]], numericas=[1]))
         return sql, [f"Contagem no recorte solicitado: {n} registros (inclui registros sem valor)."]
 
     if consulta.tipo == "estatistica":
@@ -1265,7 +1270,7 @@ def _executar(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao:
                     [float(l['valor']) for l in grupo if l['valor'] is not None], n=len(grupo))})
         markdown.append(_tabela_metricas(consulta, registros, "Recorte"))
         if ausentes or simbolicos:
-            markdown.append(f"{ausentes} registros sem valor informado; {simbolicos} com valor abaixo de R$ 1,00. Campos ausentes não são zero.")
+            markdown.append(f"{_n_registros(ausentes)} sem valor informado; {simbolicos} com valor abaixo de R$ 1,00. Campos ausentes não são zero.")
         if consulta.comparacao_esferas and insuficiente:
             markdown.append(texto_markdown(insuficiente))
     return sql, resultado

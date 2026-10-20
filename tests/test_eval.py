@@ -776,6 +776,22 @@ def test_p61_nao_exige_clausula_condicional_de_dados_insuficientes():
     assert _content_ok(caso, resposta) is True
 
 
+def test_p61_aceita_regra_confirmada_com_confianca_alta():
+    '''Resposta real das rodadas de 2026-10-20: certa e com a LC 123/2006 citada.
+    O teto "média" do gabarito reprovava só pela confiança; com a regra
+    explícita no corpus, confiança alta é coerente.'''
+    caso = _caso_golden("P6.1")
+    resposta = {
+        "answer": (
+            "Sim, uma microempresa pode participar de pregão eletrônico conforme o art. 42 da "
+            "Lei Complementar nº 123/2006, que prevê que, em caso de pregão, a microempresa ou "
+            "empresa de pequeno porte mais bem classificada será convocada para apresentar nova proposta [1]."
+        ),
+        "confidence_level": "alta",
+    }
+    assert _content_ok(caso, resposta) is True
+
+
 def test_p61_aceita_o_ramo_de_dados_insuficientes():
     caso = _caso_golden("P6.1")
     resposta = {
@@ -1132,3 +1148,27 @@ def test_p43_nao_pune_quem_esclarece_que_nao_informado_nao_e_modalidade():
         "confidence_level": "media",
     }
     assert _content_ok(caso, resposta) is True
+
+
+def _resposta_p12(texto):
+    return {"answer": texto, "confidence_level": "baixa", "bases_consultadas": ["estruturada", "conversacional"],
+            "is_refusal": False, "sources_used": [{"chunk_id": "c1"}]}
+
+
+@pytest.mark.parametrize("texto", [
+    "Não há evidência de atas ou registros mencionando atraso de entrega, descumprimento de prazo ou "
+    "problema de fornecimento para os fornecedores de tecnologia estaduais de 2025 acima de R$ 500 mil.",
+    "Nenhum dos registros mencionados no contexto refere-se a atraso de entrega ou problemas de fornecimento.",
+])
+def test_p12_aceita_a_resposta_da_v7(texto):
+    '''Na v7 a premissa se confirma (Extreme Digital, 3 contratos; 3Structure IT, 7) e nenhuma
+    ata desses fornecedores menciona atraso: o gabarito da v6 pedia "nenhum fornecedor".'''
+    assert _content_ok(_caso_golden("P1.2"), _resposta_p12(texto)) is True
+
+
+@pytest.mark.parametrize("texto", [
+    "Nenhum fornecedor atende ao critério; a premissa não se confirma.",
+    "Sim, há atraso de entrega registrado para a 3Structure IT.",
+])
+def test_p12_reprova_a_premissa_da_v6_e_o_atraso_inventado(texto):
+    assert _content_ok(_caso_golden("P1.2"), _resposta_p12(texto)) is False
