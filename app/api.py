@@ -262,6 +262,11 @@ async def _ciclo_de_vida(_app: FastAPI):
         threading.Thread(target=rerank.pre_carregar, name="rerank-preload", daemon=True).start()
     if config.INDEX_PRELOAD:
         threading.Thread(target=retrieve.pre_carregar_indices, name="index-preload", daemon=True).start()
+        # Estatística das palavras dos objetos, usada para reconhecer fornecedor
+        # por um nome curto ("da Medshore"): ~4 s na primeira pergunta sem isso.
+        from src import query_analysis
+        threading.Thread(target=query_analysis._palavras_dos_objetos, name="fornecedor-preload",
+                         daemon=True).start()
     # O catálogo lê e compacta o JSONL ativo uma vez (~7 s na primeira carga).
     # Aquecer em thread evita que a primeira tela de Explorar pague esse custo
     # dentro do timeout de 30 s do navegador. Falha aqui não derruba o servidor.

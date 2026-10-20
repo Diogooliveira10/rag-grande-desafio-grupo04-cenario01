@@ -1470,6 +1470,34 @@ def test_listagem_direta_so_dispensa_o_llm_quando_ha_registros(tmp_path):
     assert not any(c.metadata.extras["geracao_deterministica"] for c in chunks(("helicoptero",)))
 
 
+def test_comparacao_conta_so_as_esferas_citadas_e_exige_minimo_em_cada():
+    consulta = sq.Consulta(tabela="contratacoes", tipo="estatistica", comparacao_esferas=True,
+                           esferas_comparadas=("estadual", "municipal"))
+    # F1 na v7: um único estadual, e a federal (não citada) completava duas esferas.
+    motivo = sq._comparacao_esferas_insuficiente(
+        consulta, {"estadual": [58500.0], "municipal": [1.0e5, 2.0e5, 3.0e5, 4.0e5, 5.0e5], "federal": [1.0e6] * 6})
+    assert motivo and "estadual: 1 valores" in motivo
+
+    assert sq._comparacao_esferas_insuficiente(
+        consulta, {"estadual": [1.0e5] * 3, "municipal": [2.0e5] * 3}) is None
+
+
+def test_comparacao_sem_esferas_citadas_mantem_a_regra_de_duas_esferas():
+    consulta = sq.Consulta(tabela="contratacoes", tipo="estatistica", comparacao_esferas=True)
+
+    assert sq._comparacao_esferas_insuficiente(consulta, {"estadual": [1.0e5], "municipal": [2.0e5]}) is None
+    assert sq._comparacao_esferas_insuficiente(consulta, {"estadual": [1.0e5], "municipal": [0.0]})
+
+
+def test_pergunta_que_compara_esferas_guarda_as_esferas_citadas():
+    from src.query_analysis import _analisar
+
+    pergunta = "Em 2025, órgãos estaduais pagaram mais por ambulâncias do que os municípios?"
+    consulta = sq.detectar_consulta(pergunta, _analisar(pergunta), ESTRUTURADA)
+
+    assert set(consulta.esferas_comparadas) == {"estadual", "municipal"}
+
+
 def test_ranking_sem_modalidade_mostra_nao_informada_e_nao_none(tmp_path):
     documents = tmp_path / "documents.jsonl"
     escrever_documents(documents, contratacoes=[_contratacao("R-1", modalidade=None, objeto="Aquisição de ambulância")])
@@ -1715,3 +1743,29 @@ def test_valor_total_sem_pagamento_nao_ganha_o_aviso(base):
 
     assert not consulta.pagamento_citado
     assert "não registra pagamentos" not in cabecalho
+
+
+@pytest.mark.parametrize("verbo", ["somaram", "gastaram", "receberam", "contrataram"])
+def test_verbo_de_quantidade_com_mais_e_comparacao_entre_esferas(verbo):
+    from src.query_analysis import _analisar
+
+    pergunta = f"Em 2025, os órgãos federais {verbo} mais em ambulâncias do que os municipais?"
+    consulta = sq.detectar_consulta(pergunta, _analisar(pergunta), ESTRUTURADA)
+
+    assert consulta.tipo == "estatistica" and consulta.comparacao_esferas
+    assert set(consulta.esferas_comparadas) == {"federal", "municipal"}
+
+
+@pytest.mark.parametrize("pergunta,mostra", [
+    ("Quantos contratos de ambulância existem e qual o valor total?", True),
+    ("Quantos contratos de ambulância foram assinados em 2025?", False),
+])
+def test_contagem_mostra_o_total_so_quando_a_pergunta_pede(pergunta, mostra):
+    from src.query_analysis import _analisar
+
+    consulta = sq.detectar_consulta(pergunta, _analisar(pergunta), ESTRUTURADA)
+
+    assert consulta.metrica == "contagem" and consulta.mostrar_total is mostra
+    tabela = sq._tabela_metricas(consulta, [{"rotulo": "Recorte", "n": 2, "total": 300.0}], "Recorte")
+    assert ("Total registrado" in tabela) is mostra
+

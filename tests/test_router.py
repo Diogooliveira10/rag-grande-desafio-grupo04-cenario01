@@ -188,3 +188,20 @@ def test_pergunta_sobre_pagamento_vai_para_a_base_de_contratos(pergunta):
     # O PNCP não registra pagamento, mas a base de contratos responde com o
     # valor contratado e avisa que não é o pago; recusar seria pior.
     assert Natureza.ESTRUTURADA in rotear_pergunta(pergunta).bases_selecionadas
+
+
+def test_fornecedor_reconhecido_inclui_a_base_estruturada():
+    from src.query_analysis import analisar_query
+
+    pergunta = "Quantos registros da empresa Cristália aparecem no corpus e qual é o valor total registrado?"
+    decisao = rotear_pergunta(pergunta, analise=analisar_query(pergunta))
+
+    assert Natureza.ESTRUTURADA in decisao.bases_selecionadas
+
+
+def test_recusa_nao_ganha_base_por_causa_do_fornecedor():
+    from src.query_analysis import analisar_query
+
+    pergunta = "Qual a conta bancária da empresa Cristália?"
+    assert rotear_pergunta(pergunta, analise=analisar_query(pergunta)).bases_selecionadas == []
+

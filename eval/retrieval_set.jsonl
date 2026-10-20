@@ -29,8 +29,8 @@
 {"id": "R29", "pergunta": "Algum fundo de assistência social contratou crédito de passagem de ônibus para usuários?", "bases": ["estruturada"], "relevante_contem": ["recarga de cartoes de vale transporte"]}
 {"id": "R30", "pergunta": "Há ata de registro de preços para serviço de borracharia e conserto de pneus da frota?", "bases": ["conversacional"], "relevante_contem": ["pneus"]}
 {"id": "R31", "pergunta": "Existe ata para compra de espectrômetro de laboratório?", "bases": ["conversacional"], "relevante_contem": ["aquisicao de espectrometro"]}
-{"id": "R32", "pergunta": "Alguma ata registra preço de equipamentos para dentistas?", "bases": ["conversacional"], "relevante_contem": ["eventual aquisicao de equipamentos odontologicos"]}
-{"id": "R33", "pergunta": "Há ata para comprar material de cirurgia do coração?", "bases": ["conversacional"], "relevante_contem": ["insumos para cirurgia cardiaca"]}
+{"id": "R32", "pergunta": "Alguma ata registra preço de equipamentos para dentistas?", "bases": ["conversacional"], "relevante_contem": ["equipamentos odontologicos"]}
+{"id": "R33", "pergunta": "Há ata para comprar material de cirurgia do coração?", "bases": ["conversacional"], "relevante_contem": ["cirurgia cardiaca"]}
 {"id": "R34", "pergunta": "Por quanto foi homologado o forro de PVC no pregão 62/2023?", "bases": ["conversacional"], "relevante_contem": ["forro de pvc, liso"]}
 {"id": "I01", "pergunta": "Contrato 42498733000148-2-000014/2025", "bases": ["estruturada"], "relevante_contem": ["\"numerocontrolepncp\": \"42498733000148-2-000014/2025\""], "tipo": "identificador"}
 {"id": "I02", "pergunta": "Quais contratos tem o fornecedor de CNPJ 05340639000130?", "bases": ["estruturada"], "relevante_contem": ["\"nifornecedor\": \"05340639000130\""], "tipo": "identificador"}
