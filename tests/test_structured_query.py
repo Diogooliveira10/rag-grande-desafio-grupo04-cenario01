@@ -1797,3 +1797,12 @@ def test_cnpj_do_fornecedor_sai_do_sql_formatado(base_cnpj):
 def test_cnpj_junto_de_uma_conta_segue_o_caminho_da_conta(pergunta):
     filtros = QueryFilters(filtros_analiticos={"fornecedor": "PRIME CONSULTORIA"})
     assert sq.detectar_consulta(pergunta, filtros, ESTRUTURADA).tipo != "cnpj_fornecedor"
+
+
+@pytest.mark.parametrize("pergunta", [
+    "Contratos acima de 50 milhões em 2025",
+    "Contratações de merenda em Niterói",
+])
+def test_frase_nominal_de_contratos_e_listagem_direta(pergunta):
+    consulta = sq.detectar_consulta(pergunta, QueryFilters(ano=2025), ESTRUTURADA)
+    assert consulta.tipo == "listagem" and consulta.listagem_direta

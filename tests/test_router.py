@@ -244,3 +244,22 @@ def test_pedido_de_credencial_no_singular_ou_chave_de_api_e_recusado(pergunta):
     decisao = rotear_pergunta(pergunta)
     assert decisao.bases_selecionadas == []
     assert inferir_motivo_recusa(decisao.justificativa) == RefusalReason.CREDENCIAIS_VAZADAS
+
+
+@pytest.mark.parametrize("pergunta", [
+    "Quem vai ganhar a próxima licitação de ambulância?",
+    "Quando será o próximo pregão da Saúde?",
+    "Qual empresa vencerá o pregão de 2027?",
+])
+def test_previsao_de_vencedor_ou_proxima_licitacao_e_fora_do_corpus(pergunta):
+    decisao = rotear_pergunta(pergunta)
+    assert decisao.bases_selecionadas == []
+    assert inferir_motivo_recusa(decisao.justificativa) == RefusalReason.FORA_DE_ESCOPO
+
+
+@pytest.mark.parametrize("pergunta", [
+    "Quem venceu a licitação de ambulância em 2025?",
+    "Quais empresas ganharam contratos de ambulância?",
+])
+def test_vencedor_no_passado_continua_na_base_de_contratos(pergunta):
+    assert Natureza.ESTRUTURADA in rotear_pergunta(pergunta).bases_selecionadas

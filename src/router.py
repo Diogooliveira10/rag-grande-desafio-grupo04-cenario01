@@ -74,6 +74,11 @@ _OUT_OF_SCOPE_PATTERNS = (
     r"\bprovavelmente vencerao\b",
     r"\bprever\b",
     r"\bprevisao\b",
+    # "Quem vai ganhar a próxima licitação?" é previsão: ia ao LLM (22 s) em
+    # vez de ser recusada como fora do corpus.
+    r"\b(?:vai|vao) (?:ganhar|vencer)\b",
+    r"\b(?:ganhara|ganharao|vencera|vencerao)\b",
+    r"\bproxim[ao]s? (?:licitac|contrat|pregao|pregoes|compra)",
 )
 
 _NORMATIVE_PATTERNS = (

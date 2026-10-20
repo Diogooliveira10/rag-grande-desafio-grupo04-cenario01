@@ -118,7 +118,10 @@ _RE_CONTAGEM_CONTRATOS = re.compile(
 )
 _RE_AGENTE = re.compile(r"\b[a-z]+(?:ad|id|it)[oa]s? por (?:orgaos|municipios|esferas)\b")
 # Pergunta que pede os registros em si: "quais órgãos contrataram…", "existem contratações de…".
-_RE_LISTAGEM = re.compile(r"^(?:quais|qual|existem?|ha|houve|liste|listar|mostre|mostrar)\b")
+# Também a frase nominal "Contratos acima de 50 milhões em 2025", sem verbo:
+# ia ao LLM, levava 50 s e saía com os valores mal formatados.
+_RE_LISTAGEM = re.compile(
+    r"^(?:quais|qual|existem?|ha|houve|liste|listar|mostre|mostrar|contratos|contratacoes)\b")
 _RE_LISTAGEM_CONTRATACOES = re.compile(
     r"\b(?:quais|qual|liste|listar|mostre|mostrar)\s+contrat(?:a(?:cao|coes)|os?)\b"
 )

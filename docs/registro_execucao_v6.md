@@ -1998,6 +1998,14 @@ de processamento enquanto gera. Cada chamada ao OpenRouter passou a ter prazo
 total de relógio (`OPENROUTER_TIMEOUT`, 60 s), e o pior caso de uma pergunta
 fica em ~200 s, abaixo dos 240 s que o site espera.
 
+**Teste geral pelo túnel (2026-10-20).** Rotas da API, CORS do site, sessão,
+histórico, trace, feedback, validação de entrada e 23 perguntas variadas
+(conversa, SQL, recusa, injeção e LLM). Dois erros corrigidos: "Contratos acima
+de 50 milhões em 2025", frase sem "quais", ia ao LLM (50 s, valores mal
+formatados) e passou a sair do SQL em 2,5 s; "Quem vai ganhar a próxima
+licitação?" ia ao LLM (22 s) e passou a ser recusada como previsão. Nenhuma
+pergunta do golden muda de caminho com as duas regras.
+
 Recuperação, no mesmo dia (`eval/medir_regressao_v7.py`, 47 casos de
 `eval/retrieval_set.jsonl`, índice v6 de referência contra o v7):
 
