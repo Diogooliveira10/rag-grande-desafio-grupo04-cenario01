@@ -1011,3 +1011,27 @@ def test_ressalva_nao_sobe_confianca_baixa():
 
     assert resposta.confidence_level == ConfidenceLevel.BAIXA and resposta.avisos == []
 
+
+def _chunk_de(natureza, n):
+    base = {Natureza.ESTRUTURADA: "contratos_estruturado", Natureza.NORMATIVA: "editais_normativo"}[natureza]
+    return Chunk(content="x" * 700, metadata=ChunkMetadata(
+        chunk_id=f"{base}:{n}", base_id=base, source_file="f", doc_type="json", natureza=natureza))
+
+
+def test_pergunta_mista_alterna_as_naturezas_no_orcamento(monkeypatch):
+    monkeypatch.setattr(gen.config, "GENERATION_CONTEXT_CHARS", 3500)
+    sql = [_chunk_de(Natureza.ESTRUTURADA, i) for i in range(4)]
+    normas = [_chunk_de(Natureza.NORMATIVA, i) for i in range(4)]
+
+    escolhidos = gen._chunks_no_orcamento(sql + normas, [Natureza.ESTRUTURADA, Natureza.NORMATIVA])
+    naturezas = [c.metadata.natureza for c in escolhidos]
+
+    # Antes, as partes do SQL vinham primeiro e só 1 trecho normativo cabia.
+    assert naturezas.count(Natureza.NORMATIVA) >= 2
+    assert naturezas.count(Natureza.ESTRUTURADA) >= 2
+
+
+def test_prompt_pede_declarar_a_lacuna_explicitamente():
+    assert "os dados são insuficientes para" in gen._SYSTEM_PROMPT
+    assert "não acrescente ressalva de insuficiência" in gen._SYSTEM_PROMPT
+

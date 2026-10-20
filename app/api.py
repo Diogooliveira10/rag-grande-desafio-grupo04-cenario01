@@ -274,7 +274,10 @@ async def _ciclo_de_vida(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Adaptive RAG API", version="1.0.0", lifespan=_ciclo_de_vida)
+app = FastAPI(title="Adaptive RAG API", version="1.0.0", lifespan=_ciclo_de_vida,
+              docs_url="/docs" if config.API_DOCS else None,
+              redoc_url="/redoc" if config.API_DOCS else None,
+              openapi_url="/openapi.json" if config.API_DOCS else None)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
@@ -284,6 +287,24 @@ app.add_middleware(
     # na frente do tráfego de navegador; o site envia este header para pulá-la.
     allow_headers=["Content-Type", "X-API-Key", "X-Session-Id", "ngrok-skip-browser-warning"],
 )
+
+# Cabeçalhos de segurança em toda resposta. A API só devolve JSON: nada dela
+# deve ser renderizado em frame, reinterpretado pelo navegador ou guardado em
+# cache (as respostas e os traces trazem as perguntas dos usuários).
+_CABECALHOS_DE_SEGURANCA = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Cache-Control": "no-store",
+}
+
+
+@app.middleware("http")
+async def _cabecalhos_de_seguranca(request: Request, call_next):
+    resposta = await call_next(request)
+    for nome, valor in _CABECALHOS_DE_SEGURANCA.items():
+        resposta.headers.setdefault(nome, valor)
+    return resposta
 
 
 @app.exception_handler(RequestValidationError)

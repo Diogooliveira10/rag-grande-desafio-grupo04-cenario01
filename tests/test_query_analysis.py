@@ -1431,3 +1431,20 @@ def test_nome_curto_sem_a_base_nao_vira_fornecedor(monkeypatch):
 
     assert qa._nome_curto_de_fornecedor("medshore", todas, todas[-1][1]) is False
 
+
+@pytest.mark.parametrize("pergunta,fornecedor", [
+    ("Quais contratos a Removip assinou?", "REMOVIP SERVICO MEDICO LTDA"),
+    ("Quanto a Fiotec recebeu?", "FIOTEC - FUNDACAO PARA O DESENVOLVIMENTO CIENTIFICO E TECNOLOGICO EM SAUDE"),
+    ("Quais contratos da Dataprev?", "EMPRESA DE TECNOLOGIA E INFORMACOES DA PREVIDENCIA S.A. - DATAPREV"),
+])
+def test_apelido_de_fornecedor_vira_a_razao_social(pergunta, fornecedor):
+    assert qa._analisar(pergunta).filtros_analiticos.get("fornecedor") == fornecedor
+
+
+@pytest.mark.parametrize("pergunta,metrica", [
+    ("Quanto a Fiotec recebeu em 2025?", "soma"),
+    ("Quantos contratos de ambulância foram assinados?", "contagem"),
+])
+def test_quanto_pede_valor_e_quantos_pede_contagem(pergunta, metrica):
+    assert qa._analisar(pergunta).metrica == metrica
+

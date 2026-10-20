@@ -107,6 +107,23 @@ _PROVENIENCIA = re.compile(
 )
 
 
+# Pedido para mostrar ou mudar as instruções internas (prompt injection). Sai
+# com resposta fixa, antes de qualquer LLM: o classificador de conversa
+# chegou a responder "Meu prompt de sistema é o seguinte: ..." com o texto dele.
+_TENTATIVA_DE_INJECAO = re.compile(
+    r"\b(?:ignore|ignora|ignorar|desconsidere|desconsiderar|esqueca|esquecer)\b.{0,40}?"
+    r"\b(?:instrucoes|instrucao|regras|orientacoes|comandos|prompt)\b"
+    r"|\b(?:prompt|instrucoes) (?:de|do) sistema\b|\bsystem prompt\b"
+    r"|\bprompt (?:inicial|original|interno|oculto)\b"
+    r"|\b(?:seu|sua|seus|suas) (?:prompt|instrucoes|regras internas)\b"
+    r"|\b(?:jailbreak|modo desenvolvedor|developer mode)\b"
+    r"|\bignore (?:all |the )?(?:previous|prior|above) instructions\b"
+)
+_RESPOSTA_A_INJECAO = (
+    "Não posso mostrar nem alterar as minhas instruções internas. " + _CAPABILITIES
+)
+
+
 def resposta_conversacional(query: str, *, run_id: str = "sem-run-id",
                            query_id: str = "sem-query-id") -> RAGResponse | None:
     if not isinstance(query, str):
@@ -116,7 +133,16 @@ def resposta_conversacional(query: str, *, run_id: str = "sem-run-id",
     normalized = " ".join(re.sub(r"[^\w\s]", " ", normalized).split())
     if not normalized:
         return None
-    if _GREETING.fullmatch(normalized):
+    if _TENTATIVA_DE_INJECAO.search(normalized):
+        # Pedido de credencial, dado bancário ou juízo de legalidade junto da
+        # injeção segue para a recusa própria do pipeline.
+        if inferir_motivo_recusa(_rotear(query).justificativa) in {
+            RefusalReason.DADOS_BANCARIOS, RefusalReason.CREDENCIAIS_VAZADAS,
+            RefusalReason.JUIZO_LEGALIDADE,
+        }:
+            return None
+        answer = _RESPOSTA_A_INJECAO
+    elif _GREETING.fullmatch(normalized):
         answer = "Olá! Estou aqui para ajudar. " + _CAPABILITIES
     elif _THANKS.fullmatch(normalized):
         answer = "De nada! Se quiser, faça outra pergunta ou explore os documentos do acervo."

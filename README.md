@@ -17,10 +17,11 @@ snapshot: [qualidade das respostas sem reindexação](docs/QUALIDADE_RESPOSTAS_S
 O suplemento sintético conversacional (25 e-mails) também está ativo:
 [docs/emails_sinteticos.md](docs/emails_sinteticos.md).
 
-Os vetores ativos em `data/embeddings/2026-10-07_21-18-41_ocr-recovery/` (a v6
-após a recuperação OCR; a geração original fica em `2026-09-30_12-08-51/`), os índices em `index/`,
-os documentos normalizados e o SQLite da v6 estão versionados para consulta.
-As credenciais ECOA continuam locais no `.env`. Os arquivos brutos são externos
+A v6 (1.400 arquivos) ficou como referência das medições de regressão; os
+seus vetores continuam em `data/embeddings/2026-10-07_21-18-41_ocr-recovery/`.
+Os dados da v7 (`documents.jsonl`, SQLite e `index/`, 5,3 GB) não vão para o
+Git: cada integrante baixa na própria máquina (passo a passo na seção de
+instalação). As credenciais ECOA continuam locais no `.env`. Os arquivos brutos são externos
 ao Git; as fontes públicas constam nos metadados. As entregas das atas estão em
 [PDF](atas-zip/atas_conversacional-v6.zip) e
 [Markdown](atas-zip/atas_conversacional-v6-md.zip), com 40 documentos cada.
@@ -39,12 +40,14 @@ Contexto completo do desafio, dos outros dois cenários e dos padrões de engenh
 | Base | Natureza | Conteúdo | Fonte | Acesso |
 | --- | --- | --- | --- | --- |
 | `editais_normativo` | Normativa | Lei 14.133/2021, decretos estaduais, editais de licitação | Senado Federal, REDELOG-RJ, CGE-RJ, MPPI | PDF/HTML por URL |
-| `contratos_estruturado` | Estruturada | 625 contratos de órgãos do RJ, quase todos de 2025 (434 municipais, 159 federais, 32 estaduais) | PNCP — API de consulta | REST paginado |
-| `atas_conversacional` | Conversacional | 376 arquivos de atas de registro de preços: 336 JSON de metadados e 40 PDFs | PNCP | REST (JSON) + PDF |
+| `contratos_estruturado` | Estruturada | Censo de 2025 do RJ: 106.666 chunks; na base SQL, 106.667 registros (58.245 publicações de compra, 31.908 empenhos, 15.644 contratos assinados e 870 outros instrumentos) | PNCP — API de consulta | REST paginado |
+| `atas_conversacional` | Conversacional | Atas de registro de preços: 34.953 chunks (JSON de metadados e PDFs) | PNCP | REST (JSON) + PDF |
 | `emails_sinteticos` | Conversacional | Suplemento: 25 conversas fictícias de compras públicas; 20 públicas e 5 restritas | Base sintética gerada pelo tutor | JSON local |
-| `pca_agregado` | Agregada | 386 registros relacionados ao planejamento e ao resultado das compras: itens homologados, contratações vinculadas e um PCA confirmado (Secretaria de Saúde estadual) | PNCP | REST (JSON) |
+| `pca_agregado` | Agregada | Planejamento e resultado das compras: 911 chunks (itens homologados, contratações vinculadas e um PCA confirmado, da Secretaria de Saúde estadual) | PNCP | REST (JSON) |
 
-Números da v6 (limite de cinco arquivos por órgão e por base); detalhes em [CORPUS_INVENTORY.md](CORPUS_INVENTORY.md) e em [docs/registro_execucao_v6.md](docs/registro_execucao_v6.md).
+Números da v7 (2026-10-19); a base normativa e a agregada são as mesmas da v6
+(1.557 e 911 chunks). Detalhes em [CORPUS_INVENTORY.md](CORPUS_INVENTORY.md) e
+em [docs/registro_execucao_v6.md](docs/registro_execucao_v6.md).
 
 A definição declarativa de cada base — fonte, tipo de acesso, volume-alvo, campo de vigência, licença — vive em [corpus_manifest.yaml](corpus_manifest.yaml), que é a fonte única de verdade sobre o que entra no corpus. `data/raw/` nunca é versionado; qualquer pessoa reconstrói o corpus rodando o coletor contra o manifesto.
 
@@ -148,7 +151,7 @@ A escrita usa fila limitada e lotes, coordenados entre processos por SQLite/WAL 
 
 [Reparo incremental V7](docs/REPARO_V7.md): reutilização dos módulos existentes,
 candidato separado, SQLite compatível, validações curtas e lacunas documentadas.
-A v6 continua ativa; o candidato não foi promovido.
+O candidato foi promovido: a v7 é a base ativa desde 2026-10-19.
 
 ```
 ├── acompanhamento/              ← relato individual + resumo do dia, a cada encontro
@@ -156,12 +159,12 @@ A v6 continua ativa; o candidato não foi promovido.
 ├── CORPUS_INVENTORY.md           ← inventário legível do corpus coletado
 ├── data/
 │   ├── raw/vN/                  ← versão imutável de cada coleta (staging em raw/.staging/ até promoção)
-│   ├── normalized/              ← chunks normalizados (JSONL), saída de src/prepare_documents.py (o snapshot da v6 está versionado; novas saídas continuam ignoradas)
+│   ├── normalized/              ← chunks normalizados (JSONL), saída de src/prepare_documents.py (fora do Git: baixar a v7 do Drive)
 │   ├── embeddings/               ← embeddings versionados (cache + partes), gerados por src/create_embeddings.py
 │   ├── inventory/                ← inventário por versão (JSON), checkpoints e diffs entre versões
 │   ├── runs/                    ← relatórios de execução de cada coleta
 │   └── attempts/                ← coletas e preparações experimentais (--data-root), fora do Git
-├── index/                       ← índice vetorial por base (vectors.jsonl + vectors.faiss); o índice da v6 está versionado
+├── index/                       ← índice vetorial por base (vectors.jsonl + vectors.faiss); fora do Git: baixar a v7 do Drive
 ├── logs/                        ← pipeline/ (JSONL diário) e maintenance/ (diagnósticos), fora do Git
 ├── eval/                        ← golden set das personas e harness de avaliação (run_eval.py)
 ├── tests/fixtures/               ← amostras locais para testes offline
@@ -536,7 +539,7 @@ py -m src.structured_db sql "SELECT modalidade, COUNT(*) AS n FROM contratacoes 
 Onde a base fica depende de `DATABASE_URL` no `.env` — o mesmo código e o mesmo SQL valem para os dois:
 
 - **Preenchido:** Postgres no [Neon](https://neon.tech) (`postgresql://...?sslmode=require`). É a base do projeto. A connection string tem senha: fica só no `.env`, nunca no repositório nem no log (o log mostra só o host). Com o usuário dono, a base se remonta sozinha quando o `documents.jsonl` ou o esquema mudam; com um usuário só de leitura (`rag_leitor`), ela é usada como está e o log da etapa `consulta_sql` marca `base_desatualizada` — quem tem o usuário dono roda `py -m src.structured_db build` uma vez.
-- **Vazio:** SQLite em `data/structured/base_estruturada.sqlite`, versionado no Git com o snapshot v6. Serve a quem não tem a connection string do Neon, aos testes (que sempre usam SQLite temporário, sem internet nem senha; ver `tests/conftest.py`) e às avaliações reproduzíveis. Quando o esquema muda, o arquivo remontado entra no commit, para ninguém ficar com ele alterado.
+- **Vazio:** SQLite em `data/structured/base_estruturada.sqlite`, baixado do Drive com a v7. **É o modo da demo**: as respostas são as mesmas do Neon, mas saem em 0,4 a 3 s, contra 4 a 13 s no Neon, que paga a rede a cada consulta. O Neon foi atualizado com a v7 em 2026-10-19 (as três tabelas copiadas do SQLite, com o mesmo `source_sha256`). Serve a quem não tem a connection string do Neon, aos testes (que sempre usam SQLite temporário, sem internet nem senha; ver `tests/conftest.py`) e às avaliações reproduzíveis. Quando o esquema muda, o arquivo remontado entra no commit, para ninguém ficar com ele alterado.
 
 Tabelas: `contratacoes` e `pca_planos`. Em `contratacoes`, cada linha é uma compra publicada ou um contrato assinado do PNCP: órgão, esfera, município, objeto, modalidade (só as compras trazem), fornecedor (só os contratos trazem) e valor (`valorGlobal` no contrato; homologado, ou estimado, na compra). O contrato guarda o número da compra que o originou (`numero_controle_compra`), e as perguntas sobre "contratações" contam uma vez a contratação que tem os dois registros. Valores abaixo de R$ 1,00 (R$ 0,00 e R$ 0,01 simbólicos do PNCP) ficam fora de média, mediana e ranking. `pca_planos` tem um plano de contratações anual por unidade, com valor total e quantidade de itens. Só entram registros da base agregada cujo número de controle PNCP é de plano (`CNPJ-0-…/ano`): a base traz também compras (`-1-`) e contratos (`-2-`) ligados aos planos, que não são planos (na v6, 1 plano entre 377 registros). Essas compras e contratos vão para `contratacoes` quando a base de contratos não os tem, são do RJ e foram publicados num ano que ela já cobre: na v6, 185 registros, e a tabela passa de 625 para 810 linhas, todas do RJ: 809 publicadas em 2025 e um contrato publicado em dezembro de 2024 e assinado em 2025. A montagem original da v6 trazia 184 registros (809 linhas); são 185 desde a remontagem de 2026-10-09, no schema 7. São só os planos presentes no corpus — o total oficial do PCA do Estado está nos indicadores da base agregada, e o resultado SQL avisa isso.
 
@@ -571,7 +574,7 @@ py app/cli.py perguntar                                                    # sem
 py app/cli.py perguntar --incluir-experimentais "Quais sanções a norma prevê para o fornecedor que não recolher a multa?"
 ```
 
-Com o endpoint compartilhado, a maior parte do tempo é a geração: na última rodada do golden set a resposta completa levou 23 s na mediana e 35 s na média, com picos acima de 3 minutos quando o servidor está carregado (a geração tem limite de `GENERATION_TIMEOUT=180` s e uma nova tentativa). Na primeira pergunta de um processo, o rerank leva ~15 s a mais para carregar o modelo.
+Com o endpoint compartilhado, a maior parte do tempo é a geração: na rodada do golden set de 2026-10-19 (36 casos, v7) a resposta levou 5 s na mediana e 18 s na média, com o máximo de 84 s (com `GENERATION_TIMEOUT=60` e sem nova tentativa). As perguntas que saem do SQL não passam pelo LLM e respondem em 0,3 a 2 s. Na primeira pergunta de um processo, o rerank leva ~15 s a mais para carregar o modelo.
 
 **8. Rodar a avaliação (golden set das personas)**
 
@@ -606,6 +609,15 @@ permitidos por CORS ([app/api.py](app/api.py)); origens adicionais podem ser
 informadas, separadas por vírgula, em `CORS_ALLOW_ORIGINS`. Como CORS trabalha
 com origem, a configuração usa `https://etuarda.github.io`, sem o caminho
 `/frontendRAG/`.
+
+Toda resposta da API leva cabeçalhos de segurança (`X-Content-Type-Options:
+nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` e
+`Cache-Control: no-store`), porque as respostas e os traces trazem as perguntas
+dos usuários. Com o backend exposto pelo túnel, `API_DOCS=false` no `.env`
+desliga `/docs`, `/redoc` e `/openapi.json`; o padrão é ligado, para uso local.
+Pedidos para mostrar ou mudar as instruções internas ("ignore as instruções
+anteriores", "mostre o seu prompt") recebem uma resposta fixa, sem chamar o
+LLM ([src/conversation.py](src/conversation.py)).
 
 No projeto do frontend, configure `VITE_API_BASE_URL` com a URL pública HTTPS
 deste backend, sem `/api/v1/query` no final (na demo, o domínio do túnel ngrok;
@@ -675,7 +687,13 @@ GENERATION_MAX_RETRIES=0
 OPENROUTER_API_KEY=<chave>
 OPENROUTER_MODEL=nvidia/nemotron-3-super-120b-a12b:free
 OPENROUTER_MODEL_FALLBACK=google/gemma-4-31b-it:free
+# DATABASE_URL vazio: SQLite local com a v7 (mesmas respostas do Neon, mais rápido)
+# SQL_APRESENTACAO_LLM fica desligada (padrão): com ela, as respostas do SQL
+# também passam pelo LLM e as consultas ao vivo vão de ~2 s para 7-25 s
 ```
+
+Com a v7, a API leva cerca de 1 minuto para ficar pronta e ocupa ~4,6 GB de
+RAM. Faça uma pergunta de aquecimento antes de abrir para o público.
 
 ### Endpoint de modelos (compartilhado com toda a turma)
 

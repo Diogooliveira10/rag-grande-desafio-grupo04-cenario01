@@ -1913,7 +1913,8 @@ Comparação com as rodadas anteriores (os conjuntos de casos diferem):
 | Auditoria `20261014T191537Z`, commit `0e4cd73` | v6 | 26 | 13 (50%) |
 | `revisao-16-10-completo` | v6 | 31 | 24 (77%) |
 | `v7-19-10-completo`, antes dos ajustes | v7 | 31 | 19 (61%) |
-| **`golden-2026-10-19-v7-36`** | **v7** | **36** | **31 (86%)** |
+| `golden-2026-10-19-v7-36` | v7 | 36 | 31 (86%) |
+| **`golden-2026-10-19-v7-36-ajustes`** | **v7** | **36** | **33 (92%)** |
 
 Entre a primeira rodada na v7 e esta entraram: a busca viável com a v7 (vetores
 lidos sem o JSON do vetor, contagem de termos do BM25 em cache), a comparação
@@ -1943,6 +1944,39 @@ As cinco falhas são da geração do LLM, não de dados, SQL ou rota:
 | P4.2 | Não declara a modalidade como não informada; a busca traz contratos de outro assunto |
 | P6.1 | Resposta correta (LC 123/2006) com confiança alta (teto: média) |
 
+**Rodada com os ajustes (`golden-2026-10-19-v7-36-ajustes`, mesmo dia).**
+Depois da rodada acima entraram três mudanças: o prompt passou a pedir que a
+falta de dados seja dita de forma explícita ("os dados são insuficientes
+para ...", "nenhum ... atende") e só quando a evidência não responde a
+pergunta inteira; nas perguntas que misturam normas e contratos, os trechos
+de cada base passaram a se alternar no orçamento do contexto, para a norma não
+ficar de fora; e uma lista curta de apelidos de fornecedor (Removip, Dataprev,
+Fiotec, Embratel), além de "quanto" reconhecido como pedido de soma.
+
+**Resultado: 33/36 (91,7%)**, em 656 s (mediana de 5 s e média de 18 s por
+caso, máximo de 84 s), sem erro de provedor. Rota 97,2%, recusa 100%, conteúdo
+91,7%, citação 100%, fonte esperada 18/18. P2.3 e P3.2 passaram; nenhum caso
+que passava antes falhou. As três falhas que restam são da geração:
+
+| Caso | O que faltou |
+|---|---|
+| P1.2 | Diz que nenhum registro trata de atraso, mas não com as palavras do gabarito |
+| P4.2 | Não declara a modalidade como não informada e sai com confiança alta |
+| P6.1 | Resposta correta (LC 123/2006) com confiança alta (teto: média) |
+
+**Rodada depois das correções de segurança (`golden-2026-10-20-v7-36-seguranca`).**
+Entraram: resposta fixa para pedido de mostrar ou mudar as instruções internas
+(prompt injection), recusa de "credencial" no singular, chave de API e token de
+acesso, "gastos" levando à base de contratos sem virar termo do objeto,
+fornecedor reconhecido levando à base estruturada mesmo sem palavra de
+contratação ("Quanto a Dataprev recebeu?" era recusada como fora de escopo), e o
+alerta de qualidade também na comparação entre esferas. Resultado: **31/36**,
+rota 97,2%. As três falhas anteriores se repetem; P2.2 e P4.3, que passaram na
+rodada anterior, falharam com rota e conteúdo iguais: em P2.2 o LLM escreveu
+"impedindo o cálculo", fora da lista de palavras do gabarito, e em P4.3 a
+resposta saiu sem citação. Nenhuma das mudanças passa por esses dois casos: é a
+variação do LLM entre rodadas (de 31 a 33 acertos com o mesmo código de geração).
+
 Recuperação, no mesmo dia (`eval/medir_regressao_v7.py`, 47 casos de
 `eval/retrieval_set.jsonl`, índice v6 de referência contra o v7):
 
@@ -1957,8 +1991,9 @@ Na híbrida, dois casos pioraram (R32 e R33) e um melhorou. Os dois eram de
 critério: pediam "alguma ata" de equipamentos odontológicos e de cirurgia
 cardíaca, os cinco primeiros resultados da v7 eram atas certas do assunto, e o
 critério exigia o trecho exato de uma ata da v6. O critério passou a ser o
-assunto da pergunta. Fica registrado que esses cinco primeiros eram a mesma ata
-repetida em chunks quase idênticos da v7.
+assunto da pergunta. Os cinco primeiros da R32 são atas diferentes
+(`-000001` a `-000007`) da mesma compra de Duque de Caxias (000075/2025): o
+resultado está certo, mas uma compra ocupa o topo inteiro.
 
 Os relatórios (`eval/runs/golden-2026-10-19-v7-36/` e os da recuperação) ficam
 fora do git; a cópia do grupo está na pasta compartilhada de avaliação.

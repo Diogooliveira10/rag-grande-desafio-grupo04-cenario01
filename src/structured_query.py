@@ -170,7 +170,7 @@ _PALAVRAS_GENERICAS = frozenset(
     evidencia evidencias insuficiencia suficiencia reconheca reconhecido reconhecimento
     suficiente suficientes tecnica tecnicas equivalente equivalentes tecnicamente
     disponivel disponiveis apenas comprovem comprovado comprovada
-    assinou assinaram contratou contrataram comprou compraram gastou gastaram
+    assinou assinaram contratou contrataram comprou compraram gastou gastaram gasto gastos despesa despesas
     publicou publicaram custou custaram custam custa custaria
     seus suas dele dela deles delas respectivo respectiva respectivos respectivas
     seguem segue seguindo base baseado baseada baseados baseadas fundamentado fundamentada fundamentados
@@ -1389,9 +1389,11 @@ def executar_consulta(consulta: Consulta, banco: Banco, recorte: Optional[dict] 
             tabelas: list[str] = []
             sql, linhas = _executar(banco, consulta, termos, juncao, markdown=tabelas if markdown is not None else None)
             # Contagem que também mostra o total (mostrar_total) recebe o alerta,
-            # porque o total exibido depende do valor fora do padrão.
+            # porque o total exibido depende do valor fora do padrão; a comparação
+            # entre esferas também, pois a tabela dela traz total, média e máximo.
             if (consulta.tipo in {"ranking", "estatistica", "agrupamento", "evolucao"}
-                    and (consulta.metrica != "contagem" or consulta.mostrar_total)):
+                    and (consulta.metrica != "contagem" or consulta.mostrar_total
+                         or consulta.comparacao_esferas)):
                 where, params = _where(consulta, termos, juncao)
                 coluna = _coluna_valor(consulta)
                 extremo = banco.consultar(

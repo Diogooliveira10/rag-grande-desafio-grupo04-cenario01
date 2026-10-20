@@ -159,6 +159,9 @@ RAG_API_KEY = _env("RAG_API_KEY", "")
 # true = histórico geral (perguntas de todos) aberto sem chave, para uma demo
 # que precise dele. Padrão fechado.
 HISTORY_PUBLIC = _env("HISTORY_PUBLIC", "false").lower() in {"1", "true", "sim", "yes"}
+# false = sem /docs, /redoc e /openapi.json: com o backend exposto pelo túnel,
+# o esquema da API deixa de ficar público. Padrão ligado, para uso local.
+API_DOCS = _env("API_DOCS", "true").lower() in {"1", "true", "sim", "yes"}
 # Dias que o histórico (src/history_store.py) guarda cada consulta; 0 = sem expurgo.
 HISTORY_RETENTION_DAYS = int(_env("HISTORY_RETENTION_DAYS", "30"))
 # Daily pipeline files follow history retention by default; 0 keeps all files.

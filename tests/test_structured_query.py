@@ -1433,6 +1433,15 @@ def test_pronome_e_verbo_da_pergunta_nao_viram_termo_do_objeto(complemento):
     assert sq._termos_do_objeto(f"contratos de ambulancia {complemento}") == ("ambulancia",)
 
 
+@pytest.mark.parametrize("pergunta,termos", [
+    ("compare os gastos federais e estaduais em 2025", ()),
+    ("quais os gastos com merenda escolar", ("merenda", "escolar")),
+    ("despesas com ambulancia", ("ambulancia",)),
+])
+def test_gasto_e_despesa_nao_viram_termo_do_objeto(pergunta, termos):
+    assert sq._termos_do_objeto(pergunta) == termos
+
+
 @pytest.mark.parametrize("palavra", ["passagem", "passagens"])
 def test_gem_e_gens_viram_o_mesmo_radical(palavra):
     assert sq._termos_do_objeto(f"contratos de {palavra} aerea") == ("passage", "aerea")

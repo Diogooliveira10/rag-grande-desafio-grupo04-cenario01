@@ -258,3 +258,11 @@ def test_publicacao_explicita_e_distinta_da_data_de_captura():
     assert "publicacao_informada=2021-04-01" in cabecalho
     assert "20/04/2021" not in cabecalho
     assert "cabeçalhos de impressão" in gen._SYSTEM_PROMPT
+
+
+def test_comparacao_entre_esferas_tambem_recebe_o_alerta_de_valor_extremo(base_respostas, monkeypatch):
+    # A comparação fica com métrica "contagem", mas a tabela dela mostra total,
+    # média e máximo: sem o alerta, um valor fora do padrão passava calado.
+    monkeypatch.setattr(sq.config, "VALUE_REVIEW_THRESHOLD", 250)
+    resposta = responder_sql("Compare os gastos federais e estaduais em 2025.", base_respostas)
+    assert "Alerta de qualidade" in resposta.answer
