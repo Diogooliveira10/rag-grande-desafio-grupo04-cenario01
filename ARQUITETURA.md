@@ -100,9 +100,9 @@ Já estão implementados:
 - CORS configurado para desenvolvimento local e para a origem `https://etuarda.github.io`;
 - frontend em repositório separado, publicado em [https://etuarda.github.io/frontendRAG/](https://etuarda.github.io/frontendRAG/): consome consulta, feedback, trace da pergunta e da conversa, catálogo e resumo do projeto, e mostra os `avisos` da resposta. Na demo, o backend roda na máquina de quem apresenta e fica público por um túnel ngrok no domínio fixo gratuito (README, seção 9.1); o site ainda precisa ser publicado apontando para ele;
 - suporte a certificados HTTPS com `certifi` sem desabilitar validação SSL;
-- golden set atual com 31 casos (`E1`–`E3`, dos e-mails sintéticos, entraram em 14/10; `I3` e `I4`, de busca por CNPJ de fornecedor e de órgão, em 16/10) e critérios de conteúdo (radicais, teto de confiança, negação), mais um conjunto de busca com 47 perguntas e a ablação do rerank. A rodada auditada de 2026-10-14 (`20261014T191537Z`, commit `0e4cd73`) usou o snapshot de 26 casos anterior a `E1`–`E3`: 13/26 (50%), roteamento 25/26, recusa 24/26, conteúdo 14/24 e citação correta 22/24. Houve dois erros do provedor, não validáveis como conteúdo. Resultado pontual, não medida permanente; comparação com 09/10 é parcial. Detalhes e análise individual em [docs/registro_execucao_v6.md](docs/registro_execucao_v6.md#auditoria-documental-do-golden-set-execução-20261014t191537z-2026-10-15);
+- golden set com 36 casos e critérios de conteúdo (radicais, teto de confiança, negação), mais um conjunto de busca com 47 perguntas e a ablação do rerank. Na v7, a rodada única de 2026-10-19 (`golden-2026-10-19-v7-36`, `main` em `b93164c`) deu **31/36 (86%)**: rota 97%, recusa 100%, citação 100%, conteúdo 86%, sem erro de provedor; as cinco falhas são da geração do LLM (palavras de insuficiência e confiança acima do teto). Na busca híbrida dos 47 casos, hit@10 de 0,87 na v7 contra 0,91 na v6. Detalhes em [docs/registro_execucao_v6.md](docs/registro_execucao_v6.md);
 - scripts de instalação (`scripts/setup.ps1`/`setup.sh`) e de download dos modelos com hash conferido (`scripts/models.ps1`/`models.sh`);
-- 1.677 testes automatizados passando na verificação realizada em 2026-10-16.
+- 2.035 testes automatizados passando na verificação realizada em 2026-10-19.
 
 ### Corpus e índice
 
@@ -115,7 +115,7 @@ As bases oficiais da v6 são:
 
 mais o suplemento sintético `emails_sinteticos` (25 conversas geradas pelo tutor, 20 públicas e 5 restritas; [docs/emails_sinteticos.md](docs/emails_sinteticos.md)).
 
-O inventário vigente é a versão v6, registrada em `data/inventory/v6.json` e resumida em `CORPUS_INVENTORY.md` e `docs/registro_execucao_v6.md`: **1.400 arquivos** no total (contratos_estruturado 625, editais_normativo 13, atas_conversacional 376, pca_agregado 386), distribuídos por esfera em municipal 804, federal 513 e estadual 83, com limite de até 5 documentos por órgão/base. O manifesto da v6 está arquivado byte a byte em [archive/corpus_manifest_v6.yaml](archive/corpus_manifest_v6.yaml); o `corpus_manifest.yaml` passou a descrever o censo **v7** (contratos e publicações de 2025), que está em construção e só substitui a v6 depois da regressão e da re-auditoria do golden set ([docs/PLANO_POSSIVEL_CORPUS_V7.md](docs/PLANO_POSSIVEL_CORPUS_V7.md)). O histórico de reconstrução do inventário entre as versões está em `data/inventory/DIFF_v2_v3.md`, `DIFF_v3_v4.md`, `DIFF_v4_v5.md` e `DIFF_v5_v6.md`.
+A base ativa é a **v7**, o censo de contratos e publicações de 2025, desde 2026-10-19: 106.667 registros em `contratacoes`, 144.112 chunks e 143.299 vetores, resumidos em `CORPUS_INVENTORY.md`. Os dados (5,3 GB) ficam fora do git e cada integrante baixa na própria máquina (README). A v6 (1.400 arquivos; manifesto arquivado em [archive/corpus_manifest_v6.yaml](archive/corpus_manifest_v6.yaml)) é a referência das medições de regressão. O histórico de reconstrução do inventário entre as versões está em `data/inventory/DIFF_v2_v3.md`, `DIFF_v3_v4.md`, `DIFF_v4_v5.md` e `DIFF_v5_v6.md`.
 
 O índice oficial vigente ([index/manifest.json](index/manifest.json)) usa embeddings `Qwen3-Embedding-0.6B.Q8_0` (dimensão 1024) em índice FAISS (`index/*/vectors.faiss`), gerados a partir de `data/normalized/v6/documents.jsonl`. Depois da recuperação OCR de 2026-10-07 ([src/qualidade_corpus.py](src/qualidade_corpus.py), relatório em [data/inventory/qualidade_v6.json](data/inventory/qualidade_v6.json)), ele tem **5.090 vetores** da v6, mais os 25 das conversas sintéticas (**5.115 no total**), sem trechos ilegíveis:
 
@@ -151,25 +151,19 @@ As tarefas são distribuídas entre os integrantes a cada encontro conforme as n
 
 ### Frentes atuais
 
-- Preparação do Demo Day (23/10): publicação do site, roteiro e ensaio.
-- Avaliação: a execução de 2026-10-14 foi auditada sobre o snapshot de 26 casos do commit `0e4cd73` (13/26); o Golden Set atual tem 31 casos, então ainda é necessária uma execução completa do snapshot vigente antes de tomar o resultado como medida atual.
-- Corpus v7 (censo de 2025), em construção; a v6 segue como base ativa.
+- Preparação do Demo Day (23/10): ensaio pelo site publicado em 21/10.
+- Avaliação na v7: golden set de 36 casos em 31/36 (2026-10-19).
 
 ### Pendências em aberto
 
-Situação conferida em 2026-10-15, após auditoria documental da execução do Golden Set de 2026-10-14.
+Situação conferida em 2026-10-19, depois do PR #62.
 
-- **Reexecutar o Golden Set vigente (31 casos).** A rodada auditada em `docs/registro_execucao_v6.md` foi executada sobre o commit `0e4cd73`, cujo Golden Set continha 26 casos; `E1`–`E3`, `I3` e `I4` foram adicionados depois, e P1.3, P4.2 e P4.3 passaram a ser avaliadas com o histórico da conversa. Medir o snapshot atual com configuração e commit registrados e guardar os artefatos completos.
-- **F1 (comparação sem dados suficientes):** nesta execução, a rota obtida foi somente `estruturada` (esperavam-se também `agregada` e `normativa`), o SQL apresentou 1 registro municipal de R$ 0,00, a resposta não declarou a insuficiência exigida e a confiança `media` excedeu o teto `baixa`. O resultado sustenta falha observável de roteamento e geração; não demonstra, por si só, ausência do dado no corpus.
-- **P4.1/P4.2, P6.2/P6.3 e I2:** a execução mostrou, respectivamente, omissão de registros obrigatórios, conclusão de predominância sem suporte suficiente, afirmação imprecisa sobre disponibilidade de fornecedor, falta de referência normativa exigida pelo caso e omissão do identificador da ata. As etapas internas precisam ser confirmadas com trace/SQL antes de atribuir causa específica.
-- **P2.3 e P3.2:** conteúdo reprovado apesar de respostas que podem satisfazer parte da intenção em linguagem natural; revisar os casos contra os critérios lexicais e as condições do enunciado. Não concluir que é erro do avaliador sem revisão manual dos documentos/fontes da execução.
-- **Erros de infraestrutura em A1/A2:** obter os registros técnicos do provedor para diagnosticar as duas falhas; os artefatos disponíveis só apresentam a mensagem genérica de erro de geração.
-- **Publicar o site apontando para o backend:** o site publicado (09/10) tem as telas de trace, mas foi gerado com o `VITE_API_BASE_URL` vazio. Falta enviar o header `ngrok-skip-browser-warning` nas chamadas, configurar a variável com o domínio do túnel e publicar. Os repositórios `Etuarda/frontendRAG` (com as telas de trace) e `sevenRevy/frontendRAG` (com os dois personas, `check:backend` e o botão do NEXO) divergem, e a branch `feat/melhorias-trace` ainda não entrou na `main` da Eduarda.
-- **Validar frontend e backend juntos de novo**, pelo túnel, depois dos merges de 2026-10-14 (personas, recorte, avisos, filtros novos).
-- **Roteiro do Demo Day** (material interno do grupo, fora do repositório): já leva ao vivo só as consultas estáveis e rápidas (medidas três vezes no ECOA, todas abaixo de 5 s); falta o ensaio cronometrado, marcar o freeze e preparar o checklist do plano B.
-- **Defeitos achados no teste de 2026-10-16 (frontend + backend local):** "Qual é a capital da França?" é respondida pelo modo de conversa (`CONVERSATION_MODE=llm`) em vez de recusada; "publicou" e "seus" viram termo do objeto no SQL ("Quais compras o órgão X publicou em 2025?", "…e seus fornecedores"); e "Qual o valor de todos os contratos de 2025?" não vai ao SQL e o LLM soma só os trechos recuperados (com "valor total" o SQL responde R$ 2.546.786.958,21).
-- **Cobertura do PCA e da modalidade dos contratos:** limitação da fonte, documentada; depende do censo v7.
-- **Depois do Demo Day:** fornecedor por apelido (a Infolog do roteiro não existe no corpus, então o zero da consulta é real) e a promoção do corpus v7.
+- **Ensaio do Demo Day pelo site publicado** (roteiro e plano B são material interno do grupo, fora do repositório): cronometrar a apresentação e conferir as telas de trace e a tabela das respostas no navegador. As consultas ao vivo saem do SQL, sem o LLM, em 0,3 a 2 s; com a v7, o backend leva cerca de 1 minuto para ficar pronto e ocupa ~4,6 GB de RAM.
+- **Respostas do LLM que não admitem a falta de dados com clareza** (P1.2, P2.3, P3.2, P4.2) e confiança acima do teto quando a resposta não traz ressalva (P3.2, P6.1).
+- **Busca:** na v7, a mesma ata aparece repetida entre os primeiros resultados quando há chunks quase idênticos; em perguntas que misturam norma e contratações, a janela de 3.500 caracteres do ECOA comporta só de 1 a 3 trechos normativos.
+- **Catálogo de órgãos, municípios e fornecedores** (`data/config/orgaos_corpus.json`): ainda é o da v6 (401 fornecedores, 56 municípios); a v7 tem 12.798 fornecedores e 87 municípios. Regenerado sem mais regras, ele inventa fornecedor em perguntas com palavras comuns ("tecnologia") e não distingue a matriz da filial; refazer depois de juntar as filiais e reforçar a proteção contra nomes comuns.
+- **Cobertura do PCA e da modalidade dos contratos:** limitação da fonte, documentada.
+- **Depois do Demo Day:** apelidos de fornecedor que diferem da razão social, limite de requisições na API pública e revogação da chave do OpenRouter usada na demo.
 
 ---
 

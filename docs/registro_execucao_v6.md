@@ -1876,3 +1876,89 @@ Achado da preparação do I4: "publicou" ("Quais compras o órgão X publicou em
 2025?") e "seus" ("…e seus fornecedores") viram termo do objeto no SQL, e a
 consulta procura essas palavras no objeto. O I4 foi escrito sem esse verbo para
 medir o CNPJ, e o defeito ficou registrado para correção à parte.
+
+### Item 4 — golden set na v7, rodada única dos 36 casos (2026-10-19)
+
+Rodada `golden-2026-10-19-v7-36`, concluída às 22h06 de 2026-10-19
+(`built_at` 2026-10-20T01:06:46Z), sobre a `main` em `b93164c` (PR #62), com o
+corpus **v7** como base ativa (106.667 registros em `contratacoes`, 144.112
+chunks, 143.299 vetores). Configuração da demo: LLM do ECOA (`qwen3-8b`) com
+`GENERATION_TIMEOUT=60` e `GENERATION_MAX_RETRIES=0`, OpenRouter de reserva
+(`nvidia/nemotron-3-super-120b-a12b:free`, depois `google/gemma-4-31b-it:free`),
+raciocínio do ECOA no padrão do servidor, `SQL_APRESENTACAO_LLM` desligada e a
+base estruturada no SQLite local (`DATABASE_URL` vazio).
+
+```powershell
+py .\eval\run_eval.py run --pipeline eval.adapters:pipeline_completo
+```
+
+**Resultado: 31/36 (86,1%)**, em 755 s (mediana de 10 s por caso), sem erro de
+provedor.
+
+| Métrica | Valor |
+|---|---|
+| Rota | 97,2% |
+| Recusa | 100% |
+| Conteúdo | 86,1% |
+| Citação | 100% |
+| Fonte esperada | 18/18 |
+
+Por tipo: filtro 8/8, recusa 6/6, fora de escopo 1/1, vigência 1/1, factual 8/9
+e cross_source 7/11.
+
+Comparação com as rodadas anteriores (os conjuntos de casos diferem):
+
+| Rodada | Corpus | Casos | Acertos |
+|---|---|---|---|
+| Auditoria `20261014T191537Z`, commit `0e4cd73` | v6 | 26 | 13 (50%) |
+| `revisao-16-10-completo` | v6 | 31 | 24 (77%) |
+| `v7-19-10-completo`, antes dos ajustes | v7 | 31 | 19 (61%) |
+| **`golden-2026-10-19-v7-36`** | **v7** | **36** | **31 (86%)** |
+
+Entre a primeira rodada na v7 e esta entraram: a busca viável com a v7 (vetores
+lidos sem o JSON do vetor, contagem de termos do BM25 em cache), a comparação
+entre esferas só com as esferas citadas e um mínimo de 3 registros com valor
+em cada (F1), "município/UF" e "órgão" deixando de virar fornecedor (A1, A2 e
+I2), a base estruturada incluída na rota quando há fornecedor ou CNPJ
+reconhecido, "somaram/gastaram mais do que" como comparação, a contagem que
+também pede o total mostrando os dois com o alerta de qualidade, e o
+fornecedor reconhecido por um nome curto ("da Medshore").
+
+O gabarito de P2.1, P4.1, I4 e P5.2 foi refeito com os valores conferidos no
+SQLite da v7, porque pedia registros e valores da v6 (o contrato de R$ 0,00 da
+Proteger, Bom Jardim entre os listados, compras de R$ 4.437,90 e R$ 139,30, a
+Cristália como maior fornecedor). Entraram cinco casos que medem o que a v7
+traz, todos com os valores conferidos no banco: `V1` (fornecedor com valor fora
+do padrão e o alerta de qualidade), `V2` (total de um município), `V3` (ano fora
+do censo de 2025), `V4` (maior contrato de um assunto) e `V5` (comparação entre
+esferas com dados suficientes). O golden set passou de 31 para 36 casos.
+
+As cinco falhas são da geração do LLM, não de dados, SQL ou rota:
+
+| Caso | O que faltou |
+|---|---|
+| P1.2 | A resposta não diz que nenhum fornecedor atende ao critério com as palavras do gabarito |
+| P2.3 | A resposta não usa "insuficiente" ou equivalente |
+| P3.2 | Não usa as palavras de insuficiência e sai com confiança alta (teto: média) |
+| P4.2 | Não declara a modalidade como não informada; a busca traz contratos de outro assunto |
+| P6.1 | Resposta correta (LC 123/2006) com confiança alta (teto: média) |
+
+Recuperação, no mesmo dia (`eval/medir_regressao_v7.py`, 47 casos de
+`eval/retrieval_set.jsonl`, índice v6 de referência contra o v7):
+
+| Busca | Corpus | hit@1 | hit@3 | hit@10 | MRR@10 |
+|---|---|---|---|---|---|
+| Densa | v6 | 0,60 | 0,72 | 0,81 | 0,67 |
+| Densa | v7 | 0,53 | 0,64 | 0,74 | 0,60 |
+| Híbrida (BM25, RRF e rerank) | v6 | 0,79 | 0,87 | 0,91 | 0,83 |
+| Híbrida (BM25, RRF e rerank) | v7 | 0,77 | 0,83 | 0,87 | 0,80 |
+
+Na híbrida, dois casos pioraram (R32 e R33) e um melhorou. Os dois eram de
+critério: pediam "alguma ata" de equipamentos odontológicos e de cirurgia
+cardíaca, os cinco primeiros resultados da v7 eram atas certas do assunto, e o
+critério exigia o trecho exato de uma ata da v6. O critério passou a ser o
+assunto da pergunta. Fica registrado que esses cinco primeiros eram a mesma ata
+repetida em chunks quase idênticos da v7.
+
+Os relatórios (`eval/runs/golden-2026-10-19-v7-36/` e os da recuperação) ficam
+fora do git; a cópia do grupo está na pasta compartilhada de avaliação.
