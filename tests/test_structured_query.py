@@ -1806,3 +1806,8 @@ def test_cnpj_junto_de_uma_conta_segue_o_caminho_da_conta(pergunta):
 def test_frase_nominal_de_contratos_e_listagem_direta(pergunta):
     consulta = sq.detectar_consulta(pergunta, QueryFilters(ano=2025), ESTRUTURADA)
     assert consulta.tipo == "listagem" and consulta.listagem_direta
+
+
+def test_cnpj_sem_verbo_tambem_e_pedido_de_cnpj():
+    filtros = QueryFilters(filtros_analiticos={"fornecedor": "PRIME CONSULTORIA"})
+    assert sq.detectar_consulta("CNPJ da Prime Consultoria?", filtros, ESTRUTURADA).tipo == "cnpj_fornecedor"

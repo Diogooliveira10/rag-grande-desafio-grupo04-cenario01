@@ -258,7 +258,8 @@ Depois de ter os dados:
 
 Com a v7, a API leva cerca de 2 minutos para ficar pronta depois de subir: ela
 lê os índices e prepara o BM25 em segundo plano (`INDEX_PRELOAD`), e ocupa
-~4,6 GB de RAM (medido em 2026-10-19 numa máquina de 16 GB). Feche o que não
+~4,6 GB de RAM ao subir e cerca de 6 GB depois de responder pelo LLM (medido em
+2026-10-19 e 2026-10-20 numa máquina de 16 GB). Feche o que não
 for necessário antes da demonstração e faça uma pergunta de aquecimento.
 O golden set roda o pipeline no próprio processo e carrega a v7 de novo:
 desligue o backend antes de rodá-lo, para os dois não disputarem a memória.
@@ -698,8 +699,8 @@ OPENROUTER_MODEL_FALLBACK=google/gemma-4-31b-it:free
 # também passam pelo LLM e as consultas ao vivo vão de ~2 s para 7-25 s
 ```
 
-Com a v7, a API leva cerca de 2 minutos para ficar pronta e ocupa ~4,6 GB de
-RAM. Faça uma pergunta de aquecimento antes de abrir para o público.
+Com a v7, a API leva cerca de 2 minutos para ficar pronta e ocupa de ~4,6 a
+~6 GB de RAM. Faça uma pergunta de aquecimento antes de abrir para o público.
 
 ### Endpoint de modelos (compartilhado com toda a turma)
 

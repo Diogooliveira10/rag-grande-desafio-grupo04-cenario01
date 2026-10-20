@@ -87,7 +87,7 @@ explicitamente; novas execuções continuam ignoradas por padrão.
 
 ## P0/P8A — baseline e primeiro ensaio integrado (2026-10-13)
 
-Execução de [PLANO_DE_ACAO_DEMO_DAY.md](PLANO_DE_ACAO_DEMO_DAY.md), fases P0 e
+Execução de `PLANO_DE_ACAO_DEMO_DAY.md` (plano interno do grupo, fora do repositório), fases P0 e
 P8A, sobre backend `joao-reis` @ `435c9c0` e frontend `main` @ `91c0fbb`
 (`../frontendRAG`), árvore de trabalho do backend com dois arquivos de docs não
 commitados. Nenhuma troca de branch, merge, publicação ou reconstrução de banco.
@@ -1744,8 +1744,8 @@ e sem alterar o Golden Set, os avaliadores, o relatório ou o JSON.
   (`d6e988c`); o relatório JSON não grava o SHA, portanto o vínculo da execução
   ao commit é conferido pelo registro da rodada e pelo snapshot versionado no commit.
 - Run ID: `20261014T191537Z`; gerado em `2026-10-14T19:15:37+00:00`.
-- Artefatos: [relatório](../eval/runs/20261014T191537Z/REPORT.md) e
-  [JSON](../eval/runs/20261014T191537Z/report.json).
+- Artefatos: `eval/runs/20261014T191537Z/REPORT.md` (arquivo local, fora do Git) e
+  `eval/runs/20261014T191537Z/report.json` (arquivo local, fora do Git).
 - Comando da execução bem-sucedida: `.\.venv\Scripts\python.exe .\eval\run_eval.py run --pipeline eval.adapters:pipeline_completo`.
   A tentativa anterior com `py` não carregou `dotenv` no Python selecionado;
   a primeira instalação de dependências via `requirements.txt` também encontrou

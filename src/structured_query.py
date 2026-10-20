@@ -129,7 +129,7 @@ _RE_OBJETO_CONTRATACAO = re.compile(
     r"\bcontrat(?:a(?:cao|coes)|os?)\s+de\s+(.+?)"
     r"(?=\s+(?:do corpus|da base|que|usam|utilizam|foram|sao|existem|em)\b|[,;?.!]|$)"
 )
-_RE_PEDIDO_DE_CNPJ = re.compile(r"\b(?:qual|quais|informe|mostre|diga|me de)\b.*\bcnpjs?\b")
+_RE_PEDIDO_DE_CNPJ = re.compile(r"(?:\b(?:qual|quais|informe|mostre|diga|me de)\b.*|^)\bcnpjs?\b")
 # Pedido de CNPJ junto de uma conta ("quantos contratos e qual o CNPJ") segue
 # o caminho da conta.
 _RE_CNPJ_COM_CONTA = re.compile(r"\b(?:quantos|quantas|quanto|valor|total|soma|media|maior|maiores|ranking)\b")

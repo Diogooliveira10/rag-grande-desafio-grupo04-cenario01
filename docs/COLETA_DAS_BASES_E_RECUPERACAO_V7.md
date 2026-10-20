@@ -6,6 +6,11 @@ Documento iniciado em 15/10/2026. Construção **em staging**, não promoção.
 A autorização do usuário é executar o plano de recuperação e ampliar a cobertura,
 **preservando contratos e empenhos separados**. A v6 continua ativa.
 
+> **Atualização de 2026-10-19:** a v7 foi promovida e é a base ativa (decisão do
+> grupo a pedido do tutor). Os dados da v7 ficam fora do Git; cada integrante
+> baixa na própria máquina (README). O texto abaixo é o registro da construção
+> em staging.
+
 > **Promoção somente após relatório, rollback validado e decisão explícita.**
 > Passar nos testes de código não equivale a provar cobertura ou qualidade do RAG.
 
