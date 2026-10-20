@@ -224,6 +224,16 @@ def rotear_pergunta(
             decisao = RouteDecision(bases_selecionadas=bases,
                 justificativa="Necessidades de evidência identificadas na análise compartilhada da pergunta.",
                 confidence=0.8)
+        # Fornecedor ou CNPJ reconhecido na pergunta pede registro de contratação,
+        # mesmo sem a palavra "contrato": "Quantos registros da empresa
+        # Cristália..." ia só para a base agregada e era recusada (V1).
+        analiticos = getattr(getattr(analise, "filtros", None), "filtros_analiticos", None) or {}
+        if (decisao.bases_selecionadas and Natureza.ESTRUTURADA not in decisao.bases_selecionadas
+                and (analiticos.get("fornecedor") or analiticos.get("cnpj"))):
+            decisao = RouteDecision(
+                bases_selecionadas=[Natureza.ESTRUTURADA, *decisao.bases_selecionadas],
+                justificativa=decisao.justificativa + " Fornecedor ou CNPJ citado: base estruturada incluída.",
+                confidence=decisao.confidence)
         span.set_result(
             {
                 "bases": [base.value for base in decisao.bases_selecionadas],

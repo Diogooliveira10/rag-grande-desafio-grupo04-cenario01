@@ -216,8 +216,9 @@ def _responder(
         return payload
 
     analise = analisar_query(query, run_id=run_id, query_id=query_id)
-    decisao = (rotear_pergunta(query, run_id=run_id, query_id=query_id, analise=analise)
-               if analise.intencoes else rotear_pergunta(query, run_id=run_id, query_id=query_id))
+    # A análise vai sempre: o roteador usa as intenções quando existem e o
+    # fornecedor/CNPJ reconhecido para incluir a base estruturada.
+    decisao = rotear_pergunta(query, run_id=run_id, query_id=query_id, analise=analise)
 
     chunks: list[Chunk] = []
     filtros_relaxados: dict[str, dict[str, list[str]]] = {}

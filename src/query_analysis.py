@@ -1146,7 +1146,10 @@ _GENERICAS_DE_FORNECEDOR = frozenset(
 _GATILHOS_DE_FORNECEDOR = frozenset(
     "empresa fornecedor fornecedora firma comercial companhia sociedade "
     "industria laboratorio clinica hospital cooperativa associacao fundacao "
-    "construtora transportadora distribuidora representante orgao".split()
+    "construtora transportadora distribuidora representante".split()
+    # "órgão" não anuncia fornecedor: em "o órgão X", X é o contratante. Como
+    # gatilho, "Qual é o órgão, a data de assinatura..." virava fornecedor
+    # "LINK DATA INFORMÁTICA E SERVIÇOS LTDA" na v7 (I2 do golden set).
 )
 
 
@@ -1251,6 +1254,60 @@ def _extrair_municipio(texto: str) -> tuple[Optional[str], Optional[Span]]:
     return valor, _estender_para_tras(texto, span)
 
 
+# Artigo ou contração logo antes do nome: "da Medshore", "a Cristália recebeu".
+_ARTIGOS_ANTES_DE_NOME = frozenset("da do das dos a o as os pela pelo pelas pelos".split())
+
+
+# Parcela dos objetos que citam a palavra cujo fornecedor também a tem no nome,
+# para ela valer como nome de empresa: Cristália 92%; Light 24%, limpeza 4%,
+# merenda e ambulância 0% (medido na v7 em 2026-10-19).
+_PARCELA_MINIMA_DO_PROPRIO_FORNECEDOR = 0.8
+
+
+@lru_cache(maxsize=1)
+def _palavras_dos_objetos() -> Optional[dict[str, tuple[int, int]]]:
+    """Palavra -> (objetos que a citam, quantos deles têm fornecedor com ela no nome).
+
+    ``None`` sem a base. Uma palavra que é assunto de contrato ("merenda",
+    "limpeza") não pode virar fornecedor só por coincidir com o nome de uma
+    empresa; a marca citada no objeto dos próprios contratos ("medicamentos
+    Cristália") pode.
+    """
+    try:
+        from src import structured_db
+
+        linhas = structured_db.banco_padrao().consultar(
+            "SELECT objeto_normalizado AS o, fornecedor AS f FROM contratacoes")
+    except Exception:
+        return None
+    contagem: dict[str, list[int]] = {}
+    for linha in linhas:
+        fornecedor = _normalize(linha.get("f") or "")
+        for palavra in set(re.findall(r"[a-z]{4,}", linha.get("o") or "")):
+            par = contagem.setdefault(palavra, [0, 0])
+            par[0] += 1
+            par[1] += palavra in fornecedor
+    return {palavra: (total, do_fornecedor) for palavra, (total, do_fornecedor) in contagem.items()}
+
+
+def _nome_curto_de_fornecedor(palavra: str, todas: Sequence[tuple[str, int, int]], comeca: int) -> bool:
+    """Uma palavra só, sem "empresa"/"fornecedor" antes, pode nomear o fornecedor?
+
+    Só depois de artigo ("da Medshore"), com 5 letras ou mais, e se nos objetos
+    dos contratos ela não aparece ou aparece quase sempre em contratos do próprio
+    fornecedor. O fornecedor ainda precisa ser único no catálogo
+    (``_valor_do_catalogo``). Sem a base para conferir, não aceita.
+    """
+    anterior = next((p for p, _, fim in reversed(todas) if fim <= comeca), None)
+    if len(palavra) < 5 or anterior not in _ARTIGOS_ANTES_DE_NOME:
+        return False
+    palavras = _palavras_dos_objetos()
+    if palavras is None:
+        return False
+    total, do_fornecedor = palavras.get(palavra, (0, 0))
+    return total == 0 or do_fornecedor / total >= _PARCELA_MINIMA_DO_PROPRIO_FORNECEDOR
+
+
 def _extrair_fornecedor(texto: str, bloqueados: Sequence[Span] = ()) -> tuple[Optional[str], Optional[Span]]:
     """Fornecedor do snapshot citado na pergunta, e o trecho que o citou.
 
@@ -1285,7 +1342,7 @@ def _extrair_fornecedor(texto: str, bloqueados: Sequence[Span] = ()) -> tuple[Op
                 break
             citados.append(palavra)
             span = (span[0], pos_fim)
-        if len(citados) < 2 and not tem_gatilho:
+        if len(citados) < 2 and not tem_gatilho and not _nome_curto_de_fornecedor(primeira, todas, comeca):
             continue
         valor = _valor_do_catalogo(catalogo.fornecedores, citados)
         if valor is not None:

@@ -37,7 +37,7 @@ def _resposta_dummy(bases_consultadas):
 def test_responder_passa_filtros_extraidos_para_retrieve(monkeypatch):
     chamadas_retrieve = {}
 
-    def fake_rotear(query, *, run_id, query_id):
+    def fake_rotear(query, *, run_id, query_id, analise=None):
         return RouteDecision(
             bases_selecionadas=[Natureza.ESTRUTURADA],
             justificativa="teste",
@@ -74,7 +74,7 @@ def test_responder_passa_filtros_extraidos_para_retrieve(monkeypatch):
 def test_responder_sem_filtro_nenhum_passa_dict_vazio(monkeypatch):
     chamadas_retrieve = {}
 
-    def fake_rotear(query, *, run_id, query_id):
+    def fake_rotear(query, *, run_id, query_id, analise=None):
         return RouteDecision(
             bases_selecionadas=[Natureza.ESTRUTURADA], justificativa="teste", confidence=0.9
         )
@@ -140,7 +140,7 @@ def test_responder_recusa_do_roteador_nao_chama_retrieve(monkeypatch):
     resolver = Mock()
     monkeypatch.setattr(pipeline, "reranker_padrao", resolver)
 
-    def fake_rotear(query, *, run_id, query_id):
+    def fake_rotear(query, *, run_id, query_id, analise=None):
         return RouteDecision(bases_selecionadas=[], justificativa="dados bancarios", confidence=0.98)
 
     def fake_retrieve(*args, **kwargs):

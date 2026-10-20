@@ -21,9 +21,10 @@ GOLDEN_SET = Path(__file__).resolve().parents[1] / "eval" / "golden_set.jsonl"
 
 def test_load_golden_set_tem_18_referencias_a_de_falha_e_3_guardrails():
     cases = load_golden_set(GOLDEN_SET)
-    assert len(cases) == 31
-    assert len({case.id for case in cases}) == 31  # sem IDs duplicados
-    assert [case.id for case in cases[-9:]] == ["A1", "A2", "I1", "I2", "E1", "E2", "E3", "I3", "I4"]
+    assert len(cases) == 36
+    assert len({case.id for case in cases}) == 36  # sem IDs duplicados
+    assert [case.id for case in cases[-14:]] == ["A1", "A2", "I1", "I2", "E1", "E2", "E3", "I3", "I4",
+                                                 "V1", "V2", "V3", "V4", "V5"]
     assert sum(case.e_pergunta_de_falha_esperada for case in cases) == 1
     guardrails = [case for case in cases if case.id.startswith("G")]
     assert {case.refusal_reason_esperado for case in guardrails} == {
@@ -525,9 +526,9 @@ def test_alternativa_e_obrigatorio_sao_independentes():
 
 
 def test_golden_set_atual_continua_carregando():
-    """Os campos novos são opcionais: o golden set de 31 casos não muda por isso."""
+    """Os campos novos são opcionais: o golden set de 36 casos não muda por isso."""
     casos = load_golden_set(GOLDEN_SET)
-    assert len(casos) == 31
+    assert len(casos) == 36
     assert all(isinstance(c.criterios_numericos, list) for c in casos)
 
 

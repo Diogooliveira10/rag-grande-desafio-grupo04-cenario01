@@ -1398,3 +1398,36 @@ def test_municipio_uf_na_pergunta_nao_vira_fornecedor():
 
     assert "fornecedor" not in _analisar(pergunta).filtros_analiticos
 
+
+@pytest.fixture
+def palavras_dos_objetos(monkeypatch):
+    """Estatística fixa: (objetos que citam a palavra, quantos são do próprio fornecedor)."""
+    tabela = {"cristalia": (79, 73), "merenda": (153, 0), "limpeza": (2031, 91)}
+    monkeypatch.setattr(qa, "_palavras_dos_objetos", lambda: tabela)
+
+
+def _todas(texto):
+    import re
+    return [(qa._normalize(m.group()), m.start(), m.end()) for m in re.finditer(r"\w+", texto)]
+
+
+@pytest.mark.parametrize("texto,palavra,aceita", [
+    ("quais contratos da medshore", "medshore", True),      # não aparece em objeto
+    ("quanto a cristalia recebeu", "cristalia", True),      # 92% dos objetos são dela
+    ("quais contratos da merenda escolar", "merenda", False),
+    ("quais contratos da limpeza urbana", "limpeza", False),
+    ("contratos de medshore", "medshore", False),           # sem artigo antes
+])
+def test_nome_curto_de_fornecedor(palavras_dos_objetos, texto, palavra, aceita):
+    todas = _todas(texto)
+    comeca = next(i for p, i, _ in todas if p == palavra)
+
+    assert qa._nome_curto_de_fornecedor(palavra, todas, comeca) is aceita
+
+
+def test_nome_curto_sem_a_base_nao_vira_fornecedor(monkeypatch):
+    monkeypatch.setattr(qa, "_palavras_dos_objetos", lambda: None)
+    todas = _todas("quais contratos da medshore")
+
+    assert qa._nome_curto_de_fornecedor("medshore", todas, todas[-1][1]) is False
+

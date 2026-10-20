@@ -100,7 +100,10 @@ _RE_EVOLUCAO = re.compile(r"\bao longo\b|\bevolu|\baument|\bcresc|\bqueda\b|\bpo
 _RE_AGRUPAMENTO = re.compile(
     r"\bmais frequen|\bmais usad|\bmais comu|\bpor modalidades?\b|\bpor orgaos?\b|\bpor municipios?\b|\bpor esferas?\b"
 )
-_RE_COMPARACAO = re.compile(r"\bmais car[oa]s?\b|\bmais barat|\bpag(?:ou|aram|am|a) mais\b|\bcompar")
+# "Somaram/gastaram/receberam mais do que" também compara (V5 do golden set).
+_RE_COMPARACAO = re.compile(r"\bmais car[oa]s?\b|\bmais barat|\bpag(?:ou|aram|am|a) mais\b|\bcompar"
+                            r"|\b(?:som(?:ou|aram|am|a)|gast(?:ou|aram|am|a)|receb(?:eu|eram|em|e)|"
+                            r"contrat(?:ou|aram|am|a)) mais\b")
 # Sem "\bvalor\b": pedir para *informar* um valor ("informe o valor contratado")
 # é listar, não calcular. Só conta como cálculo a palavra que declara a conta
 # (média, mediana, total, soma, quanto, quantidade). Métrica sem a pergunta
@@ -245,6 +248,9 @@ class Consulta:
     # Esferas que a pergunta compara ("estaduais ... do que os municípios").
     # Vazio quando ela não cita duas: aí contam todas as do resultado.
     esferas_comparadas: tuple[str, ...] = field(default_factory=tuple)
+    # Contagem que também pede o total ("quantos registros ... e qual o valor
+    # total?"): a tabela mostra os dois, e não só a contagem (V1).
+    mostrar_total: bool = False
     # Listagem que a pergunta pede por inteiro ("quais órgãos contrataram X em
     # 2025 e quais os valores?"): a resposta sai das linhas do SQL, sem o LLM,
     # que resumia a lista e deixava registros de fora. Com um pedido além da
@@ -623,6 +629,7 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
         comparacao_esferas=bool(tabela == "contratacoes" and tipo == "estatistica"
                                 and esfera is None and len(citadas) > 1),
         esferas_comparadas=tuple(citadas) if len(citadas) > 1 else (),
+        mostrar_total=bool(metrica == "contagem" and re.search(r"\b(?:soma|total)\b", texto)),
         termos_objeto=termos_objeto,
         referencia_temporal=referencia_temporal,
         minimo_por_grupo=minimo_por_grupo,
@@ -930,6 +937,7 @@ def _tabela_metricas(consulta: Consulta, registros: list[dict], rotulo: str) -> 
              "mediana": "Mediana (valores ≥ R$ 1,00)", "minimo": "Mínimo (≥ R$ 1,00)",
              "maximo": "Máximo (≥ R$ 1,00)"}
     campos = (["total", "media", "mediana", "minimo", "maximo"] if consulta.comparacao_esferas
+              else ["total"] if consulta.metrica == "contagem" and consulta.mostrar_total
               else [] if consulta.metrica == "contagem"
               else [{"soma": "total"}.get(consulta.metrica, consulta.metrica)])
     campos = [c for c in campos if c in nomes]
@@ -1380,7 +1388,10 @@ def executar_consulta(consulta: Consulta, banco: Banco, recorte: Optional[dict] 
         if not termos or contagem(termos, juncao):
             tabelas: list[str] = []
             sql, linhas = _executar(banco, consulta, termos, juncao, markdown=tabelas if markdown is not None else None)
-            if consulta.tipo in {"ranking", "estatistica", "agrupamento", "evolucao"} and consulta.metrica != "contagem":
+            # Contagem que também mostra o total (mostrar_total) recebe o alerta,
+            # porque o total exibido depende do valor fora do padrão.
+            if (consulta.tipo in {"ranking", "estatistica", "agrupamento", "evolucao"}
+                    and (consulta.metrica != "contagem" or consulta.mostrar_total)):
                 where, params = _where(consulta, termos, juncao)
                 coluna = _coluna_valor(consulta)
                 extremo = banco.consultar(
