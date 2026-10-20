@@ -100,6 +100,10 @@ _RE_EVOLUCAO = re.compile(r"\bao longo\b|\bevolu|\baument|\bcresc|\bqueda\b|\bpo
 _RE_AGRUPAMENTO = re.compile(
     r"\bmais frequen|\bmais usad|\bmais comu|\bpor modalidades?\b|\bpor orgaos?\b|\bpor municipios?\b|\bpor esferas?\b"
 )
+# "Quais modalidades aparecem nos contratos de X?" (P4.2) ia à busca semântica,
+# que trazia contratos de outro assunto. Vale só sem norma na pergunta: "que
+# modalidades a Lei 14.133 prevê?" é pergunta da base normativa.
+_RE_QUAIS_MODALIDADES = re.compile(r"\b(?:quais|que) (?:as )?modalidades\b")
 # "Somaram/gastaram/receberam mais do que" também compara (V5 do golden set).
 _RE_COMPARACAO = re.compile(r"\bmais car[oa]s?\b|\bmais barat|\bpag(?:ou|aram|am|a) mais\b|\bcompar"
                             r"|\b(?:som(?:ou|aram|am|a)|gast(?:ou|aram|am|a)|receb(?:eu|eram|em|e)|"
@@ -178,6 +182,7 @@ _PALAVRAS_GENERICAS = frozenset(
     suficiente suficientes tecnica tecnicas equivalente equivalentes tecnicamente
     disponivel disponiveis apenas comprovem comprovado comprovada
     assinou assinaram contratou contrataram comprou compraram gastou gastaram gasto gastos despesa despesas
+    concluir conclusao predominante predominantes predomina predominancia encontrados encontradas
     publicou publicaram custou custaram custam custa custaria
     seus suas dele dela deles delas respectivo respectiva respectivos respectivas
     seguem segue seguindo base baseado baseada baseados baseadas fundamentado fundamentada fundamentados
@@ -496,6 +501,9 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
     elif _RE_EVOLUCAO.search(texto):
         tipo = "evolucao"
     elif _RE_AGRUPAMENTO.search(texto_agrupamento):
+        tipo = "agrupamento"
+    elif (_RE_QUAIS_MODALIDADES.search(texto) and Natureza.NORMATIVA not in bases
+          and not _RE_NORMA_NUMERADA.search(texto)):
         tipo = "agrupamento"
     elif _RE_CONTAGEM_CONTRATOS.search(texto):
         tipo = "agrupamento"

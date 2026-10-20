@@ -2006,6 +2006,23 @@ formatados) e passou a sair do SQL em 2,5 s; "Quem vai ganhar a próxima
 licitação?" ia ao LLM (22 s) e passou a ser recusada como previsão. Nenhuma
 pergunta do golden muda de caminho com as duas regras.
 
+**Auditoria de 2026-10-20 (noite).** A P4.2 ("quais modalidades aparecem nos
+contratos de manutenção de computadores de 2025?") não gerava consulta SQL:
+ia à busca semântica, que trazia contratos de grafite, telefonia e sinalização,
+e a resposta dizia que não havia contratos do assunto. Agora "quais
+modalidades…" sem norma citada vira agrupamento por modalidade no SQL. Na v7
+são **12** contratos assinados (6 pregão eletrônico, 3 dispensa, 1
+inexigibilidade e 2 sem modalidade), não os 3 da v6. O gabarito da P4.2 foi
+refeito para a v7: a pergunta deixa de dizer "três contratos", a resposta
+precisa citar o pregão eletrônico e os registros sem modalidade, e sai o teto
+de confiança "média", que valia para a insuficiência da v6 (o pregão
+eletrônico predomina mesmo que os 2 sem modalidade fossem de outra). Os testes
+do gabarito antigo foram trocados pelos da v7. Na sequência P4.1 → P4.2 → P4.3
+pela API, com histórico, as três passaram no gabarito. Também na auditoria: as variáveis
+`PAUSA_ENTRE_LOTES_EMBEDDING` e `SNAPSHOT_MANIFEST` entraram no `.env.example`.
+Na P6.1, a resposta está certa e cita a LC 123/2006, art. 42; a falha é só a
+confiança alta acima do teto "média" do gabarito, a rever junto com a P4.2.
+
 Recuperação, no mesmo dia (`eval/medir_regressao_v7.py`, 47 casos de
 `eval/retrieval_set.jsonl`, índice v6 de referência contra o v7):
 

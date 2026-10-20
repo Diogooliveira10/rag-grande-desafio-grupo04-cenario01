@@ -1811,3 +1811,20 @@ def test_frase_nominal_de_contratos_e_listagem_direta(pergunta):
 def test_cnpj_sem_verbo_tambem_e_pedido_de_cnpj():
     filtros = QueryFilters(filtros_analiticos={"fornecedor": "PRIME CONSULTORIA"})
     assert sq.detectar_consulta("CNPJ da Prime Consultoria?", filtros, ESTRUTURADA).tipo == "cnpj_fornecedor"
+
+
+def test_quais_modalidades_dos_contratos_e_agrupamento_por_modalidade():
+    pergunta = ("Considerando os contratos de manutenção de computadores encontrados em 2025, quais modalidades "
+                "aparecem nos registros e há dados suficientes para concluir uma modalidade predominante?")
+    consulta = sq.detectar_consulta(pergunta, QueryFilters(ano=2025), ESTRUTURADA)
+    assert consulta.tipo == "agrupamento" and consulta.agrupar_por == "modalidade"
+    assert consulta.termos_objeto == ("manutencao", "computador")
+
+
+@pytest.mark.parametrize("pergunta", [
+    "Que modalidades de licitação a Lei 14.133 prevê?",
+    "Quais as modalidades de licitação previstas nas normas?",
+])
+def test_quais_modalidades_da_norma_nao_vira_consulta_sql(pergunta):
+    bases = [Natureza.NORMATIVA, Natureza.ESTRUTURADA]
+    assert sq.detectar_consulta(pergunta, QueryFilters(), bases) is None

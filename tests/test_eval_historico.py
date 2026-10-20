@@ -109,20 +109,19 @@ def test_pipeline_completo_repassa_o_historico_ao_responder(monkeypatch):
     assert recebido == {"pergunta": "E as modalidades?", "historico": historico}
 
 
-# Resposta da P4.2 na rodada golden-2026-10-16-dependentes: certa (os três
-# contratos não trazem modalidade), mas com termos que o gabarito não aceitava.
-# Os dois sinônimos entraram com o OK do Renato.
+# Resposta da P4.2 na v7 (gabarito refeito em 2026-10-20): 12 contratos, com
+# pregão eletrônico em 6 e 2 sem modalidade. A resposta da v6 ("nenhum dos
+# registros informa a modalidade") passou a ser errada.
 _RESPOSTA_P42 = (
-    "Nenhum dos registros informa a modalidade de licitação. As três contratos não possuem dados "
-    "sobre modalidade de licitação, portanto, não há informações suficientes para identificar uma "
-    "modalidade predominante."
+    "Nos contratos de manutenção de computadores de 2025, o pregão eletrônico aparece em 6 registros, "
+    "a dispensa em 3 e a inexigibilidade em 1; 2 registros estão sem modalidade informada."
 )
 
 
 @pytest.mark.parametrize("resposta,aprovada", [
     (_RESPOSTA_P42, True),
-    ("Os três contratos usaram pregão. A modalidade predominante foi pregão.", False),
-    ("Os registros mostram pregão e dispensa, não há informações suficientes.", False),
+    ("Nenhum dos registros informa a modalidade de licitação; não há informações suficientes.", False),
+    ("Os registros mostram pregão e dispensa, e a dispensa foi a modalidade predominante.", False),
 ])
 def test_gabarito_da_p42_aceita_a_parafrase_certa_e_reprova_as_erradas(monkeypatch, resposta, aprovada):
     from eval.run_eval import _content_ok
