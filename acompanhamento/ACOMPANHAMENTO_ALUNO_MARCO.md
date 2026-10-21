@@ -196,3 +196,15 @@ O que fiz:
 Li o caminho que a pergunta percorre (src/router.py, src/pipeline.py, src/retrieve.py e src/generate.py) e rodei a P6.3 com o pipeline completo (py .\eval\run_eval.py run --pipeline eval.adapters:pipeline_completo --ids P6.3), na main atual. A P6.3 passou (OK, run 20261019T192712Z, 404 s). Depois li o log da execução, estágio por estágio, pra ver o que de fato chegava ao prompt. O roteador mandou a pergunta pras bases normativa e estruturada, a busca vetorial devolveu só chunks da base normativa, e a parte de contratações veio pelo SQL, num chunk separado. No rerank ficaram 10 chunks normativos e só 3 couberam no prompt, mais o chunk do SQL: a janela de contexto é de 3500 caracteres (GENERATION_CONTEXT_CHARS no meu .env, modo local), então 7 dos 10 ficaram de fora. Os 3 que entraram são da LC 123: o art. 48 (licitação exclusiva até R$ 80.000, subcontratação e cota de 25%), o art. 44 (desempate) e o art. 74 (Juizado Especial, que não tem relação com licitação).
 
 Minha primeira hipótese estava errada: achei que o documento principal da base normativa fosse a Lei 14.133 e que a LC 123 ficaria de fora por causa do orçamento do prompt. O texto do prompt mostrou que esse documento é a própria LC 123, então ela chega. Como o item não se reproduz, não alterei código. Anotei duas melhorias possíveis, que ainda não são um item: o art. 74 ocupa espaço no prompt sem ser relevante, e o art. 48 é cortado em 900 caracteres, no meio da cota de 25%.
+
+
+## Encontro 15 — 21/10/2026
+
+Contexto: dia da prévia da apresentação do Demo Day, que é oficial na sexta, 23/10, às 14h. O código está congelado até lá, então hoje não alterei nada nele. A orientação oficial pede 15 minutos (no máximo 20), que todos os integrantes apresentem pelo menos uma parte e que a apresentação siga cinco partes: problema e motivação, dados utilizados, arquitetura e funcionamento, apresentação do sistema e demonstração prática, com exemplos reais e também casos de falha e limitações.
+
+O que fiz:
+
+Li o deck do grupo (NEXO RJ, 16 slides) e o guia de estudos da defesa (versão 4.1, de 21/10, sobre a main depois do PR #65) e comparei com a orientação. O deck cobre as cinco partes e ainda reserva um minuto para resultados e limitações, somando 15 minutos, e a demonstração já mostra falhas e limites (aviso de pagamento, zero de 2024 com a ressalva do recorte, recusa de dado sensível e uma empresa fora do acervo). Estudei a arquitetura pelo guia: o caminho da pergunta (guardrails, análise por regras, roteador, SQL direto ou busca híbrida com rerank e LLM, validação e trace), onde fica cada etapa no código e as perguntas prováveis da banca.
+
+A divisão das falas, proposta pelo Renato, ficou assim: Eduarda abre e conduz como host, depois Renato (dados), Diogo (arquitetura), eu (o sistema), João (demonstração, por ser quem opera o sistema) e Pâmela fecha com resultados e limitações. A minha parte são os slides 11 e 12, para quem é o NEXO RJ e como o usuário chega à resposta, com destaque para a conversa ("E em 2024?"), que depende da reformulação da pergunta (item 11). 
+
