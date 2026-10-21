@@ -141,12 +141,41 @@ def token_usage_from_response(response: Any, *, extra: dict[str, Any] | None = N
                                "fonte": "response.usage", "chamadas_observadas": 1,
                                "campos_reportados": fields}
     if usage is None:
-        return TokenUsage()
+        # Estimativa quando o provider não reporta usage (ex.: OpenRouter free).
+        # ~4 caracteres por token é a aproximação usual para português/inglês.
+        estimated = _estimate_tokens_from_response(response)
+        if extra is not None and estimated.total:
+            extra["uso_tokens"] = {"status": "estimado", "fonte": "estimativa_texto",
+                                   "chamadas_observadas": 1,
+                                   "campos_reportados": {"prompt": True, "completion": True, "total": True}}
+        return estimated
 
     prompt = _read_usage_value(usage, "prompt_tokens")
     completion = _read_usage_value(usage, "completion_tokens")
     total = _read_usage_value(usage, "total_tokens") or prompt + completion
     return TokenUsage(prompt=prompt, completion=completion, total=total)
+
+
+def _estimate_tokens_from_response(response: Any) -> TokenUsage:
+    """Estima tokens pelo tamanho do texto quando usage não é reportado."""
+    prompt_chars = 0
+    completion_chars = 0
+    # Extrai texto das escolhas (completion) e das mensagens (prompt).
+    choices = getattr(response, "choices", None) or (response.get("choices") if isinstance(response, Mapping) else None) or []
+    for choice in choices:
+        message = getattr(choice, "message", None) or (choice.get("message") if isinstance(choice, Mapping) else None)
+        if message:
+            content = getattr(message, "content", None) or (message.get("content") if isinstance(message, Mapping) else None) or ""
+            completion_chars += len(str(content))
+    messages = getattr(response, "messages", None) or (response.get("messages") if isinstance(response, Mapping) else None) or []
+    for msg in messages:
+        content = getattr(msg, "content", None) or (msg.get("content") if isinstance(msg, Mapping) else None) or ""
+        prompt_chars += len(str(content))
+    if not completion_chars and not prompt_chars:
+        return TokenUsage()
+    prompt = prompt_chars // 4 if prompt_chars else 0
+    completion = completion_chars // 4 if completion_chars else 0
+    return TokenUsage(prompt=prompt, completion=completion, total=prompt + completion)
 
 
 def _read_usage_value(usage: Any, field_name: str) -> int:

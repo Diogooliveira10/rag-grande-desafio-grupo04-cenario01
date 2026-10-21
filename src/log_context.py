@@ -48,7 +48,7 @@ class ExecutionContext:
                 for key in ("prompt", "completion", "total")}
 
     def token_coverage(self) -> dict[str, Any]:
-        counts = {status: 0 for status in ("reportado", "parcial", "indisponivel", "cache", "nao_aplicavel")}
+        counts = {status: 0 for status in ("reportado", "parcial", "estimado", "indisponivel", "cache", "nao_aplicavel")}
         for event in self.events:
             status = (event["extra"].get("uso_tokens") or {}).get("status", "nao_aplicavel")
             counts[status] = counts.get(status, 0) + 1
