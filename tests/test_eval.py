@@ -1172,3 +1172,15 @@ def test_p12_aceita_a_resposta_da_v7(texto):
 ])
 def test_p12_reprova_a_premissa_da_v6_e_o_atraso_inventado(texto):
     assert _content_ok(_caso_golden("P1.2"), _resposta_p12(texto)) is False
+
+
+def test_p22_aceita_impossivel_calcular_como_insuficiencia():
+    """Resposta real da rodada golden-2026-10-21-v7-36-anuladas: certa, com
+    "tornando impossível calcular", forma que o gabarito ainda não aceitava."""
+    resposta = {
+        "answer": ("Os dados não fornecem informações sobre a quantidade de veículos em cada contrato, "
+                   "tornando impossível calcular a mediana do valor por veículo."),
+        "confidence_level": "baixa", "bases_consultadas": ["agregada", "estruturada"],
+        "is_refusal": False, "sources_used": [{"chunk_id": "c1"}],
+    }
+    assert _content_ok(_caso_golden("P2.2"), resposta) is True
