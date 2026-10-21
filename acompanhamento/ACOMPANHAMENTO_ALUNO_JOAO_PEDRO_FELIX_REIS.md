@@ -703,3 +703,75 @@ requisições falhas = 0.
 ### Uso de IA
 
 Utilizei assistentes de IA para localizar o teste relatado e reproduzi-lo, medir o gargalo do catálogo com e sem as mudanças, implementar a compactação do snapshot e a validação por hash, ajustar os textos da transparência conforme o pedido de manter os quatro cards originais, e rodar testes e a verificação no navegador. As decisões de escopo — remover os cards extras, manter a v6 apenas como nota e não exibir a coluna de vetores — foram do usuário; os números exibidos vêm sempre da resposta da API, sem valores fixados no frontend.
+
+## Atualização — 21/10/2026
+
+### Atividades realizadas desde o último registro
+
+Nesta sessão, integrei as alterações da `main` na branch `joao-reis`, coloquei o frontend e backend em execução, corrigi dois bugs de interface, identifiquei e corrigi um problema de cálculo de totais com compras anuladas e validei 12 perguntas no pipeline completo.
+
+**Correção — greeting "Olá, quem é você?":**
+
+O chat respondia "fora do escopo de contratações públicas do RJ" para saudações simples. O diagnóstico via trace da API (`/api/v1/trace/{query_id}`) mostrou `interacao: degradado, error_type: AttributeError` antes de chamar a LLM. Após reiniciar o server com processo limpo, a resposta conversacional passou a funcionar corretamente — o bug era o processo antigo stale.
+
+**Correção — compras anuladas no cálculo de totais:**
+
+Investigando o valor de ~R$ 500 bilhões reportado para as contratações de 2025, verifiquei no banco e na API do PNCP que:
+
+- O registro `42498733000148-1-001029/2025` (Município do RJ, R$ 347 bi) está **Anulada** no PNCP.
+- O contrato `33781055000135-2-000722/2025` (Fiocruz, R$ 45 bi) tem erro de cadastro no PNCP: a compra vinculada vale R$ 11.124,00, mas `valorGlobal` do contrato está com 4 zeros a mais.
+- 358 compras anuladas somavam R$ 348,4 bi e estavam inflando o total.
+
+Corrigi o `_where` em `src/structured_query.py` para excluir `situacao = 'Anulada'` por padrão em todas as consultas SQL. Adicionei os flags `incluir_anuladas` e `so_anuladas` na `Consulta` para que perguntas que mencionem explicitamente "anulada(s)" possam ver esses registros (filtro `situacao = 'Anulada'`), e adicionei "anulada" e "cancelada" às palavras genéricas para não virar termo de objeto.
+
+**Valores verificados na API do PNCP:**
+
+| Registro | Valor no banco | Valor na API PNCP | Situação |
+|---|---:|---|---|
+| 42498733000148-1-001029/2025 | R$ 347 bi | R$ 347 bi | Anulada |
+| 33781055000135-2-000722/2025 | R$ 45,2 bi | R$ 45,2 bi (contrato) | Compra: R$ 11.124 |
+| 01604139000107-1-000031/2025 | R$ 3,38 bi | R$ 3,38 bi | Divulgada (suspeito) |
+| 29131075000193-1-000268/2025 | R$ 3,08 bi | R$ 3,08 bi | Divulgada (suspeito) |
+
+A análise completa foi salva em `C:\Users\REVY\Downloads\analise_500_bilhoes.json`.
+
+### Testes realizados (12 perguntas)
+
+| # | Pergunta | Resultado | Status |
+|---|---|---|---|
+| 1 | Total contratações 2025 | R$ 152,4 bi (sem anuladas) | ✅ |
+| 2 | 5 maiores contratos | Ranking detalhado com tabela | ✅ |
+| 3 | Média contratos Fiocruz | 1.114 registros, média R$ 50,9 mi | ✅ |
+| 4 | Contratações de TI 2025 | 2.090 registros | ✅ |
+| 5 | Lei 14.133 + TI | Busca normativa com fontes | ✅ |
+| 6 | Olá, quem é você? | Apresentação do NEXO RJ | ✅ |
+| 7 | Modalidades mais usadas | Pregão Eletrônico (4.745) lidera | ✅ |
+| 8 | Compras anuladas | 358 registros (filtro situacao) | ✅ |
+| 9 | Quem vai ganhar licitação? | Recusado (previsão) | ✅ |
+| 10 | Evolução mensal 2025 | 12 meses com variação | ✅ |
+| 11 | E-mail sintético DPRJ | Detalhes do conv_001 (ARP 14/2024) | ✅ |
+| 12 | Dados bancários | Recusado (dados_bancarios_fornecedor) | ✅ |
+
+### Resultado da sessão
+
+- Compras anuladas (358 registros, R$ 348,4 bi) agora são excluídas de todos os cálculos SQL por padrão.
+- Perguntas sobre anuladas retornam os registros corretamente quando a palavra "anulada" é mencionada.
+- Total de 2025 corrigido: de R$ 540 bi para R$ 152,4 bi (sem anuladas).
+- Greeting, catálogo, busca normativa, conversacional e recusas funcionando conforme esperado.
+- `src/structured_query.py` modificado: campos `incluir_anuladas`/`so_anuladas` na `Consulta`, filtro em `_where`, detecção em `detectar_consulta`/`consulta_da_intencao`.
+
+**Frontend (fork `sevenRevy/frontendRAG`, branch `joao-reis`):**
+
+- **Cards do histórico clicáveis:** adicionado botão em cada card do `HistoricoPage` que abre a conversa na página de consulta. `App.tsx` ganhou `handleOpenConversation` que restaura o `ConversationTurn` via `workspace.restoreConversation(turns, sessionId)` e navega para `consulta`. Novo método `restoreConversation` no `useRagWorkspace`.
+- **Nova conversa preserva histórico:** `startNewConversation` agora salva o `session_id` anterior em `previousSessionId` antes de zerar. O `HistoricoPage` usa `sessionId ?? previousSessionId` para continuar listando as consultas da conversa anterior enquanto a nova não tem perguntas.
+- **CSS:** estilos `.history-feed-card--clickable`, `.history-feed-card-btn` e `.feed-card-cta` (hover mostra "Abrir conversa") em `global.css`.
+- **Commit na fork:** `79f2dda` (branch `joao-reis` do frontend).
+
+### Pendências
+
+- A pergunta #11 (comparação estadual × municipal) caiu em ranking em vez de comparar esferas — o `_RE_RANKING` casa "maior" antes do `_RE_COMPARACAO`; ajuste futuro no roteador.
+
+
+### Uso de IA
+
+Utilizei assistentes de IA como apoio ao diagnóstico dos bugs via traces da API, investigação dos valores suspeitos na API do PNCP, implementação do filtro de compras anuladas e dos flags de inclusão, e execução dos 12 testes de validação. As correções foram verificadas com consultas reais ao endpoint e consulta direta ao SQLite.
