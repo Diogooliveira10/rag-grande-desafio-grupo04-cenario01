@@ -438,3 +438,37 @@ O caso `P2.2` passou a recuperar o contrato existente e a explicitar que os dado
 - Utilizei assistentes de IA como apoio à inspeção do código, análise da causa raiz, implementação da correção e elaboração dos testes de regressão.
 
 - Conferi os resultados contra o SQL executado sobre o snapshot local, os testes automatizados e o relatório da avaliação direcionada. Não alterei o Golden Set, os critérios ou os relatórios históricos.
+
+## Encontro 16 — 2026-10-21
+
+### Relato individual — Diogo Oliveira
+
+**Tarefa do dia:**
+
+Preparar a apresentação do projeto para o Demo Day, previsto para 23/10/2026, estudando o material elaborado pela equipe e organizando a explicação da arquitetura do sistema para a banca avaliadora. A preparação deve seguir as orientações oficiais quanto ao tempo de apresentação, à participação de todos os integrantes e à demonstração do funcionamento, incluindo exemplos reais, falhas e limitações.
+
+**O que fiz hoje:**
+
+- Acompanhei a preparação da prévia da apresentação do projeto para o Demo Day, previsto para o dia 23/10/2026.
+
+- Li os slides preparados pela equipe e o guia de estudos para a defesa, buscando compreender a organização da apresentação, os principais pontos técnicos do projeto e a melhor forma de comunicá-los à banca avaliadora.
+
+- Revisei as orientações oficiais para a apresentação, que estabelecem uma duração de 15 minutos, com limite máximo de 20 minutos, e exigem a participação de todos os integrantes da equipe em pelo menos uma parte da exposição.
+
+- Considerei a estrutura proposta para a apresentação, organizada em cinco partes: problema e motivação, dados utilizados, arquitetura e funcionamento, apresentação do sistema e demonstração prática, contemplando exemplos reais, casos de falha e limitações conhecidas.
+
+- Fiquei responsável pela explicação da arquitetura do sistema, correspondente aos slides 7, 8 e 9. Estou preparando minha fala com foco em apresentar a organização dos componentes, o funcionamento da solução e a relação entre as partes da arquitetura de maneira clara, objetiva e tecnicamente correta.
+
+- Direcionei a preparação para uma explicação acessível à banca, buscando traduzir os aspectos técnicos em uma narrativa compreensível, sem perder a precisão necessária para demonstrar o funcionamento da solução desenvolvida pela equipe.
+
+- Não realizei alterações no código-fonte nesta etapa. Conforme o planejamento da equipe, o código permanecerá congelado até o dia da apresentação, priorizando a preparação da defesa e a estabilidade da versão que será demonstrada.
+
+**Resultado:**
+
+A prévia da apresentação foi preparada e as responsabilidades individuais foram distribuídas. Fiquei responsável pela apresentação da arquitetura do sistema nos slides 7, 8 e 9 e iniciei a preparação da minha fala com base nos slides e no guia de estudos da defesa. O foco atual está na clareza da explicação técnica e na preparação para o Demo Day de 23/10/2026, mantendo o código congelado até a apresentação.
+
+### Uso de assistentes de IA:
+
+- Utilizei assistentes de IA como apoio à organização e à redação do relato individual de acompanhamento das atividades do encontro.
+
+- A preparação da apresentação está sendo orientada pelo material elaborado pela equipe e pelas instruções oficiais do Demo Day, com foco na compreensão da arquitetura e na comunicação clara dos aspectos técnicos do projeto.

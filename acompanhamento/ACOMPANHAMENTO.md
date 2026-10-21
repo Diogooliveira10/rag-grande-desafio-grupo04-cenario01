@@ -648,3 +648,37 @@ João Pedro Félix Reis e Eduarda não participaram deste encontro por questões
 
 - A equipe utilizou assistentes de IA para investigar falhas, implementar correções e testes, comparar respostas com e sem alterações, otimizar recuperação e desempenho, revisar documentação e preparar os materiais de apresentação.
 - As alterações foram verificadas por testes automatizados, execução do pipeline, logs e avaliações do Golden Set. Os resultados da v6 e da v7 foram mantidos separados, e as decisões sobre promoção do corpus, escopo das correções e preparação da demonstração foram tomadas pela equipe.
+
+## Encontro 16 — 2026-10-21
+
+## Entregamos hoje:
+
+- **Preparação para o Demo Day:** a equipe revisou os slides e o guia de estudos da defesa, organizando a apresentação em cinco partes: problema e motivação, dados utilizados, arquitetura e funcionamento, apresentação do sistema e demonstração prática. A duração prevista é de 15 minutos, com limite máximo de 20 minutos. As responsabilidades de apresentação foram distribuídas, e Eduarda ficou definida como apresentadora oficial.
+
+- **Preparação individual:** Diogo estudou a arquitetura do NEXO RJ, revisou o fluxo de perguntas e respostas, os logs de execução e o conteúdo dos slides sob sua responsabilidade. Também validou o funcionamento do sistema com o frontend e o backend utilizando a v7. A consulta sobre contratos de ambulância firmados em 2025 retornou 31 registros via SQL em 1,7 segundo, em concordância com o plano de contingência.
+
+- **Validação do Golden Set:** Renato executou a avaliação na v7, obtendo **35 acertos em 36 casos** após atualizar o gabarito de P4.2 para a nova versão do corpus e corrigir seu encaminhamento para SQL. A correção de confiança do Diogo e os três defeitos identificados anteriormente também já estão integrados à `main`.
+
+- **Correção de cálculos SQL:** foram identificadas 358 compras anuladas que inflavam os totais financeiros. O filtro padrão passou a excluir esses registros, mantendo a possibilidade de consultá-los explicitamente. Com isso, o total de contratações de 2025 caiu de aproximadamente R$ 540 bilhões para R$ 152,4 bilhões, desconsiderando as compras anuladas.
+
+- **Melhorias de interface e conversação:** foram corrigidos problemas de inicialização do atendimento conversacional e adicionada a possibilidade de abrir conversas a partir dos cards do histórico e preservar a sessão anterior ao iniciar uma nova conversa.
+
+- **Validação funcional:** foram testadas 12 perguntas abrangendo consultas SQL, rankings, cálculos, busca normativa, apresentação do sistema, compras anuladas e recusas por previsão ou dados sensíveis. Todas passaram nos testes relatados.
+
+## Ficou pendente:
+
+- Finalizar os ensaios da apresentação e a preparação da demonstração para o dia 23/10/2026.
+- Concluir a integração do frontend publicado com o backend ativo.
+- Avaliar o ajuste de roteamento para perguntas de comparação entre esferas estadual e municipal.
+- Manter o plano de contingência preparado para eventuais falhas de conexão, backend ou provedor de LLM.
+
+## Bloqueios em aberto:
+
+- **Publicação do sistema:** o frontend publicado ainda depende da configuração do endereço do backend.
+- **Limitações conhecidas:** a demonstração deve explicitar que os dados representam o recorte disponível do corpus e que determinadas informações, como pagamentos efetivamente realizados, não podem ser confirmadas apenas pelos registros de contratação.
+
+### Uso de assistentes de IA:
+
+- Foram utilizados assistentes de IA para revisar as alterações integradas à `main`, apoiar a investigação de falhas, implementar e validar melhorias no backend e frontend, executar avaliações e preparar a documentação da defesa.
+- Diogo utilizou o Claude Code para revisar as alterações integradas e se preparar para explicar os resultados, a arquitetura e as limitações do sistema.
+- Conforme o planejamento da equipe, o código permanece congelado até o Demo Day, priorizando a estabilidade da versão apresentada.
