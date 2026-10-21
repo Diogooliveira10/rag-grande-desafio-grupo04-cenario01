@@ -174,7 +174,9 @@ def test_inventory_operation_uses_common_contract(monkeypatch):
     assert next(e for e in records() if e["stage"] == "inventario")["output"]["totais"] == {"arquivos": 2}
 
 
-@pytest.mark.parametrize("response,expected", [(sdk_response(), "reportado"), (sdk_response(usage=False), "indisponivel"),
+# Sem usage, a resposta de conversa tem os tokens estimados pelo texto (PR #67, João).
+@pytest.mark.parametrize("response,expected", [(sdk_response(), "reportado"), (sdk_response(usage=False), "estimado"),
+    (SimpleNamespace(usage=None, choices=[]), "indisponivel"),
     (SimpleNamespace(usage={"prompt_tokens": 4}), "parcial"),
     (SimpleNamespace(usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}), "reportado")])
 def test_known_zero_missing_usage_and_partial_usage_are_distinct(response, expected):

@@ -12,6 +12,7 @@ from src.structured_db import Banco
 from tests.test_structured_db import _contratacao, _plano, escrever_documents
 
 ESTRUTURADA = [Natureza.ESTRUTURADA]
+_SEM_ANULADAS = "(situacao IS NULL OR situacao != 'Anulada')"
 AGREGADA = [Natureza.ESTRUTURADA, Natureza.AGREGADA]
 
 
@@ -182,14 +183,15 @@ def test_periodo_vira_where_do_sql(filtros, where, parametros):
     # "contratações": o ano é o da publicação (com "contratos", o da assinatura).
     consulta = sq.detectar_consulta("Qual a mediana das contratações?", QueryFilters(**filtros), ESTRUTURADA)
     sql, valores = sq._where(consulta, ())
-    assert sql == f" WHERE {where}"
+    # Compras anuladas ficam fora de toda conta (PR #67, João, 21/10).
+    assert sql == f" WHERE {_SEM_ANULADAS} AND {where}"
     assert valores == parametros
 
 
 def test_periodo_aberto_de_contratos_usa_ano_da_assinatura():
     consulta = sq.detectar_consulta("Qual a mediana dos contratos?", QueryFilters(ano_desde=2024), ESTRUTURADA)
     sql, valores = sq._where(consulta, ())
-    assert sql == " WHERE tipo_registro = ? AND ano_assinatura >= ?"
+    assert sql == f" WHERE tipo_registro = ? AND {_SEM_ANULADAS} AND ano_assinatura >= ?"
     assert valores == ["contrato_assinado", 2024]
 
 
