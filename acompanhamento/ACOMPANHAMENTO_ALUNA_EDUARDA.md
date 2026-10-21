@@ -89,7 +89,7 @@
 - Estruturei o fluxo para exibir de forma clara o caminho real de cada consulta, incluindo o uso de SQL, a busca vetorial e as principais etapas do pipeline, sempre vinculadas ao respectivo `query_id`.
 - Preparei essa estrutura para consumir o trace real do backend quando ele estiver disponível, sem utilizar dados mockados ou simular informações que ainda não são fornecidas pela API.
 
-## Encontro 11 - 2026-10-08
+## Encontro 11 - 2026-10-07
 
 ### Relato individual - Eduarda
 
@@ -120,3 +120,22 @@
 - Adicionei comandos de diagnóstico para verificar a saúde do backend e executar uma consulta real no pipeline, além do suporte centralizado ao header necessário para acesso por túnel ngrok.
 - Ampliei os testes automatizados do histórico, feedback, serviços de exploração, timeout e nova tentativa, e corrigi a sincronização dos arquivos gerados para o GitHub Pages no Windows.
 - Atualizei a documentação de integração e o build publicado, registrando que uma demonstração pública precisa de um backend HTTPS e validando localmente o frontend integrado ao backend real.
+
+## Encontro 14 - 2026-10-16
+
+### Relato individual - Eduarda
+
+- Dei continuidade à preparação do frontend para a demonstração pública, acompanhando os ajustes necessários para conectar o GitHub Pages ao backend da aplicação.
+- Colaborei na validação da configuração de deploy, que passou a definir corretamente a URL pública da API durante o processo de build.
+- Acompanhei a criação de uma verificação automatizada da configuração do GitHub Pages, com testes para evitar a publicação do frontend sem o endereço correto do backend.
+- Revisei as atualizações da documentação de deploy e integração, incluindo as orientações para configurar a variável `VITE_API_BASE_URL` e validar a aplicação publicada.
+
+## Encontro 15 - 2026-10-19
+
+### Relato individual - Eduarda
+
+- Revisei e integrei ao repositório principal do frontend as correções de configuração do GitHub Pages e as melhorias desenvolvidas para a demonstração.
+- Integrei a versão final da visualização detalhada da rastreabilidade, com aprimoramentos na apresentação das evidências, filtros, uso de modelos e observações das etapas do pipeline.
+- Revisei e incorporei as melhorias colaborativas da tela de transparência e do resumo do projeto, incluindo a exibição do corpus ativo, do snapshot anterior e a renderização das respostas em Markdown.
+- Corrigi a declaração das dependências utilizadas pelo renderizador de Markdown, garantindo que o build e a instalação do frontend incluíssem todos os pacotes necessários.
+- Consolidei as contribuições das branches de trabalho na `main` do frontend, deixando a versão integrada pronta para publicação e validação da equipe.
