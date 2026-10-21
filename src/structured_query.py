@@ -45,6 +45,7 @@ _NUMEROS_POR_EXTENSO = {
 }
 
 _RE_PCA = re.compile(r"\bpca\b|\bplanos? (?:anua(?:l|is) )?de contratac|\bplanos? anua(?:l|is)\b|\bplanejad")
+_RE_ANULADA = re.compile(r"\banulad[ao]s?\b")
 _RE_CONTRATOS = re.compile(r"\bcontrat(?:o|os|ad[oa]s?|acao|acoes|ou|aram)\b")
 _MESES = {
     "janeiro": 1, "fevereiro": 2, "marco": 3, "abril": 4, "maio": 5, "junho": 6,
@@ -171,6 +172,7 @@ _PALAVRAS_GENERICAS = frozenset(
     tipo tipos corpus base bases numero fornecedor fornecedores empresa empresas receberam recebeu
     usado usada usadas usados comum comuns pagaram pagou pago paga pagos caro cara caros barato
     publicado publicados assinado assinada assinados assinadas assinatura assinaturas vigente vigentes vigencia
+    anulada anulado anuladas anulados cancelada cancelado canceladas cancelados
     compare comparar compara comparado comparados comparacao data datas federal federais uniao nacional
     fevereiro marco abril maio junho julho agosto setembro outubro novembro dezembro
     semestre trimestre existem quantidade registro registros realizado realizadas realizados
@@ -269,6 +271,10 @@ class Consulta:
     # lista ("há dados suficientes para concluir?", "quais regras?"), False.
     listagem_direta: bool = False
     incluir_total_geral: bool = False
+    # A pergunta fala de compras anuladas: não aplicar filtro que as exclui.
+    incluir_anuladas: bool = False
+    # A pergunta pede APENAS compras anuladas: filtrar só por sitaucao = 'Anulada'.
+    so_anuladas: bool = False
 
 
 # Contrato de compilação apenas: estas tabelas de fatos não são criadas aqui.
@@ -450,6 +456,8 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
             or filtros.referencia_temporal in {"resultado", "vigencia", "propostas"}):
         return None
     bases = set(bases)
+    anulada_citada = bool(_RE_ANULADA.search(structured_db.normalizar(query)))
+    so_anuladas = anulada_citada and not any(p in structured_db.normalizar(query) for p in ["cancelad", "ativas", "vigente", "valid"])
     if Natureza.ESTRUTURADA in bases:
         identificador = _RE_NUMERO_CONTROLE_PNCP.search(query)
         if identificador:
@@ -458,6 +466,8 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
                 tipo="identificador",
                 limite=1,
                 numero_controle_pncp=identificador.group(0),
+                incluir_anuladas=anulada_citada,
+                so_anuladas=so_anuladas,
             )
         # "Qual o CNPJ da Cristália?": o CNPJ está no registro do fornecedor.
         # Sem este caminho, a pergunta ia à busca e ao LLM, que levava 90 s e
@@ -471,6 +481,8 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
                 tipo="cnpj_fornecedor",
                 limite=5,
                 filtros_analiticos=(("fornecedor", fornecedor),),
+                incluir_anuladas=anulada_citada,
+                so_anuladas=so_anuladas,
             )
     # Sem as expressões que já viraram filtro: em "média dos contratos com valor
     # maior que 2000", o "maior" não pede ranking, e "acima"/"milhão" não
@@ -671,6 +683,8 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
                          and not _RE_NORMA_NUMERADA.search(texto)
                          and not _RE_PEDIDO_ALEM_DA_LISTA.search(texto)),
         incluir_total_geral=orgaos_e_total,
+        incluir_anuladas=anulada_citada,
+        so_anuladas=so_anuladas,
     )
 
 
@@ -731,7 +745,9 @@ def consulta_da_intencao(intent: QueryIntent) -> Optional[Consulta]:
         metrica=f.metrica or "contagem", minimo_por_grupo=f.minimo_por_grupo,
         campo={"contratado": "valor_contratado", "estimado": "valor_estimado", "homologado": "valor_homologado"}.get(f.tipo_valor),
         referencia_temporal=referencia,
-        termos_objeto=tuple(structured_db.normalizar(t) for t in intent.termos_objeto) if tabela == "contratacoes" else ())
+        termos_objeto=tuple(structured_db.normalizar(t) for t in intent.termos_objeto) if tabela == "contratacoes" else (),
+        incluir_anuladas=bool(_RE_ANULADA.search(structured_db.normalizar(intent.pergunta))),
+        so_anuladas=bool(_RE_ANULADA.search(structured_db.normalizar(intent.pergunta))))
 
 
 # --------------------------------------------------------------------------
@@ -755,6 +771,14 @@ def _where(consulta: Consulta, termos: Iterable[str], juncao: str = "AND") -> tu
     ):
         condicoes.append("tipo_registro = ?")
         parametros.append("contrato_assinado")
+    # Compras anuladas no PNCP não devem entrar em nenhum cálculo; o
+    # valor homologado de uma compra anulada não representa contratação válida.
+    # Quando a pergunta fala explicitamente de anuladas, não aplica o filtro.
+    if consulta.tabela == "contratacoes" and not consulta.incluir_anuladas:
+        condicoes.append("(situacao IS NULL OR situacao != 'Anulada')")
+    # Quando a pergunta pede APENAS anuladas, filtra por sitaucao = 'Anulada'.
+    elif consulta.tabela == "contratacoes" and consulta.so_anuladas:
+        condicoes.append("situacao = 'Anulada'")
     if consulta.ano is not None:
         fim = consulta.ano_final or consulta.ano
         if fim == consulta.ano:
