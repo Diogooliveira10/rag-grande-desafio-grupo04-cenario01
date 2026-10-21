@@ -141,6 +141,11 @@ def token_usage_from_response(response: Any, *, extra: dict[str, Any] | None = N
                                "fonte": "response.usage", "chamadas_observadas": 1,
                                "campos_reportados": fields}
     if usage is None:
+        # Resposta de embedding não tem texto gerado: estimar pelo texto das
+        # escolhas contaria tokens que não existem (o log dizia "indisponivel"
+        # com total diferente de zero).
+        if getattr(response, "data", None) is not None or isinstance(response, Mapping) and "data" in response:
+            return TokenUsage()
         # Estimativa quando o provider não reporta usage (ex.: OpenRouter free).
         # ~4 caracteres por token é a aproximação usual para português/inglês.
         estimated = _estimate_tokens_from_response(response)
