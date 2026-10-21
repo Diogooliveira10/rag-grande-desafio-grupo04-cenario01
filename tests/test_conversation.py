@@ -85,3 +85,18 @@ def test_pergunta_sobre_regras_do_acervo_nao_e_tratada_como_injecao(query, monke
 
     monkeypatch.setattr(conversa, "CONVERSATION_MODE", "regras")
     assert resposta_conversacional(query) is None
+
+
+@pytest.mark.parametrize("query", [
+    "Olá, que é vc?", "quem é vc?", "Oi, o que você faz?", "O que é o NEXO RJ?", "Bom dia, quem é você?",
+])
+def test_pergunta_sobre_o_assistente_tem_resposta_fixa_sem_llm(query, monkeypatch):
+    """Prévia do João (21/10): "Olá, que é vc?" ia ao LLM e voltava genérica, ou
+    recusada como fora de escopo quando o LLM não respondia."""
+    import src.conversation as conversa
+
+    monkeypatch.setattr(conversa, "_interpret_interaction",
+                        lambda *a, **k: pytest.fail("pergunta de ajuda não deve chegar ao LLM"))
+    resposta = resposta_conversacional(query)
+
+    assert resposta is not None and resposta.answer.startswith("Sou o NEXO RJ")

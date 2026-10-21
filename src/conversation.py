@@ -88,7 +88,22 @@ _HELP = {
     "o que voce faz", "o que voce pode fazer", "como voce pode me ajudar",
     "quem e voce", "como funciona", "como funciona o nexo", "como usar o nexo",
     "posso fazer uma pergunta", "quero fazer uma pergunta", "vamos conversar", "quero conversar",
+    # "Olá, que é vc?" (prévia do João, 21/10) caía no classificador do LLM:
+    # resposta genérica ou, sem o LLM, recusa por fora de escopo.
+    "que e voce", "o que e voce", "o que voce e", "voce e quem",
+    "quem e o nexo", "o que e o nexo", "o que e o nexo rj", "quem e o nexo rj",
 }
+# Abreviações comuns na pergunta de ajuda: "vc" e "q".
+_ABREVIACOES = {"vc": "voce", "q": "que"}
+
+
+def _pedido_de_ajuda(normalized: str) -> bool:
+    """Pergunta sobre o assistente, com ou sem saudação na frente ("olá, quem é vc?")."""
+    texto = " ".join(_ABREVIACOES.get(palavra, palavra) for palavra in normalized.split())
+    saudacao = _GREETING.match(texto)
+    if saudacao and saudacao.end() < len(texto):
+        texto = texto[saudacao.end():].strip()
+    return texto in _HELP
 _CAPABILITIES = (
     "Posso ajudar com perguntas sobre contratos, editais, atas, órgãos e valores de "
     "contratações públicas do RJ, além das conversas sintéticas do acervo. "
@@ -170,7 +185,7 @@ def resposta_conversacional(query: str, *, run_id: str = "sem-run-id",
             "Conversas dos usuários não são fonte documental do PNCP. Nas respostas factuais, "
             "as fontes indicam os registros usados."
         )
-    elif normalized in _HELP:
+    elif _pedido_de_ajuda(normalized):
         answer = "Sou o NEXO RJ, assistente de consulta ao acervo do projeto. " + _CAPABILITIES
     else:
         route = _rotear(query)
