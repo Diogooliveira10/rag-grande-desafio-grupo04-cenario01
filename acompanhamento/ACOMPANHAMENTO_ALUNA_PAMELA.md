@@ -380,3 +380,20 @@ Hoje fiz o item 22 na P4.2: o LLM dizia que a modalidade era "pregão", deduzind
 ### Uso de assistentes de IA:
 
 - Usei o Claude Code para investigar a falha da P4.2, fazer a regra, a correção e os testes, conferir os dados do v7 e comparar as respostas do LLM com e sem a mudança.
+
+## Encontro 16 - 2026-10-21
+
+### Relato individual - Pâmela de Freitas
+
+Hoje me preparei para a minha parte do Demo Day: resultados e melhorias (slides 14 e 15).
+
+- Revisei o que entrou na main: o Renato rodou o golden set na v7 (35 de 36), refez o gabarito da P4.2 para a v7, como eu tinha avisado, e fez ela ir ao SQL. A minha correção do item 22 já está na main, e os três defeitos que eu tinha achado em 16/10 foram corrigidos.
+- Li o plano B do Demo Day: as 5 consultas ao vivo saem do SQL, sem o LLM, e as que passam pelo LLM vão com captura prévia.
+- Liguei o backend e o frontend com os dados da v7 e testei pelo site: "Quantos contratos de ambulância foram firmados em 2025?" deu 31 registros, pelo SQL, em 1,7 s, igual ao plano B.
+- Estudei o log, cada etapa da pergunta grava uma linha em `logs/pipeline/pipeline-AAAA-MM-DD.jsonl`, e o "Ver caminho" do site junta essas linhas pelo `query_id`. Li o JSON (resumo da consulta, etapas puladas e o motivo, tempo de cada etapa) e a ver no navegador (F12, aba Rede) o JSON que o site recebe.
+- Estudei os números dos slides 14 e 15 para explicar: golden set, recusas e citações, roteamento, busca, testes e as limitações.
+
+
+### Uso de assistentes de IA:
+
+- Usei o Claude Code para revisar o que entrou na main
