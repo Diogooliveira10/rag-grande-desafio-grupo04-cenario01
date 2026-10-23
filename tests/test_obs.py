@@ -34,6 +34,7 @@ def test_span_grava_contrato_jsonl_e_tokens(tmp_path):
     assert set(record) == {
         "ts", "run_id", "query_id", "stage", "status", "latencia_ms",
         "input", "output", "tokens", "modelo", "extra", "session_id",
+        "hash_anterior", "hash",
     }
     assert record["stage"] == "geracao"
     assert record["status"] == "ok"

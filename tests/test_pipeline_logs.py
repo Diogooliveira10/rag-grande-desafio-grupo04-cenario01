@@ -15,6 +15,8 @@ from src.schema import Chunk, ChunkMetadata, Natureza
 CAMPOS_CONTRATO = {
     "ts", "run_id", "query_id", "stage", "status", "latencia_ms",
     "input", "output", "tokens", "modelo", "extra", "session_id",
+    # Cadeia de hashes (src/log_chain.py), gravada junto com a linha.
+    "hash_anterior", "hash",
 }
 
 

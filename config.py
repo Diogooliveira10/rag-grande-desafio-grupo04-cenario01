@@ -166,6 +166,15 @@ HISTORY_PUBLIC = _env("HISTORY_PUBLIC", "false").lower() in {"1", "true", "sim",
 # false = sem /docs, /redoc e /openapi.json: com o backend exposto pelo túnel,
 # o esquema da API deixa de ficar público. Padrão ligado, para uso local.
 API_DOCS = _env("API_DOCS", "true").lower() in {"1", "true", "sim", "yes"}
+# Limite por cliente (app/rate_limit.py), em requisições por minuto; 0 desliga.
+# Perguntas e feedback: cada pergunta pelo LLM ocupa o ECOA por 20 a 100 s.
+# Leitura (histórico, trace, explorar): o site faz várias chamadas por tela.
+RATE_LIMIT_QUERY_PER_MINUTE = int(_env("RATE_LIMIT_QUERY_PER_MINUTE", "10"))
+RATE_LIMIT_READ_PER_MINUTE = int(_env("RATE_LIMIT_READ_PER_MINUTE", "120"))
+# Cadeia de hashes no log JSONL (src/log_chain.py): cada linha guarda o hash da
+# anterior. Com a chave, HMAC-SHA256; sem ela, SHA-256. Nunca versionar a chave.
+LOG_CHAIN_ENABLED = _env("LOG_CHAIN_ENABLED", "true").lower() in {"1", "true", "sim", "yes"}
+LOG_CHAIN_KEY = _env("LOG_CHAIN_KEY", "")
 # Dias que o histórico (src/history_store.py) guarda cada consulta; 0 = sem expurgo.
 HISTORY_RETENTION_DAYS = int(_env("HISTORY_RETENTION_DAYS", "30"))
 # Daily pipeline files follow history retention by default; 0 keeps all files.

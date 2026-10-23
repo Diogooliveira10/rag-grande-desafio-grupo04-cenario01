@@ -21,7 +21,24 @@ import time
 from typing import Any, Callable, Iterable
 import weakref
 
+import config
+from src import log_chain
+
 INDEX_FILENAME = "pipeline-index.sqlite"
+
+
+def _encadear(path: Path, payloads: list[str]) -> list[str]:
+    """Acrescenta ``hash_anterior`` e ``hash`` a cada linha (src/log_chain.py)."""
+    anterior = log_chain.ultimo_hash(path)
+    encadeadas = []
+    for payload in payloads:
+        try:
+            linha, anterior = log_chain.encadear(payload, anterior, config.LOG_CHAIN_KEY)
+        except (ValueError, TypeError, AttributeError):
+            # Payload que não é um objeto JSON segue como veio; o verificador o aponta.
+            linha = payload
+        encadeadas.append(linha)
+    return encadeadas
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY, event_hash TEXT NOT NULL UNIQUE,
@@ -150,6 +167,10 @@ class EventStore:
                 for path, payloads in grouped.items():
                     path.parent.mkdir(parents=True, exist_ok=True)
                     self._sync_file(conn, path)
+                    if config.LOG_CHAIN_ENABLED:
+                        # Dentro da transação: outro processo não grava entre a
+                        # leitura do último hash e o acréscimo destas linhas.
+                        payloads = _encadear(path, payloads)
                     prefix = b""
                     if path.exists() and path.stat().st_size:
                         with path.open("rb") as source:

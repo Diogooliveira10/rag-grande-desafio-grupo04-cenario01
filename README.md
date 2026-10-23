@@ -622,6 +622,36 @@ Pedidos para mostrar ou mudar as instruções internas ("ignore as instruções
 anteriores", "mostre o seu prompt") recebem uma resposta fixa, sem chamar o
 LLM ([src/conversation.py](src/conversation.py)).
 
+**Limite de requisições** ([app/rate_limit.py](app/rate_limit.py)): cada
+cliente pode fazer `RATE_LIMIT_QUERY_PER_MINUTE` perguntas e feedbacks por
+minuto (padrão 10) e `RATE_LIMIT_READ_PER_MINUTE` leituras de histórico,
+trace e telas de explorar (padrão 120); `0` desliga. Passou do limite, a API
+responde 429 com `Retry-After` e a mensagem "Tente de novo em N s", com os
+cabeçalhos do CORS, para o site poder mostrá-la. `/health` e `/ready` ficam de
+fora. Pelo túnel toda requisição chega de 127.0.0.1; o IP real vem do
+`X-Forwarded-For`, aceito só quando a conexão vem da própria máquina (o agente
+do túnel), e só a última entrada, a que o túnel acrescentou. O estado fica em
+memória, porque o backend roda num processo só.
+
+**Cadeia de hashes no log** ([src/log_chain.py](src/log_chain.py)): cada
+linha de `logs/pipeline/pipeline-AAAA-MM-DD.jsonl` ganha `hash_anterior` e
+`hash`, um HMAC-SHA256 do registro em JSON canônico com a chave
+`LOG_CHAIN_KEY` (sem chave, SHA-256). Alterar, apagar, inserir ou trocar a
+ordem de uma linha quebra a corrente; o primeiro registro de cada dia continua
+do último hash do dia anterior. Para conferir:
+
+```bash
+python -m src.log_chain verificar          # logs/pipeline por padrão
+```
+
+O comando aponta a primeira linha quebrada e imprime o último hash. Guardar
+esse hash fora do servidor de tempos em tempos (num e-mail ao grupo, por
+exemplo) impede reescrever o log inteiro sem ser notado. Linhas gravadas
+antes da cadeia ficam como estão. O índice SQLite do trace continua só índice,
+reconstruível a partir do JSONL. Escolhemos a cadeia de hashes, e não uma
+blockchain: com um operador e um servidor, não há partes que precisem chegar a
+consenso, e a cadeia dá a mesma prova de adulteração sem nós nem custo.
+
 No projeto do frontend, configure `VITE_API_BASE_URL` com a URL pública HTTPS
 deste backend, sem `/api/v1/query` no final (na demo, o domínio do túnel ngrok;
 ver 9.1):

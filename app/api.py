@@ -32,7 +32,7 @@ from contextlib import asynccontextmanager
 from pathlib import PurePosixPath
 from typing import Any, Literal, Optional
 
-from fastapi import FastAPI, Header, HTTPException, Path, Query, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,6 +41,7 @@ from pydantic import BaseModel, Field, field_validator
 import config
 from src import pipeline, rerank, retrieve, snapshot
 from app import catalog
+from app.rate_limit import LimiteDeRequisicoes, cliente_real
 from app.catalog_models import ContratacaoRecord, DocumentoRecord, OfficialSource, OrgaoRecord, ProjectSummary
 from src.history_store import ConsultaNaoEncontrada, default_store as historico
 from src.obs import (Stage, default_logger, lifecycle, new_query_id, new_run_id,
@@ -274,7 +275,36 @@ async def _ciclo_de_vida(_app: FastAPI):
     yield
 
 
+limite_de_consultas = LimiteDeRequisicoes(config.RATE_LIMIT_QUERY_PER_MINUTE)
+limite_de_leitura = LimiteDeRequisicoes(config.RATE_LIMIT_READ_PER_MINUTE)
+_ROTAS_DE_CONSULTA = {"/api/v1/query", "/api/v1/feedback"}
+
+
+def _limitar_requisicoes(request: Request) -> None:
+    """429 quando o cliente passa do limite; /health e /ready ficam de fora.
+
+    É dependência, e não middleware, para a resposta 429 passar pelo CORS: o
+    navegador só deixa o site ler o erro com os cabeçalhos do CORS.
+    """
+    caminho = request.url.path
+    if not caminho.startswith("/api/"):
+        return
+    limite = limite_de_consultas if caminho in _ROTAS_DE_CONSULTA else limite_de_leitura
+    cliente = cliente_real(request.client.host if request.client else None,
+                           request.headers.get("x-forwarded-for"))
+    espera = limite.consumir(cliente)
+    if espera:
+        logger.warning("limite de requisições: %s em %s", "consulta" if limite is limite_de_consultas
+                       else "leitura", caminho)
+        raise HTTPException(
+            status_code=429,
+            detail=f"Muitas requisições em pouco tempo. Tente de novo em {espera} s.",
+            headers={"Retry-After": str(espera)},
+        )
+
+
 app = FastAPI(title="Adaptive RAG API", version="1.0.0", lifespan=_ciclo_de_vida,
+              dependencies=[Depends(_limitar_requisicoes)],
               docs_url="/docs" if config.API_DOCS else None,
               redoc_url="/redoc" if config.API_DOCS else None,
               openapi_url="/openapi.json" if config.API_DOCS else None)

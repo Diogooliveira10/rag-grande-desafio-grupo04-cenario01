@@ -63,6 +63,22 @@ def _historico_da_api_isolado(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _sem_limite_de_requisicoes(monkeypatch):
+    """Os testes da API fazem dezenas de chamadas seguidas; quem testa o limite liga o seu."""
+    from app import api
+    from app.rate_limit import LimiteDeRequisicoes
+    monkeypatch.setattr(api, "limite_de_consultas", LimiteDeRequisicoes(0))
+    monkeypatch.setattr(api, "limite_de_leitura", LimiteDeRequisicoes(0))
+
+
+@pytest.fixture(autouse=True)
+def _cadeia_de_hashes_padrao(monkeypatch):
+    """Cadeia ligada e sem a chave do .env, igual em todas as máquinas."""
+    monkeypatch.setattr(config, "LOG_CHAIN_ENABLED", True)
+    monkeypatch.setattr(config, "LOG_CHAIN_KEY", "")
+
+
+@pytest.fixture(autouse=True)
 def _chave_da_api_de_teste(monkeypatch):
     """Histórico e trace exigem X-API-Key; os testes usam esta chave, nunca a do .env."""
     monkeypatch.setattr(config, "RAG_API_KEY", "chave-de-teste")
