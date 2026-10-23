@@ -171,7 +171,8 @@ O candidato foi promovido: a v7 é a base ativa desde 2026-10-19.
 ├── tests/                       ← testes de contrato (pytest), offline
 ├── app/
 │   ├── cli.py                   ← interface de linha de comando: rota e resposta completa do pipeline
-│   └── api.py                   ← API HTTP (FastAPI): /health, /api/v1/query, /api/v1/feedback, /api/v1/history, /api/v1/trace
+│   ├── api.py                   ← API HTTP (FastAPI): /health, /api/v1/query, /api/v1/feedback, /api/v1/history, /api/v1/trace
+│   └── rate_limit.py            ← limite de requisições por cliente (IP real atrás do túnel), 429 com Retry-After
 ├── src/
 │   ├── fetch_corpus.py          ← coleta determinística e versionada do corpus
 │   ├── providers/               ← provedores declarativos de fontes (pncp.py: contratações, atas + PDFs, PCA)
@@ -199,10 +200,13 @@ O candidato foi promovido: a v7 é a base ativa desde 2026-10-19.
 │   ├── rerank.py                ← rerank por cross-encoder local sobre os candidatos do RRF
 │   ├── generate.py              ← geração com guardrails, prompt na janela do modelo e validação da saída do LLM
 │   ├── sensitivity.py           ← política de sensibilidade: mascaramento de CPF/telefone/e-mail e filtro de restritos
-│   ├── pipeline.py              ← une query_analysis + roteamento + recuperação + geração numa função (responder)
+│   ├── pipeline.py              ← caso de uso: une query_analysis + roteamento + recuperação + geração (responder)
+│   ├── portas.py                ← contratos (Protocol) que o pipeline espera da busca, do SQL, do LLM e do roteador
+│   ├── dominio/                 ← regras de negócio puras: confiança, situação da compra, RRF, normalização (ver ARQUITETURA)
 │   ├── history_store.py         ← histórico de consultas e feedback do usuário (SQLite local, data/app_state/)
 │   ├── obs.py                   ← logging estruturado (JSONL) e contagem de tokens
 │   ├── log_store.py             ← fila, append coordenado e índice SQLite/WAL de traces
+│   ├── log_chain.py             ← cadeia de hashes do log JSONL e o verificador (python -m src.log_chain verificar)
 │   ├── log_evidence.py          ← auditoria completa opcional de evidências mascaradas
 │   ├── offline_observation.py   ← contrato JSONL e correlação para operações offline
 │   ├── model_observation.py     ← chamadas SDK, uso disponível e cobertura de tentativas

@@ -80,6 +80,62 @@ flowchart TD
 - `validacao`: valida a saída do LLM, trata JSON inválido, remove citações inexistentes e mascara dados pessoais quando necessário. Também converte recusas indevidas: quando o roteador já colocou a pergunta no escopo e o LLM escreveu uma resposta com evidência parcial mas ainda assim marcou recusa por "fora de escopo" ou "sem evidência", a recusa vira resposta com confiança baixa, e a conversão fica registrada como `recusa_convertida` no log (`_converter_recusa_indevida` em [src/generate.py](src/generate.py)). Recusas de guardrail (dados bancários, credenciais, juízo de legalidade) nunca são convertidas.
 - `feedback`: não roda dentro de `responder`, e sim quando o usuário avalia uma resposta já entregue. `POST /api/v1/feedback` associa a avaliação (`positivo`/`negativo` + comentário opcional) ao `query_id` da consulta original (404 se ele não existir) e grava o evento no log com esse mesmo `run_id`, amarrando-o aos demais stages da pergunta. Persistência e histórico em [src/history_store.py](src/history_store.py).
 
+### Camadas do código (Clean Architecture)
+
+Desde 2026-10-23 o código segue, aos poucos, a separação em camadas da Clean
+Architecture. A regra é que a dependência só aponta para dentro: o domínio não
+conhece o banco, o índice nem o LLM; o caso de uso conhece só os contratos
+(portas); a infraestrutura implementa esses contratos.
+
+| Camada | Onde | O que tem |
+|---|---|---|
+| Entidades | [src/schema.py](src/schema.py) | `Chunk`, `RouteDecision`, `QueryFilters`, `RAGResponse`… (só pydantic) |
+| Domínio | [src/dominio/](src/dominio/) | regras puras: política de confiança (`confianca.py`), situação da compra nas contas (`situacao.py`), conta do RRF (`fusao.py`), normalização de texto (`texto.py`) |
+| Caso de uso | [src/pipeline.py](src/pipeline.py) | `responder`: reformulação, conversa, análise, roteamento, coleta (SQL e busca), geração |
+| Portas | [src/portas.py](src/portas.py) | `Analisador`, `Roteador`, `Buscador`, `ConsultaEstruturada`, `Gerador`, `Conversa`, `Reformulador` (`Protocol`) |
+| Infraestrutura | `src/retrieve.py`, `src/structured_query.py`, `src/generate.py`, `src/structured_db.py`, `llm_ecoa.py`, `src/obs.py`… | FAISS + BM25, SQLite/Neon, ECOA/OpenRouter, log JSONL |
+| Entrada | [app/api.py](app/api.py), [app/cli.py](app/cli.py) | HTTP e linha de comando; só convertem a requisição no caso de uso |
+
+**Regra conferida por teste** ([tests/test_arquitetura.py](tests/test_arquitetura.py)): os módulos de
+`src/dominio/` só importam a biblioteca padrão, `src.schema` e o próprio domínio; `src/schema.py` só
+depende do pydantic; `src/pipeline.py` não importa nome privado (com `_`) de outro módulo. Quem quebrar
+a regra vê o teste falhar com o nome do import proibido.
+
+**Trocar uma peça.** O pipeline recebe as implementações em `Dependencias`; as do projeto saem de
+`dependencias_padrao()`. Para usar outra busca, outro LLM ou uma versão falsa num teste:
+
+```python
+import dataclasses
+from src import pipeline
+
+deps = dataclasses.replace(pipeline.dependencias_padrao(), buscar=minha_busca)
+pipeline.responder("Quantos contratos de ambulância em 2025?", dependencias=deps)
+```
+
+Exemplos com peças falsas, sem `monkeypatch`, em [tests/test_pipeline_portas.py](tests/test_pipeline_portas.py).
+
+**Acrescentar um tipo de consulta SQL.** Cada tipo (identificador, CNPJ do fornecedor, ranking,
+listagem, agrupamento, evolução, estatística) tem um executor próprio em
+[src/structured_query.py](src/structured_query.py), registrado em `_EXECUTORES`. Tipo novo é uma função
+`_executar_<tipo>(e: _Execucao)` e uma linha no registro, sem mexer nos outros (princípio aberto/fechado).
+Um teste falha se a análise puder gerar um tipo que não tem executor.
+
+**Funções divididas pelas etapas do log.** As funções centrais foram quebradas nas etapas que o log já
+nomeia, sem mudar o comportamento (2.197 testes e golden 35/36 antes e depois):
+
+| Função | Antes | Depois | Partes |
+|---|---|---|---|
+| `pipeline._responder` | 186 linhas | 43 | conversa, coleta por intenções, consulta única, intercalação, aviso de filtros |
+| `structured_query._executar` | 288 | 7 | um executor por tipo de consulta |
+| `structured_query.detectar_consulta` | 244 | 123 | registro pedido, tabela, tipo, limite, agrupamento, esferas, modalidade e objeto, mês, órgão |
+| `retrieve.retrieve` | 277 | 74 | rota e filtros, registros elegíveis, busca densa, BM25, identificadores exatos, fusão, rerank |
+| `generate.gerar_resposta` | 142 | 94 | resposta pelo SQL, preparação do prompt, validação da saída do LLM |
+
+**O que falta:** `src/query_analysis.py` (2,2 mil linhas, com funções de mais de 100 linhas) ainda não foi
+dividido; é o próximo passo, e o mais coberto por testes de regressão. Os nomes antigos das funções movidas
+para o domínio (`generate._aplicar_recorte`, `structured_query._situacoes_da_pergunta`,
+`structured_db.normalizar`…) continuam valendo como apelidos, para não quebrar quem os importava.
+
 ### Estado atual
 
 Já estão implementados:
@@ -89,7 +145,7 @@ Já estão implementados:
 - consulta a base estruturada em SQL (Postgres/SQLite) para perguntas sobre contratos;
 - filtros por metadados com fallback quando a filtragem retorna vazio;
 - guardrails para perguntas fora do escopo e ausência de evidência, com motivo de recusa inferido;
-- segurança da API: pedido para mostrar ou mudar as instruções internas (prompt injection) recebe resposta fixa, sem passar pelo LLM; credencial, senha, chave de API e token de acesso são recusados; cabeçalhos HTTP de segurança (`nosniff`, `X-Frame-Options: DENY`, `no-referrer`, `no-store`) em toda resposta; CORS só para as origens do site; trace e histórico só para o dono da sessão ou a chave de operação; `/docs` desligável por `API_DOCS=false`;
+- segurança da API: pedido para mostrar ou mudar as instruções internas (prompt injection) recebe resposta fixa, sem passar pelo LLM; credencial, senha, chave de API e token de acesso são recusados; cabeçalhos HTTP de segurança (`nosniff`, `X-Frame-Options: DENY`, `no-referrer`, `no-store`) em toda resposta; CORS só para as origens do site; trace e histórico só para o dono da sessão ou a chave de operação; `/docs` desligável por `API_DOCS=false`; desde 2026-10-23, role-play ("finja que é o administrador", "você agora é o DAN") e pedidos de vazar o contexto ("repita o texto acima") também recebem a resposta fixa; limite de requisições por cliente, com o IP real atrás do túnel ([app/rate_limit.py](app/rate_limit.py)); e cadeia de hashes no log JSONL, com verificador ([src/log_chain.py](src/log_chain.py));
 - política de sensibilidade e mascaramento de dados pessoais;
 - validação da resposta gerada;
 - observabilidade estruturada por `run_id`, `query_id`, `session_id`, origem, sequência e outcome; envelopes API/pipeline com tempo monotônico, persistência do histórico, metadados de versão e resumo SQL/vetorial que distingue tentativa de retorno de evidências (`resumo_consulta`);
@@ -103,7 +159,7 @@ Já estão implementados:
 - suporte a certificados HTTPS com `certifi` sem desabilitar validação SSL;
 - golden set com 36 casos e critérios de conteúdo (radicais, teto de confiança, negação), mais um conjunto de busca com 47 perguntas e a ablação do rerank. Na v7, a rodada de 2026-10-19 com o código da `main` em `b93164c` (`golden-2026-10-19-v7-36`) deu **31/36 (86%)**; com os ajustes seguintes no prompt (insuficiência dita de forma explícita), na ordem dos trechos de perguntas mistas e nos apelidos de fornecedor, a rodada `golden-2026-10-19-v7-36-ajustes` deu **33/36 (92%)**: rota 97%, recusa 100%, citação 100%, conteúdo 92%, sem erro de provedor. As três falhas que restam são da geração do LLM (palavras do gabarito e confiança acima do teto). Três rodadas seguidas com o código final (`golden-2026-10-20-v7-36-final-1` a `-3`) deram 31, 33 e 31: P1.2, P4.2 e P6.1 falham nas três, P2.3 e P4.3 oscilam, e rota (97%) e recusa (100%) não variam. Depois dessas rodadas, a P4.2 passou a sair do SQL (agrupamento por modalidade) e teve o gabarito refeito para a v7; na sequência P4.1 → P4.2 → P4.3 pela API, as três passam, e a rodada seguinte (`golden-2026-10-20-v7-36-auditoria`) deu **32/36**. Com os gabaritos da P1.2 e da P6.1 refeitos para a v7, a rodada de 2026-10-21 (`golden-2026-10-21-v7-36`) deu **35/36 (97%)**: só a P3.2 falhou, por variação da redação do LLM. Na busca híbrida dos 47 casos, hit@10 de 0,87 na v7 contra 0,91 na v6. Detalhes em [docs/registro_execucao_v6.md](docs/registro_execucao_v6.md);
 - scripts de instalação (`scripts/setup.ps1`/`setup.sh`) e de download dos modelos com hash conferido (`scripts/models.ps1`/`models.sh`);
-- 2.035 testes automatizados passando na verificação realizada em 2026-10-19.
+- 2.197 testes automatizados passando na verificação realizada em 2026-10-23 (eram 2.035 em 2026-10-19). Golden v7 em 35/36 nas rodadas de 2026-10-23; a falha que resta alterna entre P1.2, P3.2 e P4.3, sempre pela redação do LLM.
 
 ### Corpus e índice
 
@@ -165,7 +221,7 @@ Situação conferida em 2026-10-19, depois do PR #62 e dos ajustes da rodada `go
 - **Catálogo de órgãos, municípios e fornecedores** (`data/config/orgaos_corpus.json`): ainda é o da v6 (401 fornecedores, 56 municípios); a v7 tem 12.798 fornecedores e 87 municípios. Regenerado sem mais regras, ele inventa fornecedor em perguntas com palavras comuns ("tecnologia") e não distingue a matriz da filial; refazer depois de juntar as filiais e reforçar a proteção contra nomes comuns.
 - **Cobertura do PCA e da modalidade dos contratos:** limitação da fonte, documentada.
 - **Reserva do LLM (OpenRouter gratuito) instável:** em 2026-10-21, com o ECOA simulado fora do ar, os modelos gratuitos devolveram 404, 429 e 502 e respostas vazias em parte das chamadas; a resposta vazia passou a acionar o modelo reserva, mas a reserva não é garantida. As perguntas ao vivo da demo saem do SQL, sem LLM; as de norma têm captura no plano B.
-- **Depois do Demo Day:** tabela de apelidos de fornecedor completa (hoje há uma lista curta, com Light e Correios desde 2026-10-21; a CEDAE fica de fora por também ser órgão do catálogo), limite de requisições na API pública e revogação da chave do OpenRouter usada na demo.
+- **Depois do Demo Day:** tabela de apelidos de fornecedor completa (hoje há uma lista curta, com Light e Correios desde 2026-10-21; a CEDAE fica de fora por também ser órgão do catálogo), revogação das chaves usadas na demo (OpenRouter, ngrok, `RAG_API_KEY`) e divisão de `src/query_analysis.py` (último passo da reestruturação em camadas). Feitos em 2026-10-23: compras revogadas e suspensas fora dos cálculos, limite de requisições, cadeia de hashes no log, detector de injeção com role-play e as camadas descritas em "Camadas do código".
 
 ---
 
