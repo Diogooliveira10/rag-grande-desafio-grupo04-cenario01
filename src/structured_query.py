@@ -29,6 +29,7 @@ from typing import Any, Iterable, Optional, Sequence
 
 import config
 from src import structured_db
+from src.dominio import situacao
 from src.obs import Stage, default_logger
 from src.query_analysis import texto_sem_filtros
 from src.schema import Chunk, ChunkMetadata, Natureza, QueryFilters, QueryIntent
@@ -45,16 +46,6 @@ _NUMEROS_POR_EXTENSO = {
 }
 
 _RE_PCA = re.compile(r"\bpca\b|\bplanos? (?:anua(?:l|is) )?de contratac|\bplanos? anua(?:l|is)\b|\bplanejad")
-# Situações do PNCP em que a compra não vale como contratação: ficam fora de
-# toda conta, salvo quando a pergunta fala delas. O PNCP não tem "cancelada";
-# na pergunta, ela vale anulada e revogada.
-_SITUACOES_INVALIDAS = ("Anulada", "Revogada", "Suspensa")
-_RE_SITUACAO = (
-    ("Anulada", re.compile(r"\banulad[ao]s?\b|\bcancelad[ao]s?\b")),
-    ("Revogada", re.compile(r"\brevogad[ao]s?\b|\bcancelad[ao]s?\b")),
-    ("Suspensa", re.compile(r"\bsuspens[ao]s?\b")),
-)
-_RE_TAMBEM_VALIDAS = re.compile(r"\b(?:vigentes?|ativas|valid[ao]s|inclusive|incluindo)\b")
 _RE_CONTRATOS = re.compile(r"\bcontrat(?:o|os|ad[oa]s?|acao|acoes|ou|aram)\b")
 _MESES = {
     "janeiro": 1, "fevereiro": 2, "marco": 3, "abril": 4, "maio": 5, "junho": 6,
@@ -764,35 +755,14 @@ def consulta_da_intencao(intent: QueryIntent) -> Optional[Consulta]:
 # --------------------------------------------------------------------------
 
 
-def _situacoes_da_pergunta(pergunta: str) -> dict[str, Any]:
-    """Campos de situação da ``Consulta`` a partir do texto da pergunta.
-
-    Os dois caminhos (regras e intenção do LLM) usam esta função; antes cada um
-    decidia por conta própria, e "anuladas e vigentes" saía diferente em cada.
-    """
-    texto = structured_db.normalizar(pergunta)
-    citadas = tuple(situacao for situacao, padrao in _RE_SITUACAO if padrao.search(texto))
-    return {"situacoes_citadas": citadas,
-            "com_situacoes_validas": bool(citadas and _RE_TAMBEM_VALIDAS.search(texto))}
+# Situação da compra: regra de negócio, em src/dominio/situacao.py.
+_SITUACOES_INVALIDAS = situacao.SITUACOES_INVALIDAS
+_situacoes_da_pergunta = situacao.situacoes_da_pergunta
 
 
 def _clausula_de_situacao(consulta: Consulta) -> Optional[str]:
-    """Filtro por situação da compra; os valores são constantes do módulo.
-
-    ``IS NULL`` mantém empenhos e contratos, que não têm situação no PNCP.
-    """
-    if consulta.todas_as_situacoes:
-        return None
-    if consulta.situacoes_citadas and not consulta.com_situacoes_validas:
-        return f"situacao IN ({_lista_sql(consulta.situacoes_citadas)})"
-    excluidas = tuple(s for s in _SITUACOES_INVALIDAS if s not in consulta.situacoes_citadas)
-    if not excluidas:
-        return None
-    return f"(situacao IS NULL OR situacao NOT IN ({_lista_sql(excluidas)}))"
-
-
-def _lista_sql(valores: Iterable[str]) -> str:
-    return ", ".join(f"'{valor}'" for valor in valores)
+    return situacao.clausula_de_situacao(
+        consulta.situacoes_citadas, consulta.com_situacoes_validas, consulta.todas_as_situacoes)
 
 
 def _coluna_valor(consulta: Consulta) -> str:

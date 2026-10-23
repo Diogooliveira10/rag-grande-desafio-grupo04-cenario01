@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import config
+from src.dominio import fusao
 from src.obs import Stage, TokenUsage, default_logger, registrar, token_usage_from_response
 from src.schema import Natureza
 
@@ -1255,17 +1256,17 @@ def reciprocal_rank_fusion(
     k: int = DEFAULT_RRF_K,
     top_k: int | None = None,
 ) -> list[RetrievalResult]:
-    """Combina rankings por identificador estável usando Reciprocal Rank Fusion."""
-    if k < 0:
-        raise ValueError("k deve ser >= 0")
+    """Combina rankings por identificador estável usando Reciprocal Rank Fusion.
+
+    A conta é do domínio (src/dominio/fusao.py); aqui só se monta o resultado.
+    """
+    scores = fusao.pontuacoes_rrf([[item.chunk_id for item in ranked] for ranked in ranked_lists], k=k)
     merged: dict[str, RetrievalResult] = {}
-    scores: Counter[str] = Counter()
     dense_scores: dict[str, float] = {}
     sparse_scores: dict[str, float] = {}
     for list_number, ranked in enumerate(ranked_lists):
-        for rank, item in enumerate(ranked, start=1):
+        for item in ranked:
             key = item.chunk_id
-            scores[key] += 1 / (k + rank)
             if list_number == 0:
                 dense_scores[key] = item.score
             else:
