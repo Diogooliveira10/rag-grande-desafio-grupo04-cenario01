@@ -1153,45 +1153,10 @@ def gerar_resposta(
         # Padrão: a resposta do SQL sai sem LLM. A apresentação pelo LLM
         # (SQL_APRESENTACAO_LLM) levava as consultas ao vivo de ~2,5 s para
         # 7-25 s e as fazia depender do ECOA, para acrescentar só uma frase.
-        answer, mascaramentos_resposta = mascarar(resposta_sql.answer)
-        resposta_sql = resposta_sql.model_copy(update={"answer": answer})
-        fontes_sql = [source.chunk_id for source in resposta_sql.sources_used]
-        if auditoria_completa():
-            usados = [c for c in chunks if c.metadata.chunk_id in fontes_sql]
-            sensibilidade["auditoria_evidencias"] = auditar_geracao(chunks, usados, metodo="sql_deterministico")
-        _logar_evento(run_id, query_id, "ok", inicio, resposta_sql,
-                      metodo="sql_deterministico", llm_called=False,
-                      evidencias_usadas=fontes_sql, chunks_no_prompt=0,
-                      chunks_fora_do_orcamento=0, prompt_chunk_ids=[], prompt=[],
-                      **sensibilidade)
-        _logar_validacao(run_id, query_id, time.monotonic(), resposta_sql,
-                        erro_parsing=None, citacoes_descartadas=[], chaves_alias=[],
-                        mascaramentos_resposta=mascaramentos_resposta)
-        return resposta_sql
+        return _responder_pelo_sql(resposta_sql, chunks, run_id=run_id, query_id=query_id,
+                                   inicio=inicio, sensibilidade=sensibilidade)
 
-    chunks_prompt = _chunks_no_orcamento(chunks, bases_requeridas=bases_consultadas)
-    sensibilidade["chunks_no_prompt"] = len(chunks_prompt)
-    sensibilidade["chunks_fora_do_orcamento"] = len(chunks) - len(chunks_prompt)
-    sensibilidade["evidencias_no_prompt"] = [chunk.metadata.chunk_id for chunk in chunks_prompt]
-    sensibilidade["prompt_chunk_ids"] = [chunk.metadata.chunk_id for chunk in chunks_prompt]
-    sensibilidade["prompt_evidence_ids"] = {
-        f"E{index}": chunk.metadata.chunk_id for index, chunk in enumerate(chunks_prompt, start=1)
-    }
-    selecionados_ids = {chunk.metadata.chunk_id for chunk in chunks_prompt}
-    sensibilidade["evidencias_fora_do_prompt"] = [
-        chunk.metadata.chunk_id for chunk in chunks if chunk.metadata.chunk_id not in selecionados_ids
-    ]
-    sensibilidade["chunks_excluidos_orcamento"] = sensibilidade["evidencias_fora_do_prompt"]
-    mensagens = _montar_prompt(query, chunks_prompt)
-    if auditoria_completa():
-        sensibilidade["auditoria_evidencias"] = auditar_geracao(
-            chunks, chunks_prompt, metodo="llm", mensagens=mensagens)
-    chunks = chunks_prompt
-    sensibilidade["prompt"] = _prompt_para_log(mensagens)
-    sensibilidade["prompt_truncated"] = any(
-        len(mascarar(str(message.get("content", "")))[0]) > _LIMITE_DE_TEXTO_NO_LOG
-        for message in mensagens
-    )
+    chunks, mensagens = _preparar_prompt(query, chunks, bases_consultadas, sensibilidade)
     cliente = cliente or _cliente_padrao(_schema_resposta([f"E{i}" for i in range(1, len(chunks) + 1)]))
 
     sensibilidade["llm_called"] = True
@@ -1218,6 +1183,81 @@ def gerar_resposta(
         sensibilidade["erro_parsing"] = erro_parsing
     if chaves_alias:
         sensibilidade["chaves_fora_do_contrato"] = chaves_alias
+    resposta, recusa_convertida, mascaramentos_resposta = _validar_resposta_do_llm(
+        resposta, chunks, bases_consultadas, erro_parsing, sensibilidade)
+    _logar_evento(
+        run_id, query_id, "saida_invalida" if erro_parsing else "ok", inicio, resposta,
+        tokens=tokens, modelo=llm_info.get("model", GENERATION_MODEL), **sensibilidade,
+    )
+    _logar_validacao(
+        run_id, query_id, inicio_validacao, resposta,
+        erro_parsing=erro_parsing,
+        citacoes_descartadas=citacoes_descartadas,
+        chaves_alias=chaves_alias,
+        mascaramentos_resposta=mascaramentos_resposta,
+        recusa_convertida=recusa_convertida,
+    )
+    return resposta
+
+
+def _responder_pelo_sql(resposta_sql: RAGResponse, chunks: list[Chunk], *, run_id: str, query_id: str,
+                        inicio: float, sensibilidade: dict[str, Any]) -> RAGResponse:
+    """Resposta determinística do SQL, sem LLM, mascarada e registrada no log."""
+    answer, mascaramentos_resposta = mascarar(resposta_sql.answer)
+    resposta_sql = resposta_sql.model_copy(update={"answer": answer})
+    fontes_sql = [source.chunk_id for source in resposta_sql.sources_used]
+    if auditoria_completa():
+        usados = [c for c in chunks if c.metadata.chunk_id in fontes_sql]
+        sensibilidade["auditoria_evidencias"] = auditar_geracao(chunks, usados, metodo="sql_deterministico")
+    _logar_evento(run_id, query_id, "ok", inicio, resposta_sql,
+                  metodo="sql_deterministico", llm_called=False,
+                  evidencias_usadas=fontes_sql, chunks_no_prompt=0,
+                  chunks_fora_do_orcamento=0, prompt_chunk_ids=[], prompt=[],
+                  **sensibilidade)
+    _logar_validacao(run_id, query_id, time.monotonic(), resposta_sql,
+                    erro_parsing=None, citacoes_descartadas=[], chaves_alias=[],
+                    mascaramentos_resposta=mascaramentos_resposta)
+    return resposta_sql
+
+
+def _preparar_prompt(query: str, chunks: list[Chunk], bases_consultadas: list[Natureza],
+                     sensibilidade: dict[str, Any]) -> tuple[list[Chunk], list[dict[str, Any]]]:
+    """Evidências que cabem no orçamento e as mensagens do prompt.
+
+    Anota em ``sensibilidade`` (o extra do log) o que entrou e o que ficou de fora.
+    """
+    chunks_prompt = _chunks_no_orcamento(chunks, bases_requeridas=bases_consultadas)
+    sensibilidade["chunks_no_prompt"] = len(chunks_prompt)
+    sensibilidade["chunks_fora_do_orcamento"] = len(chunks) - len(chunks_prompt)
+    sensibilidade["evidencias_no_prompt"] = [chunk.metadata.chunk_id for chunk in chunks_prompt]
+    sensibilidade["prompt_chunk_ids"] = [chunk.metadata.chunk_id for chunk in chunks_prompt]
+    sensibilidade["prompt_evidence_ids"] = {
+        f"E{index}": chunk.metadata.chunk_id for index, chunk in enumerate(chunks_prompt, start=1)
+    }
+    selecionados_ids = {chunk.metadata.chunk_id for chunk in chunks_prompt}
+    sensibilidade["evidencias_fora_do_prompt"] = [
+        chunk.metadata.chunk_id for chunk in chunks if chunk.metadata.chunk_id not in selecionados_ids
+    ]
+    sensibilidade["chunks_excluidos_orcamento"] = sensibilidade["evidencias_fora_do_prompt"]
+    mensagens = _montar_prompt(query, chunks_prompt)
+    if auditoria_completa():
+        sensibilidade["auditoria_evidencias"] = auditar_geracao(
+            chunks, chunks_prompt, metodo="llm", mensagens=mensagens)
+    sensibilidade["prompt"] = _prompt_para_log(mensagens)
+    sensibilidade["prompt_truncated"] = any(
+        len(mascarar(str(message.get("content", "")))[0]) > _LIMITE_DE_TEXTO_NO_LOG
+        for message in mensagens
+    )
+    return chunks_prompt, mensagens
+
+
+def _validar_resposta_do_llm(resposta: RAGResponse, chunks: list[Chunk], bases_consultadas: list[Natureza],
+                             erro_parsing: Optional[str],
+                             sensibilidade: dict[str, Any]) -> tuple[RAGResponse, Any, Any]:
+    """Recusa indevida, citações [n], política de confiança, avisos e mascaramento.
+
+    Devolve a resposta, a recusa convertida (se houve) e os mascaramentos da resposta.
+    """
     resposta, recusa_convertida = _converter_recusa_indevida(resposta, bases_consultadas, erro_parsing)
     if recusa_convertida:
         sensibilidade["recusa_convertida"] = recusa_convertida
@@ -1233,19 +1273,7 @@ def gerar_resposta(
     if mascaramentos_resposta:
         resposta = resposta.model_copy(update={"answer": answer_mascarada})
         sensibilidade["mascaramentos_resposta"] = mascaramentos_resposta
-    _logar_evento(
-        run_id, query_id, "saida_invalida" if erro_parsing else "ok", inicio, resposta,
-        tokens=tokens, modelo=llm_info.get("model", GENERATION_MODEL), **sensibilidade,
-    )
-    _logar_validacao(
-        run_id, query_id, inicio_validacao, resposta,
-        erro_parsing=erro_parsing,
-        citacoes_descartadas=citacoes_descartadas,
-        chaves_alias=chaves_alias,
-        mascaramentos_resposta=mascaramentos_resposta,
-        recusa_convertida=recusa_convertida,
-    )
-    return resposta
+    return resposta, recusa_convertida, mascaramentos_resposta
 
 
 # Identificadores internos que o LLM escreve no texto: evidence_id do prompt

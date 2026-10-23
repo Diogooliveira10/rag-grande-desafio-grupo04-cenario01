@@ -1338,6 +1338,70 @@ def retrieve(
     Cada etapa registra seu stage (``retrieval_denso``, ``retrieval_bm25``,
     ``fusao_rrf``, ``rerank``) em ``logs/pipeline/pipeline-AAAA-MM-DD.jsonl``.
     """
+    bases, route_filters = _bases_e_filtros_da_rota(query, route, filters)
+    fetch_k = fetch_k if fetch_k is not None else max(5 * top_k, DEFAULT_FETCH_K)
+    dense_records, sparse_records, filtros_ignorados = _registros_elegiveis(
+        index_dir, documents_file, bases, escopos, route_filters)
+    extra = {
+        "bases": sorted(str(getattr(b, "value", b)) for b in ([bases] if isinstance(bases, str) else bases or [])),
+        "escopos": sorted(escopos) if escopos is not None else None,
+        "filtros": dict(route_filters or {}),
+        "k": top_k,
+        "fetch_k": fetch_k,
+    }
+    if filtros_ignorados:
+        extra["filtros_ignorados"] = filtros_ignorados
+    r = _Recuperacao(query=query, index_dir=index_dir, documents_file=documents_file, bases=bases,
+                     escopos=escopos, route_filters=route_filters, top_k=top_k, fetch_k=fetch_k,
+                     run_id=run_id, query_id=query_id, extra=extra,
+                     dense_records=dense_records, sparse_records=sparse_records)
+
+    dense, recuperacao_degradada = _busca_densa(r, embed_fn)
+    sparse, candidatos_norma = _busca_bm25(r)
+    identificadores_exatos = _identificadores_exatos(r)
+    if reranker is not None:
+        rerank_k = max(top_k, rerank_k if rerank_k is not None else config.RERANK_CANDIDATES)
+    corte = rerank_k if reranker is not None else top_k
+    fused = _fundir(r, dense, sparse, candidatos_norma, identificadores_exatos, corte,
+                    recuperacao_degradada=recuperacao_degradada, filtros_ignorados=filtros_ignorados)
+    if reranker is None or not fused:
+        from src.obs import registrar_pulo
+        registrar_pulo(run_id=run_id, query_id=query_id, stage=Stage.RERANK, query=query,
+                       motivo="desabilitado" if reranker is None else "sem_candidatos")
+        return fused
+    return _reordenar(r, reranker, fused, candidatos_norma, identificadores_exatos, rerank_k)
+
+
+@dataclass
+class _Recuperacao:
+    """O que as etapas de uma busca compartilham: a pergunta, o recorte e os ids do log."""
+    query: str
+    index_dir: Path
+    documents_file: Path
+    bases: Any
+    escopos: Iterable[str] | None
+    route_filters: Mapping[str, Any] | None
+    top_k: int
+    fetch_k: int
+    run_id: str
+    query_id: str
+    extra: dict[str, Any]
+    dense_records: list[dict[str, Any]] | None
+    sparse_records: list[dict[str, Any]] | None
+
+    def span(self, stage: Stage, **mais: Any):
+        return default_logger.span(run_id=self.run_id, query_id=self.query_id, stage=stage,
+                                   input=self.query, extra={**self.extra, **mais})
+
+    def registros_bm25(self) -> list[dict[str, Any]]:
+        """Registros que a BM25 pode ver; sem filtro, todos os das bases escolhidas."""
+        if self.sparse_records is not None:
+            return self.sparse_records
+        return _records_for(self.index_dir, self.bases, None, _read_jsonl(self.documents_file), self.escopos)
+
+
+def _bases_e_filtros_da_rota(query: str, route: Any, filters: Mapping[str, Any] | None) -> tuple[Any, Any]:
+    """Bases e filtros da rota (dict ou objeto), mais os critérios de "bem completo"."""
     bases = None
     route_filters = filters
     if route is not None:
@@ -1357,66 +1421,63 @@ def retrieve(
         tema = tema_bem_completo(query)
         if tema:
             route_filters["objeto_termo"] = {"operator": "contains", "value": tema, "optional": False}
-    fetch_k = fetch_k if fetch_k is not None else max(5 * top_k, DEFAULT_FETCH_K)
-    dense_records: list[dict[str, Any]] | None = None
-    sparse_records: list[dict[str, Any]] | None = None
-    filtros_ignorados: dict[str, dict[str, list[str]]] = {}
-    if route_filters:
-        # Seleção de bases e escopos antes, para decidir o filtro só entre as
-        # bases que o roteador escolheu.
-        sparse_records, ignorados_bm25 = _filtrar_por_base(
-            _records_for(index_dir, bases, None, _read_jsonl(documents_file), escopos), route_filters
-        )
-        # O payload vetorial não repete o texto JSON com o CNPJ do fornecedor.
-        # Os IDs dos documentos filtrados delimitam também os candidatos densos.
-        dense_filters = {key: value for key, value in route_filters.items() if key != "cnpj"}
-        dense_records, ignorados_denso = _filtrar_por_base(
-            _records_for(index_dir, bases, None, None, escopos), dense_filters
-        )
-        if "cnpj" in route_filters:
-            eligible = {str(record.get("chunk_id")) for record in sparse_records}
-            dense_records = [record for record in dense_records if str(record.get("chunk_id")) in eligible]
-        filtros_ignorados = {**ignorados_bm25, **ignorados_denso}
-    extra = {
-        "bases": sorted(str(getattr(b, "value", b)) for b in ([bases] if isinstance(bases, str) else bases or [])),
-        "escopos": sorted(escopos) if escopos is not None else None,
-        "filtros": dict(route_filters or {}),
-        "k": top_k,
-        "fetch_k": fetch_k,
-    }
-    if filtros_ignorados:
-        extra["filtros_ignorados"] = filtros_ignorados
+    return bases, route_filters
 
-    def _span(stage: Stage, **mais: Any):
-        return default_logger.span(
-            run_id=run_id, query_id=query_id, stage=stage, input=query, extra={**extra, **mais}
-        )
 
+def _registros_elegiveis(index_dir: Path, documents_file: Path, bases: Any, escopos: Iterable[str] | None,
+                         route_filters: Mapping[str, Any] | None) -> tuple[Any, Any, dict[str, dict[str, list[str]]]]:
+    """Registros que passam nos filtros, para a busca densa e para a BM25.
+
+    Sem filtros, ``None``: cada busca lê as bases por conta própria.
+    """
+    if not route_filters:
+        return None, None, {}
+    # Seleção de bases e escopos antes, para decidir o filtro só entre as
+    # bases que o roteador escolheu.
+    sparse_records, ignorados_bm25 = _filtrar_por_base(
+        _records_for(index_dir, bases, None, _read_jsonl(documents_file), escopos), route_filters
+    )
+    # O payload vetorial não repete o texto JSON com o CNPJ do fornecedor.
+    # Os IDs dos documentos filtrados delimitam também os candidatos densos.
+    dense_filters = {key: value for key, value in route_filters.items() if key != "cnpj"}
+    dense_records, ignorados_denso = _filtrar_por_base(
+        _records_for(index_dir, bases, None, None, escopos), dense_filters
+    )
+    if "cnpj" in route_filters:
+        eligible = {str(record.get("chunk_id")) for record in sparse_records}
+        dense_records = [record for record in dense_records if str(record.get("chunk_id")) in eligible]
+    return dense_records, sparse_records, {**ignorados_bm25, **ignorados_denso}
+
+
+def _busca_densa(r: _Recuperacao, embed_fn: EmbedFn | None) -> tuple[list[RetrievalResult], bool]:
+    """Stage ``retrieval_denso``; sem embedding disponível, vazia e degradada (segue a BM25)."""
     uso_embedding: list[TokenUsage] = []
     estatisticas_embedding = {"calls": 0, "cache_hits": 0}
     observacoes_embedding: list[dict] = []
     embed_original = embed_fn or _embed_fn_com_uso(uso_embedding, estatisticas_embedding, observacoes_embedding)
+
     def embed_da_consulta(texts):
         if embed_fn is not None:
             estatisticas_embedding["calls"] += 1
         return embed_original(texts)
+
     recuperacao_degradada = False
-    with _span(Stage.RETRIEVAL_DENSO) as span:
+    with r.span(Stage.RETRIEVAL_DENSO) as span:
         try:
             if not config.DENSE_RETRIEVAL_ENABLED:
                 raise EmbeddingUnavailable("Busca densa desabilitada por configuração; usando BM25")
             dense = dense_retrieve(
-                query,
-                index_dir=index_dir,
-                documents_file=documents_file,
-                top_k=fetch_k,
-                bases=bases,
-                filters=None if dense_records is not None else route_filters,
+                r.query,
+                index_dir=r.index_dir,
+                documents_file=r.documents_file,
+                top_k=r.fetch_k,
+                bases=r.bases,
+                filters=None if r.dense_records is not None else r.route_filters,
                 embed_fn=embed_da_consulta,
-                records=dense_records,
-                escopos=escopos,
-                run_id=run_id,
-                query_id=query_id,
+                records=r.dense_records,
+                escopos=r.escopos,
+                run_id=r.run_id,
+                query_id=r.query_id,
             )
         except Exception as error:
             from llm_ecoa import erro_de_disponibilidade
@@ -1431,7 +1492,7 @@ def retrieve(
                                "dense_enabled": config.DENSE_RETRIEVAL_ENABLED})
         span.set_result(_resumo(dense))
         _registrar_evidencias(span, dense)
-        span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(query, dense)
+        span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(r.query, dense)
         span.extra.update({"query_embedding": estatisticas_embedding})
         if observacoes_embedding:
             from src.model_observation import resumir_uso
@@ -1449,72 +1510,79 @@ def retrieve(
                 completion=sum(u.completion for u in uso_embedding),
                 total=sum(u.total for u in uso_embedding),
             )
-    with _span(Stage.RETRIEVAL_BM25) as span:
+    return dense, recuperacao_degradada
+
+
+def _busca_bm25(r: _Recuperacao) -> tuple[list[RetrievalResult], list[RetrievalResult]]:
+    """Stage ``retrieval_bm25``, com a norma citada na pergunta priorizada.
+
+    Devolve o ranking e os trechos da norma pedida, que a fusão e o rerank
+    também priorizam.
+    """
+    with r.span(Stage.RETRIEVAL_BM25) as span:
         sparse = bm25_retrieve(
-            query,
-            index_dir=index_dir,
-            documents_file=documents_file,
-            top_k=fetch_k,
-            bases=bases,
-            filters=None if sparse_records is not None else route_filters,
-            records=sparse_records,
-            escopos=escopos,
+            r.query,
+            index_dir=r.index_dir,
+            documents_file=r.documents_file,
+            top_k=r.fetch_k,
+            bases=r.bases,
+            filters=None if r.sparse_records is not None else r.route_filters,
+            records=r.sparse_records,
+            escopos=r.escopos,
         )
         candidatos_norma: list[RetrievalResult] = []
-        pedidas = _normas_mencionadas(query)
+        pedidas = _normas_mencionadas(r.query)
         if pedidas:
-            elegiveis = sparse_records if sparse_records is not None else _records_for(
-                index_dir, bases, route_filters, _read_jsonl(documents_file), escopos,
+            elegiveis = r.sparse_records if r.sparse_records is not None else _records_for(
+                r.index_dir, r.bases, r.route_filters, _read_jsonl(r.documents_file), r.escopos,
             )
-            primarios = [r for r in elegiveis
-                         if _record_natureza(r, _metadata_of(r)) == Natureza.NORMATIVA.value
-                         and _norma_do_documento(_metadata_of(r)) & pedidas]
+            primarios = [registro for registro in elegiveis
+                         if _record_natureza(registro, _metadata_of(registro)) == Natureza.NORMATIVA.value
+                         and _norma_do_documento(_metadata_of(registro)) & pedidas]
             if primarios:
-                candidatos_norma = bm25_retrieve(
-                    _consulta_topica_norma(query), records=primarios, top_k=fetch_k,
-                    index_dir=index_dir, documents_file=documents_file,
-                )
-                # Se há conteúdo articulado, capas/cabeçalhos ficam depois.
-                candidatos_norma = _ordenar_candidatos_norma(query, candidatos_norma)
-                vistos_textos: set[str] = set()
-                distintos = []
-                for item in candidatos_norma:
-                    assinatura = " ".join(item.content.split()).casefold()
-                    if assinatura not in vistos_textos:
-                        distintos.append(item)
-                        vistos_textos.add(assinatura)
-                candidatos_norma = distintos
-                sparse = _priorizar_norma_solicitada(query, sparse, candidatos_norma, fetch_k)
-                span.extra["normas_primarias_priorizadas"] = [r.chunk_id for r in candidatos_norma[:top_k]]
+                candidatos_norma = _trechos_da_norma_pedida(r, primarios)
+                sparse = _priorizar_norma_solicitada(r.query, sparse, candidatos_norma, r.fetch_k)
+                span.extra["normas_primarias_priorizadas"] = [c.chunk_id for c in candidatos_norma[:r.top_k]]
         span.set_result(_resumo(sparse))
         _registrar_evidencias(span, sparse)
-        span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(query, sparse)
+        span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(r.query, sparse)
+    return sparse, candidatos_norma
 
-    identificadores_exatos: list[RetrievalResult] = []
-    if _identificadores_pncp(query) or _referencias_contrato(query):
-        records_exatos = sparse_records
-        if records_exatos is None:
-            records_exatos = _records_for(
-                index_dir,
-                bases,
-                None,
-                _read_jsonl(documents_file),
-                escopos,
-            )
-        identificadores_exatos = _resultados_identificador_exato(query, records_exatos)
 
-    if reranker is not None:
-        rerank_k = max(top_k, rerank_k if rerank_k is not None else config.RERANK_CANDIDATES)
-    with _span(Stage.FUSAO_RRF, rrf_k=DEFAULT_RRF_K) as span:
-        fused = reciprocal_rank_fusion([dense, sparse], top_k=rerank_k if reranker is not None else top_k)
-        fused = _priorizar_norma_solicitada(
-            query, fused, candidatos_norma, rerank_k if reranker is not None else top_k,
-        )
-        fused = _promover_identificadores_exatos(
-            fused,
-            identificadores_exatos,
-            rerank_k if reranker is not None else top_k,
-        )
+def _trechos_da_norma_pedida(r: _Recuperacao, primarios: list[dict[str, Any]]) -> list[RetrievalResult]:
+    """Trechos da norma citada, conteúdo articulado antes de capas, sem texto repetido."""
+    candidatos = bm25_retrieve(
+        _consulta_topica_norma(r.query), records=primarios, top_k=r.fetch_k,
+        index_dir=r.index_dir, documents_file=r.documents_file,
+    )
+    # Se há conteúdo articulado, capas/cabeçalhos ficam depois.
+    candidatos = _ordenar_candidatos_norma(r.query, candidatos)
+    vistos_textos: set[str] = set()
+    distintos = []
+    for item in candidatos:
+        assinatura = " ".join(item.content.split()).casefold()
+        if assinatura not in vistos_textos:
+            distintos.append(item)
+            vistos_textos.add(assinatura)
+    return distintos
+
+
+def _identificadores_exatos(r: _Recuperacao) -> list[RetrievalResult]:
+    """Registros com o número do PNCP ou do contrato citado na pergunta."""
+    if not (_identificadores_pncp(r.query) or _referencias_contrato(r.query)):
+        return []
+    return _resultados_identificador_exato(r.query, r.registros_bm25())
+
+
+def _fundir(r: _Recuperacao, dense: list[RetrievalResult], sparse: list[RetrievalResult],
+            candidatos_norma: list[RetrievalResult], identificadores_exatos: list[RetrievalResult],
+            corte: int, *, recuperacao_degradada: bool,
+            filtros_ignorados: dict[str, dict[str, list[str]]]) -> list[RetrievalResult]:
+    """Stage ``fusao_rrf``: RRF, norma pedida e identificadores exatos à frente."""
+    with r.span(Stage.FUSAO_RRF, rrf_k=DEFAULT_RRF_K) as span:
+        fused = reciprocal_rank_fusion([dense, sparse], top_k=corte)
+        fused = _priorizar_norma_solicitada(r.query, fused, candidatos_norma, corte)
+        fused = _promover_identificadores_exatos(fused, identificadores_exatos, corte)
         for item in fused:
             if recuperacao_degradada:
                 item.metadata = {**item.metadata, "extras": {
@@ -1527,52 +1595,51 @@ def retrieve(
                 }}
         span.set_result(_resumo(fused))
         _registrar_evidencias(span, fused)
-        span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(query, fused)
+        span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(r.query, fused)
         span.extra["identificadores_exactos_adicionados"] = [
             item.chunk_id for item in identificadores_exatos
         ]
-    if reranker is None or not fused:
-        from src.obs import registrar_pulo
-        registrar_pulo(run_id=run_id, query_id=query_id, stage=Stage.RERANK, query=query,
-                       motivo="desabilitado" if reranker is None else "sem_candidatos")
-    if reranker is not None and fused:
-        try:
-            with _span(Stage.RERANK, rerank_k=rerank_k) as span:
-                span.modelo = getattr(reranker, "modelo", None)
-                span.extra["candidatos"] = len(fused)
-                candidates = {item.chunk_id: item for item in fused}
-                span.extra["fallback_on_error"] = "fusao_rrf"
-                ranked = list(reranker(query, fused))
-                if getattr(reranker, "backend_usado", None):
-                    span.extra["rerank_backend"] = reranker.backend_usado
-                    if "ecoa falhou" in reranker.backend_usado:
-                        span.status = "degradado"
-                        span.extra["fallback"] = "reranker_local"
-                if {item.chunk_id for item in ranked} - candidates.keys():
-                    raise ValueError("Reranker devolveu evidência fora dos candidatos")
-                reranked = []
-                seen = set()
-                for item in ranked:
-                    if item.chunk_id not in seen:
-                        original = candidates[item.chunk_id]
-                        reranked.append(replace(original,
-                            score=getattr(item, "score", original.score),
-                            rerank_score=getattr(item, "rerank_score", original.rerank_score)))
-                        seen.add(item.chunk_id)
-                if not reranked:
-                    raise ValueError("Reranker vazio")
-                antes_do_top_k = reranked
-                reranked = _priorizar_norma_solicitada(query, reranked, candidatos_norma, top_k)
-                reranked = _promover_identificadores_exatos(reranked, identificadores_exatos, top_k)
-                span.set_result(_resumo(reranked))
-                _registrar_evidencias(span, reranked, antes_do_top_k=antes_do_top_k)
-                span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(
-                    query, reranked
-                )
-            return reranked
-        except Exception:  # o span registra o erro; segue com os candidatos originais
-            return fused[:top_k]
     return fused
+
+
+def _reordenar(r: _Recuperacao, reranker: RerankFn, fused: list[RetrievalResult],
+               candidatos_norma: list[RetrievalResult], identificadores_exatos: list[RetrievalResult],
+               rerank_k: int) -> list[RetrievalResult]:
+    """Stage ``rerank``; se o reranker falhar, o span registra o erro e valem os do RRF."""
+    try:
+        with r.span(Stage.RERANK, rerank_k=rerank_k) as span:
+            span.modelo = getattr(reranker, "modelo", None)
+            span.extra["candidatos"] = len(fused)
+            candidates = {item.chunk_id: item for item in fused}
+            span.extra["fallback_on_error"] = "fusao_rrf"
+            ranked = list(reranker(r.query, fused))
+            if getattr(reranker, "backend_usado", None):
+                span.extra["rerank_backend"] = reranker.backend_usado
+                if "ecoa falhou" in reranker.backend_usado:
+                    span.status = "degradado"
+                    span.extra["fallback"] = "reranker_local"
+            if {item.chunk_id for item in ranked} - candidates.keys():
+                raise ValueError("Reranker devolveu evidência fora dos candidatos")
+            reranked = []
+            seen = set()
+            for item in ranked:
+                if item.chunk_id not in seen:
+                    original = candidates[item.chunk_id]
+                    reranked.append(replace(original,
+                        score=getattr(item, "score", original.score),
+                        rerank_score=getattr(item, "rerank_score", original.rerank_score)))
+                    seen.add(item.chunk_id)
+            if not reranked:
+                raise ValueError("Reranker vazio")
+            antes_do_top_k = reranked
+            reranked = _priorizar_norma_solicitada(r.query, reranked, candidatos_norma, r.top_k)
+            reranked = _promover_identificadores_exatos(reranked, identificadores_exatos, r.top_k)
+            span.set_result(_resumo(reranked))
+            _registrar_evidencias(span, reranked, antes_do_top_k=antes_do_top_k)
+            span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(r.query, reranked)
+        return reranked
+    except Exception:  # o span registra o erro; segue com os candidatos originais
+        return fused[:r.top_k]
 
 
 def _resumo(resultados: Sequence[Any]) -> str:
