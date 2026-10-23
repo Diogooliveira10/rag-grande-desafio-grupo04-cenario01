@@ -45,7 +45,16 @@ _NUMEROS_POR_EXTENSO = {
 }
 
 _RE_PCA = re.compile(r"\bpca\b|\bplanos? (?:anua(?:l|is) )?de contratac|\bplanos? anua(?:l|is)\b|\bplanejad")
-_RE_ANULADA = re.compile(r"\banulad[ao]s?\b")
+# Situações do PNCP em que a compra não vale como contratação: ficam fora de
+# toda conta, salvo quando a pergunta fala delas. O PNCP não tem "cancelada";
+# na pergunta, ela vale anulada e revogada.
+_SITUACOES_INVALIDAS = ("Anulada", "Revogada", "Suspensa")
+_RE_SITUACAO = (
+    ("Anulada", re.compile(r"\banulad[ao]s?\b|\bcancelad[ao]s?\b")),
+    ("Revogada", re.compile(r"\brevogad[ao]s?\b|\bcancelad[ao]s?\b")),
+    ("Suspensa", re.compile(r"\bsuspens[ao]s?\b")),
+)
+_RE_TAMBEM_VALIDAS = re.compile(r"\b(?:vigentes?|ativas|valid[ao]s|inclusive|incluindo)\b")
 _RE_CONTRATOS = re.compile(r"\bcontrat(?:o|os|ad[oa]s?|acao|acoes|ou|aram)\b")
 _MESES = {
     "janeiro": 1, "fevereiro": 2, "marco": 3, "abril": 4, "maio": 5, "junho": 6,
@@ -173,6 +182,8 @@ _PALAVRAS_GENERICAS = frozenset(
     usado usada usadas usados comum comuns pagaram pagou pago paga pagos caro cara caros barato
     publicado publicados assinado assinada assinados assinadas assinatura assinaturas vigente vigentes vigencia
     anulada anulado anuladas anulados cancelada cancelado canceladas cancelados
+    revogada revogado revogadas revogados suspensa suspenso suspensas suspensos situacao situacoes
+    incluindo inclusive ativas validas validos
     compare comparar compara comparado comparados comparacao data datas federal federais uniao nacional
     fevereiro marco abril maio junho julho agosto setembro outubro novembro dezembro
     semestre trimestre existem quantidade registro registros realizado realizadas realizados
@@ -271,10 +282,13 @@ class Consulta:
     # lista ("há dados suficientes para concluir?", "quais regras?"), False.
     listagem_direta: bool = False
     incluir_total_geral: bool = False
-    # A pergunta fala de compras anuladas: não aplicar filtro que as exclui.
-    incluir_anuladas: bool = False
-    # A pergunta pede APENAS compras anuladas: filtrar só por sitaucao = 'Anulada'.
-    so_anuladas: bool = False
+    # Situações inválidas que a pergunta cita ("anuladas", "revogadas"); vazio
+    # deixa todas as inválidas fora da conta. Ver ``_situacoes_da_pergunta``.
+    situacoes_citadas: tuple[str, ...] = ()
+    # Junto das citadas, a pergunta quer as válidas ("anuladas e vigentes").
+    com_situacoes_validas: bool = False
+    # Consulta por identificador: o registro pedido aparece em qualquer situação.
+    todas_as_situacoes: bool = False
 
 
 # Contrato de compilação apenas: estas tabelas de fatos não são criadas aqui.
@@ -456,8 +470,7 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
             or filtros.referencia_temporal in {"resultado", "vigencia", "propostas"}):
         return None
     bases = set(bases)
-    anulada_citada = bool(_RE_ANULADA.search(structured_db.normalizar(query)))
-    so_anuladas = anulada_citada and not any(p in structured_db.normalizar(query) for p in ["cancelad", "ativas", "vigente", "valid"])
+    situacoes = _situacoes_da_pergunta(query)
     if Natureza.ESTRUTURADA in bases:
         identificador = _RE_NUMERO_CONTROLE_PNCP.search(query)
         if identificador:
@@ -466,8 +479,7 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
                 tipo="identificador",
                 limite=1,
                 numero_controle_pncp=identificador.group(0),
-                incluir_anuladas=anulada_citada,
-                so_anuladas=so_anuladas,
+                todas_as_situacoes=True,
             )
         # "Qual o CNPJ da Cristália?": o CNPJ está no registro do fornecedor.
         # Sem este caminho, a pergunta ia à busca e ao LLM, que levava 90 s e
@@ -481,8 +493,7 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
                 tipo="cnpj_fornecedor",
                 limite=5,
                 filtros_analiticos=(("fornecedor", fornecedor),),
-                incluir_anuladas=anulada_citada,
-                so_anuladas=so_anuladas,
+                **situacoes,
             )
     # Sem as expressões que já viraram filtro: em "média dos contratos com valor
     # maior que 2000", o "maior" não pede ranking, e "acima"/"milhão" não
@@ -683,8 +694,7 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
                          and not _RE_NORMA_NUMERADA.search(texto)
                          and not _RE_PEDIDO_ALEM_DA_LISTA.search(texto)),
         incluir_total_geral=orgaos_e_total,
-        incluir_anuladas=anulada_citada,
-        so_anuladas=so_anuladas,
+        **situacoes,
     )
 
 
@@ -746,13 +756,43 @@ def consulta_da_intencao(intent: QueryIntent) -> Optional[Consulta]:
         campo={"contratado": "valor_contratado", "estimado": "valor_estimado", "homologado": "valor_homologado"}.get(f.tipo_valor),
         referencia_temporal=referencia,
         termos_objeto=tuple(structured_db.normalizar(t) for t in intent.termos_objeto) if tabela == "contratacoes" else (),
-        incluir_anuladas=bool(_RE_ANULADA.search(structured_db.normalizar(intent.pergunta))),
-        so_anuladas=bool(_RE_ANULADA.search(structured_db.normalizar(intent.pergunta))))
+        **_situacoes_da_pergunta(intent.pergunta))
 
 
 # --------------------------------------------------------------------------
 # Execução (SQL com "?" como marcador; Banco.consultar adapta ao Postgres)
 # --------------------------------------------------------------------------
+
+
+def _situacoes_da_pergunta(pergunta: str) -> dict[str, Any]:
+    """Campos de situação da ``Consulta`` a partir do texto da pergunta.
+
+    Os dois caminhos (regras e intenção do LLM) usam esta função; antes cada um
+    decidia por conta própria, e "anuladas e vigentes" saía diferente em cada.
+    """
+    texto = structured_db.normalizar(pergunta)
+    citadas = tuple(situacao for situacao, padrao in _RE_SITUACAO if padrao.search(texto))
+    return {"situacoes_citadas": citadas,
+            "com_situacoes_validas": bool(citadas and _RE_TAMBEM_VALIDAS.search(texto))}
+
+
+def _clausula_de_situacao(consulta: Consulta) -> Optional[str]:
+    """Filtro por situação da compra; os valores são constantes do módulo.
+
+    ``IS NULL`` mantém empenhos e contratos, que não têm situação no PNCP.
+    """
+    if consulta.todas_as_situacoes:
+        return None
+    if consulta.situacoes_citadas and not consulta.com_situacoes_validas:
+        return f"situacao IN ({_lista_sql(consulta.situacoes_citadas)})"
+    excluidas = tuple(s for s in _SITUACOES_INVALIDAS if s not in consulta.situacoes_citadas)
+    if not excluidas:
+        return None
+    return f"(situacao IS NULL OR situacao NOT IN ({_lista_sql(excluidas)}))"
+
+
+def _lista_sql(valores: Iterable[str]) -> str:
+    return ", ".join(f"'{valor}'" for valor in valores)
 
 
 def _coluna_valor(consulta: Consulta) -> str:
@@ -771,14 +811,10 @@ def _where(consulta: Consulta, termos: Iterable[str], juncao: str = "AND") -> tu
     ):
         condicoes.append("tipo_registro = ?")
         parametros.append("contrato_assinado")
-    # Compras anuladas no PNCP não devem entrar em nenhum cálculo; o
-    # valor homologado de uma compra anulada não representa contratação válida.
-    # Quando a pergunta fala explicitamente de anuladas, não aplica o filtro.
-    if consulta.tabela == "contratacoes" and not consulta.incluir_anuladas:
-        condicoes.append("(situacao IS NULL OR situacao != 'Anulada')")
-    # Quando a pergunta pede APENAS anuladas, filtra por sitaucao = 'Anulada'.
-    elif consulta.tabela == "contratacoes" and consulta.so_anuladas:
-        condicoes.append("situacao = 'Anulada'")
+    if consulta.tabela == "contratacoes":
+        clausula = _clausula_de_situacao(consulta)
+        if clausula:
+            condicoes.append(clausula)
     if consulta.ano is not None:
         fim = consulta.ano_final or consulta.ano
         if fim == consulta.ano:

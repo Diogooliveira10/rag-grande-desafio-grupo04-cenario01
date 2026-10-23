@@ -12,7 +12,7 @@ from src.structured_db import Banco
 from tests.test_structured_db import _contratacao, _plano, escrever_documents
 
 ESTRUTURADA = [Natureza.ESTRUTURADA]
-_SEM_ANULADAS = "(situacao IS NULL OR situacao != 'Anulada')"
+_SEM_ANULADAS = "(situacao IS NULL OR situacao NOT IN ('Anulada', 'Revogada', 'Suspensa'))"
 AGREGADA = [Natureza.ESTRUTURADA, Natureza.AGREGADA]
 
 
@@ -1830,3 +1830,72 @@ def test_quais_modalidades_dos_contratos_e_agrupamento_por_modalidade():
 def test_quais_modalidades_da_norma_nao_vira_consulta_sql(pergunta):
     bases = [Natureza.NORMATIVA, Natureza.ESTRUTURADA]
     assert sq.detectar_consulta(pergunta, QueryFilters(), bases) is None
+
+
+# --------------------------------------------------------------------------
+# Situação da compra: anuladas, revogadas e suspensas fora das contas, salvo
+# quando a pergunta fala delas (os dois caminhos usam _situacoes_da_pergunta).
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("pergunta, clausula", [
+    ("Qual a mediana das contratações?", _SEM_ANULADAS),
+    ("Qual a mediana das contratações anuladas?", "situacao IN ('Anulada')"),
+    ("Qual a mediana das contratações canceladas?", "situacao IN ('Anulada', 'Revogada')"),
+    ("Qual a mediana das contratações revogadas ou suspensas?", "situacao IN ('Revogada', 'Suspensa')"),
+    ("Qual a mediana das contratações, incluindo as anuladas?",
+     "(situacao IS NULL OR situacao NOT IN ('Revogada', 'Suspensa'))"),
+    ("Qual a mediana das contratações anuladas e vigentes?",
+     "(situacao IS NULL OR situacao NOT IN ('Revogada', 'Suspensa'))"),
+])
+def test_situacao_citada_define_o_filtro(pergunta, clausula):
+    consulta = sq.detectar_consulta(pergunta, QueryFilters(), ESTRUTURADA)
+    sql, _ = sq._where(consulta, ())
+    assert sql == f" WHERE {clausula}"
+
+
+def test_situacao_decidida_igual_nos_dois_caminhos():
+    # Antes, o caminho da intenção tratava "anuladas e vigentes" como só anuladas.
+    for pergunta in ("Quantas contratações anuladas e vigentes?", "Total das compras canceladas"):
+        assert sq._situacoes_da_pergunta(pergunta) == sq._situacoes_da_pergunta(pergunta.upper())
+    assert sq._situacoes_da_pergunta("Quantas contratações anuladas e vigentes?") == {
+        "situacoes_citadas": ("Anulada",), "com_situacoes_validas": True}
+
+
+@pytest.fixture
+def base_situacoes(tmp_path):
+    registros = []
+    for numero, situacao in [("S-1", "Divulgada no PNCP"), ("S-2", "Anulada"), ("S-3", "Revogada"), ("S-4", "Suspensa")]:
+        registro = _contratacao(numero, valor_estimado=100.0)
+        registro["situacaoCompraNome"] = situacao
+        registros.append(registro)
+    documents = escrever_documents(tmp_path / "documents.jsonl", contratacoes=registros)
+    banco = Banco(sqlite_path=tmp_path / "base.sqlite")
+    structured_db.construir_banco(documents, banco)
+    return {"banco": banco, "documents_file": documents}
+
+
+def _registros(pergunta, base):
+    chunks = _consultar(pergunta, base)
+    return chunks[0].metadata.extras["resultado_sql"]["recorte"]["registros_correspondentes"]
+
+
+@pytest.mark.parametrize("pergunta, esperado", [
+    ("Qual a mediana das contratações?", 1),
+    ("Qual a mediana das contratações anuladas?", 1),
+    ("Qual a mediana das contratações canceladas?", 2),
+    ("Qual a mediana das contratações suspensas?", 1),
+    ("Qual a mediana das contratações anuladas e vigentes?", 2),
+    ("Qual a mediana das contratações, incluindo as anuladas?", 2),
+    ("Qual a mediana das contratações revogadas ou suspensas?", 2),
+])
+def test_situacao_filtra_as_linhas_do_sql(base_situacoes, pergunta, esperado):
+    assert _registros(pergunta, base_situacoes) == esperado
+
+
+def test_identificador_encontra_compra_anulada():
+    # Quem pede um registro pelo número do PNCP precisa vê-lo, mesmo anulado.
+    consulta = sq.detectar_consulta("Detalhes da compra 00394429000100-1-000183/2025",
+                                    QueryFilters(), ESTRUTURADA)
+    assert consulta.tipo == "identificador"
+    sql, _ = sq._where(consulta, ())
+    assert "situacao" not in sql
