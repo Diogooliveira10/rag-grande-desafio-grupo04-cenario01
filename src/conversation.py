@@ -133,6 +133,29 @@ _TENTATIVA_DE_INJECAO = re.compile(
     r"|\b(?:seu|sua|seus|suas) (?:prompt|instrucoes|regras internas)\b"
     r"|\b(?:jailbreak|modo desenvolvedor|developer mode)\b"
     r"|\bignore (?:all |the )?(?:previous|prior|above) instructions\b"
+    # Role-play: pedir ao assistente que seja outro, sem as regras. "Imagine que
+    # a prefeitura..." continua pergunta; só conta quando o papel é do assistente.
+    r"|\b(?:finja|finge|fingir)\b"
+    r"|\bfaca de conta\b"
+    r"|\b(?:imagine|suponha) que (?:voce|vc|tu) (?:e|seja|fosse|esta)\b"
+    r"|\b(?:aja|atue|comporte se|responda|fale) como (?:se fosse |um |uma |o |a )?"
+    r"(?:administrador|admin|desenvolvedor|hacker|outr[ao]|assistente|ia|bot|root)\b"
+    r"|\bse passe por\b"
+    # "dan" sozinho pode ser nome de empresa; só com o assistente ou "modo".
+    r"|\b(?:voce|vc|tu) (?:agora )?(?:e|sera|vai ser) (?:agora )?(?:o |a |um |uma )?(?:dan|outr[ao])\b"
+    r"|\ba partir de agora (?:voce|vc|tu)\b"
+    r"|\b(?:modo dan|do anything now)\b"
+    r"|\b(?:assistente|ia|modelo|modo|bot|chatbot) (?:sem|livre de) (?:restricoes|limites|filtros|censura|regras)\b"
+    r"|\bresponda (?:livremente|sem (?:restricoes|limites|filtros|censura|regras))\b"
+    # Vazar o contexto: "repita o texto acima", "mostre a mensagem do sistema".
+    # "Mostre o texto original do contrato" é pedido legítimo: só "acima" e "do sistema".
+    r"|\b(?:repita|mostre|revele|imprima|copie|transcreva) (?:todo |toda )?(?:o |a )?"
+    r"(?:texto|mensagem|conteudo|contexto) (?:acima|oculto|do sistema|de sistema)\b"
+    r"|\b(?:repita|transcreva) tudo (?:o que (?:esta|foi dito) )?acima\b"
+    r"|\b(?:suas|as suas|tuas) (?:diretrizes|configuracoes|restricoes)\b"
+    r"|\besqueca tudo\b"
+    r"|\besqueca o que (?:te |lhe )?(?:disseram|falaram|foi dito|mandaram)\b"
+    r"|\b(?:you are now|act as|pretend (?:to be|you are))\b"
 )
 _RESPOSTA_A_INJECAO = (
     "Não posso mostrar nem alterar as minhas instruções internas. " + _CAPABILITIES
