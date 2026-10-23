@@ -130,11 +130,18 @@ nomeia, sem mudar o comportamento (2.197 testes e golden 35/36 antes e depois):
 | `structured_query.detectar_consulta` | 244 | 123 | registro pedido, tabela, tipo, limite, agrupamento, esferas, modalidade e objeto, mês, órgão |
 | `retrieve.retrieve` | 277 | 74 | rota e filtros, registros elegíveis, busca densa, BM25, identificadores exatos, fusão, rerank |
 | `generate.gerar_resposta` | 142 | 94 | resposta pelo SQL, preparação do prompt, validação da saída do LLM |
+| `query_analysis._analisar_com_trechos` | 127 | 68 | métrica, agrupamentos, referência de data, esfera, entidades (órgão, município, fornecedor), modalidade, tipo de valor |
+| `query_analysis._nome_a_partir_do_gatilho` | 117 | 3 | classe `_LeitorDeOrgao`: qualificadores, município, próximo passo, veredito |
+| `query_analysis._analisar_llm` | 98 | 18 | cache, chamada ao LLM, validação de cada intenção contra a pergunta |
 
-**O que falta:** `src/query_analysis.py` (2,2 mil linhas, com funções de mais de 100 linhas) ainda não foi
-dividido; é o próximo passo, e o mais coberto por testes de regressão. Os nomes antigos das funções movidas
-para o domínio (`generate._aplicar_recorte`, `structured_query._situacoes_da_pergunta`,
+No caminho da pergunta, nove funções passavam de 100 linhas (a maior, 288); hoje são três, todas com
+menos de 125 (`detectar_consulta`, `_where` e `dense_retrieve`). Os nomes antigos
+das funções movidas para o domínio (`generate._aplicar_recorte`, `structured_query._situacoes_da_pergunta`,
 `structured_db.normalizar`…) continuam valendo como apelidos, para não quebrar quem os importava.
+
+**Próximos passos possíveis:** separar `query_analysis.py` (2,2 mil linhas) em módulos por assunto
+(valores e períodos, órgão e fornecedor, análise por LLM) e levar as regras de leitura de valores e datas
+para o domínio; a coleta (`fetch_corpus.py`, 4,3 mil linhas) fica fora do caminho da pergunta.
 
 ### Estado atual
 
@@ -221,7 +228,7 @@ Situação conferida em 2026-10-19, depois do PR #62 e dos ajustes da rodada `go
 - **Catálogo de órgãos, municípios e fornecedores** (`data/config/orgaos_corpus.json`): ainda é o da v6 (401 fornecedores, 56 municípios); a v7 tem 12.798 fornecedores e 87 municípios. Regenerado sem mais regras, ele inventa fornecedor em perguntas com palavras comuns ("tecnologia") e não distingue a matriz da filial; refazer depois de juntar as filiais e reforçar a proteção contra nomes comuns.
 - **Cobertura do PCA e da modalidade dos contratos:** limitação da fonte, documentada.
 - **Reserva do LLM (OpenRouter gratuito) instável:** em 2026-10-21, com o ECOA simulado fora do ar, os modelos gratuitos devolveram 404, 429 e 502 e respostas vazias em parte das chamadas; a resposta vazia passou a acionar o modelo reserva, mas a reserva não é garantida. As perguntas ao vivo da demo saem do SQL, sem LLM; as de norma têm captura no plano B.
-- **Depois do Demo Day:** tabela de apelidos de fornecedor completa (hoje há uma lista curta, com Light e Correios desde 2026-10-21; a CEDAE fica de fora por também ser órgão do catálogo), revogação das chaves usadas na demo (OpenRouter, ngrok, `RAG_API_KEY`) e divisão de `src/query_analysis.py` (último passo da reestruturação em camadas). Feitos em 2026-10-23: compras revogadas e suspensas fora dos cálculos, limite de requisições, cadeia de hashes no log, detector de injeção com role-play e as camadas descritas em "Camadas do código".
+- **Depois do Demo Day:** tabela de apelidos de fornecedor completa (hoje há uma lista curta, com Light e Correios desde 2026-10-21; a CEDAE fica de fora por também ser órgão do catálogo), revogação das chaves usadas na demo (OpenRouter, ngrok, `RAG_API_KEY`) e, se houver prazo, a separação de `src/query_analysis.py` em módulos por assunto. Feitos em 2026-10-23: compras revogadas e suspensas fora dos cálculos, limite de requisições, cadeia de hashes no log, detector de injeção com role-play e as camadas descritas em "Camadas do código".
 
 ---
 

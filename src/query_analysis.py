@@ -109,31 +109,55 @@ def _gravar_cache(query: str, result: QueryAnalysisResult, llm: dict, fallback: 
 
 
 def _analisar_llm(query: str, cliente: Any, span: Any) -> QueryAnalysisResult:
-    from src.generate import _cliente_padrao, _texto_e_tokens
-    key = _analysis_key(query)
     span.extra["prompt_version"] = PROMPT_VERSION
     # Clientes injetados não consultam cache de produção.
     cacheable = cliente is None
-    if cacheable and ANALYSIS_CACHE.exists():
-        for line in reversed(ANALYSIS_CACHE.read_text(encoding="utf8").splitlines()):
-            try:
-                cached = json.loads(line)
-                if cached.get("key") == key:
-                    if cached.get("expires_at", float("inf")) <= time.time():
-                        continue
-                    result = QueryAnalysisResult.model_validate(cached["analysis"])
-                    span.extra["cache_hit"] = True
-                    span.extra["llm"] = {**cached.get("llm", {}), "llm_called": False,
-                                         "chamadas_modelo": [], "uso_tokens": {"status": "cache"}}
-                    span.extra["llm_called"] = False
-                    span.extra["uso_tokens"] = {"status": "cache"}
-                    span.modelo = cached.get("llm", {}).get("model", config.GENERATION_MODEL)
-                    if cached.get("fallback"):
-                        span.status = "degradado"
-                        span.extra["fallback"] = cached["fallback"]
-                    return result.model_copy(update={"query_original": query})
-            except (ValueError, KeyError):
-                continue
+    if cacheable:
+        do_cache = _analise_do_cache(query, span)
+        if do_cache is not None:
+            return do_cache
+    data = _chamar_llm_de_analise(query, cliente, span)
+    normalized: list[str] = []
+    intents = [_intencao_validada(original, query, normalized) for original in data["intencoes"]]
+    span.extra["campos_normalizados"] = normalized
+    if not 1 <= len(intents) <= 4:
+        raise ValueError("Análise deve produzir entre uma e quatro intenções")
+    result = QueryAnalysisResult(query_original=query, filtros=intents[0].filtros, intencoes=intents, metodo="llm")
+    if cacheable:
+        _gravar_cache(query, result, span.extra["llm"])
+    return result
+
+
+def _analise_do_cache(query: str, span: Any) -> Optional[QueryAnalysisResult]:
+    """Última análise guardada para a pergunta, se ainda vale; anota o acerto no span."""
+    if not ANALYSIS_CACHE.exists():
+        return None
+    key = _analysis_key(query)
+    for line in reversed(ANALYSIS_CACHE.read_text(encoding="utf8").splitlines()):
+        try:
+            cached = json.loads(line)
+            if cached.get("key") == key:
+                if cached.get("expires_at", float("inf")) <= time.time():
+                    continue
+                result = QueryAnalysisResult.model_validate(cached["analysis"])
+                span.extra["cache_hit"] = True
+                span.extra["llm"] = {**cached.get("llm", {}), "llm_called": False,
+                                     "chamadas_modelo": [], "uso_tokens": {"status": "cache"}}
+                span.extra["llm_called"] = False
+                span.extra["uso_tokens"] = {"status": "cache"}
+                span.modelo = cached.get("llm", {}).get("model", config.GENERATION_MODEL)
+                if cached.get("fallback"):
+                    span.status = "degradado"
+                    span.extra["fallback"] = cached["fallback"]
+                return result.model_copy(update={"query_original": query})
+        except (ValueError, KeyError):
+            continue
+    return None
+
+
+def _chamar_llm_de_analise(query: str, cliente: Any, span: Any) -> dict[str, Any]:
+    """Chama o LLM com o prompt de análise e devolve o JSON dele (ainda sem validar)."""
+    from src.generate import _cliente_padrao, _texto_e_tokens
     span.modelo = config.GENERATION_MODEL
     span.extra["cache_hit"] = False
     chamada = cliente or _cliente_padrao(_schema_analise())
@@ -148,64 +172,64 @@ def _analisar_llm(query: str, cliente: Any, span: Any) -> QueryAnalysisResult:
         span.extra["llm"] = dict(getattr(chamada, "diagnosticos", {}))
         span.modelo = span.extra["llm"].get("model", config.GENERATION_MODEL)
     span.tokens = usage
-    data = json.loads(raw)
-    intents = []
-    normalized = []
-    for original in data["intencoes"]:
-        row = dict(original)
-        filtros = dict(row.get("filtros") or {})
-        analiticos = dict(filtros.get("filtros_analiticos") or {})
-        for campo in ("uf", "esfera", "municipio", "modalidade", "fornecedor", "orgao_nome", "unidade_nome", "categoria", "classe"):
-            if campo in filtros:
-                value = filtros.pop(campo)
-                if campo in analiticos and analiticos[campo] != value:
-                    raise ValueError("Filtros contraditórios")
-                analiticos[campo] = value
-                normalized.append("filtros." + campo)
-        if "termos_objeto" in filtros:
-            value = filtros.pop("termos_objeto")
-            if "termos_objeto" in row and row["termos_objeto"] != value:
-                raise ValueError("Termos contraditórios")
-            row["termos_objeto"] = value
-            normalized.append("filtros.termos_objeto")
-        filtros["filtros_analiticos"] = analiticos
-        explicit = _analisar(row.get("pergunta", query))
-        if explicit.orgao:
-            filtros["orgao"] = explicit.orgao
-            filtros["papel_orgao"] = explicit.papel_orgao
-            normalized.append("orgao_papel_explicito")
-        elif filtros.get("orgao"):
-            raise ValueError("Filtro de órgão/unidade não explícito na pergunta")
-        if ("estruturada" in row.get("bases", []) and filtros.get("referencia_temporal") is None
-                and explicit.referencia_temporal is not None):
-            filtros["referencia_temporal"] = explicit.referencia_temporal
-            normalized.append("referencia_temporal_explicita")
-        row["filtros"] = filtros
-        intent = QueryIntent.model_validate(row)
-        from src.structured_query import requer_calculo
-        if intent.operacao != "buscar" and not requer_calculo(query):
-            raise ValueError("Operação analítica não solicitada na pergunta")
-        original = _normalize(query)
-        for campo in ("modalidade", "categoria", "classe", "fornecedor", "orgao_nome", "unidade_nome"):
-            valor = intent.filtros.filtros_analiticos.get(campo)
-            if valor and _normalize(str(valor)) not in original:
-                raise ValueError(f"Filtro {campo} não explícito na pergunta")
-        cnpj_modelo = intent.filtros.filtros_analiticos.get("cnpj")
-        cnpj_explicito = explicit.filtros_analiticos.get("cnpj")
-        if cnpj_modelo and cnpj_modelo != cnpj_explicito:
-            raise ValueError("Filtro CNPJ não explícito na pergunta")
-        if intent.filtros.papel_cnpj and intent.filtros.papel_cnpj != explicit.papel_cnpj:
-            raise ValueError("Papel do CNPJ não explícito na pergunta")
-        if intent.filtros.ano is not None and str(intent.filtros.ano) not in query:
-            raise ValueError("Ano não explícito na pergunta")
-        intents.append(intent)
-    span.extra["campos_normalizados"] = normalized
-    if not 1 <= len(intents) <= 4:
-        raise ValueError("Análise deve produzir entre uma e quatro intenções")
-    result = QueryAnalysisResult(query_original=query, filtros=intents[0].filtros, intencoes=intents, metodo="llm")
-    if cacheable:
-        _gravar_cache(query, result, span.extra["llm"])
-    return result
+    return json.loads(raw)
+
+
+def _intencao_validada(original: dict[str, Any], query: str, normalized: list[str]) -> QueryIntent:
+    """Uma intenção do LLM, normalizada e conferida contra a pergunta.
+
+    O LLM não pode inventar filtro: órgão, modalidade, fornecedor, CNPJ e ano
+    precisam estar na pergunta, e conta só quando a pergunta pede conta. Senão,
+    ``ValueError`` (a análise cai para as regras). ``normalized`` recebe os
+    campos que foram movidos para o lugar certo do contrato.
+    """
+    row = dict(original)
+    filtros = dict(row.get("filtros") or {})
+    analiticos = dict(filtros.get("filtros_analiticos") or {})
+    for campo in ("uf", "esfera", "municipio", "modalidade", "fornecedor", "orgao_nome", "unidade_nome", "categoria", "classe"):
+        if campo in filtros:
+            value = filtros.pop(campo)
+            if campo in analiticos and analiticos[campo] != value:
+                raise ValueError("Filtros contraditórios")
+            analiticos[campo] = value
+            normalized.append("filtros." + campo)
+    if "termos_objeto" in filtros:
+        value = filtros.pop("termos_objeto")
+        if "termos_objeto" in row and row["termos_objeto"] != value:
+            raise ValueError("Termos contraditórios")
+        row["termos_objeto"] = value
+        normalized.append("filtros.termos_objeto")
+    filtros["filtros_analiticos"] = analiticos
+    explicit = _analisar(row.get("pergunta", query))
+    if explicit.orgao:
+        filtros["orgao"] = explicit.orgao
+        filtros["papel_orgao"] = explicit.papel_orgao
+        normalized.append("orgao_papel_explicito")
+    elif filtros.get("orgao"):
+        raise ValueError("Filtro de órgão/unidade não explícito na pergunta")
+    if ("estruturada" in row.get("bases", []) and filtros.get("referencia_temporal") is None
+            and explicit.referencia_temporal is not None):
+        filtros["referencia_temporal"] = explicit.referencia_temporal
+        normalized.append("referencia_temporal_explicita")
+    row["filtros"] = filtros
+    intent = QueryIntent.model_validate(row)
+    from src.structured_query import requer_calculo
+    if intent.operacao != "buscar" and not requer_calculo(query):
+        raise ValueError("Operação analítica não solicitada na pergunta")
+    pergunta = _normalize(query)
+    for campo in ("modalidade", "categoria", "classe", "fornecedor", "orgao_nome", "unidade_nome"):
+        valor = intent.filtros.filtros_analiticos.get(campo)
+        if valor and _normalize(str(valor)) not in pergunta:
+            raise ValueError(f"Filtro {campo} não explícito na pergunta")
+    cnpj_modelo = intent.filtros.filtros_analiticos.get("cnpj")
+    cnpj_explicito = explicit.filtros_analiticos.get("cnpj")
+    if cnpj_modelo and cnpj_modelo != cnpj_explicito:
+        raise ValueError("Filtro CNPJ não explícito na pergunta")
+    if intent.filtros.papel_cnpj and intent.filtros.papel_cnpj != explicit.papel_cnpj:
+        raise ValueError("Papel do CNPJ não explícito na pergunta")
+    if intent.filtros.ano is not None and str(intent.filtros.ano) not in query:
+        raise ValueError("Ano não explícito na pergunta")
+    return intent
 
 
 def _schema_analise() -> dict:
@@ -1457,57 +1481,110 @@ def _sem_pista_de_maiuscula(tokens: Sequence[str]) -> bool:
 
 
 def _nome_a_partir_do_gatilho(tokens: Sequence[str], indice: int, sem_caixa: bool) -> Optional[str]:
-    def limpa(i: int) -> str:
-        return tokens[i].strip(_PONTUACAO) if i < len(tokens) else ""
+    """Nome do órgão que começa no gatilho ("Prefeitura", "Secretaria"...), ou ``None``."""
+    return _LeitorDeOrgao(tokens, indice, sem_caixa).ler()
 
-    def nome_proprio(palavra: str) -> bool:
+
+class _LeitorDeOrgao:
+    """Lê o nome do órgão palavra por palavra a partir do gatilho.
+
+    O nome cresce enquanto continua correspondendo a um órgão do corpus ou é
+    nome próprio; município do RJ entra inteiro; pontuação, palavra de fim ou
+    conectora sem nome depois encerram. ``ler`` decide no fim se o que foi lido
+    é um órgão.
+    """
+
+    def __init__(self, tokens: Sequence[str], indice: int, sem_caixa: bool) -> None:
+        self.tokens, self.indice, self.sem_caixa = tokens, indice, sem_caixa
+        self.gatilho = _normalize(self.limpa(indice))
+        self.palavras = [self.limpa(indice)]
+        self.chaves = [_SINONIMOS_DE_ORGAO.get(self.gatilho, self.gatilho)]
+        self.cursor = indice + 1
+        self._ler_qualificadores()
+        self.inicio_do_nome = len(self.chaves)
+        self.com_maiuscula: list[bool] = []
+        self.parou_em_palavra_colada = False
+        self.antes_do_municipio: Optional[list[str]] = None
+        self.cidade: Optional[list[str]] = None
+
+    def limpa(self, i: int) -> str:
+        return self.tokens[i].strip(_PONTUACAO) if i < len(self.tokens) else ""
+
+    def nome_proprio(self, palavra: str) -> bool:
         # Inicial maiúscula numa frase normal; SIGLA toda em maiúscula não conta.
-        return not sem_caixa and palavra[:1].isupper() and not (len(palavra) > 1 and palavra.isupper())
+        return not self.sem_caixa and palavra[:1].isupper() and not (len(palavra) > 1 and palavra.isupper())
 
-    gatilho = _normalize(limpa(indice))
-    palavras = [limpa(indice)]
-    chaves = [_SINONIMOS_DE_ORGAO.get(gatilho, gatilho)]
-    cursor = indice + 1
-    while cursor < len(tokens) and _normalize(limpa(cursor)) in _QUALIFICADORES_DE_ORGAO:
-        palavras.append(limpa(cursor))
-        chaves.append(_normalize(limpa(cursor)))
-        cursor += 1
-    inicio_do_nome = len(chaves)
-
-    def confere(nome: Sequence[str]) -> Optional[str]:
+    def confere(self, nome: Sequence[str]) -> Optional[str]:
         """O nome existe no corpus? Para prefeitura, bastam as palavras da
         cidade num órgão municipal ("Câmara Municipal de São Gonçalo"); para
         cabeças fortes, as palavras do nome; para as demais ("câmara",
         "fundo", "comando"), a cabeça também tem de estar no nome."""
-        if gatilho in ("prefeitura", "municipio"):
+        if self.gatilho in ("prefeitura", "municipio"):
             return _orgao_do_catalogo(nome, exigir_algum=("municipio", "municipal", "prefeitura"))
-        if gatilho in _GATILHOS_FORTES:
+        if self.gatilho in _GATILHOS_FORTES:
             return _orgao_do_catalogo(nome)
-        return _orgao_do_catalogo(list(chaves[:inicio_do_nome]) + list(nome))
+        return _orgao_do_catalogo(list(self.chaves[:self.inicio_do_nome]) + list(nome))
 
-    com_maiuscula: list[bool] = []
-    parou_em_palavra_colada = False
-    antes_do_municipio: Optional[list[str]] = None
-    cidade: Optional[list[str]] = None
-    while cursor < len(tokens):
+    def _ler_qualificadores(self) -> None:
+        while self.cursor < len(self.tokens) and _normalize(self.limpa(self.cursor)) in _QUALIFICADORES_DE_ORGAO:
+            self.palavras.append(self.limpa(self.cursor))
+            self.chaves.append(_normalize(self.limpa(self.cursor)))
+            self.cursor += 1
+
+    def ler(self) -> Optional[str]:
+        while self.cursor < len(self.tokens):
+            if not self._avancar():
+                break
+        return self._veredito()
+
+    def _avancar(self) -> bool:
+        """Lê a próxima palavra (ou grupo) do nome; ``False`` quando o nome acabou."""
+        tokens, cursor = self.tokens, self.cursor
         if tokens[cursor - 1][-1:] in _PONTUACAO or tokens[cursor][:1] in "(\"'“‘":
-            break  # vírgula, ponto, aspas ou "(SES)" encerram o nome
-        palavra = limpa(cursor)
+            return False  # vírgula, ponto, aspas ou "(SES)" encerram o nome
+        palavra = self.limpa(cursor)
         normal = _normalize(palavra)
         if not palavra or normal in _FIM_DO_NOME_DO_ORGAO:
-            break
+            return False
         if normal in ("de", "do", "da") and (tamanho := _municipio_em(tokens, cursor + 1)):
-            # Município do RJ: entra inteiro e confirmado ("de são gonçalo", "de maricá").
-            if antes_do_municipio is None:
-                antes_do_municipio = list(chaves[inicio_do_nome:])
-                cidade = [limpa(i) for i in range(cursor + 1, cursor + 1 + tamanho)]
-            palavras += [palavra] + [limpa(i) for i in range(cursor + 1, cursor + 1 + tamanho)]
-            chaves += [_normalize(limpa(i)) for i in range(cursor + 1, cursor + 1 + tamanho)]
-            com_maiuscula.append(True)
-            cursor += 1 + tamanho
-            continue
+            self._ler_municipio(palavra, tamanho)
+            return True
+        passo_lido = self._proximo_passo(palavra, normal)
+        if passo_lido is None:
+            return False
+        novas_palavras, novas_chaves, passo = passo_lido
+        fim = cursor + passo
+        if novas_chaves[-1] == "rio" and [_normalize(self.limpa(fim)), _normalize(self.limpa(fim + 1))] == ["de", "janeiro"]:
+            novas_palavras += [self.limpa(fim), self.limpa(fim + 1)]  # "Rio de Janeiro" é um nome só
+            novas_chaves.append("janeiro")
+            fim += 2
+        # Cresce se ainda corresponde a um órgão do corpus, ou se é nome próprio.
+        if not (self.confere(self.chaves[self.inicio_do_nome:] + novas_chaves)
+                or self.nome_proprio(novas_palavras[-1])):
+            self.parou_em_palavra_colada = passo == 1
+            return False
+        self.palavras += novas_palavras
+        self.chaves += novas_chaves
+        self.com_maiuscula.append(self.nome_proprio(novas_palavras[-1]))
+        self.cursor = fim
+        return True
+
+    def _ler_municipio(self, palavra: str, tamanho: int) -> None:
+        """Município do RJ: entra inteiro e confirmado ("de são gonçalo", "de maricá")."""
+        cursor = self.cursor
+        nome_da_cidade = [self.limpa(i) for i in range(cursor + 1, cursor + 1 + tamanho)]
+        if self.antes_do_municipio is None:
+            self.antes_do_municipio = list(self.chaves[self.inicio_do_nome:])
+            self.cidade = nome_da_cidade
+        self.palavras += [palavra] + nome_da_cidade
+        self.chaves += [_normalize(p) for p in nome_da_cidade]
+        self.com_maiuscula.append(True)
+        self.cursor += 1 + tamanho
+
+    def _proximo_passo(self, palavra: str, normal: str) -> Optional[tuple[list[str], list[str], int]]:
+        """Palavras e chaves candidatas e quantos tokens elas ocupam; ``None`` encerra."""
         if normal in _PALAVRA_CONECTORA:
-            seguinte = limpa(cursor + 1)
+            seguinte = self.limpa(self.cursor + 1)
             normal_seguinte = _normalize(seguinte)
             if (
                 not seguinte
@@ -1516,63 +1593,58 @@ def _nome_a_partir_do_gatilho(tokens: Sequence[str], indice: int, sem_caixa: boo
                 or normal_seguinte in _PALAVRA_CONECTORA
                 or (normal == "e" and normal_seguinte in _GATILHOS_ORGAO)
             ):
-                break  # "de 2025", "de qual", "e da Prefeitura", "e o valor"
-            novas_palavras, novas_chaves, passo = [palavra, seguinte], [normal_seguinte], 2
-        elif (
+                return None  # "de 2025", "de qual", "e da Prefeitura", "e o valor"
+            return [palavra, seguinte], [normal_seguinte], 2
+        if (
             palavra[:1].isalpha()
             and normal not in _GATILHOS_ORGAO
             and normal not in _NAO_SAO_NOME
-            and len(chaves) > inicio_do_nome or nome_proprio(palavra)
+            and len(self.chaves) > self.inicio_do_nome or self.nome_proprio(palavra)
         ) and normal not in _GATILHOS_ORGAO:
             # Palavra colada, sem conectora: "Prefeitura Niterói", "são gonçalo".
-            novas_palavras, novas_chaves, passo = [palavra], [normal], 1
-        else:
-            break
-        fim = cursor + passo
-        if novas_chaves[-1] == "rio" and [_normalize(limpa(fim)), _normalize(limpa(fim + 1))] == ["de", "janeiro"]:
-            novas_palavras += [limpa(fim), limpa(fim + 1)]  # "Rio de Janeiro" é um nome só
-            novas_chaves.append("janeiro")
-            fim += 2
-        # Cresce se ainda corresponde a um órgão do corpus, ou se é nome próprio.
-        if not (confere(chaves[inicio_do_nome:] + novas_chaves) or nome_proprio(novas_palavras[-1])):
-            parou_em_palavra_colada = passo == 1
-            break
-        palavras += novas_palavras
-        chaves += novas_chaves
-        com_maiuscula.append(nome_proprio(novas_palavras[-1]))
-        cursor = fim
-    if gatilho in ("prefeitura", "municipio") and antes_do_municipio is None and chaves[inicio_do_nome:] == ["rio"]:
-        return _orgao_do_municipio(["Rio", "de", "Janeiro"])  # "Prefeitura do Rio"
-    if antes_do_municipio is not None:
+            return [palavra], [normal], 1
+        return None
+
+    def _veredito(self) -> Optional[str]:
+        """O que foi lido é um órgão? Devolve o nome, ou ``None``."""
+        gatilho, chaves, inicio_do_nome = self.gatilho, self.chaves, self.inicio_do_nome
+        if gatilho in ("prefeitura", "municipio") and self.antes_do_municipio is None and chaves[inicio_do_nome:] == ["rio"]:
+            return _orgao_do_municipio(["Rio", "de", "Janeiro"])  # "Prefeitura do Rio"
+        if self.antes_do_municipio is not None:
+            return self._veredito_com_municipio()
+        if self.parou_em_palavra_colada and chaves[-1] in _COMECOS_DE_NOME_COMPOSTO:
+            return None  # "prefeitura de são" + palavra que não deu para confirmar: nome pela metade
+        if chaves[-1] in _CONTINUA_SEM_CATALOGO and _normalize(self.limpa(self.cursor)) in ("de", "do", "da"):
+            # "secretaria de estado" + "de educação" que não está no corpus: nome incompleto.
+            return _nome_sem_catalogo(self.tokens, self.indice) if gatilho in _GATILHOS_FORTES else None
+        if len(chaves) > inicio_do_nome and (self.confere(chaves[inicio_do_nome:]) or all(self.com_maiuscula)):
+            return " ".join(self.palavras)
+        if (len(chaves) == inicio_do_nome > 1 and gatilho in _GATILHOS_FORTES
+                and all(self.nome_proprio(p) for p in self.palavras[1:])):
+            return " ".join(self.palavras)  # "Defensoria Pública", "Procuradoria Geral"
+        if gatilho in _GATILHOS_FORTES:
+            return _nome_sem_catalogo(self.tokens, self.indice)
+        return None  # "órgão federal", ou nome em minúsculas que não existe no corpus: "banco de sangue"
+
+    def _veredito_com_municipio(self) -> Optional[str]:
+        gatilho, antes = self.gatilho, self.antes_do_municipio
         # "Prefeitura (Municipal) de X", "Prefeitura da Cidade do X", "Município
         # de X": o órgão é gravado como "MUNICIPIO DE X", e o filtro "contém"
         # não casaria "Prefeitura de Maricá" com ele.
-        if gatilho in ("prefeitura", "municipio") and antes_do_municipio in ([], ["cidade"]) and cidade:
-            return _orgao_do_municipio(cidade)
+        if gatilho in ("prefeitura", "municipio") and antes in ([], ["cidade"]) and self.cidade:
+            return _orgao_do_municipio(self.cidade)
         # Com município: vale para prefeitura/câmara/cabeça forte, ou se o que
         # vem antes da cidade existe no corpus ("fundo municipal de saúde").
         # "banco de sangue de niterói" não.
         if (
             gatilho in ("prefeitura", "municipio", "camara")
             or gatilho in _GATILHOS_FORTES
-            or not antes_do_municipio
-            or confere(antes_do_municipio)
-            or all(com_maiuscula)
+            or not antes
+            or self.confere(antes)
+            or all(self.com_maiuscula)
         ):
-            return " ".join(palavras)
+            return " ".join(self.palavras)
         return None
-    if parou_em_palavra_colada and chaves[-1] in _COMECOS_DE_NOME_COMPOSTO:
-        return None  # "prefeitura de são" + palavra que não deu para confirmar: nome pela metade
-    if chaves[-1] in _CONTINUA_SEM_CATALOGO and _normalize(limpa(cursor)) in ("de", "do", "da"):
-        # "secretaria de estado" + "de educação" que não está no corpus: nome incompleto.
-        return _nome_sem_catalogo(tokens, indice) if gatilho in _GATILHOS_FORTES else None
-    if len(chaves) > inicio_do_nome and (confere(chaves[inicio_do_nome:]) or all(com_maiuscula)):
-        return " ".join(palavras)
-    if len(chaves) == inicio_do_nome > 1 and gatilho in _GATILHOS_FORTES and all(nome_proprio(p) for p in palavras[1:]):
-        return " ".join(palavras)  # "Defensoria Pública", "Procuradoria Geral"
-    if gatilho in _GATILHOS_FORTES:
-        return _nome_sem_catalogo(tokens, indice)
-    return None  # "órgão federal", ou nome em minúsculas que não existe no corpus: "banco de sangue"
 
 
 # Os 92 municípios do RJ: depois de "de/do/da", entram inteiros no nome do
@@ -1834,92 +1906,33 @@ def _analisar_com_trechos(query: str) -> tuple[QueryFilters, str, list[Span]]:
     # Métrica, agrupamento e referência saem do texto sem as expressões que já
     # viraram filtro: em "no máximo 50 mil" o "máximo" é filtro, não métrica.
     resto = _sem_trechos(texto, trechos)
-    media_unitaria = bool(re.search(r"\b(?:media|medio)\b.*\b(?:por|unidade|item)\b", resto))
-    if media_unitaria:
-        metrica = "media_unitaria"
-    else:
-        metrica = next((valor for padrao, valor in (
-            (r"\bmediana\b", "mediana"), (r"\b(?:media|medio)\b", "media"),
-            (r"\b(?:quantos|quantas|quantidade)\b", "contagem"),
-            # "Quanto a Fiotec recebeu/gastou?" pede valor, não contagem.
-            (r"\b(?:soma|total|quanto)\b", "soma"),
-            (r"\b(?:maior|maiores|maximo)\b", "maximo"), (r"\b(?:menor|menores|minimo)\b", "minimo"),
-            (r"\bvalor\b", "soma"),
-        ) if re.search(padrao, resto)), None)
-    agrupamentos = [campo for termo, campo in (
-        ("modalidade", "modalidade"), ("municipio", "municipio"), ("orgao", "orgao_nome"),
-        ("unidade", "unidade_nome"), ("categoria", "categoria"), ("classe", "classe"),
-        ("esfera", "esfera"), ("fornecedor", "fornecedor"),
-    ) if re.search(r"\bpor " + termo, resto)]
-    referencia = next((nome for termo, nome in (
-        ("assinatura", "assinatura"), ("assinad", "assinatura"),
-        ("pca", "pca"), ("publicac", "publicacao"), ("publicad", "publicacao"),
-        ("resultado", "resultado"), ("homolog", "resultado"),
-    ) if termo in resto), None)
-    # "O que estava vigente em 2025?" pede a vigência das normas. Em pergunta
-    # sobre contratos ou atas, "vigente" é a vigência deles e segue pelo
-    # campo de sempre (data_vigencia). "Contratações" sozinha é o assunto
-    # ("regras das contratações"), não o registro.
-    if referencia is None and _VIGENCIA_RE.search(resto) and not _REGISTRO_COM_VIGENCIA_RE.search(resto):
-        referencia = "vigencia"
-    analiticos: dict[str, str] = {}
     # Esfera e modalidade saem do texto sem filtros e sem citações de norma
     # ("Lei federal 14.133" não é esfera federal; "Lei do Pregão" não é
-    # modalidade). "Por município" pede agrupamento, não filtro de esfera.
+    # modalidade).
     sem_normas = _NORMA_COM_ESFERA_RE.sub(" ", _sem_trechos(texto, trechos + bloqueados))
-    sem_agrupamento = re.sub(r"\bpor\s+(?:municipios?|orgaos?|esferas?)\b", " ", sem_normas)
-    esferas = [nome for nome, padrao in _ESFERAS if re.search(padrao, sem_agrupamento)]
-    if len(esferas) == 1:  # várias juntas = comparação entre esferas
-        analiticos["esfera"] = esferas[0]
-    sem_sentido_comum = _SENTIDO_COMUM_DE_MODALIDADE_RE.sub(" ", sem_normas)
-    achadas = [(m, nome) for padrao, nome in _MODALIDADES if (m := re.search(padrao, sem_sentido_comum))]
-    familias = {nome.split()[0] for _, nome in achadas}
-    orgao, sigla = _extrair_orgao(query)
-    # Município e fornecedor viram o valor canônico do snapshot ("Volta
-    # Redonda", "empresa Cristália"), e o trecho que os citou sai dos termos de
-    # objeto. O fornecedor não olha dentro do que já é município/órgão.
-    municipio, trecho_municipio = _extrair_municipio(texto)
-    fornecedor, trecho_fornecedor = _extrair_fornecedor(
-        texto, [s for s in (trecho_municipio,) if s], original=query)
-    if fornecedor and orgao and trecho_fornecedor and re.search(
-        r"\b(?:fornecedor(?:a)?|empresa|contratada)\s+(?:(?:a|o|da|do|de|e)\s+)*$",
-        texto[:trecho_fornecedor[0]],
-    ) and set(_tokens_de_nome(orgao)) & set(_tokens_de_nome(fornecedor)):
-        # Uma entidade pode constar nos dois catálogos; o papel explicitamente
-        # pedido prevalece, sem criar um segundo filtro por órgão.
-        orgao, sigla = None, None
+    orgao, sigla, municipio, fornecedor, trechos_de_entidade = _entidades_da_pergunta(query, texto)
+    trechos = trechos + trechos_de_entidade
+
+    # A ordem de entrada vira a ordem dos filtros no SQL: esfera, município,
+    # fornecedor, modalidade, CNPJ.
+    analiticos: dict[str, str] = {}
+    if esfera := _esfera_da_pergunta(sem_normas):
+        analiticos["esfera"] = esfera
     if municipio and not (orgao and _normalize(municipio) in _normalize(orgao)):
         # "Prefeitura de Maricá" já prende no órgão: não repetir o município,
         # que sozinho traria os 23 órgãos da cidade em vez da prefeitura.
         analiticos["municipio"] = municipio
     if fornecedor:
         analiticos["fornecedor"] = fornecedor
-    trechos = trechos + [s for s in (trecho_municipio, trecho_fornecedor) if s]
-    if len(familias) == 1:  # "pregões e dispensas" juntos é comparação: sem filtro
-        achada, nome = achadas[0]
-        plural = achada.group().split()[0].endswith("s")
-        negada = re.search(r"\bnao\b(?:\s+\w+){0,3}\s*$", sem_sentido_comum[: achada.start()])
-        if not negada and (
-            _PERGUNTA_SOBRE_CONTRATOS_RE.search(sem_sentido_comum)
-            or (plural and (_PERGUNTA_COM_CONTA_RE.search(sem_sentido_comum) or orgao))
-        ):
-            analiticos["modalidade"] = nome
+    if modalidade := _modalidade_da_pergunta(sem_normas, orgao):
+        analiticos["modalidade"] = modalidade
     if len(cnpjs) == 1:  # vários juntos é comparação: sem filtro
         analiticos["cnpj"] = cnpjs[0]
     if sigla:
         # "contratos da SEEDUC": o órgão vira o nome por extenso, e a sigla sai
         # do texto para não ser lida como objeto do contrato.
         trechos = trechos + [m.span() for m in re.finditer(rf"\b{re.escape(sigla)}\b", texto)]
-    medida_unitaria = bool(re.search(
-        r"\b(?:preco|valor)\s+unitari[oa]s?\b|\b(?:media|mediana|valor|preco)\b.*\bpor\s+(?:veiculo|ambulancia|quilo|quilograma|kg|unidade)s?\b",
-        texto,
-    ))
-    etapa_valor = next((tipo for padrao, tipo in (
-        (r"\bvalor(?:es)?\s+contratad[oa]s?\b", "contratado"),
-        (r"\bvalor(?:es)?\s+estimad[oa]s?\b", "estimado"),
-        (r"\b(?:valor|preco)(?:\s+unitari[oa]s?)?\s+homologad[oa]s?\b", "homologado"),
-        (r"\bvalor(?:es)?\s+homologad[oa]s?\b", "homologado"),
-    ) if re.search(padrao, texto)), None)
+    etapa_valor, medida_unitaria = _tipo_de_valor_da_pergunta(texto)
     filtros = QueryFilters(
         ano=periodo.ano,
         ano_final=periodo.ano_final,
@@ -1928,9 +1941,9 @@ def _analisar_com_trechos(query: str) -> tuple[QueryFilters, str, list[Span]]:
         valor_min=valores.valor_min,
         valor_max=valores.valor_max,
         orgao=orgao,
-        metrica=metrica,
-        agrupamentos=agrupamentos,
-        referencia_temporal=referencia,
+        metrica=_metrica_da_pergunta(resto),
+        agrupamentos=_agrupamentos_da_pergunta(resto),
+        referencia_temporal=_referencia_da_pergunta(resto),
         filtros_analiticos=analiticos,
         papel_orgao=_papel_orgao(query, orgao),
         valor_min_exclusivo=valores.valor_min_exclusivo,
@@ -1941,6 +1954,114 @@ def _analisar_com_trechos(query: str) -> tuple[QueryFilters, str, list[Span]]:
         papel_cnpj=(_papel_cnpj(texto, expr_cnpj[0]) if len(cnpjs) == 1 else None),
     )
     return filtros, texto, trechos
+
+
+def _metrica_da_pergunta(resto: str) -> Optional[str]:
+    """Conta pedida (mediana, média, contagem, soma, máximo, mínimo); a primeira que casa vale."""
+    if re.search(r"\b(?:media|medio)\b.*\b(?:por|unidade|item)\b", resto):
+        return "media_unitaria"
+    return next((valor for padrao, valor in (
+        (r"\bmediana\b", "mediana"), (r"\b(?:media|medio)\b", "media"),
+        (r"\b(?:quantos|quantas|quantidade)\b", "contagem"),
+        # "Quanto a Fiotec recebeu/gastou?" pede valor, não contagem.
+        (r"\b(?:soma|total|quanto)\b", "soma"),
+        (r"\b(?:maior|maiores|maximo)\b", "maximo"), (r"\b(?:menor|menores|minimo)\b", "minimo"),
+        (r"\bvalor\b", "soma"),
+    ) if re.search(padrao, resto)), None)
+
+
+def _agrupamentos_da_pergunta(resto: str) -> list[str]:
+    """Campos pedidos com "por" ("por modalidade", "por órgão")."""
+    return [campo for termo, campo in (
+        ("modalidade", "modalidade"), ("municipio", "municipio"), ("orgao", "orgao_nome"),
+        ("unidade", "unidade_nome"), ("categoria", "categoria"), ("classe", "classe"),
+        ("esfera", "esfera"), ("fornecedor", "fornecedor"),
+    ) if re.search(r"\bpor " + termo, resto)]
+
+
+def _referencia_da_pergunta(resto: str) -> Optional[str]:
+    """Qual data conta: assinatura, PCA, publicação, resultado ou vigência."""
+    referencia = next((nome for termo, nome in (
+        ("assinatura", "assinatura"), ("assinad", "assinatura"),
+        ("pca", "pca"), ("publicac", "publicacao"), ("publicad", "publicacao"),
+        ("resultado", "resultado"), ("homolog", "resultado"),
+    ) if termo in resto), None)
+    # "O que estava vigente em 2025?" pede a vigência das normas. Em pergunta
+    # sobre contratos ou atas, "vigente" é a vigência deles e segue pelo
+    # campo de sempre (data_vigencia). "Contratações" sozinha é o assunto
+    # ("regras das contratações"), não o registro.
+    if referencia is None and _VIGENCIA_RE.search(resto) and not _REGISTRO_COM_VIGENCIA_RE.search(resto):
+        return "vigencia"
+    return referencia
+
+
+def _esfera_da_pergunta(sem_normas: str) -> Optional[str]:
+    """Uma esfera citada vira filtro; várias juntas são comparação, sem filtro.
+
+    "Por município" pede agrupamento, não filtro de esfera.
+    """
+    sem_agrupamento = re.sub(r"\bpor\s+(?:municipios?|orgaos?|esferas?)\b", " ", sem_normas)
+    esferas = [nome for nome, padrao in _ESFERAS if re.search(padrao, sem_agrupamento)]
+    return esferas[0] if len(esferas) == 1 else None
+
+
+def _entidades_da_pergunta(query: str, texto: str) -> tuple[Optional[str], Optional[str], Optional[str],
+                                                              Optional[str], list[Span]]:
+    """Órgão (e a sigla), município e fornecedor citados, com os trechos que os citaram.
+
+    Município e fornecedor viram o valor canônico do snapshot ("Volta Redonda",
+    "empresa Cristália"), e o trecho que os citou sai dos termos de objeto. O
+    fornecedor não olha dentro do que já é município/órgão.
+    """
+    orgao, sigla = _extrair_orgao(query)
+    municipio, trecho_municipio = _extrair_municipio(texto)
+    fornecedor, trecho_fornecedor = _extrair_fornecedor(
+        texto, [s for s in (trecho_municipio,) if s], original=query)
+    if fornecedor and orgao and trecho_fornecedor and re.search(
+        r"\b(?:fornecedor(?:a)?|empresa|contratada)\s+(?:(?:a|o|da|do|de|e)\s+)*$",
+        texto[:trecho_fornecedor[0]],
+    ) and set(_tokens_de_nome(orgao)) & set(_tokens_de_nome(fornecedor)):
+        # Uma entidade pode constar nos dois catálogos; o papel explicitamente
+        # pedido prevalece, sem criar um segundo filtro por órgão.
+        orgao, sigla = None, None
+    trechos = [s for s in (trecho_municipio, trecho_fornecedor) if s]
+    return orgao, sigla, municipio, fornecedor, trechos
+
+
+def _modalidade_da_pergunta(sem_normas: str, orgao: Optional[str]) -> Optional[str]:
+    """Modalidade citada que vira filtro.
+
+    Só uma família ("pregões e dispensas" juntos é comparação), não negada, e
+    numa pergunta sobre contratos ou com conta ("quantos pregões?").
+    """
+    sem_sentido_comum = _SENTIDO_COMUM_DE_MODALIDADE_RE.sub(" ", sem_normas)
+    achadas = [(m, nome) for padrao, nome in _MODALIDADES if (m := re.search(padrao, sem_sentido_comum))]
+    if len({nome.split()[0] for _, nome in achadas}) != 1:
+        return None
+    achada, nome = achadas[0]
+    plural = achada.group().split()[0].endswith("s")
+    negada = re.search(r"\bnao\b(?:\s+\w+){0,3}\s*$", sem_sentido_comum[: achada.start()])
+    if not negada and (
+        _PERGUNTA_SOBRE_CONTRATOS_RE.search(sem_sentido_comum)
+        or (plural and (_PERGUNTA_COM_CONTA_RE.search(sem_sentido_comum) or orgao))
+    ):
+        return nome
+    return None
+
+
+def _tipo_de_valor_da_pergunta(texto: str) -> tuple[Optional[str], bool]:
+    """Etapa do valor pedida (contratado, estimado, homologado) e se é preço unitário."""
+    medida_unitaria = bool(re.search(
+        r"\b(?:preco|valor)\s+unitari[oa]s?\b|\b(?:media|mediana|valor|preco)\b.*\bpor\s+(?:veiculo|ambulancia|quilo|quilograma|kg|unidade)s?\b",
+        texto,
+    ))
+    etapa_valor = next((tipo for padrao, tipo in (
+        (r"\bvalor(?:es)?\s+contratad[oa]s?\b", "contratado"),
+        (r"\bvalor(?:es)?\s+estimad[oa]s?\b", "estimado"),
+        (r"\b(?:valor|preco)(?:\s+unitari[oa]s?)?\s+homologad[oa]s?\b", "homologado"),
+        (r"\bvalor(?:es)?\s+homologad[oa]s?\b", "homologado"),
+    ) if re.search(padrao, texto)), None)
+    return etapa_valor, medida_unitaria
 
 
 def _papel_orgao(query: str, orgao: Optional[str]) -> Optional[str]:
