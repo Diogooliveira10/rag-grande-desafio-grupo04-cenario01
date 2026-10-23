@@ -328,13 +328,17 @@ def _condicao_satisfeita(actual: Any, operator: str, value: Any) -> bool:
         return False
 
 
-def _filtro_opcional(expected: Any) -> bool:
+def filtro_opcional(expected: Any) -> bool:
     """Filtro com ``"optional": True`` não descarta chunk que não tem o campo."""
     if isinstance(expected, Mapping):
         return bool(expected.get("optional"))
     if isinstance(expected, (tuple, list)) and expected:
         return all(isinstance(item, Mapping) and item.get("optional") for item in expected)
     return False
+
+
+# Nome antigo, usado dentro deste módulo e pelos testes.
+_filtro_opcional = filtro_opcional
 
 
 _COMPARACOES = frozenset({">", ">=", "<", "<="})

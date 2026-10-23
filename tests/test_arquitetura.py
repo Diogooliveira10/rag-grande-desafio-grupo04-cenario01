@@ -51,6 +51,17 @@ def test_entidades_nao_dependem_do_resto_do_projeto():
     assert not proibidos, f"src/schema.py importa {proibidos}"
 
 
+def test_caso_de_uso_nao_importa_nome_privado_de_outro_modulo():
+    # O pipeline usava retrieve._filtro_opcional: detalhe interno da busca
+    # vazando para o caso de uso. Quem precisa de algo de outro módulo usa a
+    # parte pública dele (ou a porta, em src/portas.py).
+    arvore = ast.parse((RAIZ / "src" / "pipeline.py").read_text(encoding="utf-8"))
+    privados = sorted(f"{no.module}.{alias.name}" for no in ast.walk(arvore)
+                      if isinstance(no, ast.ImportFrom) and no.module and no.module.startswith("src")
+                      for alias in no.names if alias.name.startswith("_"))
+    assert not privados, f"src/pipeline.py importa nomes privados: {privados}"
+
+
 def test_dominio_existe_e_tem_as_regras_extraidas():
     # Guarda contra apagar o pacote e o teste acima passar vazio.
     assert {p.stem for p in DOMINIO.glob("*.py")} >= {"__init__", "confianca", "fusao", "situacao", "texto"}

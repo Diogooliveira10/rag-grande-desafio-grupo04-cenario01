@@ -5,21 +5,28 @@ função compatível com o contrato ``PipelineFn`` de ``eval/run_eval.py``
 (``Callable[[str], dict[str, Any]]``), para uso direto via::
 
     py .\\eval\\run_eval.py run --pipeline src.pipeline:responder
+
+É o caso de uso "responder pergunta": conversa com a infraestrutura só pelas
+portas de ``src/portas.py``, reunidas em ``Dependencias``.
 """
 
 from __future__ import annotations
 
-from typing import Any, Optional, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Callable, Optional, Sequence
 
+from src import structured_query
 from src.obs import (Stage, bounded_log_value, lifecycle, new_query_id, new_run_id,
                      registrar, registrar_pulo, sessao)
 from src.log_context import current_execution, execution, log_details
 from src.conversation import resposta_conversacional, tentativa_de_injecao
 from src.generate import ClienteLLM, gerar_resposta, pode_responder_sql
+from src.portas import (Analisador, Buscador, ConsultaEstruturada, Conversa, Gerador,
+                        Reformulador, Roteador)
 from src.query_analysis import analisar_query, filtros_para_retrieve
 from src.reformulacao import Reformulacao, reformular_pergunta
 from src.rerank import reranker_padrao
-from src.retrieve import DEFAULT_TOP_K, RerankFn, RetrievalResult, _filtro_opcional, retrieve
+from src.retrieve import DEFAULT_TOP_K, RerankFn, RetrievalResult, filtro_opcional, retrieve
 from src.router import inferir_motivo_recusa, rotear_pergunta
 from src.schema import Chunk, ChunkMetadata
 from src.structured_query import consultar_estruturado, pode_consultar_sql_direto
@@ -27,6 +34,42 @@ from src.structured_query import consultar_estruturado, pode_consultar_sql_diret
 # Só as bases de escopo "oficial" no manifesto respondem perguntas; fixtures de
 # teste e amostras experimentais ficam de fora da busca.
 ESCOPOS_CONSULTADOS = ("oficial",)
+
+
+@dataclass(frozen=True)
+class Dependencias:
+    """Implementações das portas (src/portas.py) que o pipeline usa.
+
+    O pipeline só conversa com a infraestrutura por aqui. Para trocar uma peça,
+    passe ``dataclasses.replace(dependencias_padrao(), buscar=minha_busca)`` a
+    ``responder``.
+    """
+    analisar: Analisador
+    rotear: Roteador
+    buscar: Buscador
+    consultar_sql: ConsultaEstruturada
+    gerar: Gerador
+    conversa: Conversa
+    reformular: Reformulador
+    reranker_padrao: Callable[[], Optional[RerankFn]]
+    pode_consultar_sql_direto: Callable[..., bool]
+    pode_responder_sql: Callable[[list[Chunk], Any], bool]
+    tentativa_de_injecao: Callable[[str], bool]
+
+
+def dependencias_padrao() -> Dependencias:
+    """As implementações do projeto: ECOA/OpenRouter, FAISS + BM25, SQLite/Neon.
+
+    Montadas a cada pergunta a partir dos nomes deste módulo, para um
+    ``monkeypatch`` em ``pipeline.retrieve`` (como os testes fazem) continuar valendo.
+    """
+    return Dependencias(
+        analisar=analisar_query, rotear=rotear_pergunta, buscar=retrieve,
+        consultar_sql=consultar_estruturado, gerar=gerar_resposta, conversa=resposta_conversacional,
+        reformular=reformular_pergunta, reranker_padrao=reranker_padrao,
+        pode_consultar_sql_direto=pode_consultar_sql_direto, pode_responder_sql=pode_responder_sql,
+        tentativa_de_injecao=tentativa_de_injecao,
+    )
 
 
 def _chunk_from_retrieval(result: RetrievalResult) -> Chunk:
@@ -94,6 +137,7 @@ def responder(
     escopos: Optional[Sequence[str]] = ESCOPOS_CONSULTADOS,
     session_id: Optional[str] = None,
     historico: Optional[Sequence[Any]] = None,
+    dependencias: Optional[Dependencias] = None,
 ) -> dict[str, Any]:
     """Roda query_analysis + roteamento + recuperação híbrida + geração para uma pergunta.
 
@@ -137,7 +181,11 @@ def responder(
     sustentar sozinha, e a pergunta reescrita substitui a original em todas as
     etapas. Nesse caso a resposta leva ``pergunta_reformulada``. Sem histórico,
     nada muda.
+
+    ``dependencias`` troca as peças de infraestrutura (src/portas.py); sem ela,
+    valem as do projeto (``dependencias_padrao``).
     """
+    deps = dependencias or dependencias_padrao()
     run_id = run_id or new_run_id()
     query_id = query_id or new_query_id()
     with sessao(session_id), execution(run_id, query_id):
@@ -148,21 +196,10 @@ def responder(
                               "cliente_injetado": cliente is not None,
                               "reranker_injetado": reranker is not None}) as flow:
             try:
-                if historico and tentativa_de_injecao(query):
-                    # Sem reformulação: o LLM reescrevia a injeção como a pergunta
-                    # anterior, e a resposta fixa da conversa não era dada.
-                    registrar_pulo(run_id=run_id, query_id=query_id, stage=Stage.REFORMULACAO,
-                                   query=query, motivo="tentativa_de_injecao")
-                    reformulacao = Reformulacao(query, False, "tentativa_de_injecao")
-                elif historico:
-                    reformulacao = reformular_pergunta(query, historico, run_id=run_id, query_id=query_id)
-                else:
-                    registrar_pulo(run_id=run_id, query_id=query_id, stage=Stage.REFORMULACAO,
-                                   query=query, motivo="sem_historico")
-                    reformulacao = Reformulacao(query, False, "sem_historico")
+                reformulacao = _reformular(query, historico, deps, run_id=run_id, query_id=query_id)
                 resposta = _responder(
                     reformulacao.pergunta, top_k=top_k, reranker=reranker,
-                    cliente=cliente, run_id=run_id, query_id=query_id, escopos=escopos,
+                    cliente=cliente, run_id=run_id, query_id=query_id, escopos=escopos, deps=deps,
                 )
                 if reformulacao.reescrita:
                     resposta = {**resposta, "query": query, "pergunta_reformulada": reformulacao.pergunta}
@@ -178,19 +215,220 @@ def responder(
                 flow.status = "erro"
                 raise
             finally:
-                # Absent optional/downstream stages are explicit, not mistaken for
-                # a missing log event. On failure the terminal envelope records it.
-                context = current_execution()
-                observed = context.stages() if context else {}
-                failed = flow.status == "erro" or any(event["status"] == "erro"
-                            for events in observed.values() for event in events)
-                for stage in (Stage.INTERACAO, Stage.REFORMULACAO, Stage.QUERY_ANALYSIS,
-                              Stage.ROTEAMENTO, Stage.RETRIEVAL_DENSO, Stage.RETRIEVAL_BM25,
-                              Stage.FUSAO_RRF, Stage.RERANK, Stage.CONSULTA_SQL,
-                              Stage.GERACAO, Stage.VALIDACAO):
-                    if stage.value not in observed:
-                        registrar_pulo(run_id=run_id, query_id=query_id, stage=stage, query=query,
-                                       motivo="falha_anterior" if failed else "caminho_nao_requer_etapa")
+                _registrar_etapas_ausentes(query, flow.status, run_id=run_id, query_id=query_id)
+
+
+def _reformular(query: str, historico: Optional[Sequence[Any]], deps: Dependencias, *,
+                run_id: str, query_id: str) -> Reformulacao:
+    if historico and deps.tentativa_de_injecao(query):
+        # Sem reformulação: o LLM reescrevia a injeção como a pergunta
+        # anterior, e a resposta fixa da conversa não era dada.
+        registrar_pulo(run_id=run_id, query_id=query_id, stage=Stage.REFORMULACAO,
+                       query=query, motivo="tentativa_de_injecao")
+        return Reformulacao(query, False, "tentativa_de_injecao")
+    if historico:
+        return deps.reformular(query, historico, run_id=run_id, query_id=query_id)
+    registrar_pulo(run_id=run_id, query_id=query_id, stage=Stage.REFORMULACAO,
+                   query=query, motivo="sem_historico")
+    return Reformulacao(query, False, "sem_historico")
+
+
+def _registrar_etapas_ausentes(query: str, status: str, *, run_id: str, query_id: str) -> None:
+    """Etapas que não rodaram ficam explícitas no log, com o motivo.
+
+    Assim uma etapa ausente não é confundida com um evento perdido. Em caso de
+    falha, o envelope final registra o erro.
+    """
+    context = current_execution()
+    observed = context.stages() if context else {}
+    failed = status == "erro" or any(event["status"] == "erro"
+                                     for events in observed.values() for event in events)
+    for stage in (Stage.INTERACAO, Stage.REFORMULACAO, Stage.QUERY_ANALYSIS,
+                  Stage.ROTEAMENTO, Stage.RETRIEVAL_DENSO, Stage.RETRIEVAL_BM25,
+                  Stage.FUSAO_RRF, Stage.RERANK, Stage.CONSULTA_SQL,
+                  Stage.GERACAO, Stage.VALIDACAO):
+        if stage.value not in observed:
+            registrar_pulo(run_id=run_id, query_id=query_id, stage=stage, query=query,
+                           motivo="falha_anterior" if failed else "caminho_nao_requer_etapa")
+
+
+def _registrar_interacao(query: str, conversa: Any, *, run_id: str, query_id: str) -> None:
+    context = current_execution()
+    if context and Stage.INTERACAO.value not in context.stages():
+        registrar(run_id=run_id, query_id=query_id, stage=Stage.INTERACAO, status="ok",
+                  latencia_ms=0, input=query, output={"tipo_interacao": "conversa" if conversa else "consulta"},
+                  extra={"metodo": "regras", "llm_called": False})
+
+
+def _responder_conversa(query: str, conversa: Any, *, run_id: str, query_id: str) -> dict[str, Any]:
+    """Cumprimento, ajuda ou injeção: resposta fixa, sem consultar o acervo."""
+    registrar(run_id=run_id, query_id=query_id, stage=Stage.GERACAO, status="conversa",
+              latencia_ms=0, input=query, output="resposta de cortesia; sem consulta ao acervo",
+              extra={"is_refusal": False, "num_sources": 0, "resposta_conversacional": True,
+                     "resposta": {"answer": bounded_log_value(conversa.answer), "sources_used": [],
+                                  "refusal_reason": None}})
+    payload = conversa.model_dump(mode="json")
+    _registrar_resumo(run_id=run_id, query_id=query_id, query=query, caminho="conversa",
+                      bases_roteadas=[], chunks=[], resposta=payload)
+    return payload
+
+
+@dataclass
+class _Coleta:
+    """Evidências reunidas para a geração, e os filtros que a busca precisou ampliar."""
+    chunks: list[Chunk] = field(default_factory=list)
+    filtros_relaxados: dict[str, dict[str, list[str]]] = field(default_factory=dict)
+
+
+class _Consulta:
+    """O que as etapas de coleta compartilham numa pergunta: ids, recorte e reranker."""
+
+    def __init__(self, deps: Dependencias, query: str, *, top_k: int, escopos: Optional[Sequence[str]],
+                 reranker: Optional[RerankFn], run_id: str, query_id: str) -> None:
+        self.deps, self.query, self.top_k, self.escopos = deps, query, top_k, escopos
+        self.run_id, self.query_id = run_id, query_id
+        self._reranker, self._reranker_resolvido = reranker, reranker is not None
+
+    def buscar(self, pergunta: str, route: Any, filters: Optional[dict[str, Any]]) -> list[Any]:
+        # Um cálculo SQL suficiente não precisa carregar o cross-encoder: ele só
+        # é resolvido na primeira busca.
+        if not self._reranker_resolvido:
+            self._reranker = self.deps.reranker_padrao()
+            self._reranker_resolvido = True
+        return self.deps.buscar(pergunta, route, reranker=self._reranker, top_k=self.top_k,
+                                filters=filters, escopos=self.escopos,
+                                run_id=self.run_id, query_id=self.query_id)
+
+    def consultar_sql(self, pergunta: str, filtros: Any, bases: Any, intencao: Any = None) -> list[Chunk]:
+        extra = {"intencao": intencao} if intencao is not None else {}
+        return self.deps.consultar_sql(pergunta, filtros, bases, run_id=self.run_id,
+                                       query_id=self.query_id, **extra)
+
+    def pular_busca(self) -> None:
+        # Pula recuperação, não apresentação: o backend injeta os resultados
+        # no marcador {{sql}} após uma única chamada de template à LLM.
+        for stage in (Stage.RETRIEVAL_DENSO, Stage.RETRIEVAL_BM25, Stage.FUSAO_RRF, Stage.RERANK):
+            registrar_pulo(run_id=self.run_id, query_id=self.query_id, stage=stage, query=self.query,
+                           motivo="calculo_sql_suficiente")
+
+
+def _coletar_por_intencoes(consulta: _Consulta, analise: Any, decisao: Any) -> _Coleta:
+    """Pergunta com várias intenções: SQL e busca por intenção, intercaladas."""
+    deps = consulta.deps
+    coleta = _Coleta()
+    grupos: list[list[Chunk]] = []
+    for numero, intent in enumerate(analise.intencoes):
+        route = {"bases": [b for b in intent.bases if b in decisao.bases_selecionadas]}
+        with log_details(intencao=numero, tentativa_busca=1):
+            grupo = None
+            if deps.pode_consultar_sql_direto(intent.pergunta, intent.filtros, route["bases"], intencao=intent):
+                grupo = consulta.consultar_sql(intent.pergunta, intent.filtros, route["bases"], intencao=intent)
+            if grupo and deps.pode_responder_sql(grupo, route["bases"]):
+                resultados = []
+                consulta.pular_busca()
+            else:
+                resultados = consulta.buscar(intent.pergunta, route, filtros_para_retrieve(intent.filtros))
+            if grupo is None:
+                grupo = consulta.consultar_sql(intent.pergunta, intent.filtros, route["bases"], intencao=intent)
+        calculo_disponivel = bool(grupo)
+        grupo += [_chunk_from_retrieval(item) for item in resultados]
+        for chunk in grupo:
+            chunk.metadata.extras = {**chunk.metadata.extras, "intencao": numero,
+                "total_intencoes": len(analise.intencoes),
+                "subpergunta": intent.pergunta, "operacao": intent.operacao,
+                "tipo_valor_solicitado": intent.filtros.tipo_valor,
+                "tipo_medida_solicitada": intent.filtros.tipo_medida,
+                "granularidade_solicitada": intent.filtros.granularidade,
+                "calculo_disponivel": (
+                    False if intent.filtros.tipo_valor == "unitario"
+                    else calculo_disponivel if intent.operacao != "buscar" else None
+                )}
+            relaxed = chunk.metadata.extras.get("filtros_relaxados")
+            if relaxed:
+                coleta.filtros_relaxados[chunk.metadata.base_id] = relaxed
+        grupos.append(grupo)
+    coleta.chunks = _intercalar(grupos)
+    return coleta
+
+
+def _intercalar(grupos: list[list[Chunk]]) -> list[Chunk]:
+    """Uma evidência de cada intenção por vez, SQL primeiro: nenhum pacote SQL
+    elimina a outra intenção do orçamento do prompt. Repetidas saem."""
+    for grupo in grupos:
+        grupo.sort(key=lambda c: not c.metadata.chunk_id.startswith("sql:"))
+    chunks: list[Chunk] = []
+    vistos = set()
+    while any(grupos):
+        for grupo in grupos:
+            if not grupo:
+                continue
+            chunk = grupo.pop(0)
+            key = chunk.metadata.chunk_content_sha256 or chunk.metadata.chunk_id
+            if key not in vistos:
+                chunks.append(chunk)
+                vistos.add(key)
+    return chunks
+
+
+def _coletar_consulta(consulta: _Consulta, analise: Any, decisao: Any) -> _Coleta:
+    """Pergunta única: SQL primeiro; se não basta, busca (e busca sem filtros se zerou)."""
+    deps, query, bases = consulta.deps, consulta.query, decisao.bases_selecionadas
+    filtros = filtros_para_retrieve(analise.filtros)
+    sql_chunks = None
+    with log_details(tentativa_busca=1):
+        if deps.pode_consultar_sql_direto(query, analise.filtros, bases):
+            sql_chunks = consulta.consultar_sql(query, analise.filtros, bases)
+        sql_suficiente = bool(sql_chunks) and deps.pode_responder_sql(sql_chunks, bases)
+        if sql_suficiente:
+            resultados = []
+            consulta.pular_busca()
+        else:
+            resultados = consulta.buscar(query, decisao, filtros)
+    if filtros and all(filtro_opcional(value) for value in filtros.values()) and not resultados and not sql_suficiente:
+        # Os filtros são heurísticos; se zeraram tudo, a busca sem eles
+        # ainda dá evidência ao generate (que decide se basta).
+        with log_details(tentativa_busca=2, motivo="filtros_sem_resultado"):
+            resultados = consulta.buscar(query, decisao, None)
+    chunks = [_chunk_from_retrieval(item) for item in resultados]
+    filtros_relaxados = {
+        item.metadata["base_id"]: item.metadata.get("extras", {}).get("filtros_relaxados", {})
+        for item in resultados if item.metadata.get("extras", {}).get("filtros_relaxados")
+    }
+    # Ranking/estatística/comparação: o resultado SQL vai à frente, para
+    # caber no orçamento do prompt antes dos trechos da busca.
+    if sql_chunks is None:
+        sql_chunks = consulta.consultar_sql(query, analise.filtros, bases)
+    for chunk in sql_chunks + chunks:
+        chunk.metadata.extras = {**chunk.metadata.extras,
+            "calculo_disponivel": (
+                False if analise.filtros.tipo_valor == "unitario"
+                else bool(sql_chunks) if structured_query.requer_calculo(query) else None
+            ),
+            "tipo_valor_solicitado": analise.filtros.tipo_valor,
+            "tipo_medida_solicitada": analise.filtros.tipo_medida,
+            "granularidade_solicitada": analise.filtros.granularidade}
+    return _Coleta(chunks=sql_chunks + chunks, filtros_relaxados=filtros_relaxados)
+
+
+_ROTULOS_DE_FILTRO = {"data_vigencia": "ano/período de vigência", "orgao": "órgão", "valor": "valor",
+                      "esfera": "esfera", "data_assinatura": "data de assinatura",
+                      "data_resultado": "data do resultado", "data_publicacao": "data de publicação",
+                      "ano_pca": "ano do PCA"}
+_ROTULOS_DE_BASE = {"contratos_estruturado": "contratos", "atas_conversacional": "atas",
+                    "editais_normativo": "normas", "pca_agregado": "indicadores"}
+
+
+def _aviso_filtros_relaxados(filtros_relaxados: dict[str, dict[str, list[str]]]) -> str:
+    """Aviso de que a busca foi ampliada. Fica em ``avisos``, fora do texto da
+    resposta: é sobre a busca, não sobre o que foi perguntado."""
+    notas = []
+    for base, motivos in sorted(filtros_relaxados.items()):
+        for motivo, chaves in sorted(motivos.items()):
+            campos = ", ".join(_ROTULOS_DE_FILTRO.get(chave, chave) for chave in chaves)
+            por_que = "metadados ausentes" if motivo == "sem_campo" else "nenhum resultado com o recorte solicitado"
+            notas.append(f"{_ROTULOS_DE_BASE.get(base, base)}: {campos} ({por_que})")
+    return ("Nenhum resultado atendeu a todos os filtros da pergunta; a busca foi ampliada em "
+            + "; ".join(notas) + ".")
 
 
 def _responder(
@@ -202,182 +440,39 @@ def _responder(
     run_id: str,
     query_id: str,
     escopos: Optional[Sequence[str]],
+    deps: Dependencias,
 ) -> dict[str, Any]:
-
-    conversa = resposta_conversacional(query, run_id=run_id, query_id=query_id)
-    context = current_execution()
-    if context and Stage.INTERACAO.value not in context.stages():
-        registrar(run_id=run_id, query_id=query_id, stage=Stage.INTERACAO, status="ok",
-                  latencia_ms=0, input=query, output={"tipo_interacao": "conversa" if conversa else "consulta"},
-                  extra={"metodo": "regras", "llm_called": False})
+    conversa = deps.conversa(query, run_id=run_id, query_id=query_id)
+    _registrar_interacao(query, conversa, run_id=run_id, query_id=query_id)
     if conversa is not None:
-        registrar(run_id=run_id, query_id=query_id, stage=Stage.GERACAO, status="conversa",
-                  latencia_ms=0, input=query, output="resposta de cortesia; sem consulta ao acervo",
-                  extra={"is_refusal": False, "num_sources": 0, "resposta_conversacional": True,
-                         "resposta": {"answer": bounded_log_value(conversa.answer), "sources_used": [],
-                                      "refusal_reason": None}})
-        payload = conversa.model_dump(mode="json")
-        _registrar_resumo(run_id=run_id, query_id=query_id, query=query, caminho="conversa",
-                          bases_roteadas=[], chunks=[], resposta=payload)
-        return payload
+        return _responder_conversa(query, conversa, run_id=run_id, query_id=query_id)
 
-    analise = analisar_query(query, run_id=run_id, query_id=query_id)
+    analise = deps.analisar(query, run_id=run_id, query_id=query_id)
     # A análise vai sempre: o roteador usa as intenções quando existem e o
     # fornecedor/CNPJ reconhecido para incluir a base estruturada.
-    decisao = rotear_pergunta(query, run_id=run_id, query_id=query_id, analise=analise)
-
-    chunks: list[Chunk] = []
-    filtros_relaxados: dict[str, dict[str, list[str]]] = {}
+    decisao = deps.rotear(query, run_id=run_id, query_id=query_id, analise=analise)
+    consulta = _Consulta(deps, query, top_k=top_k, escopos=escopos, reranker=reranker,
+                         run_id=run_id, query_id=query_id)
     refusal_reason_hint = None
-    reranker_resolvido = reranker is not None
-    def buscar(pergunta: str, route: Any, **kwargs: Any):
-        nonlocal reranker, reranker_resolvido
-        # Um cálculo SQL suficiente não precisa carregar o cross-encoder.
-        # A geração pode chamar a LLM apenas para o template {{sql}}.
-        if not reranker_resolvido:
-            reranker = reranker_padrao()
-            reranker_resolvido = True
-        return retrieve(pergunta, route, reranker=reranker, **kwargs)
-
-    def pular_busca_sql() -> None:
-        # Pula recuperação, não apresentação: o backend injeta os resultados
-        # no marcador {{sql}} após uma única chamada de template à LLM.
-        for stage in (Stage.RETRIEVAL_DENSO, Stage.RETRIEVAL_BM25, Stage.FUSAO_RRF, Stage.RERANK):
-            registrar_pulo(run_id=run_id, query_id=query_id, stage=stage, query=query,
-                           motivo="calculo_sql_suficiente")
-
     if decisao.bases_selecionadas and analise.intencoes:
-        grupos: list[list[Chunk]] = []
-        for numero, intent in enumerate(analise.intencoes):
-            route = {"bases": [b for b in intent.bases if b in decisao.bases_selecionadas]}
-            with log_details(intencao=numero, tentativa_busca=1):
-                grupo = None
-                if pode_consultar_sql_direto(intent.pergunta, intent.filtros, route["bases"], intencao=intent):
-                    grupo = consultar_estruturado(intent.pergunta, intent.filtros, route["bases"],
-                        intencao=intent, run_id=run_id, query_id=query_id)
-                if grupo and pode_responder_sql(grupo, route["bases"]):
-                    resultados = []
-                    pular_busca_sql()
-                else:
-                    resultados = buscar(intent.pergunta, route, top_k=top_k,
-                        filters=filtros_para_retrieve(intent.filtros),
-                        escopos=escopos, run_id=run_id, query_id=query_id)
-                if grupo is None:
-                    grupo = consultar_estruturado(intent.pergunta, intent.filtros, route["bases"],
-                        intencao=intent, run_id=run_id, query_id=query_id)
-            calculo_disponivel = bool(grupo)
-            grupo += [_chunk_from_retrieval(item) for item in resultados]
-            for chunk in grupo:
-                chunk.metadata.extras = {**chunk.metadata.extras, "intencao": numero,
-                    "total_intencoes": len(analise.intencoes),
-                    "subpergunta": intent.pergunta, "operacao": intent.operacao,
-                    "tipo_valor_solicitado": intent.filtros.tipo_valor,
-                    "tipo_medida_solicitada": intent.filtros.tipo_medida,
-                    "granularidade_solicitada": intent.filtros.granularidade,
-                    "calculo_disponivel": (
-                        False if intent.filtros.tipo_valor == "unitario"
-                        else calculo_disponivel if intent.operacao != "buscar" else None
-                    )}
-                relaxed = chunk.metadata.extras.get("filtros_relaxados")
-                if relaxed:
-                    filtros_relaxados[chunk.metadata.base_id] = relaxed
-            grupos.append(grupo)
-        # Intercala intenções e bases: nenhum pacote SQL elimina a outra intenção.
-        for grupo in grupos:
-            grupo.sort(key=lambda c: not c.metadata.chunk_id.startswith("sql:"))
-        vistos = set()
-        while any(grupos):
-            for grupo in grupos:
-                if not grupo:
-                    continue
-                chunk = grupo.pop(0)
-                key = chunk.metadata.chunk_content_sha256 or chunk.metadata.chunk_id
-                if key not in vistos:
-                    chunks.append(chunk)
-                    vistos.add(key)
+        coleta = _coletar_por_intencoes(consulta, analise, decisao)
     elif decisao.bases_selecionadas:
-        filtros = filtros_para_retrieve(analise.filtros)
-        sql_chunks = None
-        with log_details(tentativa_busca=1):
-            if pode_consultar_sql_direto(query, analise.filtros, decisao.bases_selecionadas):
-                sql_chunks = consultar_estruturado(
-                    query, analise.filtros, decisao.bases_selecionadas, run_id=run_id, query_id=query_id)
-            sql_suficiente = bool(sql_chunks) and pode_responder_sql(sql_chunks, decisao.bases_selecionadas)
-            if sql_suficiente:
-                resultados = []
-                pular_busca_sql()
-            else:
-                resultados = buscar(
-                    query, decisao, top_k=top_k, filters=filtros,
-                    escopos=escopos, run_id=run_id, query_id=query_id,
-                )
-        if filtros and all(_filtro_opcional(value) for value in filtros.values()) and not resultados and not sql_suficiente:
-            # Os filtros são heurísticos; se zeraram tudo, a busca sem eles
-            # ainda dá evidência ao generate (que decide se basta).
-            with log_details(tentativa_busca=2, motivo="filtros_sem_resultado"):
-                resultados = buscar(
-                    query, decisao, top_k=top_k, filters=None,
-                    escopos=escopos, run_id=run_id, query_id=query_id,
-                )
-        chunks = [_chunk_from_retrieval(item) for item in resultados]
-        filtros_relaxados = {
-            item.metadata["base_id"]: item.metadata.get("extras", {}).get("filtros_relaxados", {})
-            for item in resultados if item.metadata.get("extras", {}).get("filtros_relaxados")
-        }
-        # Ranking/estatística/comparação: o resultado SQL vai à frente, para
-        # caber no orçamento do prompt antes dos trechos da busca.
-        if sql_chunks is None:
-            sql_chunks = consultar_estruturado(
-                query, analise.filtros, decisao.bases_selecionadas, run_id=run_id, query_id=query_id
-            )
-        from src.structured_query import requer_calculo
-        for chunk in sql_chunks + chunks:
-            chunk.metadata.extras = {**chunk.metadata.extras,
-                "calculo_disponivel": (
-                    False if analise.filtros.tipo_valor == "unitario"
-                    else bool(sql_chunks) if requer_calculo(query) else None
-                ),
-                "tipo_valor_solicitado": analise.filtros.tipo_valor,
-                "tipo_medida_solicitada": analise.filtros.tipo_medida,
-                "granularidade_solicitada": analise.filtros.granularidade}
-        chunks = sql_chunks + chunks
+        coleta = _coletar_consulta(consulta, analise, decisao)
     else:
+        coleta = _Coleta()
         refusal_reason_hint = inferir_motivo_recusa(decisao.justificativa)
 
-    resposta = gerar_resposta(
-        query,
-        chunks,
-        decisao.bases_selecionadas,
-        cliente=cliente,
-        run_id=run_id,
-        query_id=query_id,
-        refusal_reason_hint=refusal_reason_hint,
-    )
-    if filtros_relaxados:
-        labels = {"data_vigencia": "ano/período de vigência", "orgao": "órgão", "valor": "valor", "esfera": "esfera",
-                  "data_assinatura": "data de assinatura", "data_resultado": "data do resultado",
-                  "data_publicacao": "data de publicação", "ano_pca": "ano do PCA"}
-        bases = {"contratos_estruturado": "contratos", "atas_conversacional": "atas",
-                 "editais_normativo": "normas", "pca_agregado": "indicadores"}
-        notes = []
-        for base, reasons in sorted(filtros_relaxados.items()):
-            for reason, keys in sorted(reasons.items()):
-                fields = ", ".join(labels.get(key, key) for key in keys)
-                why = "metadados ausentes" if reason == "sem_campo" else "nenhum resultado com o recorte solicitado"
-                notes.append(f"{bases.get(base, base)}: {fields} ({why})")
-        # Fica em ``avisos``, fora do texto da resposta: é sobre a busca, não
-        # sobre o que foi perguntado, e o front-end decide como mostrar.
-        resposta.avisos.append(
-            "Nenhum resultado atendeu a todos os filtros da pergunta; a busca foi ampliada em "
-            + "; ".join(notes) + "."
-        )
+    resposta = deps.gerar(query, coleta.chunks, decisao.bases_selecionadas, cliente=cliente,
+                          run_id=run_id, query_id=query_id, refusal_reason_hint=refusal_reason_hint)
+    if coleta.filtros_relaxados:
+        resposta.avisos.append(_aviso_filtros_relaxados(coleta.filtros_relaxados))
     payload = resposta.model_dump(mode="json")
     if not decisao.bases_selecionadas:
         caminho = "recusa_sem_consulta"
     else:
         caminho = "consulta_por_intencoes" if analise.intencoes else "consulta"
     _registrar_resumo(run_id=run_id, query_id=query_id, query=query, caminho=caminho,
-                      bases_roteadas=decisao.bases_selecionadas, chunks=chunks, resposta=payload)
+                      bases_roteadas=decisao.bases_selecionadas, chunks=coleta.chunks, resposta=payload)
     return payload
 
 
@@ -389,4 +484,4 @@ def responder_incluindo_experimentais(query: str) -> dict[str, Any]:
     return responder(query, escopos=None)
 
 
-__all__ = ["responder", "responder_incluindo_experimentais"]
+__all__ = ["Dependencias", "dependencias_padrao", "responder", "responder_incluindo_experimentais"]
