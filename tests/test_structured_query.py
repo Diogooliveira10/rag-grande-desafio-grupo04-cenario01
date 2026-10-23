@@ -1899,3 +1899,23 @@ def test_identificador_encontra_compra_anulada():
     assert consulta.tipo == "identificador"
     sql, _ = sq._where(consulta, ())
     assert "situacao" not in sql
+
+
+# --------------------------------------------------------------------------
+# Registro de executores: um por tipo de consulta (aberto para tipo novo sem
+# mexer nos outros).
+# --------------------------------------------------------------------------
+
+def test_todo_tipo_de_consulta_tem_executor():
+    from typing import get_args
+    from src.schema import QueryIntent
+
+    operacoes = set(get_args(QueryIntent.model_fields["operacao"].annotation)) - {"buscar"}
+    gerados_por_regra = {"identificador", "cnpj_fornecedor", "listagem"}
+    assert operacoes | gerados_por_regra <= set(sq._EXECUTORES)
+
+
+def test_tipo_desconhecido_da_erro_claro(base):
+    consulta = sq.Consulta(tabela="contratacoes", tipo="inexistente")
+    with pytest.raises(ValueError, match="Tipo de consulta SQL desconhecido"):
+        sq._executar(base["banco"], consulta, (), "AND")
