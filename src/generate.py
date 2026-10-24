@@ -153,9 +153,11 @@ Não associe regras de dispensa a um pregão ou de outro processo ao registro em
 Relacione cada norma à modalidade explicitamente identificada pela fonte.
 Cláusula que prevê atraso, penalidade ou cancelamento não comprova ocorrência desses
 eventos. Para afirmar ocorrência, cite relato, decisão ou registro do fato.
-Conclusão de ausência também se apoia no contexto: ao dizer que nenhum trecho menciona
-algo (ex.: "não há menção a atraso nas atas desses fornecedores"), cite os trechos que
-você examinou, no texto e em sources_used.
+Conclusão de ausência também se apoia no contexto: ao dizer que os trechos não mostram
+algo, cite os trechos que você examinou, no texto e em sources_used. Se a pergunta
+depende do que falta (comparar, calcular, confirmar), diga também, com essas palavras,
+que os dados são insuficientes para isso (ex.: "os dados são insuficientes para comparar
+as compras").
 Ao citar uma regra de norma, nomeie a norma e o dispositivo como aparecem no trecho
 (ex.: "Lei Complementar 123/2006, art. 44", "Decreto 48.816/2023, art. 5º") e use os
 termos dela (ex.: "desempate", "tratamento diferenciado").
@@ -615,14 +617,7 @@ def _parsear_resposta_llm(
             if chunk.metadata.chunk_id in fontes_adicionadas:
                 continue
             fontes_adicionadas.add(chunk.metadata.chunk_id)
-            sources_used.append(
-                SourceRef(
-                    chunk_id=chunk.metadata.chunk_id,
-                    base_id=chunk.metadata.base_id,
-                    source_file=chunk.metadata.source_file,
-                    origem=chunk.metadata.origem if (chunk.metadata.origem or "").startswith(("https://", "http://")) else None,
-                )
-            )
+            sources_used.append(_fonte_do_chunk(chunk))
 
         refusal_reason: Optional[RefusalReason] = None
         if is_refusal:
@@ -1300,7 +1295,13 @@ _RE_GRUPO_IDS = re.compile(
 # "O trecho E2 prevê", sem "=" nem ":": os modelos de reserva escrevem assim,
 # apesar do prompt (o ECOA não). Só com o rótulo: "a classe E1" é texto comum.
 _RE_E_SEM_SEPARADOR = re.compile(
-    r"(?P<rotulo>\b(?:trechos?|evid[eê]ncias?|fontes?|registros?|contrata(?:ç|c)(?:ão|ao|ões|oes))\s+)"
+    r"(?P<rotulo>(?:\b(?:trechos?|evid[eê]ncias?|fontes?|registros?|documentos?|contrata(?:ç|c)(?:ão|ao|ões|oes)"
+    # "o E2 trata", "e E2 é uma norma", "identificada em E3", "como E1", "regra de
+    # E2", "são E2", "apenas E3": artigo, "e", preposição ou verbo logo antes
+    # também marca o id. "A classe E1" continua texto comum.
+    r"|o|a|e|de|do|da|no|na|em|como|conforme|segundo|pelo|pela|sao|são|apenas|somente)\s+"
+    # Lista depois de uma citação já numerada: "os registros [3], E3 e E4".
+    r"|(?<=\]),\s*))"
     r"(?P<id>E\d{1,3})\b(?![\w-])",
     re.IGNORECASE,
 )
@@ -1308,6 +1309,42 @@ _RE_ID_SOLTO = re.compile(
     rf"(?:{_ROTULO_ID}\s*[=:]\s*{_ID_INTERNO}|sql:[a-z_]+(?::[\w.-]+)+|[a-z_]+:[0-9a-f]{{8,}}(?::[\w-]+)+)",
     re.IGNORECASE,
 )
+
+
+def _fonte_do_chunk(chunk: Chunk) -> SourceRef:
+    """Fonte citável de um chunk; a origem só vai quando é um link público."""
+    origem = chunk.metadata.origem
+    return SourceRef(
+        chunk_id=chunk.metadata.chunk_id,
+        base_id=chunk.metadata.base_id,
+        source_file=chunk.metadata.source_file,
+        origem=origem if (origem or "").startswith(("https://", "http://")) else None,
+    )
+
+
+def _incluir_trechos_mencionados(resposta: RAGResponse, chunks: list[Chunk]) -> RAGResponse:
+    """Trecho que o texto menciona ("o registro E1 não informa") entra nas fontes.
+
+    O LLM usou o trecho para afirmar algo, então ele é fonte; sem isso, o texto
+    mostrava "E1", que não diz nada ao usuário. Vale só para E<n> com rótulo ou
+    artigo antes (``_RE_E_SEM_SEPARADOR``) e que exista no prompt. Recusa
+    continua sem fontes.
+    """
+    if resposta.is_refusal:
+        return resposta
+    citados = {fonte.chunk_id for fonte in resposta.sources_used}
+    novas: list[SourceRef] = []
+    for achado in _RE_E_SEM_SEPARADOR.finditer(resposta.answer):
+        indice = int(achado.group("id")[1:])
+        if not 1 <= indice <= len(chunks):
+            continue
+        chunk = chunks[indice - 1]
+        if chunk.metadata.chunk_id not in citados:
+            citados.add(chunk.metadata.chunk_id)
+            novas.append(_fonte_do_chunk(chunk))
+    if not novas:
+        return resposta
+    return resposta.model_copy(update={"sources_used": [*resposta.sources_used, *novas]})
 
 
 def _numerar_citacoes(resposta: RAGResponse, chunks: list[Chunk]) -> tuple[RAGResponse, int]:
@@ -1318,6 +1355,7 @@ def _numerar_citacoes(resposta: RAGResponse, chunks: list[Chunk]) -> tuple[RAGRe
     à sua fonte), mas ``E1`` ou ``contratos_estruturado:…`` não dizem nada ao
     usuário. Devolve a resposta e quantos identificadores foram trocados.
     """
+    resposta = _incluir_trechos_mencionados(resposta, chunks)
     numero_da_fonte = {fonte.chunk_id: indice for indice, fonte in enumerate(resposta.sources_used, start=1)}
     por_evidence_id = {f"E{indice}": chunk.metadata.chunk_id for indice, chunk in enumerate(chunks, start=1)}
 
