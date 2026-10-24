@@ -153,6 +153,12 @@ Não associe regras de dispensa a um pregão ou de outro processo ao registro em
 Relacione cada norma à modalidade explicitamente identificada pela fonte.
 Cláusula que prevê atraso, penalidade ou cancelamento não comprova ocorrência desses
 eventos. Para afirmar ocorrência, cite relato, decisão ou registro do fato.
+Conclusão de ausência também se apoia no contexto: ao dizer que nenhum trecho menciona
+algo (ex.: "não há menção a atraso nas atas desses fornecedores"), cite os trechos que
+você examinou, no texto e em sources_used.
+Ao citar uma regra de norma, nomeie a norma e o dispositivo como aparecem no trecho
+(ex.: "Lei Complementar 123/2006, art. 44", "Decreto 48.816/2023, art. 5º") e use os
+termos dela (ex.: "desempate", "tratamento diferenciado").
 Valor global/estimado/contratado não é preço unitário nem pagamento realizado.
 Zero registrado é zero, não ausência de informação. Quando houver valorGlobal=0
 e valorInicial positivo, informe os dois campos com seus nomes e significados distintos.

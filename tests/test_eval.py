@@ -1184,3 +1184,21 @@ def test_p22_aceita_impossivel_calcular_como_insuficiencia():
         "is_refusal": False, "sources_used": [{"chunk_id": "c1"}],
     }
     assert _content_ok(_caso_golden("P2.2"), resposta) is True
+
+
+@pytest.mark.parametrize("answer, esperado", [
+    # Resposta real da rodada golden-2026-10-23-v7-36-prompt-citacao: certa.
+    ("Na contratação identificada no [1], a modalidade foi identificada como 'concorrência', "
+     "regulamentada pela Lei 14.133/2021, Art. 28, II. No [2], a modalidade não está informada no "
+     "registro. A amostra apresenta insuficiência para confirmar a identificação da modalidade em "
+     "todos os registros de 2025.", True),
+    # Respostas reais erradas das reexecuções: continuam reprovadas.
+    ("Na amostra, apenas o registro [1] possui modalidade identificada: 'concorrência'. A amostra "
+     "não é insuficiente, pois há pelo menos um exemplo com modalidade identificada.", False),
+    ("A norma aplicável à modalidade 'concorrência' é a Lei 14.133/2021, Art. 28, II, conforme "
+     "registrado no contrato [1]. Na amostra fornecida, apenas esse registro identifica a modalidade.", False),
+])
+def test_p32_aceita_insuficiencia_e_reprova_a_negacao(answer, esperado):
+    resposta = {"answer": answer, "confidence_level": "media", "bases_consultadas": ["estruturada", "normativa"],
+                "is_refusal": False, "sources_used": [{"chunk_id": "c1"}]}
+    assert _content_ok(_caso_golden("P3.2"), resposta) is esperado
