@@ -1108,3 +1108,80 @@ def test_lista_depois_de_citacao_numerada():
     chunks = [_chunk("c1"), _chunk("c2"), _chunk("c3"), _chunk("c4")]
     resposta = _responder_com("Os registros [E2], E3 e E4 usam a modalidade.", ["E2"], chunks)
     assert resposta.answer == "Os registros [1], [2] e [3] usam a modalidade."
+
+
+def _cliente_em_sequencia(*respostas):
+    chamadas = []
+
+    def cliente(mensagens):
+        chamadas.append(mensagens)
+        resposta = respostas[min(len(chamadas), len(respostas)) - 1]
+        if isinstance(resposta, Exception):
+            raise resposta
+        return json.dumps(resposta)
+
+    cliente.chamadas = chamadas
+    return cliente
+
+
+_SEM_FONTE = {"answer": "Não há dados suficientes: os trechos tratam de normas gerais.",
+              "is_refusal": False, "confidence_level": "baixa", "sources_used": []}
+_COM_FONTE = {"answer": "Não há dados suficientes: os trechos [E1] tratam de normas gerais.",
+              "is_refusal": False, "confidence_level": "baixa", "sources_used": ["E1"]}
+
+
+def test_resposta_sem_fonte_pede_citacao_uma_vez():
+    # P4.3 do golden de 2026-10-23: resposta certa, sem nenhuma fonte citada.
+    cliente = _cliente_em_sequencia(_SEM_FONTE, _COM_FONTE)
+    resposta = gen.gerar_resposta("pergunta", [_chunk("norma-1")], [Natureza.NORMATIVA], cliente=cliente)
+
+    assert len(cliente.chamadas) == 2
+    assert cliente.chamadas[1][-1]["content"] == gen._PEDIDO_DE_CITACAO
+    assert [f.chunk_id for f in resposta.sources_used] == ["norma-1"]
+    assert resposta.answer == "Não há dados suficientes: os trechos [1] tratam de normas gerais."
+
+
+@pytest.mark.parametrize("segunda", [_SEM_FONTE, RuntimeError("ECOA fora")])
+def test_retentativa_que_nao_cita_mantem_a_original(segunda):
+    cliente = _cliente_em_sequencia(_SEM_FONTE, segunda)
+    resposta = gen.gerar_resposta("pergunta", [_chunk("norma-1")], [Natureza.NORMATIVA], cliente=cliente)
+
+    assert len(cliente.chamadas) == 2
+    assert resposta.answer == _SEM_FONTE["answer"] and resposta.sources_used == []
+
+
+def test_resposta_com_fonte_nao_repete_a_chamada():
+    cliente = _cliente_em_sequencia(_COM_FONTE)
+    gen.gerar_resposta("pergunta", [_chunk("norma-1")], [Natureza.NORMATIVA], cliente=cliente)
+    assert len(cliente.chamadas) == 1
+
+
+def test_recusa_nao_pede_citacao():
+    recusa = {"answer": "Fora do escopo.", "is_refusal": True, "refusal_reason": "fora_de_escopo",
+              "confidence_level": "recusado", "sources_used": []}
+    cliente = _cliente_em_sequencia(recusa)
+    gen.gerar_resposta("pergunta", [_chunk("norma-1")], [], cliente=cliente)
+    assert len(cliente.chamadas) == 1
+
+
+def test_retentativa_fica_no_log_da_geracao():
+    gen.gerar_resposta("pergunta", [_chunk("norma-1")], [Natureza.NORMATIVA],
+                       cliente=_cliente_em_sequencia(_SEM_FONTE, _COM_FONTE))
+    geracao = next(json.loads(l) for a in obs.default_logger.logs_dir.glob("pipeline-*.jsonl")
+                   for l in a.read_text(encoding="utf-8").splitlines() if json.loads(l)["stage"] == "geracao")
+    assert geracao["extra"]["retentativa_citacao"] == {"motivo": "resposta_sem_fontes", "resultado": "citou",
+                                                       "fontes": ["norma-1"]}
+
+
+def test_recusa_indevida_convertida_tambem_pede_citacao():
+    # P4.3 de 2026-10-24: o LLM marcou "fora de escopo" e escreveu a resposta;
+    # a conversão a tornava resposta, mas sem nenhuma fonte.
+    recusa_com_texto = {"answer": "Não há dados suficientes: os trechos tratam de normas gerais.",
+                        "is_refusal": True, "refusal_reason": "fora_de_escopo",
+                        "confidence_level": "recusado", "sources_used": []}
+    cliente = _cliente_em_sequencia(recusa_com_texto, _COM_FONTE)
+    resposta = gen.gerar_resposta("pergunta", [_chunk("norma-1")], [Natureza.NORMATIVA], cliente=cliente)
+
+    assert len(cliente.chamadas) == 2
+    assert resposta.is_refusal is False
+    assert [f.chunk_id for f in resposta.sources_used] == ["norma-1"]

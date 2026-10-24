@@ -61,7 +61,7 @@ def _cliente_padrao(schema: Optional[dict] = None) -> ClienteLLM:
 
     def _chamar(mensagens: list[dict]) -> Any:
         return llm_ecoa.completar_chat(
-            mensagens, diagnosticos=diagnosticos,
+            mensagens, diagnosticos=diagnosticos, temperature=config.LLM_TEMPERATURE,
             response_format=({"type": "json_schema", "json_schema": {"name": "query_plan", "schema": schema}}
                              if schema is not None else {"type": "json_object"}),
         )
@@ -1180,6 +1180,13 @@ def gerar_resposta(
     resposta, erro_parsing, chaves_alias, citacoes_descartadas = _parsear_resposta_llm(
         bruto, query, chunks, bases_consultadas
     )
+    # A recusa indevida ("fora de escopo" com texto útil) vira resposta mais
+    # adiante; a falta de fonte é conferida já na forma convertida (P4.3).
+    convertida, _ = _converter_recusa_indevida(resposta, bases_consultadas, erro_parsing)
+    if _falta_citar(convertida, chunks, erro_parsing):
+        resposta, tokens = _pedir_citacao(cliente, mensagens, bruto, resposta, tokens,
+                                          query, chunks, bases_consultadas, sensibilidade)
+        llm_info = sensibilidade["llm"] = dict(getattr(cliente, "diagnosticos", {})) or llm_info
     if erro_parsing:
         sensibilidade["erro_parsing"] = erro_parsing
     if chaves_alias:
@@ -1199,6 +1206,53 @@ def gerar_resposta(
         recusa_convertida=recusa_convertida,
     )
     return resposta
+
+
+_PEDIDO_DE_CITACAO = (
+    "Sua resposta não citou nenhuma evidência em sources_used, mas o contexto tem trechos "
+    "relacionados. Devolva o mesmo JSON, sem mudar a conclusão, citando em sources_used e no "
+    "texto ([E1]) os evidence_id em que a resposta se apoia, inclusive os trechos que você "
+    "examinou para concluir que algo falta."
+)
+
+
+def _falta_citar(resposta: RAGResponse, chunks: list[Chunk], erro_parsing: Optional[str]) -> bool:
+    """Resposta (não recusa) sem nenhuma fonte, nem citada nem mencionada no texto."""
+    return (not erro_parsing and not resposta.is_refusal and bool(chunks)
+            and not _incluir_trechos_mencionados(resposta, chunks).sources_used)
+
+
+def _pedir_citacao(cliente: ClienteLLM, mensagens: list[dict[str, Any]], bruto: str, resposta: RAGResponse,
+                   tokens: TokenUsage, query: str, chunks: list[Chunk], bases_consultadas: list[Natureza],
+                   sensibilidade: dict[str, Any]) -> tuple[RAGResponse, TokenUsage]:
+    """Uma nova chamada pedindo as citações; fica a resposta nova só se vier com fontes.
+
+    O prompt já exige citar ao menos uma evidência, e o LLM às vezes conclui
+    "os trechos não tratam disso" sem citar os trechos (P4.3 do golden). A
+    retentativa nunca piora: resposta inválida, recusa ou ainda sem fontes
+    mantém a original. ``sensibilidade["retentativa_citacao"]`` vai para o log.
+    """
+    registro: dict[str, Any] = {"motivo": "resposta_sem_fontes"}
+    sensibilidade["retentativa_citacao"] = registro
+    try:
+        bruto_novo, tokens_novos = _texto_e_tokens(cliente([
+            *mensagens,
+            {"role": "assistant", "content": bruto},
+            {"role": "user", "content": _PEDIDO_DE_CITACAO},
+        ]))
+    except Exception as exc:  # a original continua valendo
+        registro["resultado"] = f"erro: {type(exc).__name__}"
+        return resposta, tokens
+    total = TokenUsage(prompt=tokens.prompt + tokens_novos.prompt,
+                       completion=tokens.completion + tokens_novos.completion,
+                       total=tokens.total + tokens_novos.total)
+    nova, erro, _, _ = _parsear_resposta_llm(bruto_novo, query, chunks, bases_consultadas)
+    if erro or nova.is_refusal or not nova.sources_used:
+        registro["resultado"] = "sem_mudanca"
+        return resposta, total
+    registro["resultado"] = "citou"
+    registro["fontes"] = [fonte.chunk_id for fonte in nova.sources_used]
+    return nova, total
 
 
 def _responder_pelo_sql(resposta_sql: RAGResponse, chunks: list[Chunk], *, run_id: str, query_id: str,

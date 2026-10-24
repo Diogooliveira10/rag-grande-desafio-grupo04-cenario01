@@ -61,6 +61,10 @@ GENERATION_CHUNK_CHARS = int(_env("GENERATION_CHUNK_CHARS", "900"))
 # A geração normal leva de 20 a 90 s no servidor da turma.
 GENERATION_TIMEOUT = float(_env("GENERATION_TIMEOUT", "180"))
 GENERATION_MAX_RETRIES = int(_env("GENERATION_MAX_RETRIES", "1"))
+# Temperatura das chamadas com resposta em JSON (geração e análise da pergunta).
+# 0 = a mesma pergunta com as mesmas evidências tende ao mesmo texto; com 0,2 a
+# redação variava entre execuções e mudava o resultado do golden set.
+LLM_TEMPERATURE = float(_env("LLM_TEMPERATURE", "0"))
 # ``reasoning_effort`` mandado ao LLM do ECOA. Vazio = padrão do servidor (o
 # Qwen3 pensa antes de responder). ``none`` desliga o raciocínio: medido em
 # 2026-10-16, a mesma pergunta caiu de 15 s para 2 s. Só o ECOA recebe; o

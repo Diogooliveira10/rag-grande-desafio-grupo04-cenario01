@@ -1202,3 +1202,17 @@ def test_p32_aceita_insuficiencia_e_reprova_a_negacao(answer, esperado):
     resposta = {"answer": answer, "confidence_level": "media", "bases_consultadas": ["estruturada", "normativa"],
                 "is_refusal": False, "sources_used": [{"chunk_id": "c1"}]}
     assert _content_ok(_caso_golden("P3.2"), resposta) is esperado
+
+
+@pytest.mark.parametrize("termo, texto, afirmado", [
+    # P3.2 de 2026-10-23: o "não" é da primeira oração; a insuficiência está afirmada.
+    ("insuficiente", "O trecho [2] não identifica a modalidade, tornando insuficiente a amostra.", True),
+    ("insuficiente", "Não há registro da modalidade, mas a amostra é insuficiente.", True),
+    # Negação na mesma oração continua negação.
+    ("insuficiente", "A amostra não é insuficiente, pois há um exemplo.", False),
+    ("insuficiente", "Não é, portanto, insuficiente.", False),
+    ("pregão foi a modalidade", "Os dados não mostram que o pregão foi a modalidade.", False),
+])
+def test_negacao_nao_atravessa_virgula_que_abre_outra_oracao(termo, texto, afirmado):
+    from eval.run_eval import _termo_afirmado
+    assert _termo_afirmado(termo, texto) is afirmado
