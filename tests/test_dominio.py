@@ -43,3 +43,19 @@ def test_normalizar_tira_acento_maiuscula_e_espacos_extras():
     assert texto.normalizar("  Município   de MARICÁ ") == "municipio de marica"
     assert texto.sem_acento("Ação  X") == "acao  x"
     assert texto.normalizar(None) == ""
+
+
+@pytest.mark.parametrize("pergunta, valor_min, valor_max, periodo", [
+    ("contratos acima de r$ 500 mil em 2025", 500_000.0, None, (2025, None, None, None)),
+    ("contratos entre 1 e 2 milhoes", 1_000_000.0, 2_000_000.0, (None, None, None, None)),
+    ("contratos a partir de 2024", None, None, (None, None, 2024, None)),
+    ("contratos ate 2023", None, None, (None, None, None, 2023)),
+])
+def test_leitura_de_valores_e_periodos(pergunta, valor_min, valor_max, periodo):
+    from src.dominio import valores_e_periodos as vp
+
+    normalizada = texto.normalizar(pergunta)
+    valores = vp._extrair_valores(normalizada, [])
+    lido, _ = vp._extrair_periodo(normalizada, valores.numeros)
+    assert (valores.valor_min, valores.valor_max) == (valor_min, valor_max)
+    assert (lido.ano, lido.ano_final, lido.ano_desde, lido.ano_ate) == periodo

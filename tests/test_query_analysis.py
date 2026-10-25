@@ -1403,7 +1403,8 @@ def test_municipio_uf_na_pergunta_nao_vira_fornecedor():
 def palavras_dos_objetos(monkeypatch):
     """Estatística fixa: (objetos que citam a palavra, quantos são do próprio fornecedor)."""
     tabela = {"cristalia": (79, 73), "merenda": (153, 0), "limpeza": (2031, 91)}
-    monkeypatch.setattr(qa, "_palavras_dos_objetos", lambda: tabela)
+    from src.analise import entidades  # quem lê a estatística é o módulo de entidades
+    monkeypatch.setattr(entidades, "_palavras_dos_objetos", lambda: tabela)
 
 
 def _todas(texto):
@@ -1426,7 +1427,8 @@ def test_nome_curto_de_fornecedor(palavras_dos_objetos, texto, palavra, aceita):
 
 
 def test_nome_curto_sem_a_base_nao_vira_fornecedor(monkeypatch):
-    monkeypatch.setattr(qa, "_palavras_dos_objetos", lambda: None)
+    from src.analise import entidades
+    monkeypatch.setattr(entidades, "_palavras_dos_objetos", lambda: None)
     todas = _todas("quais contratos da medshore")
 
     assert qa._nome_curto_de_fornecedor("medshore", todas, todas[-1][1]) is False
