@@ -472,3 +472,41 @@ A prévia da apresentação foi preparada e as responsabilidades individuais for
 - Utilizei assistentes de IA como apoio à organização e à redação do relato individual de acompanhamento das atividades do encontro.
 
 - A preparação da apresentação está sendo orientada pelo material elaborado pela equipe e pelas instruções oficiais do Demo Day, com foco na compreensão da arquitetura e na comunicação clara dos aspectos técnicos do projeto.
+
+## Encontro 17 — 2026-10-26
+
+### Relato individual — Diogo Oliveira
+
+**Tarefa do dia:**
+
+Investigar a alteração de `src/reformulacao.py` sem implementar correções novas, validando a falha de `P4.3`, o resultado `17/36` do Golden Set, o comportamento das regras determinísticas e o timeout efetivo.
+
+**O que fiz hoje:**
+
+- Revisei o diff completo dos arquivos `src/reformulacao.py`, `config.py`, `tests/test_reformulacao.py` e `.env.example`, confirmando que a mudança ficou restrita ao escopo esperado de reformulação e que o timeout foi ajustado para 15 segundos.
+
+- Verifiquei o mecanismo de timeout em `src/reformulacao.py` e confirmei que a chamada ao LLM usa `future.result(timeout=REFORMULACAO_TIMEOUT)`. Em caso de falha, o código preserva o contexto com `_com_contexto()` e registra `llm_falhou` ou `saida_invalida`.
+
+- Inspecionei o relatório oficial da execução `golden-2026-10-26-v7-36-reformulacao-check` em `eval/runs/golden-2026-10-26-v7-36-reformulacao-check/report.json` e o gabarito em `eval/golden_set.jsonl`. O caso `P4.3` foi avaliado como `content_ok=false`, `acertou=false`, com recusa genérica e latência de `44.097 ms`.
+
+- Constatei que a pergunta reformulada de `P4.3` é uma continuação forte (“mesmos contratos…”) e não um caso de `troca_de_lugar`, `troca_de_esfera` ou troca de ano. A falha mais provável está no caminho de continuação/LLM e no tratamento do histórico, e não na regra determinística.
+
+- Verifiquei que as regras de lugar e esfera continuam sendo resolvidas sem chamar o LLM, enquanto a pergunta completa com “encontrados em 2025” não dispara a reformulação.
+
+- Executei a suíte focada de reformulação: `./.venv/Scripts/python.exe -m pytest -q tests/test_reformulacao.py`, obtendo **48 testes aprovados**.
+
+- Tentei a execução de testes relacionados a análise de perguntas, roteamento e SQL, mas o snapshot atual não contém `tests/test_routing.py`, então não houve evidência válida adicional nesse escopo.
+
+- Constatei que o relatório do resultado `17/36` não pode ser atribuído diretamente à mudança de reformulação, porque o benchmark comparável solicitado (`golden-2026-10-27-v7-36-interacao`) não está disponível neste repositório e o ambiente atual não está totalmente verde fora do escopo de reformulação.
+
+- Mantive o Golden Set, os critérios de avaliação e os relatórios históricos intactos e não realizei `commit`, `push` nem alterações de código nesta etapa.
+
+**Resultado:**
+
+A investigação confirmou que o timeout efetivo da reformulação é de 15 segundos, que o fallback preserva contexto e que os controles de regras determinísticas continuam funcionando como esperado. A falha de `P4.3` permanece como um caso de continuação complexa que precisa de investigação específica antes de qualquer alteração do prompt ou filtro compartilhado. O conjunto de testes focados em reformulação passou e o resultado de `17/36` foi documentado como evidência do estado atual do ambiente, sem comparativo válido de antes/depois.
+
+### Uso de assistentes de IA:
+
+- Utilizei assistentes de IA como apoio na revisão do diff, análise do relatório de avaliação do Golden Set, diferenciação entre evidências e hipóteses, e organização da investigação final.
+
+- Mantive o foco na documentação do estado atual do projeto, sem alterar regras, Golden Set, critérios de avaliação, relatórios históricos ou o código-fonte.
