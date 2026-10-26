@@ -110,8 +110,9 @@ def validate_bundle(manifest_path: Path | str) -> dict[str, Any]:
     if not isinstance(documents_file_entry, Mapping) or not isinstance(documents_file_entry.get("sha256"), str):
         raise SnapshotValidationError("manifesto_incompleto")
     documents_hash = documents_file_entry["sha256"].lower()
+    operator_acceptance = _aceite_proveniencia(manifest, index_manifest, checked["index_manifest"])
     _validar_indice(index_manifest, checked["index_manifest"], documents_hash,
-                    manifest.get("index_artifacts"))
+                    manifest.get("index_artifacts"), operator_acceptance=operator_acceptance)
     declared_documents_hash = manifest.get("documents_sha256", documents_hash)
     if not isinstance(declared_documents_hash, str) or declared_documents_hash.lower() != documents_hash:
         raise SnapshotValidationError("snapshot_divergente")
@@ -145,8 +146,35 @@ def _jsonl_ids(path: Path) -> list[str]:
     return identifiers
 
 
+def _aceite_proveniencia(manifest: Mapping[str, Any], index: Mapping[str, Any],
+                         index_path: Path) -> bool:
+    """Aceite operacional vinculado ao índice exato; não atesta o encoding histórico.
+
+    Sem aceite, os três gates continuam obrigatórios. O aceite só substitui a
+    exigência de comprovação histórica, nunca hashes, cobertura ou integridade.
+    """
+    acceptance = manifest.get("operator_acceptance")
+    if acceptance is None:
+        return False
+    if not isinstance(acceptance, Mapping):
+        raise SnapshotValidationError("aceite_operador_invalido")
+    model = acceptance.get("embedding_model")
+    if (acceptance.get("scope") != "historical_embedding_provenance"
+            or acceptance.get("approved") is not True
+            or not isinstance(acceptance.get("approved_by"), str) or not acceptance["approved_by"].strip()
+            or not isinstance(acceptance.get("approved_at"), str) or not acceptance["approved_at"].strip()
+            or acceptance.get("snapshot_id") != manifest.get("snapshot_id")
+            or index.get("snapshot_id") != manifest.get("snapshot_id")
+            or acceptance.get("index_manifest_sha256") != _sha256(index_path)
+            or not isinstance(model, str) or not model.strip()
+            or model != index.get("embedding_model")
+            or index.get("promocao_autorizada") is not True):
+        raise SnapshotValidationError("aceite_operador_invalido")
+    return True
+
+
 def _validar_indice(index_manifest: Mapping[str, Any], global_path: Path,
-                    documents_hash: str, artifacts: Any) -> None:
+                    documents_hash: str, artifacts: Any, *, operator_acceptance: bool = False) -> None:
     global_source_hash = index_manifest.get("source_sha256")
     if not isinstance(global_source_hash, str) or global_source_hash.lower() != documents_hash:
         raise SnapshotValidationError("snapshot_divergente")
@@ -155,7 +183,7 @@ def _validar_indice(index_manifest: Mapping[str, Any], global_path: Path,
         raise SnapshotValidationError("cobertura_indice_desconhecida")
     if total_chunks != total_vectors:
         raise SnapshotValidationError("vetores_ausentes")
-    if any(index_manifest.get(field) is not True for field in (
+    if not operator_acceptance and any(index_manifest.get(field) is not True for field in (
         "homogeneidade_modelo_comprovada", "homogeneidade_configuracao_comprovada",
         "proveniencia_encoding_completa",
     )):
@@ -209,7 +237,9 @@ def _validar_indice(index_manifest: Mapping[str, Any], global_path: Path,
         vector_count = submanifest.get("total_vectors")
         if not isinstance(count, int) or not isinstance(vector_count, int) or count != vector_count:
             raise SnapshotValidationError("vetores_ausentes")
-        if any(submanifest.get(field) is not True for field in (
+        if operator_acceptance and submanifest.get("embedding_model") != index_manifest.get("embedding_model"):
+            raise SnapshotValidationError("modelo_indice_divergente")
+        if not operator_acceptance and any(submanifest.get(field) is not True for field in (
             "homogeneidade_modelo_comprovada", "homogeneidade_configuracao_comprovada",
             "proveniencia_encoding_completa",
         )):
