@@ -428,8 +428,10 @@ def _matches_filters(metadata: Mapping[str, Any], filters: Mapping[str, Any] | N
                 continue
             return False
         for operator, value in _condicoes(expected):
-            if key == "fornecedor" and operator == "contains":
-                from src.analysis.suppliers import raizes_do_fornecedor, raiz_cnpj
+            # A análise pede "==" e a API costuma pedir "contains": nos dois, o
+            # mesmo CNPJ raiz é a mesma empresa, com qualquer grafia do nome.
+            if key == "fornecedor" and operator in {"==", "contains"}:
+                from src.analysis.suppliers import mesma_razao_social, raizes_do_fornecedor, raiz_cnpj
                 raizes = raizes_do_fornecedor(str(value))
                 cnpj = _metadata_value(metadata, "fornecedor_cnpj")
                 # O payload vetorial antigo só tem o nome. Resolva sua grafia
@@ -438,7 +440,8 @@ def _matches_filters(metadata: Mapping[str, Any], filters: Mapping[str, Any] | N
                 if raizes and raizes_atuais:
                     if not set(raizes).intersection(raizes_atuais):
                         return False
-                elif not _condicao_satisfeita(actual, operator, value):
+                elif not (_condicao_satisfeita(actual, operator, value)
+                          or mesma_razao_social(str(actual), str(value), exata=operator == "==")):
                     return False
             elif key in {"orgao", "unidade_nome"} and operator == "contains" and isinstance(actual, str):
                 # Nomes admitem qualificadores intermediários e abreviações do
