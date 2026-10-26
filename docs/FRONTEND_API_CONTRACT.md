@@ -158,7 +158,12 @@ reenviando as últimas trocas no campo opcional `historico` de
 - `etapas[]` pode conter `requisicao_inicio`, `pipeline_inicio`,
   `pipeline_fim`, `persistencia_historico` e `requisicao_fim`, além dos stages
   anteriores. Renderize stages desconhecidos de forma genérica. `pulado`
-  significa não executado; `degradado` significa fallback tratado. Os detalhes
+  significa não executado; `degradado` significa fallback tratado. Status
+  possíveis de uma etapa: `ok`, `iniciado` (só o marco de início, em
+  `requisicao_inicio` e `pipeline_inicio`; não é erro), `pulado` (com o
+  motivo), `conversa` (resposta de cumprimento ou ajuda), `recusa` (recusa
+  intencional, não é erro), `aviso`, `degradado`, `rejeitado` (entrada
+  inválida, `422`) e `erro`. Só `erro` indica falha. Os detalhes
   incluem `outcome`, origem, sequência, motivo e metadados permitidos. O evento
   terminal da API confirma retorno preparado, não recebimento pelo navegador.
 - `GET /api/v1/sessions/{session_id}/trace`: a conversa inteira, com as
@@ -207,12 +212,40 @@ Respostas:
   inexistente: `404`.
 - Histórico sem `X-Session-Id` e sem chave válida: `401` (exceto com
   `HISTORY_PUBLIC=true`, que abre o histórico geral para uma demo).
-- `POST /api/v1/query` e `POST /api/v1/feedback` não pedem nada.
+- `POST /api/v1/query` e `POST /api/v1/feedback` não pedem nada (só respeitam
+  o limite de requisições; ver abaixo).
 - O CORS libera os headers `X-API-Key` e `X-Session-Id`.
 
 O histórico grava pergunta, resposta e comentário do feedback já mascarados
 (CPF, telefone, e-mail pessoal) e apaga consultas com mais de
 `HISTORY_RETENTION_DAYS` dias (padrão 30; `0` desliga o expurgo).
+
+## Limite de requisições (429)
+
+Desde 2026-10-23 a API limita as chamadas por cliente
+([app/rate_limit.py](../app/rate_limit.py)):
+
+| Rotas | Limite padrão | Variável do `.env` do servidor |
+|---|---|---|
+| `POST /api/v1/query` e `POST /api/v1/feedback` | 10 por minuto | `RATE_LIMIT_QUERY_PER_MINUTE` |
+| Leituras: as demais rotas `/api/` (histórico, trace, `/api/v1/explore/*`, `/api/v1/project/summary`) | 120 por minuto | `RATE_LIMIT_READ_PER_MINUTE` |
+
+`/health` e `/ready` ficam fora do limite; `0` na variável desliga. O limite
+se recarrega aos poucos (10 por minuto = uma pergunta a cada 6 s), então
+quem pergunta devagar nunca o atinge. Atrás do túnel ngrok, o cliente é o IP
+real que o túnel informa, e não o do túnel; cada pessoa conta separado.
+
+Ao passar do limite, a resposta é:
+
+- status `429`;
+- corpo `{"detail": "Muitas requisições em pouco tempo. Tente de novo em N s."}`;
+- header `Retry-After` com os segundos até a próxima ficha;
+- cabeçalhos de CORS, então o site consegue ler o corpo.
+
+O frontend deve mostrar o texto de `detail` ao usuário, e não um erro genérico
+de rede. Pode também desabilitar o envio pelos segundos de `Retry-After`.
+Para testar: enviar 12 perguntas seguidas (por exemplo, "Olá", que responde
+na hora) em menos de um minuto.
 
 ## Suplemento sintético e segurança
 
@@ -223,7 +256,8 @@ públicas**, com título `[Sintético]` e tipo `Conversa sintética`; os cinco
 restritos não são expostos. Não há links de arquivos locais nem texto bruto
 nas rotas de catálogo. O suplemento não comprova fatos reais do PNCP.
 
-Erros: `422` para entrada inválida; `503` quando o acervo não pode ser lido;
+Erros: `422` para entrada inválida; `429` quando o cliente passa do limite de
+requisições (seção anterior); `503` quando o acervo não pode ser lido;
 `500` para falha na consulta. Não expor detalhes internos ou credenciais nem
 substituir falhas por sucesso vazio/mock. CORS aceita `localhost:5173`,
 `127.0.0.1:5173` e a origem GitHub Pages declarada em `app/api.py`.
