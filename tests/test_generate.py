@@ -1185,3 +1185,12 @@ def test_recusa_indevida_convertida_tambem_pede_citacao():
     assert len(cliente.chamadas) == 2
     assert resposta.is_refusal is False
     assert [f.chunk_id for f in resposta.sources_used] == ["norma-1"]
+
+
+def test_evidencia_insuficiente_nao_e_recusa_no_prompt_e_no_pedido_de_citacao():
+    # P4.3 de 24 a 26/10: com trechos relacionados mas insuficientes, o LLM marcava
+    # recusa e, por isso, devolvia as fontes vazias, inclusive no pedido de citação.
+    assert "Evidência insuficiente não é recusa" in gen._SYSTEM_PROMPT
+    assert "reconhecê-la é a resposta, não uma recusa" in gen._SYSTEM_PROMPT
+    assert "não é uma recusa" in gen._PEDIDO_DE_CITACAO
+    assert "is_refusal=false" in gen._PEDIDO_DE_CITACAO

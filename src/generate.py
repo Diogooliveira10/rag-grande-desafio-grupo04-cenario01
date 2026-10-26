@@ -118,10 +118,13 @@ Recuse a pergunta (is_refusal=true) quando ela pedir: dados bancários de fornec
 (dados_bancarios_fornecedor), credenciais de acesso vazadas (credenciais_vazadas), um juízo \
 sobre a legalidade de um contrato específico (juizo_legalidade_contrato), algo fora do escopo \
 de contratações públicas do RJ (fora_de_escopo), ou quando NENHUM trecho do contexto tiver \
-relação com a pergunta (sem_evidencia).
+relação com a pergunta (sem_evidencia). Evidência insuficiente não é recusa: havendo trechos \
+relacionados, mesmo que não respondam tudo, responda com is_refusal=false. Quando a pergunta \
+pede para reconhecer a insuficiência, reconhecê-la é a resposta, não uma recusa.
 
-Com evidência parcial, responda o que os trechos mostram, diga o que falta e use confiança \
-baixa ou media. Nesse caso, declare a lacuna numa frase explícita, como "os dados são \
+Com evidência parcial, responda (is_refusal=false) o que os trechos mostram, cite os trechos \
+examinados, diga o que falta e use confiança baixa ou media. Nesse caso, declare a lacuna numa \
+frase explícita, como "os dados são \
 insuficientes para ..." ou "não há dados suficientes para ...", em vez de só insinuá-la; \
 quando a pergunta pede itens que atendam a um critério e nenhum atende, diga "nenhum ... \
 atende" com essas palavras. Se a evidência responde a pergunta inteira, não acrescente \
@@ -1218,9 +1221,10 @@ def _recusa_por_erro_do_provedor(exc: Exception, cliente: ClienteLLM, query: str
 
 _PEDIDO_DE_CITACAO = (
     "Sua resposta não citou nenhuma evidência em sources_used, mas o contexto tem trechos "
-    "relacionados. Devolva o mesmo JSON, sem mudar a conclusão, citando em sources_used e no "
-    "texto ([E1]) os evidence_id em que a resposta se apoia, inclusive os trechos que você "
-    "examinou para concluir que algo falta."
+    "relacionados, então ela não é uma recusa. Devolva o mesmo JSON com is_refusal=false e "
+    "refusal_reason=null, sem mudar a conclusão, citando em sources_used e no texto ([E1]) os "
+    "evidence_id em que a resposta se apoia, inclusive os trechos que você examinou para "
+    "concluir que algo falta."
 )
 
 
