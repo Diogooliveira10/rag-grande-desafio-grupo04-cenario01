@@ -59,3 +59,25 @@ def test_leitura_de_valores_e_periodos(pergunta, valor_min, valor_max, periodo):
     lido, _ = vp._extrair_periodo(normalizada, valores.numeros)
     assert (valores.valor_min, valores.valor_max) == (valor_min, valor_max)
     assert (lido.ano, lido.ano_final, lido.ano_desde, lido.ano_ate) == periodo
+
+
+def test_limitar_repeticoes_rebaixa_o_excedente_sem_descartar():
+    itens = ["a1", "a2", "a3", "b1", "a4", "c1"]
+    lista, rebaixados = fusion.limitar_repeticoes(itens, lambda i: i[0], 2)
+    assert lista == ["a1", "a2", "b1", "c1", "a3", "a4"]
+    assert rebaixados == 2
+    assert sorted(lista) == sorted(itens)
+
+
+def test_limitar_repeticoes_sem_chave_ou_desligada_nao_mexe():
+    itens = ["a1", "a2", "a3", "x"]
+    # chave None = sem limite
+    lista, rebaixados = fusion.limitar_repeticoes(itens, lambda i: None if i == "a3" else i[0], 1)
+    assert lista == ["a1", "a3", "x", "a2"] and rebaixados == 1
+    for maximo in (0, -1):
+        assert fusion.limitar_repeticoes(itens, lambda i: i[0], maximo) == (itens, 0)
+
+
+def test_limitar_repeticoes_mantem_a_ordem_relativa_dos_excedentes():
+    lista, _ = fusion.limitar_repeticoes(["a1", "a2", "a3", "a4", "a5"], lambda i: "a", 1)
+    assert lista == ["a1", "a2", "a3", "a4", "a5"]
