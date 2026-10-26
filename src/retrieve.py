@@ -1599,13 +1599,53 @@ def _identificadores_exatos(r: _Recuperacao) -> list[RetrievalResult]:
     return _resultados_identificador_exato(r.query, r.registros_bm25())
 
 
+# Só as atas repetem muitos trechos da mesma compra (as páginas do PDF); nas
+# demais bases cada chunk já é um registro próprio e não há o que variar.
+_BASES_COM_VARIEDADE = frozenset({"atas_conversacional"})
+_COMPRA_RE = re.compile(r"\d{14}-\d-\d{6}/\d{4}")
+
+
+def _chave_da_compra(item: RetrievalResult) -> str | None:
+    """Compra a que o trecho pertence; ``None`` se a base não entra na regra.
+
+    Usa o número de controle da compra gravado nos extras; se faltar, o do PNCP
+    da ata (``cnpj-d-seq/ano-seqAta``) sem o sufixo da ata; por último, o
+    arquivo de origem, que numa ata é o próprio PDF.
+    """
+    if item.metadata.get("base_id") not in _BASES_COM_VARIEDADE:
+        return None
+    extras = item.metadata.get("extras") or {}
+    for campo in ("numero_controle_compra", "numero_controle_pncp"):
+        achado = _COMPRA_RE.search(str(extras.get(campo) or ""))
+        if achado:
+            return achado.group(0)
+    origem = item.metadata.get("source_file") or item.source_path
+    return f"arquivo:{origem}" if origem else None
+
+
+def _variar_por_compra(query: str, resultados: list[RetrievalResult]) -> tuple[list[RetrievalResult], int]:
+    """No máximo ``RETRIEVAL_MAX_PER_PURCHASE`` trechos por compra à frente do corte.
+
+    Não vale quando a pergunta cita um número do PNCP ou de contrato: aí o
+    usuário quer justamente os trechos daquele registro.
+    """
+    maximo = config.RETRIEVAL_MAX_PER_PURCHASE
+    if maximo <= 0 or _identificadores_pncp(query) or _referencias_contrato(query):
+        return resultados, 0
+    return fusion.limitar_repeticoes(resultados, _chave_da_compra, maximo)
+
+
 def _fundir(r: _Recuperacao, dense: list[RetrievalResult], sparse: list[RetrievalResult],
             candidatos_norma: list[RetrievalResult], identificadores_exatos: list[RetrievalResult],
             corte: int, *, recuperacao_degradada: bool,
             filtros_ignorados: dict[str, dict[str, list[str]]]) -> list[RetrievalResult]:
-    """Stage ``fusao_rrf``: RRF, norma pedida e identificadores exatos à frente."""
+    """Stage ``fusao_rrf``: RRF, variedade por compra, norma pedida e identificadores exatos à frente."""
     with r.span(Stage.FUSAO_RRF, rrf_k=DEFAULT_RRF_K) as span:
-        fused = reciprocal_rank_fusion([dense, sparse], top_k=corte)
+        fused = reciprocal_rank_fusion([dense, sparse])
+        fused, rebaixados = _variar_por_compra(r.query, fused)
+        fused = fused[:corte]
+        span.extra["variedade"] = {"max_por_compra": config.RETRIEVAL_MAX_PER_PURCHASE,
+                                   "rebaixados": rebaixados}
         fused = _priorizar_norma_solicitada(r.query, fused, candidatos_norma, corte)
         fused = _promover_identificadores_exatos(fused, identificadores_exatos, corte)
         for item in fused:
