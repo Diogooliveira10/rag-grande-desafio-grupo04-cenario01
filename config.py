@@ -86,6 +86,9 @@ RERANK_MODEL = _env("RERANK_MODEL", "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
 # O perfil experimental de 50 candidatos aumenta recall, mas ainda tem
 # regressões de ranking; ativar explicitamente, não como mudança global.
 RERANK_CANDIDATES = int(_env("RERANK_CANDIDATES", "10"))
+# Variedade na busca: no máximo N trechos da mesma compra (ata) à frente dos
+# candidatos do rerank; o excedente vai para o fim, não é descartado. 0 desliga.
+RETRIEVAL_MAX_PER_PURCHASE = int(_env("RETRIEVAL_MAX_PER_PURCHASE", "2"))
 RERANK_MAX_LENGTH = int(_env("RERANK_MAX_LENGTH", "512"))
 # Carregar o cross-encoder quando a API sobe, e não na primeira pergunta:
 # o carregamento leva ~15 s (69 s se ainda precisar baixar o modelo) e o
