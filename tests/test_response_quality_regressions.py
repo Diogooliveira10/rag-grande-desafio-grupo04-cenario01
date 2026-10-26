@@ -20,13 +20,16 @@ def catalogo(tmp_path, monkeypatch):
         "nomes": ["CASA DA MOEDA DO BRASIL", "BANCO CENTRAL DO BRASIL"],
         "fornecedores": ["CASA DA MOEDA DO BRASIL CMB", "CASA DOS PARAFUSOS LTDA"],
         "municipios": [], "siglas": {},
+        "palavras_objetos": {"casa": [567, 0]},
     }), encoding="utf-8")
     # O catálogo é lido em src/analysis/entities.py: a troca é feita lá.
     from src.analysis import entities
     monkeypatch.setattr(entities, "ORGAOS_CORPUS_PATH", path)
     entities._catalogo_de_orgaos.cache_clear()
+    entities._palavras_dos_objetos.cache_clear()
     yield
     entities._catalogo_de_orgaos.cache_clear()
+    entities._palavras_dos_objetos.cache_clear()
 
 
 @pytest.mark.parametrize("query", [
@@ -53,8 +56,11 @@ def test_vale_transporte_continua_objeto():
     assert "vale" in sq.detectar_consulta(q, qa._analisar(q), BASES).termos_objeto
 
 
-def test_fornecedor_nao_vira_orgao(catalogo):
-    q = "Quais contratos têm como fornecedor a CASA DA MOEDA?"
+@pytest.mark.parametrize("q", [
+    "Quais contratos têm como fornecedor a CASA DA MOEDA?",
+    "Contratos da Casa da Moeda em 2025",
+])
+def test_fornecedor_nao_vira_orgao(catalogo, q):
     filtros = qa._analisar(q)
     assert filtros.filtros_analiticos["fornecedor"] == "CASA DA MOEDA DO BRASIL CMB"
     consulta = sq.detectar_consulta(q, filtros, BASES)

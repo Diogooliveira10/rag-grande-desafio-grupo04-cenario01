@@ -93,7 +93,7 @@ conhece o banco, o índice nem o LLM; o caso de uso conhece só os contratos
 | Domínio | [src/domain/](src/domain/) | regras puras: política de confiança (`confidence.py`), situação da compra nas contas (`purchase_status.py`), conta do RRF (`fusion.py`), normalização de texto (`text.py`), leitura de valores e períodos da pergunta (`values_and_periods.py`) |
 | Caso de uso | [src/pipeline.py](src/pipeline.py) | `responder`: reformulação, conversa, análise, roteamento, coleta (SQL e busca), geração |
 | Portas | [src/ports.py](src/ports.py) | `Analisador`, `Roteador`, `Buscador`, `ConsultaEstruturada`, `Gerador`, `Conversa`, `Reformulador` (`Protocol`) |
-| Infraestrutura | `src/retrieve.py`, `src/structured_query.py`, `src/generate.py`, `src/structured_db.py`, `llm_ecoa.py`, `src/obs.py`… | FAISS + BM25, SQLite/Neon, ECOA/OpenRouter, log JSONL |
+| Infraestrutura | `src/retrieve.py` (com o índice invertido da BM25 em `src/lexical_index.py`), `src/structured_query.py`, `src/generate.py`, `src/structured_db.py`, `llm_ecoa.py`, `src/obs.py`… | FAISS + BM25, SQLite/Neon, ECOA/OpenRouter, log JSONL |
 | Entrada | [app/api.py](app/api.py), [app/cli.py](app/cli.py) | HTTP e linha de comando; só convertem a requisição no caso de uso |
 
 **Regra conferida por teste** ([tests/test_architecture.py](tests/test_architecture.py)): os módulos de

@@ -1,5 +1,17 @@
 # Reparo incremental V7
 
+## Pacote com índice SQL FTS
+
+- [Baixar o ZIP com FTS e seu checksum no Google Drive](https://drive.google.com/drive/folders/14K1K-q9kze5qivG__b0KvkJV4L7buc1r?usp=drive_link).
+- Arquivo local: `data/releases/V7-qwen-q8-promovida-2026-10-26-fts.zip`
+  (**2.141.345.218 bytes**, 25 arquivos; CRC e hashes internos conferidos).
+- SHA-256: `6a629419cf6ab18beb59b20835a45a78b7d027bfc6f761ff4cd31083d01165e5`.
+  Checksum também em `data/releases/V7-qwen-q8-promovida-2026-10-26-fts.zip.sha256`.
+- SQLite com FTS pronto e hash atualizado no `runtime_bundle.json` do pacote.
+  Bundle validado com `ready: true`; documentos, vetores e dados SQL preservados.
+- Extrair o ZIP na raiz do backend, configurar `SNAPSHOT_MANIFEST=runtime_bundle.json`
+  e reiniciar a API; não é necessário executar `structured_db fts` nesse pacote.
+
 ## Release — `v7-qwen-q8-2026-10-26`
 
 - Release em `data/releases/v7-qwen-q8-2026-10-26/`, originada do candidato_08
@@ -29,8 +41,8 @@
   restaurar `rollback/index/` e `rollback/.env` e remover `runtime_bundle.json`
   (não existia antes). SQLite, catálogo e documentos não mudaram na ativação.
   O backup de `.env` contém configuração privada e não deve ser distribuído.
-- [Download do pacote V7](https://drive.google.com/file/d/1Zgt4b57sXZeGI0M6qz61ePk5h5SWh0vx/view?usp=drive_link).
-  Referência: `V7-qwen-q8-promovida-2026-10-26.zip`, **3.101.448.480 bytes**,
+- Pacote original sem FTS (referência histórica):
+  `V7-qwen-q8-promovida-2026-10-26.zip`, **3.101.448.480 bytes**,
   25 arquivos, CRC conferido; SHA-256
   `27423850743d43ce763e4fcebe93bcec6db0197c29582d2ad7d8eaa31f7b1b25`.
   Extrair na raiz do backend, configurar `SNAPSHOT_MANIFEST=runtime_bundle.json`
@@ -160,12 +172,11 @@ O complemento foi produzido separadamente em
   `eval/runs/pendencias-v7-regressao-2026-10-26/golden-original.jsonl` e
   `auditoria-v1.json`. A avaliação usa os documentos/índices do derivado e o
   SQLite v7 local (idêntico à cópia no derivado).
-- Pacote anterior à release: `data/v7_recuperacao/V7-dados-vetores-completos-2026-10-26.zip`
+- Pacote anterior à release (histórico): `V7-dados-vetores-completos-2026-10-26.zip`
   (3.101.489.656 bytes; 25 arquivos de dados e um manifesto de hashes).
   Conferência CRC de todas as entradas: sem erro. SHA-256:
   `b7109e78073cf6c3177279c90dc86129c9919310980b55a4ef1ee4e2e6949c1c`.
-  O checksum também está no arquivo `.zip.sha256` ao lado. Dentro do ZIP, o
-  catálogo já se chama `orgaos_corpus.json`. Para instalação, use o pacote da
+  Dentro do ZIP, o catálogo já se chama `orgaos_corpus.json`. Para instalação, use o pacote da
   release indicado no início deste documento.
 
 ### Reprodução do complemento

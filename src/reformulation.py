@@ -54,8 +54,10 @@ MAX_CHARS_REFORMULADA = 1200
 # O qwen3 do ECOA raciocina antes do JSON e esses tokens contam no limite: com
 # 300 ele parava em finish_reason=length sem escrever nada, e a continuação
 # seguia sem contexto. Com duas trocas no histórico ele já usou 936; o teto só
-# corta, não faz o modelo gastar mais.
-MAX_TOKENS_REFORMULACAO = 2048
+# corta, não faz o modelo gastar mais. Na P4.3 (três trocas) ele usa 1.752, e em
+# 2026-10-26 chegou aos 2.048 e parou sem o JSON: o teto dobra para dar folga, e
+# o tempo continua limitado por REFORMULACAO_TIMEOUT.
+MAX_TOKENS_REFORMULACAO = 4096
 
 
 class TurnoAnterior(BaseModel):
