@@ -52,9 +52,12 @@ sintéticas. Totais incompletos são `null`, não zero.
 
 - Saudações, agradecimentos, despedidas e ajuda de uso recebem resposta normal,
   sem acervo/LLM quando reconhecidos diretamente.
-- Mensagens longas e mensagens sem rota reconhecida passam pela identificação
-  de intenção (`CONVERSATION_MODE=llm`). Apresentações, contextos e elaboração
-  de texto podem ser conversa. Pedidos de fatos existentes continuam pelo RAG.
+- Mensagens sem rota reconhecida passam pela identificação de intenção
+  (`CONVERSATION_MODE=llm`). Mensagens com rota reconhecida vão direto ao RAG,
+  sem essa chamada; só as longas (160+ caracteres) que pedem elaboração de
+  texto ou falam do próprio sistema ainda passam por ela. Apresentações,
+  contextos e elaboração de texto podem ser conversa. Pedidos de fatos
+  existentes continuam pelo RAG.
 - Conversa não é recusa: `is_refusal=false`, `refusal_reason=null`,
   `bases_consultadas=[]`, `sources_used=[]`, `confidence_level="baixa"`.
   O frontend apresenta essas respostas como **Conversa — sem consulta ao acervo**,
