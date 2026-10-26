@@ -473,9 +473,14 @@ def _extrair_fornecedor(texto: str, bloqueados: Sequence[Span] = (), *,
                 break
             citados.append(palavra)
             span = (span[0], pos_fim)
-        total, proprio = (_palavras_dos_objetos() or {}).get(primeira, (0, 0))
-        if total and proprio / total < _PARCELA_MINIMA_DO_PROPRIO_FORNECEDOR:
-            continue
+        if not tem_gatilho:
+            palavras_objetos = _palavras_dos_objetos() or {}
+            frequencias = [palavras_objetos.get(p, (0, 0)) for p in citados
+                           if p not in _PALAVRAS_FUNCIONAIS]
+            # Uma primeira palavra comum não basta para descartar um nome composto.
+            if frequencias and all(total and proprio / total < _PARCELA_MINIMA_DO_PROPRIO_FORNECEDOR
+                                   for total, proprio in frequencias):
+                continue
         if len(citados) < 2 and not tem_gatilho and not _nome_curto_de_fornecedor(primeira, todas, comeca):
             continue
         valor = _valor(citados)
