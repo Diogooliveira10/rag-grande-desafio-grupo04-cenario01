@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any, Iterator, Mapping, Optional, Sequence
 
 import config
-from src.dominio import texto as texto_dominio
+from src.domain import text as texto_dominio
 
 SQLITE_PATH = config.ROOT_DIR / "data" / "structured" / "base_estruturada.sqlite"
 DOCUMENTS_FILE = config.NORMALIZED_DATA_DIR / "documents.jsonl"
@@ -264,7 +264,7 @@ def banco_padrao() -> Banco:
     return Banco(url=config.DATABASE_URL)
 
 
-# casefold + sem acentos + espaços únicos; regra em src/dominio/texto.py.
+# casefold + sem acentos + espaços únicos; regra em src/domain/text.py.
 normalizar = texto_dominio.normalizar
 
 

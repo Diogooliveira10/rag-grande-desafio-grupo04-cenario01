@@ -21,12 +21,12 @@ def catalogo(tmp_path, monkeypatch):
         "fornecedores": ["CASA DA MOEDA DO BRASIL CMB", "CASA DOS PARAFUSOS LTDA"],
         "municipios": [], "siglas": {},
     }), encoding="utf-8")
-    # O catálogo é lido em src/analise/entidades.py: a troca é feita lá.
-    from src.analise import entidades
-    monkeypatch.setattr(entidades, "ORGAOS_CORPUS_PATH", path)
-    entidades._catalogo_de_orgaos.cache_clear()
+    # O catálogo é lido em src/analysis/entities.py: a troca é feita lá.
+    from src.analysis import entities
+    monkeypatch.setattr(entities, "ORGAOS_CORPUS_PATH", path)
+    entities._catalogo_de_orgaos.cache_clear()
     yield
-    entidades._catalogo_de_orgaos.cache_clear()
+    entities._catalogo_de_orgaos.cache_clear()
 
 
 @pytest.mark.parametrize("query", [

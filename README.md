@@ -193,17 +193,18 @@ O candidato foi promovido: a v7 é a base ativa desde 2026-10-19.
 │   ├── create_embeddings.py     ← embeddings com cache, multi-provedor e escrita incremental
 │   ├── index.py                 ← índice vetorial por base; gera embeddings ou reaproveita os de data/embeddings/
 │   ├── query_analysis.py        ← extrai filtros de ano, valor e órgão da pergunta (entrada; análise por LLM)
-│   ├── analise/entidades.py     ← órgão, município, fornecedor e CNPJ citados, pelo catálogo do corpus
+│   ├── analysis/entities.py     ← órgão, município, fornecedor e CNPJ citados, pelo catálogo do corpus
 │   ├── structured_db.py         ← base estruturada em SQL (Postgres/Neon ou SQLite): tabelas contratacoes e pca_planos
-│   ├── structured_query.py      ← consultas SQL fixas (ranking, estatística, evolução, agrupamento) como evidência
+│   ├── structured_query.py      ← consultas SQL fixas (ranking, estatística, evolução, agrupamento) como evidência (entrada)
+│   ├── sql_query/               ← detection.py (que conta a pergunta pede) e execution.py (WHERE e um executor por tipo)
 │   ├── router.py                ← roteamento determinístico (Adaptive RAG)
 │   ├── retrieve.py              ← recuperação híbrida: denso + BM25 + RRF, filtros de metadado por base, rerank plugável
 │   ├── rerank.py                ← rerank por cross-encoder local sobre os candidatos do RRF
 │   ├── generate.py              ← geração com guardrails, prompt na janela do modelo e validação da saída do LLM
 │   ├── sensitivity.py           ← política de sensibilidade: mascaramento de CPF/telefone/e-mail e filtro de restritos
 │   ├── pipeline.py              ← caso de uso: une query_analysis + roteamento + recuperação + geração (responder)
-│   ├── portas.py                ← contratos (Protocol) que o pipeline espera da busca, do SQL, do LLM e do roteador
-│   ├── dominio/                 ← regras de negócio puras: confiança, situação da compra, RRF, normalização (ver ARQUITETURA)
+│   ├── ports.py                 ← contratos (Protocol) que o pipeline espera da busca, do SQL, do LLM e do roteador
+│   ├── domain/                  ← regras de negócio puras: confiança, situação da compra, RRF, normalização (ver ARQUITETURA)
 │   ├── history_store.py         ← histórico de consultas e feedback do usuário (SQLite local, data/app_state/)
 │   ├── obs.py                   ← logging estruturado (JSONL) e contagem de tokens
 │   ├── log_store.py             ← fila, append coordenado e índice SQLite/WAL de traces

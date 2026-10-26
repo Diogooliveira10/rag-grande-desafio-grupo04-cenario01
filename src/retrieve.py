@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import config
-from src.dominio import fusao
+from src.domain import fusion
 from src.obs import Stage, TokenUsage, default_logger, registrar, token_usage_from_response
 from src.schema import Natureza
 
@@ -1081,75 +1081,21 @@ def dense_retrieve(
         return []
 
     query_vector = (embed_fn or (lambda texts: [_default_embed(texts[0])]))([query])[0]
-    candidates_by_base: dict[str, list[dict[str, Any]]] = {}
-    for record in candidates:
-        metadata = record.get("metadata")
-        base_id = _record_base_id(
-            record, metadata if isinstance(metadata, Mapping) else {}
-        )
-        candidates_by_base.setdefault(base_id, []).append(record)
-
-    indexed_by_base: dict[str, list[dict[str, Any]]] = {}
-    index_paths: dict[str, Path] = {}
-    if records is None:
-        # Só as bases que têm candidatos: com a v7, ler todas custava 3,4 GB
-        # de JSON (2,5 GB só dos contratos) para uma pergunta sobre normas.
-        for vectors_path in sorted(index_dir.glob("*/vectors.jsonl")):
-            base_id = vectors_path.parent.name
-            if base_id not in candidates_by_base:
-                continue
-            indexed_by_base[base_id] = _registros_do_indice(vectors_path)
-            index_paths[base_id] = vectors_path.parent / "vectors.faiss"
-    else:
-        indexed_by_base = {base_id: group for base_id, group in candidates_by_base.items()}
-
+    indexed_by_base, index_paths = _indices_das_bases(index_dir, _por_base(candidates), records)
     bases_com_faiss = {base_id for base_id, caminho in index_paths.items() if caminho.exists()}
     normalized_text = {
         str(item.get("chunk_id")): str(item.get("text", ""))
         for item in _read_jsonl(documents_file)
     }
+    compatible_candidates_by_base, incompatible_embeddings, missing_embeddings = _candidatos_com_vetor(
+        candidates, bases_com_faiss, len(query_vector))
     scored: list[RetrievalResult] = []
-    incompatible_embeddings: list[dict[str, Any]] = []
-    missing_embeddings: list[dict[str, str]] = []
-    compatible_candidates_by_base: dict[str, list[dict[str, Any]]] = {}
-    for record in candidates:
-        embedding = record.get("embedding", [])
-        metadata = record.get("metadata")
-        chunk_id = str(record.get("chunk_id") or (
-            metadata.get("chunk_id", "") if isinstance(metadata, Mapping) else ""
-        ))
-        base_do_registro = _record_base_id(record, metadata if isinstance(metadata, Mapping) else {})
-        if "embedding" not in record and base_do_registro in bases_com_faiss:
-            # Lido sem o vetor (_registros_do_indice): o FAISS tem o vetor e
-            # confere a dimensão em _faiss_scores.
-            compatible_candidates_by_base.setdefault(base_do_registro, []).append(record)
-            continue
-        if embedding is None:
-            missing_embeddings.append({"chunk_id": chunk_id})
-            continue
-        try:
-            embedding_dimension = len(embedding)
-        except TypeError:
-            embedding_dimension = None
-        if embedding_dimension != len(query_vector):
-            incompatible_embeddings.append(
-                {
-                    "chunk_id": chunk_id,
-                    "expected_dimension": len(query_vector),
-                    "actual_dimension": embedding_dimension,
-                }
-            )
-            continue
-        compatible_candidates_by_base.setdefault(
-            _record_base_id(record, metadata if isinstance(metadata, Mapping) else {}), []
-        ).append(record)
     for base_id, group in compatible_candidates_by_base.items():
-        indexed_records = indexed_by_base.get(base_id, group)
         faiss_path = index_paths.get(base_id)
         scores = _faiss_scores(
             query_vector,
             group,
-            indexed_records,
+            indexed_by_base.get(base_id, group),
             index_path=faiss_path if faiss_path and faiss_path.exists() else None,
             top_k=top_k,
         )
@@ -1159,29 +1105,108 @@ def dense_retrieve(
                 continue
             content = str(record.get("text", "")) or normalized_text.get(chunk_id, "")
             scored.append(_result(record, scores[chunk_id], content))
-    if incompatible_embeddings:
-        registrar(
-            run_id=run_id,
-            query_id=query_id,
-            stage=Stage.RETRIEVAL_DENSO,
-            status="aviso",
-            latencia_ms=0,
-            input=query,
-            output=f"{len(incompatible_embeddings)} embedding(s) incompatível(is) excluído(s)",
-            extra={"embedding_dimension_mismatches": incompatible_embeddings},
-        )
-    if missing_embeddings:
-        registrar(
-            run_id=run_id,
-            query_id=query_id,
-            stage=Stage.RETRIEVAL_DENSO,
-            status="aviso",
-            latencia_ms=0,
-            input=query,
-            output=f"{len(missing_embeddings)} embedding(s) ausente(s)/nulo(s) ignorado(s)",
-            extra={"missing_embeddings": missing_embeddings},
-        )
+    _avisar_vetores_descartados(query, incompatible_embeddings, missing_embeddings,
+                                run_id=run_id, query_id=query_id)
     return sorted(scored, key=lambda item: (-item.score, item.chunk_id))[:top_k]
+
+
+def _base_do(record: Mapping[str, Any]) -> str:
+    metadata = record.get("metadata")
+    return _record_base_id(record, metadata if isinstance(metadata, Mapping) else {})
+
+
+def _por_base(candidates: Iterable[Mapping[str, Any]]) -> dict[str, list[Mapping[str, Any]]]:
+    por_base: dict[str, list[Mapping[str, Any]]] = {}
+    for record in candidates:
+        por_base.setdefault(_base_do(record), []).append(record)
+    return por_base
+
+
+def _indices_das_bases(index_dir: Path, candidates_by_base: dict[str, list[Mapping[str, Any]]],
+                       records: Iterable[Mapping[str, Any]] | None) -> tuple[dict[str, list], dict[str, Path]]:
+    """Registros do índice e caminho do FAISS de cada base com candidatos.
+
+    Com ``records`` dados por quem chama, o próprio grupo de candidatos é o índice.
+    """
+    if records is not None:
+        return dict(candidates_by_base), {}
+    indexed_by_base: dict[str, list[dict[str, Any]]] = {}
+    index_paths: dict[str, Path] = {}
+    # Só as bases que têm candidatos: com a v7, ler todas custava 3,4 GB
+    # de JSON (2,5 GB só dos contratos) para uma pergunta sobre normas.
+    for vectors_path in sorted(index_dir.glob("*/vectors.jsonl")):
+        base_id = vectors_path.parent.name
+        if base_id not in candidates_by_base:
+            continue
+        indexed_by_base[base_id] = _registros_do_indice(vectors_path)
+        index_paths[base_id] = vectors_path.parent / "vectors.faiss"
+    return indexed_by_base, index_paths
+
+
+def _candidatos_com_vetor(candidates: Iterable[Mapping[str, Any]], bases_com_faiss: set[str],
+                          dimensao: int) -> tuple[dict[str, list], list[dict[str, Any]], list[dict[str, str]]]:
+    """Candidatos que podem ser comparados com o vetor da pergunta, por base.
+
+    Devolve também os descartados: vetor com outra dimensão e vetor ausente.
+    """
+    compativeis: dict[str, list[Mapping[str, Any]]] = {}
+    incompativeis: list[dict[str, Any]] = []
+    ausentes: list[dict[str, str]] = []
+    for record in candidates:
+        embedding = record.get("embedding", [])
+        metadata = record.get("metadata")
+        chunk_id = str(record.get("chunk_id") or (
+            metadata.get("chunk_id", "") if isinstance(metadata, Mapping) else ""
+        ))
+        base_do_registro = _base_do(record)
+        if "embedding" not in record and base_do_registro in bases_com_faiss:
+            # Lido sem o vetor (_registros_do_indice): o FAISS tem o vetor e
+            # confere a dimensão em _faiss_scores.
+            compativeis.setdefault(base_do_registro, []).append(record)
+            continue
+        if embedding is None:
+            ausentes.append({"chunk_id": chunk_id})
+            continue
+        try:
+            embedding_dimension = len(embedding)
+        except TypeError:
+            embedding_dimension = None
+        if embedding_dimension != dimensao:
+            incompativeis.append({
+                "chunk_id": chunk_id,
+                "expected_dimension": dimensao,
+                "actual_dimension": embedding_dimension,
+            })
+            continue
+        compativeis.setdefault(base_do_registro, []).append(record)
+    return compativeis, incompativeis, ausentes
+
+
+def _avisar_vetores_descartados(query: str, incompativeis: list[dict[str, Any]], ausentes: list[dict[str, str]],
+                                *, run_id: str, query_id: str) -> None:
+    """Aviso no log (stage ``retrieval_denso``) para cada tipo de vetor descartado."""
+    if incompativeis:
+        registrar(
+            run_id=run_id,
+            query_id=query_id,
+            stage=Stage.RETRIEVAL_DENSO,
+            status="aviso",
+            latencia_ms=0,
+            input=query,
+            output=f"{len(incompativeis)} embedding(s) incompatível(is) excluído(s)",
+            extra={"embedding_dimension_mismatches": incompativeis},
+        )
+    if ausentes:
+        registrar(
+            run_id=run_id,
+            query_id=query_id,
+            stage=Stage.RETRIEVAL_DENSO,
+            status="aviso",
+            latencia_ms=0,
+            input=query,
+            output=f"{len(ausentes)} embedding(s) ausente(s)/nulo(s) ignorado(s)",
+            extra={"missing_embeddings": ausentes},
+        )
 
 
 def _tokens(text: str) -> list[str]:
@@ -1262,9 +1287,9 @@ def reciprocal_rank_fusion(
 ) -> list[RetrievalResult]:
     """Combina rankings por identificador estável usando Reciprocal Rank Fusion.
 
-    A conta é do domínio (src/dominio/fusao.py); aqui só se monta o resultado.
+    A conta é do domínio (src/domain/fusion.py); aqui só se monta o resultado.
     """
-    scores = fusao.pontuacoes_rrf([[item.chunk_id for item in ranked] for ranked in ranked_lists], k=k)
+    scores = fusion.pontuacoes_rrf([[item.chunk_id for item in ranked] for ranked in ranked_lists], k=k)
     merged: dict[str, RetrievalResult] = {}
     dense_scores: dict[str, float] = {}
     sparse_scores: dict[str, float] = {}

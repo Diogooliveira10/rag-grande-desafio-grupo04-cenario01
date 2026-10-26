@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional, Sequence
-from src.dominio.valores_e_periodos import Span
+from src.domain.values_and_periods import Span
 
 
 def _normalize(texto: str) -> str:
@@ -137,7 +137,7 @@ _PONTUACAO = ".,;:!?()\"'“”‘’"
 _PALAVRAS_FUNCIONAIS = frozenset("de da do das dos em no na e a o os as que para com por pela pelo".split())
 
 
-# src/analise/entidades.py -> raiz do projeto é parents[2].
+# src/analysis/entities.py -> raiz do projeto é parents[2].
 ORGAOS_CORPUS_PATH = Path(__file__).resolve().parents[2] / "data" / "config" / "orgaos_corpus.json"
 
 

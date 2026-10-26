@@ -7,8 +7,8 @@ import uuid
 from typing import Any, Optional, Protocol
 
 import config
-from src.dominio import confianca
-from src.dominio.texto import sem_acento
+from src.domain import confidence
+from src.domain.text import sem_acento
 from src.obs import Stage, TokenUsage, registrar, token_usage_from_response
 from src.schema import (
     Chunk,
@@ -933,16 +933,16 @@ def _resposta_sql_deterministica(
                        is_refusal=False, refusal_reason=None, avisos=avisos)
 
 
-# Política de confiança: regra de negócio, em src/dominio/confianca.py. Os
+# Política de confiança: regra de negócio, em src/domain/confidence.py. Os
 # nomes antigos continuam valendo para quem os importava daqui.
-_confianca_do_recorte = confianca.confianca_do_recorte
-_confianca_dos_recortes = confianca.confianca_dos_recortes
-_recorte_dos_chunks = confianca.recorte_dos_chunks
-_limitar_confianca_pela_ressalva = confianca.limitar_confianca_pela_ressalva
-_aplicar_recorte = confianca.aplicar_recorte
-_NIVEIS = confianca.NIVEIS
-_RESSALVA_DE_INSUFICIENCIA = confianca.RESSALVA_DE_INSUFICIENCIA
-_AVISO_RESSALVA = confianca.AVISO_RESSALVA
+_confianca_do_recorte = confidence.confianca_do_recorte
+_confianca_dos_recortes = confidence.confianca_dos_recortes
+_recorte_dos_chunks = confidence.recorte_dos_chunks
+_limitar_confianca_pela_ressalva = confidence.limitar_confianca_pela_ressalva
+_aplicar_recorte = confidence.aplicar_recorte
+_NIVEIS = confidence.NIVEIS
+_RESSALVA_DE_INSUFICIENCIA = confidence.RESSALVA_DE_INSUFICIENCIA
+_AVISO_RESSALVA = confidence.AVISO_RESSALVA
 _sem_acento = sem_acento
 
 
@@ -1165,14 +1165,8 @@ def gerar_resposta(
     try:
         bruto, tokens = _texto_e_tokens(cliente(mensagens), extra=sensibilidade)
     except Exception as exc:
-        llm_info = dict(getattr(cliente, "diagnosticos", {}))
-        sensibilidade["llm"] = llm_info
-        resposta = _recusa(query, bases_consultadas, RefusalReason.ERRO_PROVEDOR)
-        _logar_evento(
-            run_id, query_id, "erro_llm", inicio, resposta,
-            modelo=llm_info.get("model", GENERATION_MODEL), erro=f"{type(exc).__name__}: {exc}", **sensibilidade,
-        )
-        return resposta
+        return _recusa_por_erro_do_provedor(exc, cliente, query, bases_consultadas, run_id=run_id,
+                                            query_id=query_id, inicio=inicio, sensibilidade=sensibilidade)
 
     llm_info = dict(getattr(cliente, "diagnosticos", {}))
     sensibilidade["llm"] = llm_info
@@ -1204,6 +1198,20 @@ def gerar_resposta(
         chaves_alias=chaves_alias,
         mascaramentos_resposta=mascaramentos_resposta,
         recusa_convertida=recusa_convertida,
+    )
+    return resposta
+
+
+def _recusa_por_erro_do_provedor(exc: Exception, cliente: ClienteLLM, query: str, bases_consultadas: list[Natureza],
+                                 *, run_id: str, query_id: str, inicio: float,
+                                 sensibilidade: dict[str, Any]) -> RAGResponse:
+    """LLM indisponível (ECOA e reserva): recusa ``erro_provedor``, com o erro no log."""
+    llm_info = dict(getattr(cliente, "diagnosticos", {}))
+    sensibilidade["llm"] = llm_info
+    resposta = _recusa(query, bases_consultadas, RefusalReason.ERRO_PROVEDOR)
+    _logar_evento(
+        run_id, query_id, "erro_llm", inicio, resposta,
+        modelo=llm_info.get("model", GENERATION_MODEL), erro=f"{type(exc).__name__}: {exc}", **sensibilidade,
     )
     return resposta
 

@@ -44,7 +44,7 @@ from typing import Any, Optional, Sequence
 import config
 from src.obs import Stage, default_logger
 from src.schema import QueryAnalysisResult, QueryFilters, QueryIntent
-from src.analise.entidades import (  # noqa: F401  (reexportados)
+from src.analysis.entities import (  # noqa: F401  (reexportados)
     ORGAOS_CORPUS_PATH,
     _APELIDOS_DE_FORNECEDOR,
     _APELIDOS_SO_COM_MAIUSCULA,
@@ -101,8 +101,8 @@ from src.analise.entidades import (  # noqa: F401  (reexportados)
     _valor_do_catalogo,
     gerar_catalogo_de_orgaos,
 )
-# Leitura de valores e períodos: regras puras, em src/dominio/valores_e_periodos.py.
-from src.dominio.valores_e_periodos import (  # noqa: F401  (reexportados)
+# Leitura de valores e períodos: regras puras, em src/domain/values_and_periods.py.
+from src.domain.values_and_periods import (  # noqa: F401  (reexportados)
     Span,
     _ABERTO_RE,
     _ANO,

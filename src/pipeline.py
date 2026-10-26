@@ -7,7 +7,7 @@ função compatível com o contrato ``PipelineFn`` de ``eval/run_eval.py``
     py .\\eval\\run_eval.py run --pipeline src.pipeline:responder
 
 É o caso de uso "responder pergunta": conversa com a infraestrutura só pelas
-portas de ``src/portas.py``, reunidas em ``Dependencias``.
+portas de ``src/ports.py``, reunidas em ``Dependencias``.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from src.obs import (Stage, bounded_log_value, lifecycle, new_query_id, new_run_
 from src.log_context import current_execution, execution, log_details
 from src.conversation import resposta_conversacional, tentativa_de_injecao
 from src.generate import ClienteLLM, gerar_resposta, pode_responder_sql
-from src.portas import (Analisador, Buscador, ConsultaEstruturada, Conversa, Gerador,
+from src.ports import (Analisador, Buscador, ConsultaEstruturada, Conversa, Gerador,
                         Reformulador, Roteador)
 from src.query_analysis import analisar_query, filtros_para_retrieve
 from src.reformulacao import Reformulacao, reformular_pergunta
@@ -38,7 +38,7 @@ ESCOPOS_CONSULTADOS = ("oficial",)
 
 @dataclass(frozen=True)
 class Dependencias:
-    """Implementações das portas (src/portas.py) que o pipeline usa.
+    """Implementações das portas (src/ports.py) que o pipeline usa.
 
     O pipeline só conversa com a infraestrutura por aqui. Para trocar uma peça,
     passe ``dataclasses.replace(dependencias_padrao(), buscar=minha_busca)`` a
@@ -182,7 +182,7 @@ def responder(
     etapas. Nesse caso a resposta leva ``pergunta_reformulada``. Sem histórico,
     nada muda.
 
-    ``dependencias`` troca as peças de infraestrutura (src/portas.py); sem ela,
+    ``dependencias`` troca as peças de infraestrutura (src/ports.py); sem ela,
     valem as do projeto (``dependencias_padrao``).
     """
     deps = dependencias or dependencias_padrao()
