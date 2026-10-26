@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -324,3 +326,64 @@ def test_validar_snapshot_rejeita_schema_antigo_sem_alterar_arquivo(documents, b
     with pytest.raises(ValueError, match="schema SQL incompatível"):
         structured_db.validar_banco(documents, banco)
     assert banco.sqlite_path.read_bytes() == before
+
+
+# Índice do objeto (FTS5 de trigramas): o mesmo resultado do LIKE, sem ler a
+# tabela inteira a cada consulta.
+_CONTAGEM_POR_OBJETO = f"SELECT COUNT(*) AS n FROM contratacoes WHERE {structured_db.FILTRO_DE_OBJETO}"
+
+
+def _sem_indice_de_objeto(banco):
+    with closing(sqlite3.connect(banco.sqlite_path)) as conexao, conexao:
+        conexao.execute(f"DROP TABLE {structured_db._INDICE_DE_OBJETO}")
+
+
+@pytest.mark.parametrize("termo,esperado", [
+    ("%ambulancia%", 2), ("%computador%", 1), ("%tipo d%", 2),
+    ("%de%", 3), ("%x%", 0),  # menos de 3 letras: o trigram não indexa, mas responde igual
+])
+def test_indice_do_objeto_devolve_o_mesmo_que_o_like(documents, tmp_path, termo, esperado):
+    com_indice = Banco(sqlite_path=tmp_path / "com.sqlite")
+    sem_indice = Banco(sqlite_path=tmp_path / "sem.sqlite")
+    structured_db.construir_banco(documents, com_indice)
+    structured_db.construir_banco(documents, sem_indice)
+    _sem_indice_de_objeto(sem_indice)
+
+    assert "rowid IN" in com_indice._sql(_CONTAGEM_POR_OBJETO)
+    assert sem_indice._sql(_CONTAGEM_POR_OBJETO) == _CONTAGEM_POR_OBJETO
+    assert (com_indice.consultar(_CONTAGEM_POR_OBJETO, [termo])
+            == sem_indice.consultar(_CONTAGEM_POR_OBJETO, [termo]) == [{"n": esperado}])
+
+
+def test_comando_fts_cria_o_indice_numa_base_ja_montada(documents, banco, monkeypatch):
+    """A base baixada pronta (Drive) ganha o índice sem ser remontada."""
+    monkeypatch.setattr(structured_db.config, "DATABASE_URL", "")
+    structured_db.construir_banco(documents, banco)
+    _sem_indice_de_objeto(banco)
+    assert "rowid IN" not in banco._sql(_CONTAGEM_POR_OBJETO)
+
+    assert structured_db.main(["--sqlite", str(banco.sqlite_path), "fts"]) == 0
+
+    assert "rowid IN" in banco._sql(_CONTAGEM_POR_OBJETO)
+    assert banco.consultar(_CONTAGEM_POR_OBJETO, ["%ambulancia%"]) == [{"n": 2}]
+
+
+def test_postgres_continua_com_like_e_sem_indice():
+    banco = Banco(url="postgresql://u@host/db")
+    assert banco._sql(_CONTAGEM_POR_OBJETO) == _CONTAGEM_POR_OBJETO.replace("?", "%s")
+    assert structured_db.indexar_objeto(banco) is False
+
+
+def test_valores_distintos_sao_lidos_uma_vez_por_versao_do_arquivo(documents, banco, monkeypatch):
+    structured_db.construir_banco(documents, banco)
+    consultas = []
+    original = Banco.consultar
+    monkeypatch.setattr(Banco, "consultar", lambda self, sql, p=(): consultas.append(sql) or original(self, sql, p))
+
+    assert banco.distintos("contratacoes", "municipio") == {"Niterói"}
+    assert banco.distintos("contratacoes", "municipio") == {"Niterói"}
+    assert len(consultas) == 1
+
+    escrever_documents(documents, contratacoes=[_contratacao("B-1", municipio="Maricá")])
+    structured_db.construir_banco(documents, banco)
+    assert banco.distintos("contratacoes", "municipio") == {"Maricá"}

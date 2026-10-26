@@ -181,6 +181,13 @@ data/structured/base_estruturada.sqlite
 Essa é a opção mais simples para demonstração local. Não é necessário iniciar
 um servidor de banco.
 
+Se a base veio pronta do Drive, crie uma vez o índice do objeto (o `build` já
+cria; sem ele as contas funcionam, só mais devagar):
+
+```powershell
+python -m src.structured_db fts
+```
+
 ## 7. Iniciar o backend na porta 8080
 
 Abra um PowerShell na pasta do backend:

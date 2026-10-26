@@ -155,14 +155,18 @@ def _filtro_de_cnpj(consulta: Consulta, valor: Any, c: _Clausulas) -> None:
 
 
 def _filtro_de_objeto(termos: list[str], juncao: str, c: _Clausulas) -> None:
-    """Termos do objeto contratado (com as expansões de sinônimo), unidos por ``juncao``."""
+    """Termos do objeto contratado (com as expansões de sinônimo), unidos por ``juncao``.
+
+    O texto do filtro é o de ``structured_db``: lá o SQLite com índice troca o
+    LIKE pela busca no FTS5, com o mesmo resultado.
+    """
     if not termos:
         return
     partes = []
     parametros: list[Any] = []
     for termo in termos:
         padroes = _EXPANSOES_DO_OBJETO.get(termo, (termo,))
-        partes.append("(" + " OR ".join("objeto_normalizado LIKE ?" for _ in padroes) + ")")
+        partes.append("(" + " OR ".join(structured_db.FILTRO_DE_OBJETO for _ in padroes) + ")")
         parametros.extend(f"%{padrao}%" for padrao in padroes)
     c.add("(" + f" {juncao} ".join(partes) + ")", *parametros)
 

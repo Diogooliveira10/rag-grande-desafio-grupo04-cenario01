@@ -1468,3 +1468,94 @@ def test_bm25_com_cache_de_termos_da_o_mesmo_ranking():
     assert [r.chunk_id for r in resultado] == [f"c{i}" for i in esperado]
     assert [r.score for r in resultado] == pytest.approx([notas[i] for i in esperado])
 
+
+def _ata(chunk_id, compra=None, **extras_extra):
+    extras = {"numero_controle_compra": compra, **extras_extra} if compra else dict(extras_extra)
+    return RetrievalResult(chunk_id=chunk_id, content="ata", score=1.0,
+                           metadata={"base_id": "atas_conversacional", "source_file": f"{chunk_id}.pdf",
+                                     "extras": extras})
+
+
+def test_chave_da_compra_usa_extras_e_so_vale_para_atas():
+    compra = "12345678000190-1-000007/2025"
+    assert retrieve_module._chave_da_compra(_ata("a", compra)) == compra
+    # número da ata do PNCP: vale a parte que identifica a compra
+    por_ata = _ata("b", numero_controle_pncp=compra + "-000003")
+    assert retrieve_module._chave_da_compra(por_ata) == compra
+    # sem número nenhum, o PDF de origem é a compra
+    assert retrieve_module._chave_da_compra(_ata("c")) == "arquivo:c.pdf"
+    contrato = RetrievalResult(chunk_id="k", content="x", score=1.0,
+                               metadata={"base_id": "contratos_estruturado",
+                                         "extras": {"numero_controle_compra": compra}})
+    assert retrieve_module._chave_da_compra(contrato) is None
+
+
+def test_variar_por_compra_limita_atas_e_respeita_a_configuracao(monkeypatch):
+    compra = "12345678000190-1-000007/2025"
+    itens = [_ata(f"a{i}", compra) for i in range(4)] + [_ata("b0", "12345678000190-1-000008/2025")]
+    monkeypatch.setattr(config, "RETRIEVAL_MAX_PER_PURCHASE", 2)
+    lista, rebaixados = retrieve_module._variar_por_compra("atraso de entrega", itens)
+    assert [i.chunk_id for i in lista] == ["a0", "a1", "b0", "a2", "a3"] and rebaixados == 2
+    monkeypatch.setattr(config, "RETRIEVAL_MAX_PER_PURCHASE", 0)
+    assert retrieve_module._variar_por_compra("atraso de entrega", itens) == (itens, 0)
+
+
+@pytest.mark.parametrize("pergunta", [
+    "O que diz a ata da compra 12345678000190-1-000007/2025?",
+    "O que diz o contrato 15/2024 sobre multa?",
+])
+def test_variar_por_compra_nao_atua_quando_a_pergunta_cita_o_registro(monkeypatch, pergunta):
+    monkeypatch.setattr(config, "RETRIEVAL_MAX_PER_PURCHASE", 2)
+    itens = [_ata(f"a{i}", "12345678000190-1-000007/2025") for i in range(4)]
+    assert retrieve_module._variar_por_compra(pergunta, itens) == (itens, 0)
+
+
+def test_retrieve_traz_compras_diferentes_no_topo_sem_perder_recall(tmp_path, monkeypatch):
+    def ata(chunk_id, compra, i):
+        return _record(chunk_id, text="ambulancia", base_id="atas_conversacional",
+                       embedding=[1.0, 0.1 * i], metadata_extra={"extras": {"numero_controle_compra": compra}})
+    a, b, c = (f"12345678000190-1-00000{n}/2025" for n in (1, 2, 3))
+    registros = [ata("a0", a, 0), ata("a1", a, 1), ata("a2", a, 2), ata("a3", a, 3),
+                 ata("b0", b, 4), ata("c0", c, 5)]
+    indice = _grava_indice(tmp_path, registros)
+
+    monkeypatch.setattr(config, "RETRIEVAL_MAX_PER_PURCHASE", 0)
+    sem_regra = retrieve("ambulancia", top_k=4, **indice)
+    assert [r.chunk_id for r in sem_regra] == ["a0", "a1", "a2", "a3"]
+
+    monkeypatch.setattr(config, "RETRIEVAL_MAX_PER_PURCHASE", 2)
+    com_regra = retrieve("ambulancia", top_k=4, **indice)
+    assert [r.chunk_id for r in com_regra] == ["a0", "a1", "b0", "c0"]
+    # com mais espaço no corte o excedente volta: nada é descartado
+    ampla = retrieve("ambulancia", top_k=6, **indice)
+    assert [r.chunk_id for r in ampla] == ["a0", "a1", "b0", "c0", "a2", "a3"]
+
+
+def test_busca_nao_altera_os_registros_compartilhados_do_cache(tmp_path):
+    """A seleção de candidatos deixou de copiar os ~144 mil registros a cada
+    pergunta; isso só é seguro enquanto nada na busca os altera."""
+    import copy
+
+    documentos = tmp_path / "documents.jsonl"
+    registros = [
+        _record("c1", text='{"objetoContrato": "Aquisição de tomógrafo"}',
+                metadata_extra={"orgao": "Fundo Municipal de Saúde de Niterói"}),
+        _record("c2", text='{"objetoContrato": "Peças para tomógrafo"}',
+                metadata_extra={"orgao": "Secretaria de Estado de Saúde"}),
+        _record("c3", text="manutenção de ambulância", base_id="atas_conversacional"),
+    ]
+    documentos.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in registros) + "\n", encoding="utf-8")
+    em_cache = retrieve_module._read_jsonl(documentos)
+    antes = copy.deepcopy(em_cache)
+    filtros = {
+        "orgao": {"operator": "contains", "value": "Fundo Municipal de Saúde", "optional": True},
+        "objeto_auxiliar": {"operator": "==", "value": False, "optional": False},
+        "objeto_termo": {"operator": "contains", "value": "tomograf", "optional": False},
+    }
+
+    resultados = bm25_retrieve("tomógrafo", documents_file=documentos, filters=filtros)
+    retrieve_module._filtrar_por_base(em_cache, filtros)
+    resultados[0]._record["text"] = "alterado fora da busca"
+
+    assert [item.chunk_id for item in resultados] == ["c1"]
+    assert retrieve_module._read_jsonl(documentos) == antes

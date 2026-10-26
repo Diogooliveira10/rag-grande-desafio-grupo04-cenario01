@@ -98,8 +98,10 @@ _RE_EMBEDDING = re.compile(r'"embedding":\s*\[[^\]]*\]\s*,?\s*')
 def _read_jsonl(path: Path, *, sem_vetor: bool = False) -> list[dict[str, Any]]:
     """Registros do arquivo, lidos uma vez enquanto ele não muda.
 
-    Os dicts são compartilhados entre as chamadas: quem precisar alterar um
-    registro copia antes (``dict(record)``), como ``_records_for`` já faz.
+    Os dicts são compartilhados entre as chamadas e ninguém os altera: a busca
+    só lê, e o que sai dela (``_result``) leva cópia própria. Copiar os ~144 mil
+    registros a cada pergunta custava ~0,75 s por seleção. Quem precisar
+    alterar um registro copia antes (``dict(record)``).
 
     ``sem_vetor`` descarta o campo ``embedding`` antes de decodificar a linha:
     com o FAISS ao lado, o vetor não é usado na consulta. Na v7, os vetores dos
@@ -391,6 +393,15 @@ def _filtro_aplicavel(metadata: Mapping[str, Any], key: str, expected: Any) -> b
     return True
 
 
+_CONECTORES_DE_NOME = frozenset({"de", "do", "da", "dos", "das", "e"})
+
+
+@lru_cache(maxsize=1 << 16)
+def _tokens_de_nome(texto: str) -> frozenset[str]:
+    """Tokens de um nome de órgão/unidade: ~1.800 nomes se repetem nos 107 mil contratos."""
+    return frozenset(_tokens(texto))
+
+
 def _matches_filters(metadata: Mapping[str, Any], filters: Mapping[str, Any] | None,
                      *, content: str = "") -> bool:
     if not filters:
@@ -422,9 +433,8 @@ def _matches_filters(metadata: Mapping[str, Any], filters: Mapping[str, Any] | N
                 # PNCP: "Secretaria de Estado de Saúde" casa com "SECRET ESTADO
                 # SAUDE". Exigir cada termo informativo no campo da entidade,
                 # sem procurar no objeto ou fornecedor.
-                conectores = {"de", "do", "da", "dos", "das", "e"}
-                requeridos = set(_tokens(str(value))) - conectores
-                disponiveis = set(_tokens(actual))
+                requeridos = _tokens_de_nome(str(value)) - _CONECTORES_DE_NOME
+                disponiveis = _tokens_de_nome(actual)
                 casa = lambda termo: any(
                     token == termo or (len(token) >= 4 and termo.startswith(token))
                     or (len(termo) >= 4 and token.startswith(termo))
@@ -457,7 +467,7 @@ def _records_for(
         )]
         raw = [record for path in paths for record in _registros_do_indice(path)]
     else:
-        raw = [dict(record) for record in records]
+        raw = records
     filtered: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
     for record in raw:
@@ -509,7 +519,7 @@ def _filtrar_por_base(
     por_base: dict[str, list[dict[str, Any]]] = {}
     for record in records:
         base_id = _record_base_id(record, _metadata_of(record))
-        por_base.setdefault(base_id, []).append(dict(record))
+        por_base.setdefault(base_id, []).append(record)
     selecionados: list[dict[str, Any]] = []
     ignorados: dict[str, dict[str, list[str]]] = {}
     for base_id, registros in por_base.items():
@@ -1599,13 +1609,53 @@ def _identificadores_exatos(r: _Recuperacao) -> list[RetrievalResult]:
     return _resultados_identificador_exato(r.query, r.registros_bm25())
 
 
+# Só as atas repetem muitos trechos da mesma compra (as páginas do PDF); nas
+# demais bases cada chunk já é um registro próprio e não há o que variar.
+_BASES_COM_VARIEDADE = frozenset({"atas_conversacional"})
+_COMPRA_RE = re.compile(r"\d{14}-\d-\d{6}/\d{4}")
+
+
+def _chave_da_compra(item: RetrievalResult) -> str | None:
+    """Compra a que o trecho pertence; ``None`` se a base não entra na regra.
+
+    Usa o número de controle da compra gravado nos extras; se faltar, o do PNCP
+    da ata (``cnpj-d-seq/ano-seqAta``) sem o sufixo da ata; por último, o
+    arquivo de origem, que numa ata é o próprio PDF.
+    """
+    if item.metadata.get("base_id") not in _BASES_COM_VARIEDADE:
+        return None
+    extras = item.metadata.get("extras") or {}
+    for campo in ("numero_controle_compra", "numero_controle_pncp"):
+        achado = _COMPRA_RE.search(str(extras.get(campo) or ""))
+        if achado:
+            return achado.group(0)
+    origem = item.metadata.get("source_file") or item.source_path
+    return f"arquivo:{origem}" if origem else None
+
+
+def _variar_por_compra(query: str, resultados: list[RetrievalResult]) -> tuple[list[RetrievalResult], int]:
+    """No máximo ``RETRIEVAL_MAX_PER_PURCHASE`` trechos por compra à frente do corte.
+
+    Não vale quando a pergunta cita um número do PNCP ou de contrato: aí o
+    usuário quer justamente os trechos daquele registro.
+    """
+    maximo = config.RETRIEVAL_MAX_PER_PURCHASE
+    if maximo <= 0 or _identificadores_pncp(query) or _referencias_contrato(query):
+        return resultados, 0
+    return fusion.limitar_repeticoes(resultados, _chave_da_compra, maximo)
+
+
 def _fundir(r: _Recuperacao, dense: list[RetrievalResult], sparse: list[RetrievalResult],
             candidatos_norma: list[RetrievalResult], identificadores_exatos: list[RetrievalResult],
             corte: int, *, recuperacao_degradada: bool,
             filtros_ignorados: dict[str, dict[str, list[str]]]) -> list[RetrievalResult]:
-    """Stage ``fusao_rrf``: RRF, norma pedida e identificadores exatos à frente."""
+    """Stage ``fusao_rrf``: RRF, variedade por compra, norma pedida e identificadores exatos à frente."""
     with r.span(Stage.FUSAO_RRF, rrf_k=DEFAULT_RRF_K) as span:
-        fused = reciprocal_rank_fusion([dense, sparse], top_k=corte)
+        fused = reciprocal_rank_fusion([dense, sparse])
+        fused, rebaixados = _variar_por_compra(r.query, fused)
+        fused = fused[:corte]
+        span.extra["variedade"] = {"max_por_compra": config.RETRIEVAL_MAX_PER_PURCHASE,
+                                   "rebaixados": rebaixados}
         fused = _priorizar_norma_solicitada(r.query, fused, candidatos_norma, corte)
         fused = _promover_identificadores_exatos(fused, identificadores_exatos, corte)
         for item in fused:
