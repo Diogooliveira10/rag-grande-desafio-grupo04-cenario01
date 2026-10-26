@@ -8,7 +8,7 @@ O corpus **v7-reparo** (`v7-qwen-q8-2026-10-26`) reúne 106.667 registros em
 `contratacoes`, 144.112 chunks e **144.112 vetores Qwen3-Embedding-0.6B.Q8_0**.
 Os arquivos de dados são distribuídos separadamente do código:
 
-**📁 [Baixar o pacote V7 no Google Drive](https://drive.google.com/file/d/1Zgt4b57sXZeGI0M6qz61ePk5h5SWh0vx/view?usp=drive_link)**
+**📁 [Baixar o pacote V7 no Google Drive](https://drive.google.com/drive/folders/14K1K-q9kze5qivG__b0KvkJV4L7buc1r?usp=drive_link)**
 
 Consulte o [inventário](CORPUS_INVENTORY.md), o
 [plano de correção](docs/PLANO_CORRECAO_SQL_PIPELINE_V7.md) e o
@@ -236,8 +236,9 @@ powershell -ExecutionPolicy Bypass -File scripts\setup.ps1   # Windows
 O script cria o `.venv`, instala o `requirements-lock.txt`, copia
 `.env.example` para `.env` (quando falta) e confere os artefatos versionados.
 
-**Dados V7:** baixe o [pacote no Google Drive](https://drive.google.com/file/d/1Zgt4b57sXZeGI0M6qz61ePk5h5SWh0vx/view?usp=drive_link)
-e extraia **na raiz do backend**. Os arquivos grandes ficam fora do Git e já
+**Dados V7:** baixe o ZIP com FTS e seu `.sha256` na
+[pasta do Google Drive](https://drive.google.com/drive/folders/14K1K-q9kze5qivG__b0KvkJV4L7buc1r?usp=drive_link)
+e extraia o ZIP **na raiz do backend**. Os arquivos grandes ficam fora do Git e já
 estão organizados nos caminhos usados pela aplicação:
 
 ```
@@ -262,9 +263,10 @@ O índice do objeto no SQL (`python -m src.structured_db fts`, ≈5 s, +60 MB)
 acelera as contas por objeto ("contratos de ambulância") sem mudar o resultado;
 sem ele, o SQL continua funcionando, só mais devagar. Como o comando altera
 `base_estruturada.sqlite` e o `runtime_bundle.json` confere o hash desse
-arquivo, o índice deve vir pronto no pacote, com o hash atualizado. Rodar o
-comando numa base do pacote faz o `/ready` responder 503 (`hash_divergente`),
-embora as perguntas continuem funcionando.
+arquivo, o pacote com FTS já inclui o índice e o manifesto atualizado;
+não é necessário executar esse comando após a extração. Consulte o checksum
+em [docs/REPARO_V7.md](docs/REPARO_V7.md). Alterar o banco sem atualizar o
+manifesto faz o `/ready` responder 503 (`hash_divergente`).
 
 Ou, sem o Drive, reconstrua do manifesto (lento, ~2h+):
 ```bash
