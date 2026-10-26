@@ -10,7 +10,7 @@
     },
     "database": {
       "path": "data/structured/base_estruturada.sqlite",
-      "sha256": "0894af7df70c814d317208013fbe7abb61e1f6c59c4a95b4062a482710e1bac8"
+      "sha256": "2f18f719b45afa1605f1bf3497f9a1fedd111d41d6236756c77ccbc6344ea0c1"
     },
     "catalog": {
       "path": "data/config/orgaos_corpus.json",
