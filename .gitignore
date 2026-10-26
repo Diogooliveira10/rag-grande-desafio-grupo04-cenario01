@@ -73,3 +73,6 @@ eval/runs/*
 
 # ConfiguraÃ§Ã£o local do editor
 .vscode/
+
+# cópia local do documents.jsonl do v6 usada nas medições (dados ficam fora do Git)
+data/v6_docs/
