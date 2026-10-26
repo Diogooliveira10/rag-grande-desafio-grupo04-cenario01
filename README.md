@@ -4,11 +4,11 @@
 
 Sistema de **Adaptive RAG** sobre contratações públicas do Estado do Rio de Janeiro: dado uma pergunta em linguagem natural, o sistema decide sozinho **onde buscar** (norma, registro estruturado, conversa ou número agregado) antes de buscar, recupera evidência híbrida (densa + BM25 + RRF + rerank) e gera uma resposta citando fontes — ou recusa, quando o caso exige.
 
-O snapshot oficial atual é a **v7-reparo**, com 106.667 contratos, 144.112 chunks e
-143.299 vetores. Os dados grandes (documents.jsonl, SQLite, índices) ficam
-fora do Git e são compartilhados via Google Drive:
+O corpus **v7-reparo** (`v7-qwen-q8-2026-10-26`) reúne 106.667 registros em
+`contratacoes`, 144.112 chunks e **144.112 vetores Qwen3-Embedding-0.6B.Q8_0**.
+Os arquivos de dados são distribuídos separadamente do código:
 
-**📁 [Dados V7 no Google Drive](https://drive.google.com/drive/folders/1GEHoZALIIxp9hYR8V_WhKweRqQkw824r?usp=drive_link)**
+**📁 [Baixar o pacote V7 no Google Drive](https://drive.google.com/file/d/1Zgt4b57sXZeGI0M6qz61ePk5h5SWh0vx/view?usp=drive_link)**
 
 Consulte o [inventário](CORPUS_INVENTORY.md), o
 [plano de correção](docs/PLANO_CORRECAO_SQL_PIPELINE_V7.md) e o
@@ -150,8 +150,7 @@ A escrita usa fila limitada e lotes, coordenados entre processos por SQLite/WAL 
 ## Estrutura do repositório
 
 [Reparo incremental V7](docs/REPARO_V7.md): reutilização dos módulos existentes,
-candidato separado, SQLite compatível, validações curtas e lacunas documentadas.
-O candidato foi promovido: a v7 é a base ativa desde 2026-10-19.
+SQLite compatível, cobertura vetorial, validação e rollback.
 
 ```
 ├── acompanhamento/              ← relato individual + resumo do dia, a cada encontro
@@ -237,18 +236,27 @@ powershell -ExecutionPolicy Bypass -File scripts\setup.ps1   # Windows
 O script cria o `.venv`, instala o `requirements-lock.txt`, copia
 `.env.example` para `.env` (quando falta) e confere os artefatos versionados.
 
-**Dados V7:** os arquivos grandes ficam fora do Git: são **5,3 GB** no total
-(o `documents.jsonl` sozinho tem 629 MB; o `index/`, 4,6 GB). Cada integrante
-baixa na própria máquina. Baixe do Google Drive e copie para as pastas corretas:
-
-**📁 [Dados V7 no Google Drive](https://drive.google.com/drive/folders/1GEHoZALIIxp9hYR8V_WhKweRqQkw824r?usp=drive_link)**
+**Dados V7:** baixe o [pacote no Google Drive](https://drive.google.com/file/d/1Zgt4b57sXZeGI0M6qz61ePk5h5SWh0vx/view?usp=drive_link)
+e extraia **na raiz do backend**. Os arquivos grandes ficam fora do Git e já
+estão organizados nos caminhos usados pela aplicação:
 
 ```
-V7-dados/
-├── documents.jsonl          → data/normalized/
-├── base_estruturada.sqlite  → data/structured/
-└── index/                   → raiz do projeto
+├── data/normalized/documents.jsonl
+├── data/structured/base_estruturada.sqlite
+├── data/config/orgaos_corpus.json
+├── index/
+└── runtime_bundle.json
 ```
+
+Configure no `.env`:
+
+```dotenv
+SNAPSHOT_MANIFEST=runtime_bundle.json
+```
+
+Inicie ou reinicie a API e confira `/ready`. Não distribua o `.env` local.
+Checksum do pacote, validação e rollback em
+[docs/REPARO_V7.md](docs/REPARO_V7.md).
 
 Ou, sem o Drive, reconstrua do manifesto (lento, ~2h+):
 ```bash
@@ -599,7 +607,15 @@ py .\eval\ablacao_rerank.py --candidatos 10 30                 # ablação da re
 
 O relatório (`eval/runs/<run_id>/REPORT.md`) traz rota e recusa (o que define o acerto), citação, confiança, latência e tokens, e o texto de cada resposta. Um caso que dá erro aparece como ERRO sem interromper a rodada. Além de rota, recusa e citação, cada caso pode ter critérios de conteúdo (`deve_conter`, `deve_conter_qualquer`, `nao_deve_conter`, critérios numéricos, fonte esperada e teto de confiança). A rodada auditada mais recente e a análise de cada caso estão em [docs/registro_execucao_v6.md](docs/registro_execucao_v6.md), e o resultado vigente em [ARQUITETURA.md](ARQUITETURA.md). Os casos `G1`–`G3` testam os guardrails do cenário (dados bancários, credenciais em e-mail, juízo de fraude), e `E1`–`E3` os e-mails sintéticos: um e-mail público encontrado com os dados pessoais mascarados e duas recusas de conteúdo restrito (dados bancários e credencial). `I1`–`I4` buscam por identificador: número de controle de contrato e de ata e CNPJ de fornecedor e de órgão. P1.3, P4.2 e P4.3 continuam a pergunta anterior ("esses contratos", "os mesmos contratos"): declaram `depende_de`, e o avaliador manda as perguntas anteriores da persona como `historico` a `pipeline_completo`, como o frontend faz. A ablação do rerank usa outro conjunto, [eval/retrieval_set.jsonl](eval/retrieval_set.jsonl), com o trecho relevante de cada pergunta rotulado; resultado e decisão em [docs/ABLACAO_RERANK.md](docs/ABLACAO_RERANK.md).
 
-**Resultado mais recente (2026-10-24, v7): 35/36 (97%) estável, com uma rodada em 36/36.** As três últimas rodadas completas (`golden-2026-10-24-v7-36-melhorias-1`, `-2` e `-final`) deram 35, 36 e 35. Três mudanças tiraram a oscilação: temperatura 0 nas chamadas do LLM com resposta em JSON (`LLM_TEMPERATURE`; duas rodadas seguidas passaram a dar 35 de 36 respostas idênticas); o avaliador deixou de ler como negada uma insuficiência afirmada em outra oração ("não identifica a modalidade, tornando insuficiente a amostra"; reavaliadas 608 respostas guardadas, nenhuma certa virou errada); e a resposta sem nenhuma fonte citada pede a citação ao LLM uma vez (`retentativa_citacao` no log), ficando com a original se a nova não citar. A falha que resta, quando ocorre, é a P4.3: resposta certa ("não há dados suficientes…"), mas sem fonte citada. Antes, em 2026-10-21 (já com as compras anuladas fora dos cálculos), o resultado era 35/36. A rodada `golden-2026-10-21-v7-36-anuladas` deu 34/36; a P2.2 respondeu certo, mas com "tornando impossível calcular", forma que o gabarito não aceitava, e as mesmas respostas, reavaliadas com o sinônimo incluído, dão 35/36. A falha que resta, a P4.3, é de redação do LLM (responde sem citar a norma) e oscila entre rodadas. Os gabaritos da P1.2, da P4.2 e da P6.1 foram refeitos para a v7, depois de conferidos no SQLite: pediam números e premissas da v6. Histórico das rodadas em [docs/registro_execucao_v6.md](docs/registro_execucao_v6.md).
+**Conferência do complemento (2026-10-26):** o derivado com vetores completos
+deu **35/36 no golden original**. A união de grafias por CNPJ revelou que V1
+omitia 80 registros acentuados da mesma filial Cristália. Após auditoria SQL e
+aprovação, somente seus números foram atualizados para 842 registros e
+R$ 1.593.059.934,13; V1 passou na reexecução isolada (1/1). Não houve nova rodada
+completa após a revisão. Busca: 47 casos sem regressão. Evidências e limites em
+[docs/REPARO_V7.md](docs/REPARO_V7.md).
+
+**Histórico (2026-10-24, v7): 35/36 (97%) estável, com uma rodada em 36/36.** As três últimas rodadas completas (`golden-2026-10-24-v7-36-melhorias-1`, `-2` e `-final`) deram 35, 36 e 35. Três mudanças tiraram a oscilação: temperatura 0 nas chamadas do LLM com resposta em JSON (`LLM_TEMPERATURE`; duas rodadas seguidas passaram a dar 35 de 36 respostas idênticas); o avaliador deixou de ler como negada uma insuficiência afirmada em outra oração ("não identifica a modalidade, tornando insuficiente a amostra"; reavaliadas 608 respostas guardadas, nenhuma certa virou errada); e a resposta sem nenhuma fonte citada pede a citação ao LLM uma vez (`retentativa_citacao` no log), ficando com a original se a nova não citar. A falha que resta, quando ocorre, é a P4.3: resposta certa ("não há dados suficientes…"), mas sem fonte citada. Antes, em 2026-10-21 (já com as compras anuladas fora dos cálculos), o resultado era 35/36. A rodada `golden-2026-10-21-v7-36-anuladas` deu 34/36; a P2.2 respondeu certo, mas com "tornando impossível calcular", forma que o gabarito não aceitava, e as mesmas respostas, reavaliadas com o sinônimo incluído, dão 35/36. A falha que resta, a P4.3, é de redação do LLM (responde sem citar a norma) e oscila entre rodadas. Os gabaritos da P1.2, da P4.2 e da P6.1 foram refeitos para a v7, depois de conferidos no SQLite: pediam números e premissas da v6. Histórico das rodadas em [docs/registro_execucao_v6.md](docs/registro_execucao_v6.md).
 
 **9. Subir a API HTTP (backend do frontend)**
 
