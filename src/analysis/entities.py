@@ -233,7 +233,10 @@ _GENERICAS_DE_FORNECEDOR = frozenset(
     # DE ABREU", o único com "municipio" no nome (A1 e A2 do golden set).
     "municipio municipios prefeitura prefeituras estado estadual governo secretaria "
     "camara fundo uf tecnologia limpeza urbana saude educacao informatica "
-    "conservacao manutencao transporte alimentacao escolar material materiais".split()
+    "conservacao manutencao transporte alimentacao escolar material materiais "
+    # "Defensoria Pública do Estado do Rio de Janeiro" virava o fornecedor
+    # "CEAP RIO DE JANEIRO ... GESTÃO PÚBLICA" (pública + rio + janeiro).
+    "publica publico publicas publicos".split()
 )
 
 
@@ -421,6 +424,25 @@ def _nome_curto_de_fornecedor(palavra: str, todas: Sequence[tuple[str, int, int]
     return total == 0 or do_fornecedor / total >= _PARCELA_MINIMA_DO_PROPRIO_FORNECEDOR
 
 
+def _escrito_como_nome_proprio(citados: Sequence[str], original: Optional[str]) -> bool:
+    """Toda palavra informativa do nome começa com maiúscula na pergunta original."""
+    if not original:
+        return False
+    maiusculas = {_normalize(p) for p in re.findall(r"\w+", original) if p[:1].isupper()}
+    informativas = [p for p in citados if p not in _PALAVRAS_FUNCIONAIS]
+    return bool(informativas) and all(p in maiusculas for p in informativas)
+
+
+def _parte_de_orgao_citado(citados: Sequence[str], catalogo: "_Catalogo",
+                           todas: Sequence[tuple[str, int, int]]) -> bool:
+    """As palavras do nome pertencem a um órgão do catálogo citado por inteiro na
+    pergunta: "Banco Central do Brasil" é o órgão, não "UNIODONTO DO BRASIL CENTRAL"."""
+    na_pergunta = {palavra for palavra, _, _ in todas}
+    informativas = {p for p in citados if p not in _PALAVRAS_FUNCIONAIS}
+    return any(tokens and set(tokens) <= na_pergunta and informativas <= set(tokens)
+               for tokens in catalogo.tokens)
+
+
 def _extrair_fornecedor(texto: str, bloqueados: Sequence[Span] = (), *,
                         original: Optional[str] = None) -> tuple[Optional[str], Optional[Span]]:
     """Fornecedor do snapshot citado na pergunta, e o trecho que o citou.
@@ -477,9 +499,14 @@ def _extrair_fornecedor(texto: str, bloqueados: Sequence[Span] = (), *,
             palavras_objetos = _palavras_dos_objetos() or {}
             frequencias = [palavras_objetos.get(p, (0, 0)) for p in citados
                            if p not in _PALAVRAS_FUNCIONAIS]
-            # Uma primeira palavra comum não basta para descartar um nome composto.
-            if frequencias and all(total and proprio / total < _PARCELA_MINIMA_DO_PROPRIO_FORNECEDOR
-                                   for total, proprio in frequencias):
+            # Uma primeira palavra comum não basta para descartar um nome composto,
+            # e um nome escrito como nome próprio também não: "casa" e "moeda" são
+            # assunto de contrato, mas "Contratos da Casa da Moeda" cita a empresa;
+            # "contratos de merenda escolar" continua sendo assunto.
+            if (frequencias and all(total and proprio / total < _PARCELA_MINIMA_DO_PROPRIO_FORNECEDOR
+                                    for total, proprio in frequencias)
+                    and not (len(citados) >= 2 and _escrito_como_nome_proprio(citados, original)
+                             and not _parte_de_orgao_citado(citados, catalogo, todas))):
                 continue
         if len(citados) < 2 and not tem_gatilho and not _nome_curto_de_fornecedor(primeira, todas, comeca):
             continue

@@ -428,8 +428,10 @@ def _matches_filters(metadata: Mapping[str, Any], filters: Mapping[str, Any] | N
                 continue
             return False
         for operator, value in _condicoes(expected):
-            if key == "fornecedor" and operator == "contains":
-                from src.analysis.suppliers import raizes_do_fornecedor, raiz_cnpj
+            # A análise pede "==" e a API costuma pedir "contains": nos dois, o
+            # mesmo CNPJ raiz é a mesma empresa, com qualquer grafia do nome.
+            if key == "fornecedor" and operator in {"==", "contains"}:
+                from src.analysis.suppliers import mesma_razao_social, raizes_do_fornecedor, raiz_cnpj
                 raizes = raizes_do_fornecedor(str(value))
                 cnpj = _metadata_value(metadata, "fornecedor_cnpj")
                 # O payload vetorial antigo só tem o nome. Resolva sua grafia
@@ -438,7 +440,8 @@ def _matches_filters(metadata: Mapping[str, Any], filters: Mapping[str, Any] | N
                 if raizes and raizes_atuais:
                     if not set(raizes).intersection(raizes_atuais):
                         return False
-                elif not _condicao_satisfeita(actual, operator, value):
+                elif not (_condicao_satisfeita(actual, operator, value)
+                          or mesma_razao_social(str(actual), str(value), exata=operator == "==")):
                     return False
             elif key in {"orgao", "unidade_nome"} and operator == "contains" and isinstance(actual, str):
                 # Nomes admitem qualificadores intermediários e abreviações do
@@ -997,9 +1000,8 @@ def pre_carregar_indices(
             if path.exists():
                 _read_jsonl(path)
                 lidos += 1
-        # Tokeniza os chunks para o BM25 agora, e não na primeira pergunta.
-        for record in _read_jsonl(documents_file):
-            _termos(str(record.get("text", "")))
+        # Monta o índice da BM25 agora, e não na primeira pergunta.
+        _indice_lexico(documents_file, construir=True)
     except Exception as erro:
         import logging
 
@@ -1277,13 +1279,32 @@ def bm25_retrieve(
     query_terms = _tokens(query)
     if not query_terms or not documents:
         return []
+    # Com registros recebidos (recorte já filtrado), usa o índice se ele já
+    # existe; lendo o próprio documents.jsonl, monta-o na primeira vez.
+    indice = _indice_lexico(documents_file, construir=records is None)
+    melhores = _bm25_pelo_indice(indice, query_terms, documents, top_k) if indice is not None else None
+    if melhores is None:
+        melhores = _bm25_por_varredura(query_terms, documents, top_k)
+    return [_result(record, score, text) for score, _, record, text in melhores]
+
+
+_Pontuado = tuple[float, str, Mapping[str, Any], str]
+
+
+def _chunk_id_do_registro(record: Mapping[str, Any]) -> str:
+    return str(record.get("chunk_id") or _metadata_of(record).get("chunk_id", ""))
+
+
+def _bm25_por_varredura(query_terms: list[str], documents: list[tuple[Mapping[str, Any], str]],
+                        top_k: int) -> list[_Pontuado]:
+    """BM25 trecho a trecho: a referência do índice e o caminho sem ele."""
     tokenized = [(record, text, *_termos(text)) for record, text in documents]
     average_length = sum(length for _, _, _, length in tokenized) / len(tokenized)
     # Só os termos da pergunta entram na conta: a frequência é a mesma que a
     # contagem sobre todos os termos daria para eles.
     document_frequency = {term: sum(1 for _, _, counts, _ in tokenized if term in counts)
                           for term in set(query_terms)}
-    scored: list[tuple[float, str, Mapping[str, Any], str]] = []
+    scored: list[_Pontuado] = []
     for record, text, counts, length in tokenized:
         score = 0.0
         for term in query_terms:
@@ -1293,12 +1314,54 @@ def bm25_retrieve(
             denominator = counts[term] + 1.5 * (1 - 0.75 + 0.75 * length / (average_length or 1))
             score += idf * counts[term] * 2.5 / denominator
         if score > 0:
-            chunk_id = str(record.get("chunk_id") or _metadata_of(record).get("chunk_id", ""))
-            scored.append((score, chunk_id, record, text))
+            scored.append((score, _chunk_id_do_registro(record), record, text))
     # Só os top_k viram RetrievalResult: com a v7, quase todos os 106 mil
     # contratos pontuam e montar o resultado de cada um custava ~3 s.
-    melhores = heapq.nsmallest(top_k, scored, key=lambda item: (-item[0], item[1]))
-    return [_result(record, score, text) for score, _, record, text in melhores]
+    return heapq.nsmallest(top_k, scored, key=lambda item: (-item[0], item[1]))
+
+
+def _bm25_pelo_indice(indice: Any, query_terms: list[str], documents: list[tuple[Mapping[str, Any], str]],
+                      top_k: int) -> list[_Pontuado] | None:
+    """A mesma BM25 pelo índice invertido; ``None`` se algum texto não está nele."""
+    import numpy as np
+
+    ids = indice.ids_dos_textos([text for _, text in documents])
+    if ids is None:
+        return None
+    notas = indice.notas(query_terms, ids)
+    positivos = np.flatnonzero(notas > 0)
+    if len(positivos) > top_k:
+        # Só quem pode entrar no top_k vira tupla: os empatados no corte entram
+        # todos, e o desempate por chunk_id decide, como na varredura.
+        corte = np.partition(notas[positivos], len(positivos) - top_k)[len(positivos) - top_k]
+        positivos = positivos[notas[positivos] >= corte]
+    escolhidos = [(float(notas[i]), _chunk_id_do_registro(documents[i][0]), documents[i][0], documents[i][1])
+                  for i in positivos]
+    return heapq.nsmallest(top_k, escolhidos, key=lambda item: (-item[0], item[1]))
+
+
+# documents.jsonl -> (mtime, tamanho, índice), refeito quando o arquivo muda.
+_INDICE_LEXICO_CACHE: dict[str, tuple[int, int, Any]] = {}
+
+
+def _indice_lexico(documents_file: Path, *, construir: bool) -> Any:
+    """Índice invertido dos textos do ``documents.jsonl``; ``None`` sem o arquivo
+    ou, com ``construir=False``, enquanto ninguém o montou."""
+    try:
+        stat = Path(documents_file).stat()
+    except OSError:
+        return None
+    chave = str(documents_file)
+    guardado = _INDICE_LEXICO_CACHE.get(chave)
+    if guardado and guardado[0] == stat.st_mtime_ns and guardado[1] == stat.st_size:
+        return guardado[2]
+    if not construir:
+        return None
+    from src.lexical_index import IndiceLexico
+
+    indice = IndiceLexico((str(record.get("text", "")) for record in _read_jsonl(Path(documents_file))), _tokens)
+    _INDICE_LEXICO_CACHE[chave] = (stat.st_mtime_ns, stat.st_size, indice)
+    return indice
 
 
 def reciprocal_rank_fusion(

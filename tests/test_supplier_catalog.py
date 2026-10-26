@@ -113,7 +113,9 @@ def test_integridade_do_catalogo_inclui_identidades_e_apelidos(catalogo):
 
 @pytest.mark.parametrize("arquivo", ["golden_set.jsonl", "retrieval_set.jsonl"])
 def test_avaliacoes_nao_ganham_filtros_espurios(arquivo):
-    # Só V1 cita Cristália pelo nome. I03/I08 citam CNPJ: não são nomes.
+    # Só V1 e I04 citam a empresa pelo nome ("Cristália", "Gente Seguradora").
+    # I03/I08 citam CNPJ: não são nomes. Na I04, o filtro mantém o contrato
+    # 75/2025 em 1º na busca (a grafia "S.A" do vetor casa pela raiz do CNPJ).
     path = Path(__file__).resolve().parents[1] / "eval" / arquivo
     encontrados = {}
     for linha in path.read_text(encoding="utf-8").splitlines():
@@ -122,4 +124,31 @@ def test_avaliacoes_nao_ganham_filtros_espurios(arquivo):
         if fornecedor:
             encontrados[caso["id"]] = fornecedor
     assert encontrados == ({"V1": "CRISTALIA PRODUTOS QUIMICOS FARMACEUTICOS LTDA"}
-                            if arquivo == "golden_set.jsonl" else {})
+                            if arquivo == "golden_set.jsonl" else {"I04": "GENTE SEGURADORA SA"})
+
+
+@pytest.mark.parametrize("nome,procurado,exata,esperado", [
+    ("GENTE SEGURADORA S.A", "GENTE SEGURADORA SA", True, True),
+    ("GENTE SEGURADORA S/A", "GENTE SEGURADORA SA", True, True),
+    ("CRISTALIA PRODUTOS QUIMICOS FARMACEUTICOS LTDA.", "CRISTALIA PRODUTOS QUIMICOS FARMACEUTICOS LTDA", True, True),
+    ("OUTRA SEGURADORA SA", "GENTE SEGURADORA SA", True, False),
+    ("GENTE SEGURADORA SA", "GENTE", True, False),
+    ("GENTE SEGURADORA SA", "GENTE", False, True),
+    ("AGENTE SEGURADORA SA", "GENTE SEGURADORA", False, False),
+])
+def test_mesma_razao_social_ignora_pontuacao_e_forma_juridica(nome, procurado, exata, esperado):
+    from src.analysis.suppliers import mesma_razao_social
+    assert mesma_razao_social(nome, procurado, exata=exata) is esperado
+
+
+def test_filtro_de_fornecedor_com_igualdade_usa_a_raiz_do_cnpj(monkeypatch):
+    """A análise pede "==": a grafia do vetor ("S.A") casa pela mesma raiz do CNPJ."""
+    import src.retrieve as retrieve_module
+    from src.analysis import suppliers
+
+    monkeypatch.setattr(suppliers, "raizes_do_fornecedor",
+                        lambda nome: ("90180605",) if "GENTE" in nome.upper() else ())
+    filtro = {"fornecedor": {"operator": "==", "value": "GENTE SEGURADORA SA", "optional": False}}
+    assert retrieve_module._matches_filters({"fornecedor": "GENTE SEGURADORA S.A"}, filtro)
+    assert not retrieve_module._matches_filters({"fornecedor": "OUTRA SEGURADORA SA"}, filtro)
+

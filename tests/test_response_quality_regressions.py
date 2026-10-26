@@ -17,10 +17,16 @@ BASES = [Natureza.ESTRUTURADA]
 def catalogo(tmp_path, monkeypatch):
     path = tmp_path / "catalogo.json"
     path.write_text(json.dumps({
-        "nomes": ["CASA DA MOEDA DO BRASIL", "BANCO CENTRAL DO BRASIL"],
-        "fornecedores": ["CASA DA MOEDA DO BRASIL CMB", "CASA DOS PARAFUSOS LTDA"],
+        "nomes": ["CASA DA MOEDA DO BRASIL", "BANCO CENTRAL DO BRASIL",
+                  "DEFENSORIA PUBLICA DO ESTADO DO RIO DE JANEIRO"],
+        "fornecedores": ["CASA DA MOEDA DO BRASIL CMB", "CASA DOS PARAFUSOS LTDA",
+                         "MERENDA ESCOLAR DO SUL LTDA", "UNIODONTO DO BRASIL CENTRAL",
+                         "CEAP RIO DE JANEIRO GESTAO PUBLICA LIMITADA"],
         "municipios": [], "siglas": {},
-        "palavras_objetos": {"casa": [567, 0]},
+        # Valores do catálogo da v7: "casa" e "moeda" são assunto de contrato
+        # (aparecem no objeto e nunca no nome do fornecedor desses contratos).
+        "palavras_objetos": {"casa": [567, 0], "moeda": [43, 0], "merenda": [300, 0], "escolar": [900, 0],
+                             "brasil": [2000, 10], "central": [400, 2]},
     }), encoding="utf-8")
     # O catálogo é lido em src/analysis/entities.py: a troca é feita lá.
     from src.analysis import entities
@@ -59,12 +65,34 @@ def test_vale_transporte_continua_objeto():
 @pytest.mark.parametrize("q", [
     "Quais contratos têm como fornecedor a CASA DA MOEDA?",
     "Contratos da Casa da Moeda em 2025",
+    "Quanto a Casa da Moeda recebeu?",
+    "Contratos da CASA DA MOEDA",
 ])
 def test_fornecedor_nao_vira_orgao(catalogo, q):
     filtros = qa._analisar(q)
     assert filtros.filtros_analiticos["fornecedor"] == "CASA DA MOEDA DO BRASIL CMB"
     consulta = sq.detectar_consulta(q, filtros, BASES)
     assert consulta.termos_objeto == () and not consulta.orgao_termos
+
+
+@pytest.mark.parametrize("q", [
+    "Contratos do Banco Central do Brasil acima de 100 milhões",
+    "Contratações da Defensoria Pública do Estado do Rio de Janeiro",
+])
+def test_orgao_citado_por_inteiro_nao_vira_fornecedor(catalogo, q):
+    """Nome de órgão com maiúscula não vira a empresa que tem as mesmas palavras
+    ("UNIODONTO DO BRASIL CENTRAL", "CEAP RIO DE JANEIRO ... PUBLICA")."""
+    assert "fornecedor" not in qa._analisar(q).filtros_analiticos
+
+
+@pytest.mark.parametrize("q", [
+    "Contratos de merenda escolar em 2025",
+    "Merenda escolar em 2025",
+])
+def test_assunto_comum_em_minusculas_nao_vira_fornecedor(catalogo, q):
+    """Nome de empresa com palavras de assunto ("MERENDA ESCOLAR DO SUL") só vira
+    filtro escrito como nome próprio ou com gatilho ("empresa ...")."""
+    assert "fornecedor" not in qa._analisar(q).filtros_analiticos
 
 
 @pytest.mark.parametrize("q", [
