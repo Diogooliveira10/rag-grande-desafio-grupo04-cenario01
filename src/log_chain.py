@@ -114,6 +114,9 @@ class Relatorio:
     linhas: int = 0
     encadeadas: int = 0
     antigas: int = 0
+    # Com chave: quantas linhas conferem com ela e quantas são de antes dela (SHA-256).
+    com_chave: int = 0
+    sem_chave: int = 0
     arquivos: int = 0
     ultimo_hash: str = GENESE
     problemas: list[str] = field(default_factory=list)
@@ -154,7 +157,15 @@ def verificar(arquivos: Iterable[Path], chave: str = "") -> Relatorio:
                 if esperado is not None and registro.get("hash_anterior") != esperado:
                     relatorio.problemas.append(f"{onde}: hash_anterior não bate com a linha anterior "
                                                "(linha apagada, inserida ou fora de ordem)")
-                if calcular_hash(registro, chave) != registro["hash"]:
+                if calcular_hash(registro, chave) == registro["hash"]:
+                    if chave:
+                        relatorio.com_chave += 1
+                elif chave and not relatorio.com_chave and calcular_hash(registro) == registro["hash"]:
+                    # Linha gravada antes de a chave existir (SHA-256). Só vale antes da
+                    # primeira linha com chave: essa guarda o hash da última sem chave,
+                    # então reescrever o trecho antigo quebra a corrente ali.
+                    relatorio.sem_chave += 1
+                else:
                     relatorio.problemas.append(f"{onde}: conteúdo alterado (ou chave diferente)")
                 esperado = registro["hash"]
     relatorio.ultimo_hash = esperado or GENESE
@@ -177,6 +188,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     relatorio = verificar(arquivos, config.LOG_CHAIN_KEY)
     print(f"{relatorio.arquivos} arquivos, {relatorio.linhas} linhas "
           f"({relatorio.encadeadas} encadeadas, {relatorio.antigas} anteriores à cadeia)")
+    if config.LOG_CHAIN_KEY:
+        print(f"com chave: {relatorio.com_chave}; de antes da chave (SHA-256): {relatorio.sem_chave}")
     for problema in relatorio.problemas[:50]:
         print(f"QUEBRA {problema}")
     if len(relatorio.problemas) > 50:
