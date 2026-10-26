@@ -10,13 +10,13 @@ import json
 import os
 import re
 import unicodedata
-from typing import Literal
+from typing import Callable, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.obs import Stage, default_logger, token_usage_from_response
 from src.router import _rotear, inferir_motivo_recusa
-from src.schema import ConfidenceLevel, RAGResponse, RefusalReason
+from src.schema import ConfidenceLevel, RAGResponse, RefusalReason, RouteDecision
 from src.sensitivity import mascarar
 
 CONVERSATION_MODE = os.getenv("CONVERSATION_MODE", "llm").strip()
@@ -170,65 +170,99 @@ def tentativa_de_injecao(query: str) -> bool:
     """
     if not isinstance(query, str):
         return False
-    normalized = "".join(character for character in unicodedata.normalize("NFKD", query.casefold())
+    return bool(_TENTATIVA_DE_INJECAO.search(_normalizar(query)))
+
+
+_RESPOSTA_DE_PROVENIENCIA = (
+    "O acervo do NEXO RJ reúne registros de contratações do PNCP relacionados ao Rio de Janeiro, "
+    "atas e documentos normativos de fontes públicas. Também há conversas sintéticas: "
+    "cenários fictícios de teste, não comprovação de fatos reais. As consultas usam um snapshot "
+    "local, não uma atualização em tempo real nem um censo de todas as contratações. "
+    "Conversas dos usuários não são fonte documental do PNCP. Nas respostas factuais, "
+    "as fontes indicam os registros usados."
+)
+
+# Respostas fixas, sem LLM: a primeira regra que reconhece a mensagem responde.
+# Regra nova é uma linha aqui, sem mexer nas outras.
+_RESPOSTAS_FIXAS: tuple[tuple[Callable[[str], bool], str], ...] = (
+    (_GREETING.fullmatch, "Olá! Estou aqui para ajudar. " + _CAPABILITIES),
+    (_THANKS.fullmatch, "De nada! Se quiser, faça outra pergunta ou explore os documentos do acervo."),
+    (_GOODBYE.fullmatch, "Até mais! Estarei aqui quando quiser consultar o acervo novamente."),
+    (_PROVENIENCIA.fullmatch, _RESPOSTA_DE_PROVENIENCIA),
+    (_pedido_de_ajuda, "Sou o NEXO RJ, assistente de consulta ao acervo do projeto. " + _CAPABILITIES),
+)
+
+# Pedido de texto ("resuma", "revise este e-mail") é conversa mesmo citando
+# contratos: o LLM decide. Comparado sem acento e em minúsculas.
+_PEDIDO_DE_TEXTO = re.compile(
+    r"\b(?:resum[aei]\w*|revis[ae]\w*|reescrev\w*|reformul[ae]\w*|traduz\w*|corrij\w*|melhor[ae]\w*"
+    r"|redij\w*|redigir|escrev[aei]\w*|rascunho|elabor[ae]\w*)\b"
+)
+_RECUSAS_DO_PIPELINE = {RefusalReason.DADOS_BANCARIOS, RefusalReason.CREDENCIAIS_VAZADAS,
+                        RefusalReason.JUIZO_LEGALIDADE}
+
+
+def _normalizar(query: str) -> str:
+    """Minúsculas, sem acento nem pontuação, espaços únicos."""
+    sem_acento = "".join(character for character in unicodedata.normalize("NFKD", query.casefold())
                          if not unicodedata.combining(character))
-    return bool(_TENTATIVA_DE_INJECAO.search(" ".join(re.sub(r"[^\w\s]", " ", normalized).split())))
+    return " ".join(re.sub(r"[^\w\s]", " ", sem_acento).split())
+
+
+def _resposta_fixa(normalized: str) -> Optional[str]:
+    return next((resposta for reconhece, resposta in _RESPOSTAS_FIXAS if reconhece(normalized)), None)
+
+
+def _precisa_do_modelo(query: str, normalized: str, route: RouteDecision) -> bool:
+    """O LLM só decide entre conversa e consulta quando as regras não decidem.
+
+    Consulta evidente não paga a chamada (8 s de mediana nos logs de outubro;
+    em 248 de 268 chamadas a resposta era "consulta"): roteador com bases
+    escolhidas, sem pedido de texto e sem pergunta sobre o próprio sistema.
+    """
+    if CONVERSATION_MODE != "llm":
+        return False
+    if route.bases_selecionadas and (
+        len(query) < 160 or not (_SOBRE_O_SISTEMA.search(normalized) or _PEDIDO_DE_TEXTO.search(normalized))
+    ):
+        return False
+    # Pergunta de fato fora do acervo ("Qual é a capital da França?") não é
+    # conversa: o LLM a classificava assim e respondia de conhecimento geral.
+    # Vai ao pipeline, que recusa por falta de evidência no acervo.
+    if _PERGUNTA_FACTUAL.match(normalized) and not _SOBRE_O_SISTEMA.search(normalized):
+        return False
+    return True
+
+
+def _conversa(query: str, answer: str) -> RAGResponse:
+    return RAGResponse(query=query, answer=answer, bases_consultadas=[], sources_used=[],
+                       confidence_level=ConfidenceLevel.BAIXA, is_refusal=False, refusal_reason=None)
 
 
 def resposta_conversacional(query: str, *, run_id: str = "sem-run-id",
                            query_id: str = "sem-query-id") -> RAGResponse | None:
+    """Resposta de conversa (cumprimento, ajuda, injeção...) ou ``None`` = é consulta."""
     if not isinstance(query, str):
         return None
-    normalized = "".join(character for character in unicodedata.normalize("NFKD", query.casefold())
-                         if not unicodedata.combining(character))
-    normalized = " ".join(re.sub(r"[^\w\s]", " ", normalized).split())
+    normalized = _normalizar(query)
     if not normalized:
         return None
     if _TENTATIVA_DE_INJECAO.search(normalized):
         # Pedido de credencial, dado bancário ou juízo de legalidade junto da
         # injeção segue para a recusa própria do pipeline.
-        if inferir_motivo_recusa(_rotear(query).justificativa) in {
-            RefusalReason.DADOS_BANCARIOS, RefusalReason.CREDENCIAIS_VAZADAS,
-            RefusalReason.JUIZO_LEGALIDADE,
-        }:
+        if inferir_motivo_recusa(_rotear(query).justificativa) in _RECUSAS_DO_PIPELINE:
             return None
-        answer = _RESPOSTA_A_INJECAO
-    elif _GREETING.fullmatch(normalized):
-        answer = "Olá! Estou aqui para ajudar. " + _CAPABILITIES
-    elif _THANKS.fullmatch(normalized):
-        answer = "De nada! Se quiser, faça outra pergunta ou explore os documentos do acervo."
-    elif _GOODBYE.fullmatch(normalized):
-        answer = "Até mais! Estarei aqui quando quiser consultar o acervo novamente."
-    elif _PROVENIENCIA.fullmatch(normalized):
-        answer = (
-            "O acervo do NEXO RJ reúne registros de contratações do PNCP relacionados ao Rio de Janeiro, "
-            "atas e documentos normativos de fontes públicas. Também há conversas sintéticas: "
-            "cenários fictícios de teste, não comprovação de fatos reais. As consultas usam um snapshot "
-            "local, não uma atualização em tempo real nem um censo de todas as contratações. "
-            "Conversas dos usuários não são fonte documental do PNCP. Nas respostas factuais, "
-            "as fontes indicam os registros usados."
-        )
-    elif _pedido_de_ajuda(normalized):
-        answer = "Sou o NEXO RJ, assistente de consulta ao acervo do projeto. " + _CAPABILITIES
-    else:
-        route = _rotear(query)
-        reason = inferir_motivo_recusa(route.justificativa)
-        if reason in {RefusalReason.DADOS_BANCARIOS, RefusalReason.CREDENCIAIS_VAZADAS,
-                      RefusalReason.JUIZO_LEGALIDADE} or (
-            reason == RefusalReason.FORA_DE_ESCOPO and route.confidence >= 0.9
-        ):
-            return None
-        # Consultas curtas já reconhecidas seguem diretamente para o RAG.
-        if CONVERSATION_MODE != "llm" or (len(query) < 160 and route.bases_selecionadas):
-            return None
-        # Pergunta de fato fora do acervo ("Qual é a capital da França?") não é
-        # conversa: o LLM a classificava assim e respondia de conhecimento geral.
-        # Vai ao pipeline, que recusa por falta de evidência no acervo.
-        if _PERGUNTA_FACTUAL.match(normalized) and not _SOBRE_O_SISTEMA.search(normalized):
-            return None
-        decision = _interpret_interaction(query, run_id=run_id, query_id=query_id)
-        if decision is None or decision.tipo != "conversa":
-            return None
-        answer = mascarar(decision.answer)[0]
-    return RAGResponse(query=query, answer=answer, bases_consultadas=[], sources_used=[],
-                       confidence_level=ConfidenceLevel.BAIXA, is_refusal=False, refusal_reason=None)
+        return _conversa(query, _RESPOSTA_A_INJECAO)
+    fixa = _resposta_fixa(normalized)
+    if fixa is not None:
+        return _conversa(query, fixa)
+    route = _rotear(query)
+    reason = inferir_motivo_recusa(route.justificativa)
+    if reason in _RECUSAS_DO_PIPELINE or (reason == RefusalReason.FORA_DE_ESCOPO and route.confidence >= 0.9):
+        return None
+    if not _precisa_do_modelo(query, normalized, route):
+        return None
+    decision = _interpret_interaction(query, run_id=run_id, query_id=query_id)
+    if decision is None or decision.tipo != "conversa":
+        return None
+    return _conversa(query, mascarar(decision.answer)[0])

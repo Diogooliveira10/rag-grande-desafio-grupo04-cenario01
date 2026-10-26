@@ -28,8 +28,11 @@ import json
 import os
 import re
 import unicodedata
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Sequence
+
+import config
 
 from pydantic import BaseModel, Field
 
@@ -38,6 +41,7 @@ from src.sensitivity import mascarar
 
 # llm = reescreve continuações com o modelo; qualquer outro valor desliga.
 REFORMULACAO_MODE = os.getenv("REFORMULACAO_MODE", "llm").strip()
+REFORMULACAO_TIMEOUT = float(config.REFORMULACAO_TIMEOUT)
 
 # Quantas trocas anteriores entram no prompt (as mais recentes) e quanto de
 # cada uma: a janela do modelo é pequena e o histórico não precisa ser inteiro.
@@ -76,7 +80,7 @@ class Reformulacao:
 # Filtro determinístico: a pergunta depende do que veio antes?
 # --------------------------------------------------------------------------
 
-_PISTAS = tuple(
+_PISTAS_FORTES = tuple(
     re.compile(padrao)
     for padrao in (
         r"\bmesm[oa]s?\b",
@@ -87,10 +91,16 @@ _PISTAS = tuple(
         r"\b(?:d|n)?(?:isso|isto)\b",
         r"\b(?:d|n)?aquel[ea]s?\b|\baquilo\b",
         r"\b(?:ele|ela|eles|elas|dele|dela|deles|delas)\b",
-        r"\b(?:citad|mencionad|encontrad|listad|apresentad|retornad|supracitad)[oa]s?\b",
         r"\b(?:acima|anterior|anteriores)\b",
     )
 )
+_PISTAS_FRACAS = tuple(
+    re.compile(padrao)
+    for padrao in (
+        r"\b(?:citad|mencionad|encontrad|listad|apresentad|retornad|supracitad)[oa]s?\b",
+    )
+)
+_PISTAS = _PISTAS_FORTES + _PISTAS_FRACAS
 # Abre a frase como continuação ("E em 2024?"). Checado no texto original (com
 # acento e pontuação), para "é possível…" e "e-mail" não contarem como "e".
 _ABERTURA = re.compile(r"^\s*(?:e|então|entao|também|tambem|mas|agora)[\s,]+\S")
@@ -108,9 +118,9 @@ def _sem_acento(texto: str) -> str:
 def parece_continuacao(query: str) -> bool:
     """True se a pergunta se refere a algo dito antes ("os mesmos", "desses", "E em 2024?").
 
-    Conservador de propósito para o lado de reescrever: um falso positivo custa
-    uma chamada ao modelo (que devolve a frase como veio); um falso negativo
-    perde o contexto.
+    Pistas fortes sempre indicam continuação. Pistas fracas só contam quando a
+    pergunta não traz seu próprio ano, para não reescrever perguntas completas
+    como "Contratos encontrados em 2025?".
     """
     if not isinstance(query, str):
         return False
@@ -119,7 +129,11 @@ def parece_continuacao(query: str) -> bool:
     if not normalizado:
         return False
     palavras = len(normalizado.split())
-    if any(pista.search(normalizado) for pista in _PISTAS):
+    if any(pista.search(normalizado) for pista in _PISTAS_FORTES):
+        return True
+    if _ANO.search(normalizado) and any(pista.search(normalizado) for pista in _PISTAS_FRACAS):
+        return False
+    if any(pista.search(normalizado) for pista in _PISTAS_FRACAS):
         return True
     if palavras <= _MAX_PALAVRAS_ABERTURA and _ABERTURA.match(query.casefold()):
         return True
@@ -235,6 +249,51 @@ _SO_ANO = re.compile(
 )
 
 
+def _regra_troca_de_ano(query: str, turnos: list[tuple[str, str]]) -> tuple[bool, str | None]:
+    if not so_troca_o_ano(query):
+        return False, None
+    return True, _com_contexto(query, turnos)
+
+
+def _regra_troca_de_lugar(query: str, turnos: list[tuple[str, str]]) -> tuple[bool, str | None]:
+    texto = " ".join(re.sub(r"[^\w\s]", " ", _sem_acento(query)).split())
+    if not texto:
+        return False, None
+    if _ANO.search(texto):
+        # perguntas com ano próprio podem ser completas; a regra é conservadora.
+        return False, None
+    padrao = (
+        r"^(?:e|entao|entao|agora|tambem|também|mas)\s+"
+        r"(?:em|no|na|no\s+ano\s+de|na\s+cidade\s+de|na\s+regiao\s+de)?\s*"
+        r"(?:em|no|na)\s+[a-zA-ZÀ-ÖØ-öø-ÿ]+(?:\s+[a-zA-ZÀ-ÖØ-öø-ÿ]+){0,4}\??$"
+    )
+    if not re.match(padrao, texto, flags=re.IGNORECASE):
+        return False, None
+    return True, _com_contexto(query, turnos)
+
+
+def _regra_troca_de_esfera(query: str, turnos: list[tuple[str, str]]) -> tuple[bool, str | None]:
+    texto = " ".join(re.sub(r"[^\w\s]", " ", _sem_acento(query)).split())
+    if not texto:
+        return False, None
+    if _ANO.search(texto):
+        return False, None
+    padrao = (
+        r"^(?:e|entao|entao|agora|tambem|também|mas)\s+"
+        r"(?:s[o0]|os|as)?\s*(?:da|de|dos|das)?\s*esfera\s+(?:federal|estadual|municipal)\??$"
+    )
+    if not re.match(padrao, texto, flags=re.IGNORECASE):
+        return False, None
+    return True, _com_contexto(query, turnos)
+
+
+REGRA_REFORMULACAO = (
+    ("troca_de_ano", _regra_troca_de_ano),
+    ("troca_de_lugar", _regra_troca_de_lugar),
+    ("troca_de_esfera", _regra_troca_de_esfera),
+)
+
+
 def so_troca_o_ano(query: str) -> bool:
     """True para continuação que só muda o ano ("E em 2025?"); a reescrita é por regra."""
     normalizado = " ".join(re.sub(r"[^\w\s]", " ", _sem_acento(query)).split())
@@ -283,16 +342,17 @@ def reformular_pergunta(
         registrar_pulo(run_id=run_id, query_id=query_id, stage=Stage.REFORMULACAO,
                        query=query, motivo=motivo)
         return Reformulacao(query, False, motivo)
-    if so_troca_o_ano(query):
-        # Sem modelo: o qwen3 às vezes raciocina até o teto e não devolve nada
-        # justamente nesse caso, o mais comum de continuação.
-        pergunta = _com_contexto(query, turnos)
-        with default_logger.span(
-            run_id=run_id, query_id=query_id, stage=Stage.REFORMULACAO, input=query,
-            extra={"turnos_no_prompt": len(turnos), "metodo": "regras", "llm_called": False},
-        ) as span:
-            span.set_result({"pergunta": mascarar(pergunta)[0], "reescrita": True, "motivo": "troca_de_ano"})
-        return Reformulacao(pergunta, True, "troca_de_ano")
+
+    for nome_regra, regra in REGRA_REFORMULACAO:
+        reconheceu, pergunta = regra(query, turnos)
+        if reconheceu:
+            with default_logger.span(
+                run_id=run_id, query_id=query_id, stage=Stage.REFORMULACAO, input=query,
+                extra={"turnos_no_prompt": len(turnos), "metodo": "regras", "llm_called": False,
+                       "regra": nome_regra},
+            ) as span:
+                span.set_result({"pergunta": mascarar(pergunta)[0], "reescrita": True, "motivo": nome_regra})
+            return Reformulacao(pergunta, True, nome_regra)
 
     diagnosticos: dict = {}
     with default_logger.span(
@@ -300,7 +360,15 @@ def reformular_pergunta(
         extra={"turnos_no_prompt": len(turnos)},
     ) as span:
         try:
-            saida = (cliente or _cliente_padrao(diagnosticos))(_mensagens(query, turnos))
+            def _chamada_llm():
+                return (cliente or _cliente_padrao(diagnosticos))(_mensagens(query, turnos))
+
+            if cliente is None:
+                with ThreadPoolExecutor(max_workers=1, thread_name_prefix="reformulacao") as executor:
+                    futuro = executor.submit(_chamada_llm)
+                    saida = futuro.result(timeout=REFORMULACAO_TIMEOUT)
+            else:
+                saida = _chamada_llm()
             span.tokens = token_usage_from_response(saida, extra=span.extra)
             span.extra.update(diagnosticos)
             span.modelo = diagnosticos.get("model") or getattr(saida, "model", None)
@@ -314,6 +382,14 @@ def reformular_pergunta(
             pergunta = _com_contexto(query, turnos)
             span.set_result({"pergunta": mascarar(pergunta)[0], "reescrita": True, "motivo": "saida_invalida"})
             return Reformulacao(pergunta, True, "saida_invalida")
+        except FutureTimeoutError as erro:
+            span.extra.update(diagnosticos)
+            span.modelo = diagnosticos.get("model")
+            span.extra.update({"fallback": "contexto_anexado", "error_type": type(erro).__name__, "timeout_seconds": REFORMULACAO_TIMEOUT})
+            span.status = "degradado"
+            pergunta = _com_contexto(query, turnos)
+            span.set_result({"pergunta": mascarar(pergunta)[0], "reescrita": True, "motivo": "llm_falhou"})
+            return Reformulacao(pergunta, True, "llm_falhou")
         except Exception as erro:  # noqa: BLE001 - provedor fora do ar não derruba a consulta
             span.extra.update(diagnosticos)
             span.modelo = diagnosticos.get("model")

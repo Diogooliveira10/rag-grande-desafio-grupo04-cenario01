@@ -208,3 +208,16 @@ Li o deck do grupo (NEXO RJ, 16 slides) e o guia de estudos da defesa (versão 4
 
 A divisão das falas, proposta pelo Renato, ficou assim: Eduarda abre e conduz como host, depois Renato (dados), Diogo (arquitetura), eu (o sistema), João (demonstração, por ser quem opera o sistema) e Pâmela fecha com resultados e limitações. A minha parte são os slides 11 e 12, para quem é o NEXO RJ e como o usuário chega à resposta, com destaque para a conversa ("E em 2024?"), que depende da reformulação da pergunta (item 11). 
 
+
+## Encontro 16 — 26/10/2026
+
+**Contexto:** Pendência 3 do pós-Demo Day, variedade na busca: quando a pergunta cai nas atas, muitos trechos da mesma compra acabavam ocupando sozinhos as primeiras posições, e a resposta ficava baseada em uma compra só.
+
+**O que fiz:** Criei a regra no domínio (`limitar_repeticoes`, em `src/domain/fusion.py`) e a apliquei no `_fundir` do `retrieve.py`, depois do RRF e antes do corte e do rerank. No máximo 2 trechos por compra ficam à frente, e os demais vão para o fim da lista, sem serem descartados, então o recall não cai. A regra só vale para atas (a compra é identificada por `numero_controle_compra`) e não atua quando a pergunta cita número do PNCP ou de contrato, porque aí a pessoa quer justamente aquele registro. Dá para ajustar ou desligar por `RETRIEVAL_MAX_PER_PURCHASE` (padrão 2, 0 desliga). Escrevi testes unitários e de integração e um script de medição, `eval/medir_variedade.py`, que compara a mesma busca com a regra desligada e ligada.
+
+Nas 9 perguntas de ata do gabarito, as compras distintas no top-10 foram de 4,67 para 6,44, com a posição do primeiro trecho relevante inalterada, e o hit@10 nas 47 perguntas ficou em 0,9149, igual com e sem a regra. Os 5 casos do golden que usam atas (P1.2, A1, A2, I2, E1) passam com a regra ligada. O golden completo não deu para validar na minha máquina, porque a base estruturada oficial não está nela (a que consegui restaurar do histórico do Git tem 810 registros e é mais antiga que a esperada pelo gabarito), então isso ficou pendente para alguém com a base oficial rodar na branch. Abri o PR #77 para o Renato revisar. O CI tem 1 falha que já existe na main, o teste do router com "Cristália", que falha igual sem a minha alteração (confirmei com `git stash`).
+
+Um problema meu no caminho: uma cópia local do `documents.jsonl` do v6 (19 MB, usada nas medições) entrou no PR por engano. Reescrevi o commit para tirá-la, adicionei `data/v6_docs/` ao `.gitignore` e conferi pelo diff que o PR ficou só com código, testes e o script. Fica de aprendizado conferir o `git status --short` antes de commitar quando há pastas de dados novas.
+
+**Uso de IA:** Utilizei o claude para diagnosticar a falha do golden (base estruturada local desatualizada).
+
