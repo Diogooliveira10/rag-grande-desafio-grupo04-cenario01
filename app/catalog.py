@@ -103,12 +103,17 @@ def _active_metadata(source_hash: str) -> dict:
             index = _read_json(INDEX_MANIFEST)
             if index.get("source_sha256") == source_hash:
                 active["snapshot_id"] = index.get("snapshot_id")
+                if isinstance(index.get("built_at"), str):
+                    active["construido_em"] = index["built_at"]
                 chunks, vectors = index.get("total_chunks"), index.get("total_vectors")
                 if type(vectors) is int and vectors >= 0:
                     active["total_vetores"] = vectors
                 if type(chunks) is int and type(vectors) is int and 0 <= vectors <= chunks:
                     active["chunks_sem_vetor"] = chunks - vectors
-                por_base = index.get("por_base") or {}
+                por_base = index.get("por_base")
+                if not isinstance(por_base, dict):
+                    provenance = index.get("proveniencia_vetores")
+                    por_base = provenance.get("por_base") if isinstance(provenance, dict) else {}
                 if isinstance(por_base, dict):
                     active["vetores_por_base"] = {
                         base: sum(value for value in counts.values() if type(value) is int)

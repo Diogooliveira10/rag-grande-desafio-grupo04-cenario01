@@ -428,7 +428,19 @@ def _matches_filters(metadata: Mapping[str, Any], filters: Mapping[str, Any] | N
                 continue
             return False
         for operator, value in _condicoes(expected):
-            if key in {"orgao", "unidade_nome"} and operator == "contains" and isinstance(actual, str):
+            if key == "fornecedor" and operator == "contains":
+                from src.analysis.suppliers import raizes_do_fornecedor, raiz_cnpj
+                raizes = raizes_do_fornecedor(str(value))
+                cnpj = _metadata_value(metadata, "fornecedor_cnpj")
+                # O payload vetorial antigo só tem o nome. Resolva sua grafia
+                # pelo catálogo; não exija regravar os 143 mil vetores antigos.
+                raizes_atuais = (raiz_cnpj(cnpj),) if cnpj is not None else raizes_do_fornecedor(str(actual))
+                if raizes and raizes_atuais:
+                    if not set(raizes).intersection(raizes_atuais):
+                        return False
+                elif not _condicao_satisfeita(actual, operator, value):
+                    return False
+            elif key in {"orgao", "unidade_nome"} and operator == "contains" and isinstance(actual, str):
                 # Nomes admitem qualificadores intermediários e abreviações do
                 # PNCP: "Secretaria de Estado de Saúde" casa com "SECRET ESTADO
                 # SAUDE". Exigir cada termo informativo no campo da entidade,

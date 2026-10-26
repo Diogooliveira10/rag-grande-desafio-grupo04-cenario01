@@ -21,6 +21,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional, Sequence
 from src.domain.values_and_periods import Span
+from src.analysis.suppliers import APELIDOS_CONHECIDOS, IndiceFornecedores, compor_fornecedores
 
 
 def _normalize(texto: str) -> str:
@@ -159,6 +160,10 @@ class _Catalogo:
     # virar o mesmo filtro ("Volta Redonda", "empresa Cristália").
     municipios: tuple[str, ...] = ()
     fornecedores: tuple[str, ...] = ()
+    indice_fornecedores: Optional[IndiceFornecedores] = None
+    apelidos: Optional[dict[str, str]] = None
+    palavras_objetos: Optional[dict[str, tuple[int, int]]] = None
+    assinatura: str = ""
 
 
 def _tokens_de_nome(texto: str) -> list[str]:
@@ -174,6 +179,9 @@ def _catalogo_de_orgaos() -> Optional[_Catalogo]:
     return _Catalogo(
         nomes, tuple(tuple(_tokens_de_nome(n)) for n in nomes), dict(dados.get("siglas", {})),
         tuple(dados.get("municipios", ())), tuple(dados.get("fornecedores", ())),
+        IndiceFornecedores(dados) if "fornecedores_identidades" in dados else None,
+        dict(dados.get("apelidos_fornecedor", {})), dados.get("palavras_objetos"),
+        str(dados.get("fonte_sha256", "")) + str(dados.get("fornecedores_sha256", "")),
     )
 
 
@@ -224,7 +232,8 @@ _GENERICAS_DE_FORNECEDOR = frozenset(
     # "Qual órgão, município/UF..." virava fornecedor "MUNICIPIO DE CASIMIRO
     # DE ABREU", o único com "municipio" no nome (A1 e A2 do golden set).
     "municipio municipios prefeitura prefeituras estado estadual governo secretaria "
-    "camara fundo uf".split()
+    "camara fundo uf tecnologia limpeza urbana saude educacao informatica "
+    "conservacao manutencao transporte alimentacao escolar material materiais".split()
 )
 
 
@@ -345,22 +354,9 @@ def _extrair_municipio(texto: str) -> tuple[Optional[str], Optional[Span]]:
     return valor, _estender_para_tras(texto, span)
 
 
-# Apelidos que não coincidem com a razão social, com a grafia exata da v7
-# (conferida no SQLite em 2026-10-19). Só fornecedores com uma única grafia na
-# base: o filtro compara o nome exato, e "Light", "Correios" e "CEDAE" têm
-# várias, o que deixaria a resposta incompleta.
-_APELIDOS_DE_FORNECEDOR = {
-    "removip": "REMOVIP SERVICO MEDICO LTDA",
-    "dataprev": "EMPRESA DE TECNOLOGIA E INFORMACOES DA PREVIDENCIA S.A. - DATAPREV",
-    "fiotec": "FIOTEC - FUNDACAO PARA O DESENVOLVIMENTO CIENTIFICO E TECNOLOGICO EM SAUDE",
-    "embratel": "EMBRATEL TVSAT TELECOMUNICACOES SA",
-    # Grafias variadas na v7: o filtro de fornecedor casa por trecho (LIKE), então
-    # o apelido aponta para a parte comum a todas ("S A"/"SA", "TELEGRAFOS"/
-    # "TELÉGRAFOS"). A CEDAE fica de fora: também é órgão do catálogo, e
-    # "contratos da CEDAE" já responde como órgão contratante.
-    "light": "LIGHT SERVICOS DE ELETRICIDADE S",
-    "correios": "EMPRESA BRASILEIRA DE CORREIOS E TEL",
-}
+# Mantém os nomes públicos dos apelidos conhecidos. Os demais vêm do catálogo
+# e exigem contexto de nome; nunca disparam só porque a palavra está no texto.
+_APELIDOS_DE_FORNECEDOR = APELIDOS_CONHECIDOS
 
 
 # Apelido que também é palavra comum: só vale com inicial maiúscula na pergunta
@@ -387,6 +383,9 @@ def _palavras_dos_objetos() -> Optional[dict[str, tuple[int, int]]]:
     empresa; a marca citada no objeto dos próprios contratos ("medicamentos
     Cristália") pode.
     """
+    catalogo = _catalogo_de_orgaos()
+    if catalogo and catalogo.palavras_objetos is not None:
+        return catalogo.palavras_objetos
     try:
         from src import structured_db
 
@@ -431,6 +430,7 @@ def _extrair_fornecedor(texto: str, bloqueados: Sequence[Span] = (), *,
     reconhecidos como outra coisa (o município, por exemplo): sem isso, "do
     Município de Maricá" acharia um fornecedor que também é município.
     """
+    catalogo = _catalogo_de_orgaos()
     if texto:
         for achado in re.finditer(r"\w+", texto):
             chave = _normalize(achado.group())
@@ -441,9 +441,13 @@ def _extrair_fornecedor(texto: str, bloqueados: Sequence[Span] = (), *,
             if apelido and not any(comeca < achado.end() and achado.start() < termina
                                    for comeca, termina in bloqueados):
                 return apelido, achado.span()
-    catalogo = _catalogo_de_orgaos()
     if not catalogo or not texto:
         return None, None
+
+    def _valor(citados: list[str]) -> Optional[str]:
+        if catalogo.indice_fornecedores is not None:
+            return catalogo.indice_fornecedores.valor(citados)
+        return _valor_do_catalogo(catalogo.fornecedores, citados)
 
     def _livre(inicio: int, fim: int) -> bool:
         return not any(comeca < fim and inicio < termina for comeca, termina in bloqueados)
@@ -454,7 +458,9 @@ def _extrair_fornecedor(texto: str, bloqueados: Sequence[Span] = (), *,
     # Só vira filtro com gatilho antes do nome ("empresa Cristália") ou com
     # nome de duas palavras ou mais ("Cristalia Produtos Quimicos").
     for inicio_palavra, (primeira, comeca, termina) in enumerate(palavras):
-        if primeira in _GENERICAS_DE_FORNECEDOR or len(primeira) < 4:
+        if (primeira in _GENERICAS_DE_FORNECEDOR or primeira in _NAO_SAO_NOME
+                or primeira in _VERBOS_COMUNS_DEPOIS_DO_NOME or len(primeira) < 4
+                or not primeira[0].isalpha() or primeira in _SIGLAS_DE_ORGAO):
             continue
         anteriores = [p for p, i, f in todas if f <= comeca and p not in _VAZIAS_DE_NOME]
         tem_gatilho = bool(anteriores) and anteriores[-1] in _GATILHOS_DE_FORNECEDOR
@@ -463,19 +469,24 @@ def _extrair_fornecedor(texto: str, bloqueados: Sequence[Span] = (), *,
         for palavra, pos_inicio, pos_fim in palavras[inicio_palavra + 1: inicio_palavra + 6]:
             if palavra in _GENERICAS_DE_FORNECEDOR or palavra in _VAZIAS_DE_NOME:
                 continue
-            if _valor_do_catalogo(catalogo.fornecedores, citados + [palavra]) is None:
+            if _valor(citados + [palavra]) is None:
                 break
             citados.append(palavra)
             span = (span[0], pos_fim)
+        total, proprio = (_palavras_dos_objetos() or {}).get(primeira, (0, 0))
+        if total and proprio / total < _PARCELA_MINIMA_DO_PROPRIO_FORNECEDOR:
+            continue
         if len(citados) < 2 and not tem_gatilho and not _nome_curto_de_fornecedor(primeira, todas, comeca):
             continue
-        valor = _valor_do_catalogo(catalogo.fornecedores, citados)
+        valor = _valor(citados)
+        if valor is None and catalogo.apelidos:
+            valor = catalogo.apelidos.get(primeira) if len(citados) == 1 else None
         if valor is not None:
             return valor, span
     return None, None
 
 
-def gerar_catalogo_de_orgaos(destino: Path = ORGAOS_CORPUS_PATH) -> dict[str, Any]:
+def gerar_catalogo_de_orgaos(destino: Path = ORGAOS_CORPUS_PATH, *, banco: Any = None) -> dict[str, Any]:
     """Grava o catálogo de órgãos, municípios e fornecedores da base SQL.
 
     As listas antigas (``nomes``/``siglas``) continuam com o mesmo formato; as
@@ -487,7 +498,7 @@ def gerar_catalogo_de_orgaos(destino: Path = ORGAOS_CORPUS_PATH) -> dict[str, An
 
     from src import structured_db
 
-    banco = structured_db.garantir_banco()
+    banco = banco if banco is not None else structured_db.garantir_banco()
     nomes: set[str] = set()
     for tabela in ("contratacoes", "pca_planos"):
         for coluna in ("orgao_nome", "unidade_nome"):
@@ -519,10 +530,17 @@ def gerar_catalogo_de_orgaos(destino: Path = ORGAOS_CORPUS_PATH) -> dict[str, An
         json.dumps({"nomes": sorted(nomes), "municipios": municipios, "fornecedores": fornecedores},
                    ensure_ascii=False, sort_keys=True).encode("utf-8")
     ).hexdigest()
+    identidades = compor_fornecedores(
+        banco, _GENERICAS_DE_FORNECEDOR | _NAO_SAO_NOME | _VERBOS_COMUNS_DEPOIS_DO_NOME,
+        sorted(nomes), municipios,
+    )
     dados = {
+        **identidades,
+        "fornecedores_sha256": hashlib.sha256(json.dumps(
+            identidades, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest(),
         "gerado_em": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "fonte": "nomes de órgão e unidade, municípios e fornecedores da base SQL (src/structured_db.py) do corpus",
-        "versao": 2,
+        "versao": 3,
         "fonte_sha256": resumo,
         "nomes": sorted(nomes),
         "siglas": dict(sorted(siglas.items())),
@@ -532,6 +550,7 @@ def gerar_catalogo_de_orgaos(destino: Path = ORGAOS_CORPUS_PATH) -> dict[str, An
     destino.parent.mkdir(parents=True, exist_ok=True)
     destino.write_text(json.dumps(dados, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     _catalogo_de_orgaos.cache_clear()
+    _palavras_dos_objetos.cache_clear()
     return dados
 
 

@@ -37,6 +37,7 @@ pytest-of-*/
 index/
 logs/
 data/backups/
+data/releases/
 data/backup_v6_*/
 # Snapshots locais: a v6 validada é adicionada explicitamente ao Git.
 data/embeddings/*/

@@ -1,0 +1,56 @@
+{
+  "format": "rag-bundle-v1",
+  "snapshot_id": "v7-qwen-q8-2026-10-26",
+  "sql_schema_version": "7",
+  "documents_sha256": "7c147a373c72c1ef35b5fe2a080ebb4e495b336d3555674c93f9dd08519a5290",
+  "files": {
+    "documents": {
+      "path": "data/normalized/documents.jsonl",
+      "sha256": "7c147a373c72c1ef35b5fe2a080ebb4e495b336d3555674c93f9dd08519a5290"
+    },
+    "database": {
+      "path": "data/structured/base_estruturada.sqlite",
+      "sha256": "0894af7df70c814d317208013fbe7abb61e1f6c59c4a95b4062a482710e1bac8"
+    },
+    "catalog": {
+      "path": "data/config/orgaos_corpus.json",
+      "sha256": "98fece6fe7b2092087fac27bfc3e376ad5f426e310da4fb5b50e21e8a01f9c85"
+    },
+    "index_manifest": {
+      "path": "index/manifest.json",
+      "sha256": "ce0f942310e348841772adce8a2f7271a08400d3dcc36b2eab99cf3999c928ca"
+    }
+  },
+  "index_artifacts": [
+    {"path": "index/atas_conversacional/manifest.json", "sha256": "f7e0643c111d1d7062c4c8887a180c22a6243464993376dd813221845162f0be"},
+    {"path": "index/atas_conversacional/documents.jsonl", "sha256": "03e554e0e886cd2b0529fc01197cca304d0ec5b4b31abd17b0d7aa1c256ad21c"},
+    {"path": "index/atas_conversacional/vectors.jsonl", "sha256": "bc79237c0ec1958f1e8eddff34919ea2602aafbd8784863934a02ef2c6f0e8f3"},
+    {"path": "index/atas_conversacional/vectors.faiss", "sha256": "d09cf044653daeaf04633b3a867669d4b8ce698c061356fc256506366f6801c3"},
+    {"path": "index/contratos_estruturado/manifest.json", "sha256": "182ae892720d0bce0c343c69216976f2f6bb6f073908248a35efa397a32cfcbe"},
+    {"path": "index/contratos_estruturado/documents.jsonl", "sha256": "c708bee1660b778605835b4e5840a6ddfecee53eb1707b50a157f73ffbe2ddf4"},
+    {"path": "index/contratos_estruturado/vectors.jsonl", "sha256": "0de856fdf9c8543c38d9aacbe98062f080a278f0f66f1780cf30ed11a558a3d4"},
+    {"path": "index/contratos_estruturado/vectors.faiss", "sha256": "3d77a63ba5fb6f0476b04c88edbb4608144116a0a85ac8216557e860ca4bbbe0"},
+    {"path": "index/editais_normativo/manifest.json", "sha256": "87113f44b10cf9f5ace5b7b06768c8a1e1ad25b919867cd089282474373a7d60"},
+    {"path": "index/editais_normativo/documents.jsonl", "sha256": "0dad201cc9f0703d90a22106dd9f402f53f34532b0d501f9c201562d3d339c62"},
+    {"path": "index/editais_normativo/vectors.jsonl", "sha256": "c9b2d53c6c1ae4aa8dd870b16bf1d8463b749fe94275e546acde2b5271026217"},
+    {"path": "index/editais_normativo/vectors.faiss", "sha256": "1753b2dca40c14c5bb04b1f83ec7bbaa7561b16c393e412b6b68822c5bd5ea28"},
+    {"path": "index/emails_sinteticos/manifest.json", "sha256": "82882a70551b18f740bdfb06f8d6216757a00fc91d47a3f8fdd2bb65504d74cf"},
+    {"path": "index/emails_sinteticos/documents.jsonl", "sha256": "904da93a5ae1fa08ddea0eef3d21ca028f18688f80fde73bfc3e8f12fb727ed5"},
+    {"path": "index/emails_sinteticos/vectors.jsonl", "sha256": "1e980d6447a5d6a2609397b9a4bbfd3dccbdaa7f7b887f0cb300546b0efaa2ea"},
+    {"path": "index/emails_sinteticos/vectors.faiss", "sha256": "3b4398be080e0b93003365252e569221a877a1313398461c830af72e6cd38d35"},
+    {"path": "index/pca_agregado/manifest.json", "sha256": "30191b1005891876fe6361db9a419aac504d9d4d3cf60c6ced9b5363edf8358d"},
+    {"path": "index/pca_agregado/documents.jsonl", "sha256": "048de1b19f6b3212e3e0d4fd88a1adac02cf03db319d78219ee5038e95fe47bb"},
+    {"path": "index/pca_agregado/vectors.jsonl", "sha256": "4751d4c2e2fb6d0b13c78e49c626220cf4ebeef6e9d7deec6c39eaba7187bd43"},
+    {"path": "index/pca_agregado/vectors.faiss", "sha256": "411c08a002a44ccc2c2d1d1318b283cc29648c27197524eee1d6f52275891dcd"}
+  ],
+  "capabilities": ["contratos", "pca", "atas", "normas", "emails_sinteticos"],
+  "operator_acceptance": {
+    "scope": "historical_embedding_provenance",
+    "approved": true,
+    "approved_by": "operador do projeto",
+    "approved_at": "2026-10-26T19:54:52+00:00",
+    "snapshot_id": "v7-qwen-q8-2026-10-26",
+    "embedding_model": "Qwen3-Embedding-0.6B.Q8_0",
+    "index_manifest_sha256": "ce0f942310e348841772adce8a2f7271a08400d3dcc36b2eab99cf3999c928ca"
+  }
+}

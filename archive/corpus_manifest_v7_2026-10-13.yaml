@@ -1,0 +1,410 @@
+scenario_id: contratacoes-rj
+version: "2026-10-13"
+description: "Contratações públicas do Estado do RJ, ano-base 2025 — censo v7 de contratos assinados e publicações (docs/PLANO_POSSIVEL_CORPUS_V7.md); bases normativas/conversacionais herdadas da v6"
+
+coleta:
+  ferramenta: "src/fetch_corpus.py"
+  armazenamento_bruto: "data/raw/vN/<base_id>"
+  inventario: "data/inventory/vN.json"
+  logs: "data/runs/<run_id>.jsonl"
+
+diretorios_locais:
+  raw: "data/raw/vN/<base_id>"
+  inventario: "data/inventory/vN.json"
+  relatorios: "data/runs"
+bases:
+  # ---------------------------------------------------------------------
+  # BASES CANÔNICAS — entram na execução oficial.
+  # ---------------------------------------------------------------------
+  # NATUREZA: estruturada
+  # ---------------------------------------------------------------------
+  - base_id: contratos_estruturado
+    escopo: oficial
+    natureza: estruturada
+    fonte: "PNCP - contratos assinados e contratações publicadas"
+    acesso:
+      tipo: provider
+      provider: pncp
+      transporte: http_json
+      estrategia: censo_por_populacao
+      artefatos_relacionados:
+        documentos_edital: editais_normativo
+        contratacao_detalhe: pca_agregado
+        contratacao_vinculada: pca_agregado
+        itens: pca_agregado
+      populations:
+        - resource_type: contrato_assinado
+          censo: true
+          censo_nacional: true
+          # Censo v7: sem teto de coleta por population (era 1200 na amostra v6).
+          volume_alvo: null
+          params:
+            anoAssinatura: 2025
+            dataInicial: "2025-01-01"
+            dataFinal: "2026-09-25"
+            tamanhoPagina: 500
+        - resource_type: contratacao
+          censo: true
+          params:
+            dataInicial: "2025-01-01"
+            dataFinal: "2025-12-31"
+            modalidades: [1, 3, 4, 5, 6, 7, 8, 9, 11]
+            uf: "RJ"
+            tamanhoPagina: 50
+      rate_limit_seg: 1.0
+      documentos_edital_filtro:
+        campos:
+          - "titulo"
+          - "tipoDocumentoNome"
+        termos:
+          - "edital"
+          - "termo de referencia"
+    selecao_deterministica: true
+    selecao:
+      deterministica: true
+      # Censo v7: "censo" seleciona TODOS os elegíveis da janela em ordem
+      # estável (sem o teto de 1.200 da amostra v6).
+      modo: censo
+      chave: "numeroControlePNCP"
+      max_paginas: 100000
+    # Piso declarado da estimativa medida (25–35 mil para os 164 órgãos
+    # amostrados; ver PLANO_POSSIVEL_CORPUS_V7.md §3). volume_regra=minimo:
+    # o censo pode ultrapassar; o inventário reporta o divergente.
+    volume_alvo: 25000
+    volume_regra: minimo
+    formato: json
+    licenca: "Dados abertos gov.br - atribuição"
+    sensitivity_default: publico
+    campo_vigencia: "dataVigenciaFim"
+    chunking_sugerido: "1 contrato = 1 chunk, serializado em linguagem natural"
+    metadados_extras: [orgao, modalidade, valor, municipio, ano]
+
+  - base_id: editais_normativo
+    escopo: oficial
+    natureza: normativa
+    fonte: "Lei 14.133 e LC 123 (Planalto); Decretos estaduais 48.816/2023 e 48.820/2023 (CGE-RJ); editais e termos de referência vinculados no PNCP"
+    acesso:
+      tipo: http_misto
+      transporte: http_misto
+      estrategia: fixed_sources
+      urls:
+        - "https://www.planalto.gov.br/ccivil_03/_ato2019-2022/2021/lei/l14133.htm"
+        - "https://www.planalto.gov.br/ccivil_03/leis/lcp/lcp123.htm"
+        - "https://www.cge.rj.gov.br/wp-content/uploads/2024/01/Decreto-no-48.816.pdf"
+        - "https://www.cge.rj.gov.br/wp-content/uploads/2024/01/Decreto-no-48.820.pdf"
+      rate_limit_seg: 2.0
+      metadados_por_url:
+        "https://www.planalto.gov.br/ccivil_03/_ato2019-2022/2021/lei/l14133.htm":
+          titulo: "Lei nº 14.133/2021"
+          tipo_documento: "lei_federal"
+          numero_norma: "Lei 14.133/2021"
+          data_publicacao: "2021-04-01"
+          data_vigencia_inicio: "2021-04-01"
+          ambito: "federal"
+          fonte_oficial: "Presidência da República — Planalto"
+        "https://www.planalto.gov.br/ccivil_03/leis/lcp/lcp123.htm":
+          titulo: "Lei Complementar nº 123/2006"
+          tipo_documento: "lei_federal"
+          numero_norma: "LC 123/2006"
+          data_publicacao: "2006-12-15"
+          data_vigencia_inicio: "2006-12-15"
+          ambito: "federal"
+          fonte_oficial: "Presidência da República — Planalto"
+        "https://www.cge.rj.gov.br/wp-content/uploads/2024/01/Decreto-no-48.816.pdf":
+          titulo: "Decreto Estadual nº 48.816/2023 — fase preparatória e pesquisa de preços"
+          tipo_documento: "decreto_estadual"
+          numero_norma: "Decreto 48.816/2023"
+          data_publicacao: "2023-11-25"
+          data_vigencia_inicio: "2023-11-25"
+          ambito: "Poder Executivo estadual direto, autárquico e fundacional do RJ"
+          fonte_oficial: "Controladoria Geral do Estado do Rio de Janeiro — Diário Oficial"
+        "https://www.cge.rj.gov.br/wp-content/uploads/2024/01/Decreto-no-48.820.pdf":
+          titulo: "Decreto Estadual nº 48.820/2023 — contratação direta"
+          tipo_documento: "decreto_estadual"
+          numero_norma: "Decreto 48.820/2023"
+          data_publicacao: "2023-11-28"
+          data_vigencia_inicio: "2023-11-28"
+          ambito: "Poder Executivo estadual direto, autárquico e fundacional do RJ"
+          fonte_oficial: "Controladoria Geral do Estado do Rio de Janeiro — Diário Oficial"
+        # Endereços de onde a v6 coletou as normas (reuso de versões anteriores,
+        # sem passar por metadados_por_url). src/qualidade_corpus.py aplica estes
+        # metadados aos chunks pela origem.
+        "https://www.mppi.mp.br/internet/wp-content/uploads/2021/04/L14133.pdf":
+          titulo: "Lei nº 14.133/2021"
+          tipo_documento: "lei_federal"
+          numero_norma: "Lei 14.133/2021"
+          data_publicacao: "2021-04-01"
+          data_vigencia_inicio: "2021-04-01"
+          ambito: "federal"
+          fonte_oficial: "Texto do Planalto, cópia publicada pelo MPPI"
+        "https://legis.senado.gov.br/norma/33382036/publicacao/33383820":
+          titulo: "Lei nº 14.133/2021"
+          tipo_documento: "lei_federal"
+          numero_norma: "Lei 14.133/2021"
+          data_publicacao: "2021-04-01"
+          data_vigencia_inicio: "2021-04-01"
+          ambito: "federal"
+          fonte_oficial: "Senado Federal — Legislação Federal"
+        "https://legis.senado.gov.br/norma/572878/publicacao/34621013":
+          titulo: "Lei Complementar nº 123/2006"
+          tipo_documento: "lei_federal"
+          numero_norma: "LC 123/2006"
+          data_publicacao: "2006-12-15"
+          data_vigencia_inicio: "2006-12-15"
+          ambito: "federal"
+          fonte_oficial: "Senado Federal — Legislação Federal"
+        "https://www.cge.rj.gov.br/wp-content/uploads/2024/01/decreto-48.760.pdf":
+          titulo: "Decreto Estadual nº 48.760/2023 — Plano de Contratações Anual (PCA) e Sistema PCA RJ"
+          tipo_documento: "decreto_estadual"
+          numero_norma: "Decreto 48.760/2023"
+          data_publicacao: "2023-10-24"
+          data_vigencia_inicio: "2023-10-24"
+          ambito: "Poder Executivo estadual direto, autárquico e fundacional do RJ"
+          fonte_oficial: "Controladoria Geral do Estado do Rio de Janeiro — Diário Oficial"
+      linked_source_inventory_base: "contratos_estruturado"
+      documentos_edital_filtro:
+        campos:
+          - "titulo"
+          - "tipoDocumentoNome"
+        termos:
+          - "edital"
+          - "termo de referencia"
+      artefatos_relacionados:
+        documentos_edital: "editais_normativo"
+    selecao_deterministica: true
+    volume_alvo: 13
+    formatos: [html, htm, pdf]
+    licenca: "Domínio público"
+    sensitivity_default: publico
+    campo_vigencia: "data_vigencia_inicio"
+    chunking_sugerido: "Split por cláusula, com overlap"
+    metadados_extras:
+      - "numero_norma"
+      - "tipo_documento"
+      - "data_publicacao"
+      - "data_vigencia_inicio"
+      - "data_vigencia_fim"
+      - "ambito"
+      - "fonte_oficial"
+      - "id_contratacao"
+      - "numero_edital"
+      - "orgao"
+      - "objeto"
+  - base_id: atas_conversacional
+    escopo: oficial
+    natureza: conversacional
+    fonte: "PNCP - atas de registro de preço"
+    acesso:
+      tipo: provider
+      provider: pncp
+      resource_type: ata
+      transporte: http_json
+      estrategia: paginated_collection
+      params:
+        dataInicial: "2025-01-01"
+        dataFinal: "2025-12-31"
+        # /v1/atas não filtra por UF; o recorte RJ vem do CNPJ do órgão
+        # (Estado do Rio de Janeiro, o mesmo de pca_agregado).
+        cnpjs: ["42498600000171"]
+        tamanhoPagina: 50
+        maxPaginas: 10
+      rate_limit_seg: 1.0
+    selecao_deterministica: true
+    selecao:
+      deterministica: true
+      limite: 20
+      chave: "numeroControlePNCPAta"
+    volume_alvo: 376
+    volume_regra: minimo
+    # O provider PNCP coleta, por ata, o JSON de metadados, a listagem
+    # /arquivos (JSON) e cada PDF anunciado nela.
+    formatos: [json, pdf]
+    licenca: "Dados abertos gov.br - atribuição"
+    sensitivity_default: publico
+    campo_vigencia: "dataVigenciaFim"
+    chunking_sugerido: "Texto por seção, com overlap"
+    metadados_extras: [numero_controle_pncp, orgao, objeto, data_vigencia]
+
+  - base_id: pca_agregado
+    escopo: oficial
+    natureza: agregada
+    fonte: "PNCP - Plano de Contratações Anual consolidado"
+    orgao: "Estado do Rio de Janeiro"
+    acesso:
+      tipo: provider
+      provider: pncp
+      resource_type: pca
+      censo: true
+      exigir_cadastro_completo: true
+      transporte: http_misto
+      estrategia: units_by_organization_and_year
+      params:
+        cnpjs_file: "data/config/cnpjs_rj.json"
+        anos: [2024, 2025]
+      rate_limit_seg: 1.0
+    selecao_deterministica: true
+    selecao:
+      deterministica: true
+      limite: 16
+      chave: "numeroControlePNCP"
+    volume_alvo: 386
+    volume_regra: minimo
+    formatos: [json, csv]
+    licenca: "Dados abertos gov.br - atribuição"
+    sensitivity_default: publico
+    campo_vigencia: "anoPca"
+    chunking_sugerido: "1 indicador agregado = 1 chunk"
+    metadados_extras: [orgao, ano, valor]
+
+  # ---------------------------------------------------------------------
+  # BASES AUXILIARES — somente por seleção experimental explícita.
+  # ---------------------------------------------------------------------
+  - base_id: contratacoes_publicacao_rj
+    escopo: experimental
+    natureza: estruturada
+    fonte: "PNCP - API pública de consulta"
+    acesso:
+      tipo: rest_api
+      endpoint: "https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao"
+      params:
+        dataInicial: "2025-01-01"
+        dataFinal: "2025-01-31"
+        codigoModalidadeContratacao: 1
+        uf: "RJ"
+        pagina: 1
+        tamanhoPagina: 50
+      paginacao:
+        campo: "pagina"
+        tamanho: 50
+      rate_limit_seg: 1.0
+    selecao_deterministica: true
+    volume_alvo: 50
+    formato: json
+    licenca: "Dados abertos gov.br - atribuição"
+    sensitivity_default: publico
+    campo_vigencia: "dataPublicacao"
+    chunking_sugerido: "1 contratação = 1 chunk, serializado em linguagem natural"
+    metadados_extras: [orgao, modalidade, valor, municipio, ano]
+
+  - base_id: documentos_pncp
+    escopo: experimental
+    natureza: normativa
+    fonte: "PNCP - documentos de contratações e atas"
+    acesso:
+      tipo: rest_api_mais_arquivo
+      endpoints:
+        edital: "https://pncp.gov.br/api/pncp/v1/orgaos/{cnpj}/compras/{ano}/{sequencial}/arquivos"
+        ata: "https://pncp.gov.br/api/pncp/v1/orgaos/{cnpj}/compras/{anoCompra}/{seqCompra}/atas/{seqAta}/arquivos"
+      params:
+        ano: 2025
+        uf: "RJ"
+        codigoModalidadeContratacao: 1
+        tamanhoPagina: 100
+        maxPaginas: 10
+      rate_limit_seg: 1.0
+      fluxo: "consultar metadados JSON e baixar a URL direta do arquivo"
+    selecao_deterministica: true
+    volume_alvo: 100
+    formato: pdf
+    licenca: "Dados abertos gov.br - atribuição"
+    sensitivity_default: publico
+    campo_vigencia: "dataPublicacao"
+    chunking_sugerido: "Texto por seção, com overlap"
+    metadados_extras: [numero_controle_pncp, orgao, objeto, data_publicacao]
+    local: "data/raw/vN/documentos_pncp"
+    deduplicacao: "SHA-256"
+
+  - base_id: respostas_api_jsonl
+    escopo: experimental
+    natureza: conversacional
+    fonte: "PNCP - respostas JSON normalizadas localmente"
+    acesso:
+      tipo: processamento_local
+      origem: "data/raw/v1/arquivos/json"
+    selecao_deterministica: true
+    volume_alvo: 5
+    formato: jsonl
+    licenca: "Derivado de dados abertos gov.br"
+    sensitivity_default: publico
+    local: "data/raw/vN/respostas_api_jsonl"
+    deduplicacao: "SHA-256"
+    chunking_sugerido: "1 resposta JSON = 1 chunk"
+    metadados_extras: [endpoint, status_http, pagina]
+
+  # Base local opcional para testes rápidos, sem requisições externas.
+  - base_id: exemplos_teste
+    escopo: experimental
+    natureza: normativa
+    fonte: "PDFs locais versionados como fixtures de teste"
+    acesso:
+      tipo: arquivo_local
+      origem: "tests/fixtures/pdf"
+      rate_limit_seg: 0
+    selecao_deterministica: true
+    volume_alvo: 20
+    formato: pdf
+    licenca: "Fixture de teste do repositorio"
+    sensitivity_default: publico
+    deduplicacao: "SHA-256"
+    chunking_sugerido: "Texto por seção, com overlap"
+    metadados_extras: [nome_arquivo, fixture]
+
+  # Suplemento sintético do corpus: não representa fatos reais do PNCP.
+  - base_id: emails_sinteticos
+    escopo: oficial
+    natureza: conversacional
+    fonte: "Conversações sintéticas de compras públicas do RJ, geradas pelo tutor"
+    acesso:
+      tipo: arquivo_local
+      origem: "data/synthetic/conversacional_sintetica"
+      rate_limit_seg: 0
+    selecao_deterministica: true
+    volume_alvo: 25
+    formato: json
+    licenca: "Conteúdo sintético gerado pelo tutor; sem licença nem restrição de uso: pode ser usado na apresentação e mantido no repositório, sem obrigação de citar autoria"
+    dados_sinteticos: true
+    sensitivity_default: restrito
+    deduplicacao: "conversation_id + SHA-256; somente JSON individual, sem duplicar TXT/JSONL"
+    chunking_sugerido: "1 conversa = 1 chunk; preservar cabeçalhos e mensagens"
+    metadados_extras: [conversation_id, title, channel, organ, subject, creation_date, process_number, arp_number, supplier_name, supplier_cnpj, sensitivity_level, guardrail_type, tags]
+
+  # Amostra real opcional em CSV, publicada pelo Portal de Dados Abertos do RJ.
+  - base_id: licitacoes_siga_csv
+    escopo: experimental
+    natureza: estruturada
+    fonte: "SEPLAG-RJ - Sistema Integrado de Gestão de Aquisições (SIGA)"
+    acesso:
+      tipo: http_csv
+      url: "https://www.compras.rj.gov.br/siga/imagens/LICITACOES.CSV"
+      rate_limit_seg: 1.0
+    selecao_deterministica: true
+    volume_alvo: 33793
+    formato: csv
+    licenca: "Open Data Commons Public Domain Dedication and License (PDDL)"
+    sensitivity_default: publico
+    campo_vigencia: "Data/Hora Homologação"
+    chunking_sugerido: "1 licitação = 1 chunk"
+    metadados_extras:
+      - "ID Licitação"
+      - "Licitação"
+      - "Unidade"
+      - "Objeto"
+      - "Modalidade"
+      - "Critério de Julgamento"
+      - "SRP"
+      - "Status"
+      - "Valor Total Homologado (R$)"
+      - "Valor Total Estimado (R$)"
+      - "Processos"
+      - "Regime"
+      - "Data_extracao"
+
+# Curadoria v7 (censo) — substitui o bloco curadoria_v6 (amostra de 5 por
+# órgão por base), arquivado em archive/corpus_manifest_v6.yaml.
+curadoria_v7:
+  selecao: censo_contratos_e_publicacoes_2025_rj
+  identificador_orgao: cnpj
+  limite_por_orgao_por_base: null   # censo: sem limite por órgão
+  alvo_arquivos_total: null         # censo: sem teto fixo (estimativa medida na §3 do plano v7)
+  bases_censitarias: [contratos_estruturado]
+  bases_herdadas_v6: [editais_normativo, atas_conversacional, pca_agregado, emails_sinteticos]

@@ -1004,7 +1004,7 @@ def test_orgao_confere_com_catalogo_e_municipios(pergunta, orgao):
     ("Contratos da Prefeitura da Cidade do Rio de Janeiro", "MUNICIPIO DE RIO DE JANEIRO"),
     ("contratos da prefeitura do rio em 2025", "MUNICIPIO DE RIO DE JANEIRO"),
     ("contratos da prefeitura de volta redonda acima de 100 mil", "MUNICIPIO DE VOLTA REDONDA"),
-    ("Contratos da Prefeitura de Sumidouro", "Município de Sumidouro"),  # cidade fora do corpus
+    ("Contratos da Prefeitura de Sumidouro", "MUNICIPIO DE SUMIDOURO"),  # presente no catálogo v7
     ("Contratos da Câmara Municipal de Maricá", "Câmara Municipal de Maricá"),
     ("Contratos da Secretaria Municipal de Saúde de Niterói", "Secretaria Municipal de Saúde de Niterói"),
 ])
