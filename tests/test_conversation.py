@@ -140,3 +140,43 @@ def test_pergunta_sobre_o_assistente_tem_resposta_fixa_sem_llm(query, monkeypatc
     resposta = resposta_conversacional(query)
 
     assert resposta is not None and resposta.answer.startswith("Sou o NEXO RJ")
+
+
+# Consulta evidente não paga a chamada ao LLM (8 s de mediana nos logs de
+# outubro; em 248 de 268 chamadas a resposta era "consulta").
+_CONSULTA_LONGA = ("Considerando os contratos de manutenção de computadores assinados pelos órgãos estaduais "
+                   "do Rio de Janeiro em 2025, quais foram os fornecedores com maior valor contratado e quais "
+                   "modalidades aparecem nos registros?")
+
+
+def _espiao_do_modelo(monkeypatch):
+    import src.conversation as conversa
+    chamadas = []
+    monkeypatch.setattr(conversa, "CONVERSATION_MODE", "llm")
+    monkeypatch.setattr(conversa, "_interpret_interaction", lambda query, **_: chamadas.append(query))
+    return chamadas
+
+
+def test_consulta_longa_reconhecida_nao_chama_o_modelo(monkeypatch):
+    chamadas = _espiao_do_modelo(monkeypatch)
+    assert len(_CONSULTA_LONGA) >= 160
+    assert resposta_conversacional(_CONSULTA_LONGA) is None
+    assert chamadas == []
+
+
+@pytest.mark.parametrize("prefixo", [
+    "Resuma este texto para mim: ",          # pedido de texto: o modelo decide
+    "Explique como o NEXO responde a isto: ",  # pergunta sobre o próprio sistema
+])
+def test_pedido_de_texto_ou_sobre_o_sistema_ainda_consulta_o_modelo(prefixo, monkeypatch):
+    chamadas = _espiao_do_modelo(monkeypatch)
+    resposta_conversacional(prefixo + _CONSULTA_LONGA)
+    assert len(chamadas) == 1
+
+
+def test_consulta_curta_sobre_o_acervo_continua_sem_modelo(monkeypatch):
+    # "acervo" conta como pergunta sobre o sistema, mas a regra antiga das
+    # mensagens curtas com base reconhecida continua valendo.
+    chamadas = _espiao_do_modelo(monkeypatch)
+    assert resposta_conversacional("Quantos contratos de ambulância há no acervo em 2025?") is None
+    assert chamadas == []
