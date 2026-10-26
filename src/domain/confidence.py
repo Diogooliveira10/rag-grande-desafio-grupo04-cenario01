@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from src.dominio.texto import sem_acento
+from src.domain.text import sem_acento
 from src.schema import Chunk, ConfidenceLevel, RAGResponse
 
 # Ordem do menor para o maior; a enumeração é str e não compara por mérito.

@@ -1040,3 +1040,148 @@ def test_prompt_pede_declarar_a_lacuna_explicitamente():
     assert "os dados são insuficientes para" in gen._SYSTEM_PROMPT
     assert "não acrescente ressalva de insuficiência" in gen._SYSTEM_PROMPT
 
+
+
+def test_trecho_mencionado_no_texto_vira_fonte_numerada():
+    # Resposta real da P3.2 (golden de 2026-10-23): o texto falava de "registro
+    # E1" e "E2" sem citá-los em sources_used, e o usuário via "E1" no texto.
+    chunks = [_chunk("contrato-1"), _chunk("norma-2", base_id="editais_normativo"), _chunk("contrato-3")]
+    resposta = _responder_com(
+        "Apenas o registro [E3] tem modalidade: concorrência. O registro E1 não informa modalidade, "
+        "e E2 é um documento normativo.", ["E3"], chunks)
+
+    assert [f.chunk_id for f in resposta.sources_used] == ["contrato-3", "contrato-1", "norma-2"]
+    assert resposta.answer == ("Apenas o registro [1] tem modalidade: concorrência. O registro [2] não "
+                               "informa modalidade, e [3] é um documento normativo.")
+    assert "E1" not in resposta.answer and "E2" not in resposta.answer
+
+
+@pytest.mark.parametrize("texto", [
+    "A classe E1 de servidores teve 3 contratos.",  # sem rótulo nem artigo antes do id
+    "O registro E9 não informa modalidade.",          # E9 não existe no prompt
+])
+def test_mencao_que_nao_e_trecho_do_prompt_nao_vira_fonte(texto):
+    resposta = _responder_com(texto, ["E1"], [_chunk("c1")])
+
+    assert [f.chunk_id for f in resposta.sources_used] == ["c1"]
+    assert resposta.answer == texto
+
+
+def test_recusa_nao_ganha_fonte_por_mencao():
+    resposta = gen._incluir_trechos_mencionados(RAGResponse(
+        query="q", answer="O registro E1 não tem relação com a pergunta.", bases_consultadas=[],
+        confidence_level=ConfidenceLevel.RECUSADO, is_refusal=True,
+        refusal_reason=RefusalReason.SEM_EVIDENCIA), [_chunk("c1")])
+
+    assert resposta.sources_used == []
+
+
+def test_trecho_mencionado_depois_de_preposicao_vira_fonte():
+    # Resposta real da P3.2 (golden final de 2026-10-23): "em E3", "como E1".
+    chunks = [_chunk("contrato-1"), _chunk("norma-2", base_id="editais_normativo"), _chunk("contrato-3")]
+    resposta = _responder_com(
+        "A norma que se aplica à contratação identificada em E3 é a Lei 14.133/2021. "
+        "Para outros registros, como E1, não há informações suficientes sobre a modalidade.", [], chunks)
+
+    assert [f.chunk_id for f in resposta.sources_used] == ["contrato-3", "contrato-1"]
+    assert resposta.answer == ("A norma que se aplica à contratação identificada em [1] é a Lei 14.133/2021. "
+                               "Para outros registros, como [2], não há informações suficientes sobre a modalidade.")
+
+
+@pytest.mark.parametrize("answer, esperado", [
+    # Formas reais das respostas do golden de 2026-10-23.
+    ("A Instrução Normativa 65/2021, mencionada no documento E2, trata disso.",
+     "A Instrução Normativa 65/2021, mencionada no documento [1], trata disso."),
+    ("O que torna inaplicável a regra de E2 para esses casos.",
+     "O que torna inaplicável a regra de [1] para esses casos."),
+    ("Os documentos que tratam desse procedimento são E2 e E3.",
+     "Os documentos que tratam desse procedimento são [1] e [2]."),
+    ("Não dá para identificar todas, pois apenas E3 apresenta informação clara.",
+     "Não dá para identificar todas, pois apenas [1] apresenta informação clara."),
+])
+def test_outras_formas_de_mencao_viram_fonte(answer, esperado):
+    chunks = [_chunk("c1"), _chunk("norma-2", base_id="editais_normativo"), _chunk("contrato-3")]
+    assert _responder_com(answer, [], chunks).answer == esperado
+
+
+def test_lista_depois_de_citacao_numerada():
+    chunks = [_chunk("c1"), _chunk("c2"), _chunk("c3"), _chunk("c4")]
+    resposta = _responder_com("Os registros [E2], E3 e E4 usam a modalidade.", ["E2"], chunks)
+    assert resposta.answer == "Os registros [1], [2] e [3] usam a modalidade."
+
+
+def _cliente_em_sequencia(*respostas):
+    chamadas = []
+
+    def cliente(mensagens):
+        chamadas.append(mensagens)
+        resposta = respostas[min(len(chamadas), len(respostas)) - 1]
+        if isinstance(resposta, Exception):
+            raise resposta
+        return json.dumps(resposta)
+
+    cliente.chamadas = chamadas
+    return cliente
+
+
+_SEM_FONTE = {"answer": "Não há dados suficientes: os trechos tratam de normas gerais.",
+              "is_refusal": False, "confidence_level": "baixa", "sources_used": []}
+_COM_FONTE = {"answer": "Não há dados suficientes: os trechos [E1] tratam de normas gerais.",
+              "is_refusal": False, "confidence_level": "baixa", "sources_used": ["E1"]}
+
+
+def test_resposta_sem_fonte_pede_citacao_uma_vez():
+    # P4.3 do golden de 2026-10-23: resposta certa, sem nenhuma fonte citada.
+    cliente = _cliente_em_sequencia(_SEM_FONTE, _COM_FONTE)
+    resposta = gen.gerar_resposta("pergunta", [_chunk("norma-1")], [Natureza.NORMATIVA], cliente=cliente)
+
+    assert len(cliente.chamadas) == 2
+    assert cliente.chamadas[1][-1]["content"] == gen._PEDIDO_DE_CITACAO
+    assert [f.chunk_id for f in resposta.sources_used] == ["norma-1"]
+    assert resposta.answer == "Não há dados suficientes: os trechos [1] tratam de normas gerais."
+
+
+@pytest.mark.parametrize("segunda", [_SEM_FONTE, RuntimeError("ECOA fora")])
+def test_retentativa_que_nao_cita_mantem_a_original(segunda):
+    cliente = _cliente_em_sequencia(_SEM_FONTE, segunda)
+    resposta = gen.gerar_resposta("pergunta", [_chunk("norma-1")], [Natureza.NORMATIVA], cliente=cliente)
+
+    assert len(cliente.chamadas) == 2
+    assert resposta.answer == _SEM_FONTE["answer"] and resposta.sources_used == []
+
+
+def test_resposta_com_fonte_nao_repete_a_chamada():
+    cliente = _cliente_em_sequencia(_COM_FONTE)
+    gen.gerar_resposta("pergunta", [_chunk("norma-1")], [Natureza.NORMATIVA], cliente=cliente)
+    assert len(cliente.chamadas) == 1
+
+
+def test_recusa_nao_pede_citacao():
+    recusa = {"answer": "Fora do escopo.", "is_refusal": True, "refusal_reason": "fora_de_escopo",
+              "confidence_level": "recusado", "sources_used": []}
+    cliente = _cliente_em_sequencia(recusa)
+    gen.gerar_resposta("pergunta", [_chunk("norma-1")], [], cliente=cliente)
+    assert len(cliente.chamadas) == 1
+
+
+def test_retentativa_fica_no_log_da_geracao():
+    gen.gerar_resposta("pergunta", [_chunk("norma-1")], [Natureza.NORMATIVA],
+                       cliente=_cliente_em_sequencia(_SEM_FONTE, _COM_FONTE))
+    geracao = next(json.loads(l) for a in obs.default_logger.logs_dir.glob("pipeline-*.jsonl")
+                   for l in a.read_text(encoding="utf-8").splitlines() if json.loads(l)["stage"] == "geracao")
+    assert geracao["extra"]["retentativa_citacao"] == {"motivo": "resposta_sem_fontes", "resultado": "citou",
+                                                       "fontes": ["norma-1"]}
+
+
+def test_recusa_indevida_convertida_tambem_pede_citacao():
+    # P4.3 de 2026-10-24: o LLM marcou "fora de escopo" e escreveu a resposta;
+    # a conversão a tornava resposta, mas sem nenhuma fonte.
+    recusa_com_texto = {"answer": "Não há dados suficientes: os trechos tratam de normas gerais.",
+                        "is_refusal": True, "refusal_reason": "fora_de_escopo",
+                        "confidence_level": "recusado", "sources_used": []}
+    cliente = _cliente_em_sequencia(recusa_com_texto, _COM_FONTE)
+    resposta = gen.gerar_resposta("pergunta", [_chunk("norma-1")], [Natureza.NORMATIVA], cliente=cliente)
+
+    assert len(cliente.chamadas) == 2
+    assert resposta.is_refusal is False
+    assert [f.chunk_id for f in resposta.sources_used] == ["norma-1"]

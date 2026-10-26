@@ -215,6 +215,14 @@ _NEGACAO_LONGA_RE = re.compile(
     re.IGNORECASE,
 )
 _JANELA_DE_NEGACAO = 6  # palavras antes do termo
+# Vírgula seguida de gerúndio ou conector abre outra oração: em "o trecho não
+# identifica a modalidade, tornando insuficiente a amostra", o "não" é da
+# primeira oração e a insuficiência está afirmada (golden de 2026-10-23, P3.2).
+_NOVA_ORACAO_RE = re.compile(
+    # "portanto", "logo" e "assim" ficam de fora: costumam vir intercalados
+    # ("não é, portanto, insuficiente" continua negado).
+    r",\s+(?=(?:\w+ndo|mas|porem|contudo|entretanto|todavia|o que)\b)"
+)
 
 
 def _termo_afirmado(term: str, text: str) -> bool:
@@ -256,6 +264,9 @@ def _termo_afirmado(term: str, text: str) -> bool:
                            antes.rfind("!"), antes.rfind("\n"), antes.rfind("|"))
         if fim_de_frase >= 0:
             antes = antes[fim_de_frase + 1:]
+        oracoes = list(_NOVA_ORACAO_RE.finditer(antes))
+        if oracoes:
+            antes = antes[oracoes[-1].end():]
         janela = " ".join(antes.split()[-_JANELA_DE_NEGACAO:])
         if not janela:
             return True

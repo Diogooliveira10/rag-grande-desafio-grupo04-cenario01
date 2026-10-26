@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Iterable, Optional
 
-from src.dominio.texto import normalizar
+from src.domain.text import normalizar
 
 SITUACOES_INVALIDAS = ("Anulada", "Revogada", "Suspensa")
 _RE_SITUACAO = (

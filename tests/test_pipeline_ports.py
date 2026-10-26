@@ -1,4 +1,4 @@
-"""O caso de uso com peças falsas injetadas pelas portas (src/portas.py), sem monkeypatch.
+"""O caso de uso com peças falsas injetadas pelas portas (src/ports.py), sem monkeypatch.
 
 Análise e roteamento são os de verdade (por regras, sem LLM); busca, SQL e
 geração são falsos e registram como foram chamados.

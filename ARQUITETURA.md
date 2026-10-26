@@ -90,14 +90,14 @@ conhece o banco, o índice nem o LLM; o caso de uso conhece só os contratos
 | Camada | Onde | O que tem |
 |---|---|---|
 | Entidades | [src/schema.py](src/schema.py) | `Chunk`, `RouteDecision`, `QueryFilters`, `RAGResponse`… (só pydantic) |
-| Domínio | [src/dominio/](src/dominio/) | regras puras: política de confiança (`confianca.py`), situação da compra nas contas (`situacao.py`), conta do RRF (`fusao.py`), normalização de texto (`texto.py`) |
+| Domínio | [src/domain/](src/domain/) | regras puras: política de confiança (`confidence.py`), situação da compra nas contas (`purchase_status.py`), conta do RRF (`fusion.py`), normalização de texto (`text.py`), leitura de valores e períodos da pergunta (`values_and_periods.py`) |
 | Caso de uso | [src/pipeline.py](src/pipeline.py) | `responder`: reformulação, conversa, análise, roteamento, coleta (SQL e busca), geração |
-| Portas | [src/portas.py](src/portas.py) | `Analisador`, `Roteador`, `Buscador`, `ConsultaEstruturada`, `Gerador`, `Conversa`, `Reformulador` (`Protocol`) |
+| Portas | [src/ports.py](src/ports.py) | `Analisador`, `Roteador`, `Buscador`, `ConsultaEstruturada`, `Gerador`, `Conversa`, `Reformulador` (`Protocol`) |
 | Infraestrutura | `src/retrieve.py`, `src/structured_query.py`, `src/generate.py`, `src/structured_db.py`, `llm_ecoa.py`, `src/obs.py`… | FAISS + BM25, SQLite/Neon, ECOA/OpenRouter, log JSONL |
 | Entrada | [app/api.py](app/api.py), [app/cli.py](app/cli.py) | HTTP e linha de comando; só convertem a requisição no caso de uso |
 
-**Regra conferida por teste** ([tests/test_arquitetura.py](tests/test_arquitetura.py)): os módulos de
-`src/dominio/` só importam a biblioteca padrão, `src.schema` e o próprio domínio; `src/schema.py` só
+**Regra conferida por teste** ([tests/test_architecture.py](tests/test_architecture.py)): os módulos de
+`src/domain/` só importam a biblioteca padrão, `src.schema` e o próprio domínio; `src/schema.py` só
 depende do pydantic; `src/pipeline.py` não importa nome privado (com `_`) de outro módulo. Quem quebrar
 a regra vê o teste falhar com o nome do import proibido.
 
@@ -112,11 +112,11 @@ deps = dataclasses.replace(pipeline.dependencias_padrao(), buscar=minha_busca)
 pipeline.responder("Quantos contratos de ambulância em 2025?", dependencias=deps)
 ```
 
-Exemplos com peças falsas, sem `monkeypatch`, em [tests/test_pipeline_portas.py](tests/test_pipeline_portas.py).
+Exemplos com peças falsas, sem `monkeypatch`, em [tests/test_pipeline_ports.py](tests/test_pipeline_ports.py).
 
 **Acrescentar um tipo de consulta SQL.** Cada tipo (identificador, CNPJ do fornecedor, ranking,
 listagem, agrupamento, evolução, estatística) tem um executor próprio em
-[src/structured_query.py](src/structured_query.py), registrado em `_EXECUTORES`. Tipo novo é uma função
+[src/sql_query/execution.py](src/sql_query/execution.py), registrado em `_EXECUTORES`. Tipo novo é uma função
 `_executar_<tipo>(e: _Execucao)` e uma linha no registro, sem mexer nos outros (princípio aberto/fechado).
 Um teste falha se a análise puder gerar um tipo que não tem executor.
 
@@ -134,14 +134,33 @@ nomeia, sem mudar o comportamento (2.197 testes e golden 35/36 antes e depois):
 | `query_analysis._nome_a_partir_do_gatilho` | 117 | 3 | classe `_LeitorDeOrgao`: qualificadores, município, próximo passo, veredito |
 | `query_analysis._analisar_llm` | 98 | 18 | cache, chamada ao LLM, validação de cada intenção contra a pergunta |
 
-No caminho da pergunta, nove funções passavam de 100 linhas (a maior, 288); hoje são três, todas com
-menos de 125 (`detectar_consulta`, `_where` e `dense_retrieve`). Os nomes antigos
+No caminho da pergunta, nove funções passavam de 100 linhas (a maior, 288); desde 2026-10-25 nenhuma
+passa (`_where` e `dense_retrieve` divididas por grupo de filtro e por etapa; `detectar_consulta` com
+96 linhas, quase metade a montagem da `Consulta`; `gerar_resposta` com 95). Os nomes antigos
 das funções movidas para o domínio (`generate._aplicar_recorte`, `structured_query._situacoes_da_pergunta`,
 `structured_db.normalizar`…) continuam valendo como apelidos, para não quebrar quem os importava.
 
-**Próximos passos possíveis:** separar `query_analysis.py` (2,2 mil linhas) em módulos por assunto
-(valores e períodos, órgão e fornecedor, análise por LLM) e levar as regras de leitura de valores e datas
-para o domínio; a coleta (`fetch_corpus.py`, 4,3 mil linhas) fica fora do caminho da pergunta.
+**`query_analysis.py` separado por assunto (2026-10-24).** Das 2.193 linhas, ficaram 939: a análise
+pelo LLM e a montagem dos filtros. A leitura de valores e períodos ("acima de R$ 500 mil", "a partir
+de 2024", 771 linhas) foi para o domínio, em [src/domain/values_and_periods.py](src/domain/values_and_periods.py),
+porque são regras puras; o reconhecimento de órgão, município, fornecedor e CNPJ (910 linhas, lê o
+catálogo do corpus) foi para [src/analysis/entities.py](src/analysis/entities.py). Os nomes continuam
+importáveis de `src.query_analysis`. A análise por regras das 83 perguntas de avaliação ficou idêntica
+antes e depois, byte a byte, com o catálogo real. Quem troca o catálogo ou a estatística de palavras
+num teste (`ORGAOS_CORPUS_PATH`, `_palavras_dos_objetos`) faz a troca em `src.analysis.entities`.
+
+**`structured_query.py` separado por etapa (2026-10-25).** Das 1.979 linhas, ficaram 771: a entrada
+(`consultar_estruturado`, `executar_consulta`), o recorte e o texto da resposta. A decisão de que
+conta a pergunta pede (`detectar_consulta`, `consulta_da_intencao`, a `Consulta`; 756 linhas) foi para
+[src/sql_query/detection.py](src/sql_query/detection.py), e o WHERE parametrizado com os
+executores por tipo (646 linhas) para [src/sql_query/execution.py](src/sql_query/execution.py). A
+detecção não depende da execução; a execução só usa a `Consulta`. O SQL gerado e o resultado no banco
+real ficaram idênticos antes e depois nas perguntas de avaliação (83 consultas, 112 trechos de resposta).
+
+**Fica como está, de propósito:** o cliente do LLM (`llm_ecoa.py`, na raiz) já fica atrás da porta
+`Gerador` (src/ports.py), que é o que a Clean Architecture pede; mudá-lo de lugar mexeria em 13
+arquivos, 30 trocas em testes e 8 trechos da documentação, sem ganho de comportamento. A coleta
+(`fetch_corpus.py`, 4,3 mil linhas) fica fora do caminho da pergunta.
 
 ### Estado atual
 
@@ -166,7 +185,7 @@ Já estão implementados:
 - suporte a certificados HTTPS com `certifi` sem desabilitar validação SSL;
 - golden set com 36 casos e critérios de conteúdo (radicais, teto de confiança, negação), mais um conjunto de busca com 47 perguntas e a ablação do rerank. Na v7, a rodada de 2026-10-19 com o código da `main` em `b93164c` (`golden-2026-10-19-v7-36`) deu **31/36 (86%)**; com os ajustes seguintes no prompt (insuficiência dita de forma explícita), na ordem dos trechos de perguntas mistas e nos apelidos de fornecedor, a rodada `golden-2026-10-19-v7-36-ajustes` deu **33/36 (92%)**: rota 97%, recusa 100%, citação 100%, conteúdo 92%, sem erro de provedor. As três falhas que restam são da geração do LLM (palavras do gabarito e confiança acima do teto). Três rodadas seguidas com o código final (`golden-2026-10-20-v7-36-final-1` a `-3`) deram 31, 33 e 31: P1.2, P4.2 e P6.1 falham nas três, P2.3 e P4.3 oscilam, e rota (97%) e recusa (100%) não variam. Depois dessas rodadas, a P4.2 passou a sair do SQL (agrupamento por modalidade) e teve o gabarito refeito para a v7; na sequência P4.1 → P4.2 → P4.3 pela API, as três passam, e a rodada seguinte (`golden-2026-10-20-v7-36-auditoria`) deu **32/36**. Com os gabaritos da P1.2 e da P6.1 refeitos para a v7, a rodada de 2026-10-21 (`golden-2026-10-21-v7-36`) deu **35/36 (97%)**: só a P3.2 falhou, por variação da redação do LLM. Na busca híbrida dos 47 casos, hit@10 de 0,87 na v7 contra 0,91 na v6. Detalhes em [docs/registro_execucao_v6.md](docs/registro_execucao_v6.md);
 - scripts de instalação (`scripts/setup.ps1`/`setup.sh`) e de download dos modelos com hash conferido (`scripts/models.ps1`/`models.sh`);
-- 2.197 testes automatizados passando na verificação realizada em 2026-10-23 (eram 2.035 em 2026-10-19). Golden v7 em 35/36 nas rodadas de 2026-10-23; a falha que resta alterna entre P1.2, P3.2 e P4.3, sempre pela redação do LLM.
+- 2.222 testes automatizados passando na verificação realizada em 2026-10-24 (eram 2.035 em 2026-10-19). Golden v7 em 35/36 estável desde 2026-10-24 (35, 36 e 35 nas três últimas rodadas), com temperatura 0 no LLM, avaliador que separa as orações na leitura de negação e retentativa de citação; a falha que resta, quando ocorre, é a P4.3 (resposta certa sem fonte citada).
 
 ### Corpus e índice
 

@@ -1,6 +1,6 @@
 """Regras de dependência entre as camadas (Clean Architecture).
 
-O domínio (src/dominio) só depende da biblioteca padrão, das entidades
+O domínio (src/domain) só depende da biblioteca padrão, das entidades
 (src/schema.py) e de si mesmo. Se um teste daqui falhar, alguém fez o domínio
 depender de infraestrutura: mova a dependência para o adaptador, que chama o
 domínio, em vez de importar o adaptador no domínio.
@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 
 RAIZ = Path(__file__).resolve().parents[1]
-DOMINIO = RAIZ / "src" / "dominio"
-_PERMITIDOS_NO_DOMINIO = {"src.schema", "src.dominio"}
+DOMINIO = RAIZ / "src" / "domain"
+_PERMITIDOS_NO_DOMINIO = {"src.schema", "src.domain"}
 # As entidades podem usar pydantic (validação dos modelos), e nada do projeto.
 _PERMITIDOS_NAS_ENTIDADES = {"pydantic"}
 
@@ -54,7 +54,7 @@ def test_entidades_nao_dependem_do_resto_do_projeto():
 def test_caso_de_uso_nao_importa_nome_privado_de_outro_modulo():
     # O pipeline usava retrieve._filtro_opcional: detalhe interno da busca
     # vazando para o caso de uso. Quem precisa de algo de outro módulo usa a
-    # parte pública dele (ou a porta, em src/portas.py).
+    # parte pública dele (ou a porta, em src/ports.py).
     arvore = ast.parse((RAIZ / "src" / "pipeline.py").read_text(encoding="utf-8"))
     privados = sorted(f"{no.module}.{alias.name}" for no in ast.walk(arvore)
                       if isinstance(no, ast.ImportFrom) and no.module and no.module.startswith("src")
@@ -64,4 +64,12 @@ def test_caso_de_uso_nao_importa_nome_privado_de_outro_modulo():
 
 def test_dominio_existe_e_tem_as_regras_extraidas():
     # Guarda contra apagar o pacote e o teste acima passar vazio.
-    assert {p.stem for p in DOMINIO.glob("*.py")} >= {"__init__", "confianca", "fusao", "situacao", "texto"}
+    assert {p.stem for p in DOMINIO.glob("*.py")} >= {"__init__", "confidence", "fusion", "purchase_status", "text", "values_and_periods"}
+
+
+def test_caminho_do_catalogo_de_orgaos_aponta_para_a_raiz():
+    # O módulo de entidades saiu de src/ para src/analysis/: o caminho relativo
+    # ao arquivo mudou de nível. Os testes trocam o caminho, então só este
+    # confere o de verdade.
+    from src.analysis import entities
+    assert entities.ORGAOS_CORPUS_PATH == RAIZ / "data" / "config" / "orgaos_corpus.json"
