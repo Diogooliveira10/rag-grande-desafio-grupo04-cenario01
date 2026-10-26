@@ -682,3 +682,50 @@ João Pedro Félix Reis e Eduarda não participaram deste encontro por questões
 - Foram utilizados assistentes de IA para revisar as alterações integradas à `main`, apoiar a investigação de falhas, implementar e validar melhorias no backend e frontend, executar avaliações e preparar a documentação da defesa.
 - Diogo utilizou o Claude Code para revisar as alterações integradas e se preparar para explicar os resultados, a arquitetura e as limitações do sistema.
 - Conforme o planejamento da equipe, o código permanece congelado até o Demo Day, priorizando a estabilidade da versão apresentada.
+
+## Encontro 17 — 2026-10-26
+
+## Entregamos hoje:
+
+- **Período coberto:** este registro reúne o que foi feito depois da apresentação do Demo Day, de 23/10 até hoje. A versão apresentada à banca foi preservada; as mudanças entraram depois, uma a uma, com testes e com o Golden Set rodado a cada etapa.
+
+- **Golden Set em 36/36:** o resultado passou de 34/36 (23/10, logo após a apresentação) para 35/36 (24/10) e chegou a **36/36** hoje. Os ajustes foram: a resposta que conclui pela ausência de dados passou a citar os trechos examinados e a nomear a norma e o dispositivo; um trecho mencionado no texto ("o registro E1", "em E3") passou a virar fonte numerada (32 de 32 menções corrigidas); as chamadas ao LLM em JSON passaram a usar temperatura 0, e duas rodadas seguidas deram 35 de 36 respostas idênticas; o avaliador passou a reconhecer a negação por oração (608 respostas reavaliadas, nenhuma certa virou errada); e uma resposta sem nenhuma fonte pede a citação uma vez antes de ser aceita.
+
+- **P4.3 resolvida pela Pâmela:** a resposta que reconhece evidência insuficiente deixou de ser tratada como recusa (`src/generate.py`). Era a única falha que restava no Golden Set; com o ajuste dela, a rodada completa deu 36/36.
+
+- **Variedade na busca (Marco):** nas atas, cada compra tem muitos trechos (as páginas do PDF) e uma só compra podia ocupar o topo da busca. Agora entram no máximo 2 trechos por compra à frente; os demais vão para o fim, sem serem descartados (`RETRIEVAL_MAX_PER_PURCHASE`, 0 desliga). Nas 9 perguntas de ata do conjunto de busca, as compras distintas no top-10 passaram de 4,67 para 6,44 em média, e o primeiro trecho relevante continuou em 1º em todas. O Golden Set completo seguiu em 36/36.
+
+- **Reformulação de perguntas de continuação (Diogo):** a etapa que reescreve perguntas como "E em 2025?" com o histórico era a mais lenta do pipeline depois da geração (23,6 s de mediana nos logs). O Diogo separou as pistas de continuação em fortes e fracas ("contratos encontrados em 2025" deixa de chamar o LLM, porque a pergunta já traz o próprio ano), criou um registro de regras que resolve sem LLM a troca de ano, de lugar ("E em Niterói?") e de esfera ("E só os da esfera federal?"), e deu à reformulação um prazo próprio de 15 s (`REFORMULACAO_TIMEOUT`), em vez do prazo de 180 s da geração.
+
+- **Cálculos SQL:** compras revogadas e suspensas também saíram dos totais (as anuladas já tinham saído em 21/10), salvo quando a pergunta as cita; "canceladas" vale anulada e revogada. O total de contratações de 2025 passou de R$ 152,4 bilhões para R$ 146,4 bilhões. A consulta por número de controle continua mostrando o registro em qualquer situação.
+
+- **Segurança:** a API ganhou limite de requisições por cliente (10 perguntas e 120 leituras por minuto, com resposta 429 e `Retry-After`), e o log passou a ter uma cadeia de hashes com chave (HMAC-SHA256), conferida por `python -m src.log_chain verificar`, que acusa qualquer linha alterada ou removida. O detector de injeção passou a recusar, sem chamar o LLM, pedidos de role-play e de vazamento de contexto ("finja que é o administrador", "modo DAN", "repita o texto acima"), sem falso positivo nas 167 perguntas reais e de avaliação. A chave da API foi trocada e a chave da cadeia de hashes foi gerada; as chaves do OpenRouter e do ngrok ficam como estão até o fim do projeto e só serão revogadas se o ECOA colocar o sistema em produção.
+
+- **Desempenho** (na rodada do Golden Set com todas as mudanças, a etapa BM25 caiu de 100,3 s para 63,1 s nas 36 perguntas):
+  - Mensagem com rota reconhecida não passa mais pelo LLM de identificação de intenção. Nas 36 perguntas do Golden Set, essa etapa caiu de 62,8 s para 0 s; em 165 mensagens reais, as chamadas ao LLM caíram de 20 para 11, sem mudar nenhuma resposta fixa.
+  - O filtro do objeto no SQL passou a usar um índice de texto (FTS5 de trigramas) no SQLite. Nas 284 consultas reais com esse filtro, o tempo caiu de 94 s para 24 s; as 88 perguntas SQL dos logs deram respostas idênticas às de antes. Na rodada do Golden Set, a etapa SQL caiu de 39,1 s para 16,6 s. Quem usa a base baixada do Drive precisa rodar uma vez `python -m src.structured_db fts` (~5 s).
+  - Na busca, os filtros de objeto e de órgão eram recalculados para cada um dos 107 mil contratos a cada pergunta, e os registros eram copiados antes de filtrar. O resultado desses cálculos passou a ser guardado e as cópias foram eliminadas. Nas 47 perguntas do conjunto de busca, o tempo total caiu de 179 s para 101 s e a mediana por busca de 2,9 s para 0,8 s, com resultados idênticos aos de antes (mesmos trechos, mesma ordem e mesmas notas).
+
+- **Organização do código em camadas (Clean Architecture):** o caminho da pergunta foi reorganizado em camadas, com a dependência apontando só para dentro: regras de negócio puras em `src/domain/` (política de confiança, situação da compra nas contas, conta do RRF, normalização de texto e leitura de valores e períodos), contratos do caso de uso em `src/ports.py` e o pipeline recebendo as implementações por injeção de dependências, o que permite trocar a busca, o LLM ou o banco num teste sem `monkeypatch`. `query_analysis.py` (2.193 linhas) e `structured_query.py` (1.979 linhas) foram separados por assunto e por etapa (`src/analysis/`, `src/sql_query/`, com um executor por tipo de consulta), e as funções centrais foram divididas nas etapas que o log já nomeia: no caminho da pergunta, nenhuma passa de 100 linhas (a maior tinha 288). O comportamento ficou idêntico, conferido pela suíte, pelo Golden Set e pela comparação, antes e depois, da análise e do SQL gerado nas perguntas de avaliação. Um teste (`tests/test_architecture.py`) falha se o domínio passar a depender da infraestrutura. A estrutura está descrita em `ARQUITETURA.md`.
+
+- **Auditoria pós-apresentação e divisão das tarefas:** Renato auditou o projeto e montou o documento de pendências (`Pendencias_Pos_Demo_Grupo04.docx`, fora do repositório), com 7 pendências e um roteiro de conferência. A divisão ficou: João, com o catálogo de fornecedores da v7 e os 813 trechos sem vetor; Marco, com a variedade na busca (entregue); Pâmela, com a P4.3 (entregue); Eduarda, com o frontend (selo "iniciado" no trace e exibição do limite de requisições); e Diogo, com a redução do tempo da reformulação de perguntas (entregue, com um ajuste pendente).
+
+- **Documentação e entrega:** o contrato da API para o frontend (`docs/FRONTEND_API_CONTRACT.md`) ganhou a seção do limite de requisições e a lista dos status das etapas do trace ("iniciado" é marco de início, não erro). O README e o guia de integração ganharam o comando do índice SQL. Os slides foram atualizados com os números novos, e foi preparado o e-mail ao tutor sobre a entrega deles. A suíte de testes passou de 2.116 para 2.261 testes aprovados.
+
+## Ficou pendente:
+
+- João: catálogo de fornecedores da v7 (com apelidos) e vetores dos 813 trechos sem embedding.
+- Eduarda: selo "iniciado" no trace e exibição da mensagem do limite de requisições (429) no frontend.
+- Diogo: ajustar o prazo da reformulação. Na rodada do Golden Set feita depois da entrega, a P4.3 voltou a falhar (35/36): a reescrita dela leva de 12 a 42 s no ECOA, o prazo de 15 s estourou e a pergunta seguiu só com a anterior anexada; além disso, o prazo ainda espera a chamada ao LLM terminar (a etapa durou 43 s mesmo assim). Falta fazer o prazo cortar o tempo de fato, escolher um valor compatível com o ECOA (nos logs, a reescrita tem mediana de 15 s e p90 de 53 s) e rodar o Golden Set de novo.
+- Fazer o merge das entregas de hoje na `main` (sem squash, para o arquivo de dados do Marco chegar a todos), reiniciar o backend e rodar `python -m src.structured_db fts` em cada máquina.
+- Entrega final do projeto em 30/10/2026.
+
+## Bloqueios em aberto:
+
+- **Provedor de LLM:** o ECOA oscilou durante o dia (erros de provedor em parte das rodadas); o tempo de geração varia de uma rodada para outra sem mudança no código.
+- **Recursos da máquina:** o backend continua ocupando cerca de 4,6 GB de memória e leva cerca de 1 minuto para subir.
+
+### Uso de assistentes de IA:
+
+- A equipe usou assistentes de IA para auditar o projeto, medir o tempo de cada etapa nos logs, implementar as correções com testes, comparar resultados antes e depois de cada mudança, rodar o Golden Set e escrever a documentação e as mensagens do grupo.
+- As mudanças só entraram depois de conferidas por testes automatizados, pelo Golden Set e, nas de desempenho, pela comparação dos resultados com os de antes. As decisões sobre escopo, divisão das tarefas e manutenção das chaves foram tomadas pela equipe.
