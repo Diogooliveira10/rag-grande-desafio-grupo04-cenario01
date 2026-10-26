@@ -89,6 +89,30 @@ def compor_fornecedores(banco: Any, genericas: set[str] | frozenset[str],
     }
 
 
+# Forma jurídica no fim da razão social, com ou sem pontuação ("S.A", "S/A", "LTDA.").
+_FORMA_JURIDICA = re.compile(r"(?:\s+(?:s\s?a|ltda|me|epp|eireli))+$")
+
+
+def chave_de_razao_social(nome: str) -> str:
+    """Razão social sem acento, pontuação e forma jurídica: "GENTE SEGURADORA S.A" -> "gente seguradora"."""
+    texto = " ".join(re.sub(r"[^a-z0-9]+", " ", normalizar(nome)).split())
+    return _FORMA_JURIDICA.sub("", texto).strip()
+
+
+def mesma_razao_social(nome: str, procurado: str, *, exata: bool = False) -> bool:
+    """``procurado`` aparece em ``nome`` (ou é ``nome``, com ``exata``), palavra por
+    palavra, ignorando pontuação e forma jurídica.
+
+    Reserva do filtro de fornecedor quando o registro não tem CNPJ e a grafia dele
+    não está no catálogo: 48 mil contratos dos vetores da v7 só têm o nome, e
+    "GENTE SEGURADORA S.A" não casava com "GENTE SEGURADORA SA" (I04).
+    """
+    chave, buscada = chave_de_razao_social(nome), chave_de_razao_social(procurado)
+    if not buscada:
+        return False
+    return chave == buscada if exata else f" {buscada} " in f" {chave} "
+
+
 def raizes_do_fornecedor(nome: str) -> tuple[str, ...]:
     from src.analysis.entities import _catalogo_de_orgaos
 
