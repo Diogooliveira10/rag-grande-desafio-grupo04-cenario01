@@ -14,8 +14,9 @@
 
 ## Release — `v7-qwen-q8-2026-10-26`
 
-- Release em `data/releases/v7-qwen-q8-2026-10-26/`, originada do candidato_08
-  preservado. Índice ativo em `index/`: **144.112 documentos e vetores**, sem lacunas.
+- Metadados da release original em `data/releases/v7-qwen-q8-2026-10-26/`,
+  originada do candidato_08. Dados completos no pacote com FTS acima.
+  Índice ativo em `index/`: **144.112 documentos e vetores**, sem lacunas.
   Modelo: **Qwen3-Embedding-0.6B.Q8_0**, confirmado pelo operador.
 - A comparação amostral re-embedou 40 contratos com o checkpoint Q8 local:
   28/30 históricos e 10/10 controles foram idênticos; os outros dois históricos
@@ -53,6 +54,8 @@
 O registro de 18/10 abaixo é histórico. Seu candidato original permanece intacto.
 O complemento foi produzido separadamente em
 `data/v7_recuperacao/2026-10-15/candidato_08_vetores_completos/`, **sem promoção**.
+Nesse diretório permanecem os manifestos e relatórios; os dados completos
+estão no pacote com FTS.
 
 ### Catálogo v3
 
