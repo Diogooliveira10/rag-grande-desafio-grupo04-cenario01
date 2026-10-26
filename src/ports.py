@@ -59,6 +59,6 @@ class Conversa(Protocol):
 
 
 class Reformulador(Protocol):
-    """Reescreve continuações ("E em 2024?") com o histórico (``src/reformulacao.py``)."""
+    """Reescreve continuações ("E em 2024?") com o histórico (``src/reformulation.py``)."""
     def __call__(self, query: str, historico: Optional[Sequence[Any]], *,
                  run_id: str, query_id: str) -> Any: ...

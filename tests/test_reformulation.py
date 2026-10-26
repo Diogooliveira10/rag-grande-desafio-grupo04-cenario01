@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from src import obs, reformulacao
-from src.reformulacao import Reformulacao, TurnoAnterior, parece_continuacao, reformular_pergunta
+from src import obs, reformulation
+from src.reformulation import Reformulacao, TurnoAnterior, parece_continuacao, reformular_pergunta
 
 P43 = (
     "Considerando os mesmos contratos de manutenção de computadores, quais regras do "
@@ -132,14 +132,14 @@ def test_prioridade_das_regras():
 
 
 def test_timeout_da_reformulacao_faz_fallback(monkeypatch):
-    monkeypatch.setattr(reformulacao, "REFORMULACAO_TIMEOUT", 0.01)
+    monkeypatch.setattr(reformulation, "REFORMULACAO_TIMEOUT", 0.01)
 
     def cliente_lento(_mensagens):
         import time
         time.sleep(0.1)
         return json.dumps({"pergunta": "reformulada"})
 
-    monkeypatch.setattr(reformulacao, "_cliente_padrao", lambda diagnostics: cliente_lento)
+    monkeypatch.setattr(reformulation, "_cliente_padrao", lambda diagnostics: cliente_lento)
 
     resultado = reformular_pergunta(P43, HISTORICO, cliente=None)
 
@@ -232,7 +232,7 @@ def test_falha_do_modelo_anexa_a_pergunta_anterior():
         json.dumps({"outra_chave": "x"}),
         json.dumps({"pergunta": ""}),
         json.dumps({"pergunta": 42}),
-        json.dumps({"pergunta": "x" * (reformulacao.MAX_CHARS_REFORMULADA + 1)}),
+        json.dumps({"pergunta": "x" * (reformulation.MAX_CHARS_REFORMULADA + 1)}),
     ],
 )
 def test_saida_fora_do_formato_anexa_a_pergunta_anterior(saida):
@@ -277,7 +277,7 @@ def test_continuacao_que_so_troca_o_ano_e_reescrita_sem_modelo(pergunta):
     "E em 2024, quais órgãos?", "E o valor em 2024?", "E em 2024 e 2025?", "Contratos de 2024?",
 ])
 def test_continuacao_com_mais_que_o_ano_continua_indo_ao_modelo(pergunta):
-    assert reformulacao.so_troca_o_ano(pergunta) is False
+    assert reformulation.so_troca_o_ano(pergunta) is False
 
 
 def test_modelo_que_devolve_a_mesma_pergunta_nao_conta_como_reescrita():
@@ -287,7 +287,7 @@ def test_modelo_que_devolve_a_mesma_pergunta_nao_conta_como_reescrita():
 
 
 def test_modo_desligado_nao_chama_o_modelo(monkeypatch):
-    monkeypatch.setattr(reformulacao, "REFORMULACAO_MODE", "regras")
+    monkeypatch.setattr(reformulation, "REFORMULACAO_MODE", "regras")
     chamadas = []
 
     resultado = reformular_pergunta(P43, HISTORICO, cliente=_cliente("outra", chamadas))
@@ -321,3 +321,29 @@ def test_reformulacao_fica_registrada_no_log():
     assert registro["output"]["reescrita"] is True
     assert registro["output"]["pergunta"] == reescrita
     assert registro["extra"]["turnos_no_prompt"] == 1
+
+
+def test_prazo_estourado_volta_sem_esperar_o_llm(monkeypatch):
+    """O prazo corta o tempo de fato. Com ``with ThreadPoolExecutor``, a saída do
+    bloco esperava o LLM terminar: na P4.3 o prazo de 15 s estourou e a etapa
+    durou 43 s mesmo assim."""
+    import threading
+    import time
+
+    monkeypatch.setattr(reformulation, "REFORMULACAO_TIMEOUT", 0.05)
+    liberar = threading.Event()
+
+    def cliente_lento(_mensagens):
+        liberar.wait(5)
+        return json.dumps({"pergunta": "reformulada"})
+
+    monkeypatch.setattr(reformulation, "_cliente_padrao", lambda diagnosticos: cliente_lento)
+    inicio = time.perf_counter()
+    try:
+        resultado = reformular_pergunta(P43, HISTORICO, cliente=None)
+    finally:
+        liberar.set()
+
+    assert time.perf_counter() - inicio < 2
+    assert resultado.motivo == "llm_falhou"
+    assert "continuação da pergunta anterior" in resultado.pergunta

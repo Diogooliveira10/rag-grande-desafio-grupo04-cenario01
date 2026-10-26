@@ -73,3 +73,16 @@ def test_caminho_do_catalogo_de_orgaos_aponta_para_a_raiz():
     # confere o de verdade.
     from src.analysis import entities
     assert entities.ORGAOS_CORPUS_PATH == RAIZ / "data" / "config" / "orgaos_corpus.json"
+
+
+@pytest.mark.parametrize("antigo,novo", [
+    ("src.reformulacao", "src.reformulation"),
+    ("src.completar_vetores_v7", "src.complete_vectors_v7"),
+])
+def test_nome_antigo_de_arquivo_renomeado_e_o_mesmo_modulo(antigo, novo):
+    """Arquivos renomeados para inglês (2026-10-26): o nome antigo segue importável
+    e devolve o próprio módulo, então trocar um valor por ele vale para o novo."""
+    import importlib
+
+    assert importlib.import_module(antigo) is importlib.import_module(novo)
+

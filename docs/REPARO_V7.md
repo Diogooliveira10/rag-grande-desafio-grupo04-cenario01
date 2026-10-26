@@ -78,7 +78,7 @@ O complemento foi produzido separadamente em
   O preflight dos 813 textos encontrou no máximo 1.601 tokens, sem truncamento.
   Entrada, cache, relatório e configuração estão em
   `data/v7_recuperacao/pendencias_v7_embeddings/`.
-- `src.completar_vetores_v7` exige cobertura exata das lacunas, texto/hash,
+- `src.complete_vectors_v7` exige cobertura exata das lacunas, texto/hash,
   dimensão, finitude/norma, modelo/configuração e hash do checkpoint. Copia para
   destino novo, acrescenta os registros ao JSONL e ao FAISS na mesma ordem, sem
   re-embedar vetores anteriores. Recusa sobrescrita do destino.
@@ -173,7 +173,7 @@ O complemento foi produzido separadamente em
 Use destinos novos (os caminhos de saída abaixo são exemplos, não artefatos já gerados):
 
 ```powershell
-python -m src.completar_vetores_v7 prepare `
+python -m src.complete_vectors_v7 prepare `
   --candidato data/v7_recuperacao/2026-10-15/candidato_07_reparo `
   --destino data/v7_recuperacao/lote_novo
 python -m src.run_local_embeddings --run `
@@ -182,12 +182,12 @@ python -m src.run_local_embeddings --run `
   --model-path D:/LLM/Qwen3-Embedding-0.6B.Q8_0.gguf `
   --llama-exe D:/LLM/llama.cpp-vulkan/llama.exe `
   --gpu-layers all --context-size 8192 --ubatch-size 8192 --flash-attn on
-python -m src.completar_vetores_v7 complete `
+python -m src.complete_vectors_v7 complete `
   --candidato data/v7_recuperacao/2026-10-15/candidato_07_reparo `
   --destino data/v7_recuperacao/candidato_novo `
   --embeddings data/v7_recuperacao/lote_novo/embeddings.jsonl `
   --catalogo data/config/orgaos_corpus.json
-python -m src.completar_vetores_v7 verify `
+python -m src.complete_vectors_v7 verify `
   --candidato data/v7_recuperacao/candidato_novo
 ```
 

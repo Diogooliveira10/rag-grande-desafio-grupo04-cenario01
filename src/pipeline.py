@@ -24,7 +24,7 @@ from src.generate import ClienteLLM, gerar_resposta, pode_responder_sql
 from src.ports import (Analisador, Buscador, ConsultaEstruturada, Conversa, Gerador,
                         Reformulador, Roteador)
 from src.query_analysis import analisar_query, filtros_para_retrieve
-from src.reformulacao import Reformulacao, reformular_pergunta
+from src.reformulation import Reformulacao, reformular_pergunta
 from src.rerank import reranker_padrao
 from src.retrieve import DEFAULT_TOP_K, RerankFn, RetrievalResult, filtro_opcional, retrieve
 from src.router import inferir_motivo_recusa, rotear_pergunta
@@ -177,7 +177,7 @@ def responder(
     ``historico`` são as últimas trocas da conversa (``TurnoAnterior`` ou dicts
     com ``pergunta`` e ``resposta``), enviadas pelo cliente: o backend não guarda
     memória entre as perguntas. Quando a pergunta parece continuação ("os mesmos
-    contratos", "E em 2024?"), ``src/reformulacao.py`` a reescreve para se
+    contratos", "E em 2024?"), ``src/reformulation.py`` a reescreve para se
     sustentar sozinha, e a pergunta reescrita substitui a original em todas as
     etapas. Nesse caso a resposta leva ``pergunta_reformulada``. Sem histórico,
     nada muda.

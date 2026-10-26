@@ -455,7 +455,7 @@ def test_trace_orders_timestamps_by_instant_not_timezone_strings(tmp_path):
 
 
 def test_followup_original_and_rewritten_questions_are_in_final_snapshot(local_pipeline, monkeypatch):
-    from src.reformulacao import Reformulacao
+    from src.reformulation import Reformulacao
     monkeypatch.setattr(pipeline, 'reformular_pergunta', lambda *a, **kw: Reformulacao(
         'Quais contratos de ambulâncias?', True, 'teste'))
     result = local_pipeline.post('/api/v1/query', json={'query': 'E os mesmos?',
