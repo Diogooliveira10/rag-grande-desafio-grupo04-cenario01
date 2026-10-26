@@ -61,8 +61,10 @@ GENERATION_CHUNK_CHARS = int(_env("GENERATION_CHUNK_CHARS", "900"))
 # A geração normal leva de 20 a 90 s no servidor da turma.
 GENERATION_TIMEOUT = float(_env("GENERATION_TIMEOUT", "180"))
 # Prazo próprio de cada reformulação: a etapa reescreve consultas curtas e não
-# deve competir com a geração pelo mesmo timeout global.
-REFORMULACAO_TIMEOUT = float(_env("REFORMULACAO_TIMEOUT", "15"))
+# deve competir com a geração pelo mesmo timeout global. Nos logs de outubro,
+# 91% das reescritas do ECOA terminam em até 60 s (com 15 s, só 43%: o resto
+# caía no fallback e a P4.3 falhava); o prazo corta a cauda, que chegou a 149 s.
+REFORMULACAO_TIMEOUT = float(_env("REFORMULACAO_TIMEOUT", "60"))
 GENERATION_MAX_RETRIES = int(_env("GENERATION_MAX_RETRIES", "1"))
 # Temperatura das chamadas com resposta em JSON (geração e análise da pergunta).
 # 0 = a mesma pergunta com as mesmas evidências tende ao mesmo texto; com 0,2 a

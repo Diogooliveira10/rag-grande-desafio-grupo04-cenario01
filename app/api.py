@@ -48,7 +48,7 @@ from src.obs import (Stage, default_logger, lifecycle, new_query_id, new_run_id,
                      new_session_id, sessao)
 from src.log_context import current_execution, execution
 from src.obs import registrar as obs_registrar
-from src.reformulacao import TurnoAnterior
+from src.reformulation import TurnoAnterior
 from src.schema import RAGResponse
 from src.trace import montar_trace, montar_trace_sessao
 
@@ -146,7 +146,7 @@ class QueryRequest(BaseModel):
     session_id: Optional[str] = Field(default=None, pattern=_SESSION_PATTERN)
     # Últimas trocas da conversa, do mais antigo ao mais recente. O backend não
     # guarda memória entre perguntas: com isso, "considerando os mesmos
-    # contratos…" é reescrita para se sustentar sozinha (src/reformulacao.py).
+    # contratos…" é reescrita para se sustentar sozinha (src/reformulation.py).
     # O pipeline usa só as 3 mais recentes.
     historico: list[TurnoAnterior] = Field(default_factory=list, max_length=10)
 

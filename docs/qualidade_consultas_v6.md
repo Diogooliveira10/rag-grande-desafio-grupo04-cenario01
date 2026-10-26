@@ -17,7 +17,7 @@ citadas abaixo foram resolvidas depois:
 | Feedback e histórico persistidos | `POST /api/v1/feedback` e `GET /api/v1/history`, com SQLite em [src/history_store.py](../src/history_store.py). Desde 07/10 o histórico grava textos mascarados e exige `X-API-Key`. |
 | PostgreSQL executável | A base estruturada roda no Postgres do Neon (`DATABASE_URL`) e no SQLite local, com os mesmos números ([src/structured_db.py](../src/structured_db.py)). |
 | Trilha conversacional de e-mails | Base `emails_sinteticos`, com 25 conversas, integrada em 05/10 ([emails_sinteticos.md](emails_sinteticos.md)). |
-| Contexto entre perguntas | Perguntas de continuação são reescritas com as mensagens anteriores enviadas pelo front-end ([src/reformulacao.py](../src/reformulacao.py), 07/10). |
+| Contexto entre perguntas | Perguntas de continuação são reescritas com as mensagens anteriores enviadas pelo front-end ([src/reformulation.py](../src/reformulation.py), 07/10). |
 | Vigência normativa | 1.498 das 1.561 normas têm data de início de vigência desde o controle de qualidade de 07/10 ([qualidade_v6.json](../data/inventory/qualidade_v6.json)). |
 
 Continuam abertos: preço unitário e equivalência técnica, que dependem de dados que

@@ -189,7 +189,7 @@ def _cliente_c1(mensagens):
 
 
 def test_responder_consulta_a_pergunta_reformulada_e_devolve_a_original(monkeypatch):
-    from src.reformulacao import Reformulacao
+    from src.reformulation import Reformulacao
 
     original = "E quanto aos contratos acima de R$ 500 mil?"
     reescrita = "Quais contratos de manutenção de computadores foram assinados acima de R$ 500 mil?"
@@ -217,7 +217,7 @@ def test_responder_consulta_a_pergunta_reformulada_e_devolve_a_original(monkeypa
 
 
 def test_responder_sem_reescrita_nao_acrescenta_pergunta_reformulada(monkeypatch):
-    from src.reformulacao import Reformulacao
+    from src.reformulation import Reformulacao
 
     pergunta = "Quais contratos foram assinados acima de R$ 500 mil?"
     monkeypatch.setattr(
@@ -247,7 +247,7 @@ def test_responder_sem_historico_nao_chama_a_reformulacao(monkeypatch):
 
 def test_guardrail_vale_sobre_a_pergunta_reformulada(monkeypatch):
     """Continuação que, reescrita, pede dado bancário, é recusada como pedido de dado bancário."""
-    from src.reformulacao import Reformulacao
+    from src.reformulation import Reformulacao
 
     def retrieve_espiao(*args, **kwargs):
         raise AssertionError("não deveria buscar")

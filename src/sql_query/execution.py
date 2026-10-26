@@ -133,7 +133,16 @@ def _filtros_analiticos(consulta: Consulta, c: _Clausulas) -> None:
             continue
         if campo not in structured_db._TABELAS[consulta.tabela]:
             raise ValueError("Campo SQL não permitido")
-        if campo in {"orgao_nome", "unidade_nome", "fornecedor"}:
+        if campo == "fornecedor":
+            from src.analysis.suppliers import raizes_do_fornecedor
+            raizes = raizes_do_fornecedor(str(valor))
+            if raizes:
+                # O nome canônico é só apresentação; matriz e filiais podem ter
+                # razões sociais diferentes. CNPJ explícito continua exato.
+                c.add("substr(fornecedor_cnpj, 1, 8) IN (" + ", ".join("?" for _ in raizes) + ")", *raizes)
+            else:
+                c.add("LOWER(fornecedor) LIKE LOWER(?)", f"%{valor}%")
+        elif campo in {"orgao_nome", "unidade_nome"}:
             c.add(f"LOWER({campo}) LIKE LOWER(?)", f"%{valor}%")
         else:
             c.add(f"{campo} = ?", valor)

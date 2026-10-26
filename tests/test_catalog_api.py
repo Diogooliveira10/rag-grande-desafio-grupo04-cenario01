@@ -231,7 +231,7 @@ def test_compact_snapshot_prefers_public_chunk_but_never_exposes_restricted(loca
     assert not catalog.documents(busca="Página duplicada")
 
 
-def _active_metadata_fixture(local_catalog, *, matching=True):
+def _active_metadata_fixture(local_catalog, *, matching=True, nested_provenance=False):
     import hashlib
     import sqlite3
 
@@ -242,12 +242,24 @@ def _active_metadata_fixture(local_catalog, *, matching=True):
             ("corpus_version", "v7-reparo"), ("source_sha256", source_hash),
             ("built_at", "2026-10-18T21:14:05+00:00"), ("schema_version", "7"),
         ])
-    catalog.INDEX_MANIFEST.write_text(json.dumps({
+    index = {
         "source_sha256": source_hash, "snapshot_id": "candidato_teste", "total_chunks": 9,
         "total_vectors": 8, "por_base": {"contratos_estruturado": {"candidato": 3, "recuperacao": 2}},
         "homogeneidade_modelo_comprovada": False,
         "proveniencia_encoding_completa": False, "promocao_autorizada": False,
-    }), encoding="utf-8")
+    }
+    if nested_provenance:
+        index.update({
+            "built_at": "2026-10-26T17:45:00+00:00",
+            "snapshot_id": "candidato_08_vetores_completos",
+            "total_vectors": 9,
+            "por_base": None,
+            "proveniencia_vetores": {"por_base": {
+                "contratos_estruturado": {"candidato": 3, "recuperacao": 2},
+                "atas_conversacional": {"complemento_q8_local": 4},
+            }},
+        })
+    catalog.INDEX_MANIFEST.write_text(json.dumps(index), encoding="utf-8")
 
 
 def test_summary_separates_verified_active_v7_from_historical_v6(local_catalog):
@@ -271,6 +283,22 @@ def test_summary_separates_verified_active_v7_from_historical_v6(local_catalog):
     assert sum(base["chunks_ativos"] for base in body["bases"]) == 9
     assert sum(base["documentos_ativos"] for base in body["bases"]) == 7
     assert str(catalog.STRUCTURED_FILE) not in json.dumps(body)
+
+
+def test_summary_reads_nested_candidate_vector_counts_without_dropping_readiness_warnings(local_catalog):
+    _active_metadata_fixture(local_catalog, nested_provenance=True)
+    body = client.get("/api/v1/project/summary").json()
+    active = body["corpus_ativo"]
+    assert active["snapshot_id"] == "candidato_08_vetores_completos"
+    assert active["construido_em"] == "2026-10-26T17:45:00+00:00"
+    assert active["total_chunks"] == active["total_vetores"] == 9
+    assert active["chunks_sem_vetor"] == 0
+    assert active["vetores_por_base"] == {"contratos_estruturado": 5, "atas_conversacional": 4}
+    assert sum(base["vetores_ativos"] or 0 for base in body["bases"]) == 9
+    assert not any("cobertura da busca vetorial é parcial" in warning for warning in active["avisos"])
+    assert any("mista" in warning for warning in active["avisos"])
+    assert any("proveniência de encoding" in warning for warning in active["avisos"])
+    assert any("produção" in warning for warning in active["avisos"])
 
 
 def test_summary_does_not_claim_v7_when_source_hashes_differ(local_catalog):

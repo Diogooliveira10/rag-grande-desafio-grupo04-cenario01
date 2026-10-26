@@ -161,3 +161,86 @@ def test_validate_bundle_rejects_wrong_declared_sql_schema(tmp_path):
 
 def test_readiness_without_manifest_is_not_ready():
     assert snapshot.readiness("") == {"ready": False, "reason": "manifesto_nao_configurado"}
+
+
+def _accept_historical_provenance(path, manifest):
+    model = "Qwen3-Embedding-0.6B.Q8_0"
+    flags = {key: False for key in (
+        "homogeneidade_modelo_comprovada", "homogeneidade_configuracao_comprovada",
+        "proveniencia_encoding_completa",
+    )}
+    for item in manifest["index_artifacts"]:
+        if item["path"].endswith("manifest.json"):
+            artifact = path.parent / item["path"]
+            data = json.loads(artifact.read_text(encoding="utf-8"))
+            data.update(flags, embedding_model=model)
+            artifact.write_text(json.dumps(data), encoding="utf-8")
+            item["sha256"] = _hash(artifact)
+    index_path = path.parent / manifest["files"]["index_manifest"]["path"]
+    data = json.loads(index_path.read_text(encoding="utf-8"))
+    data.update(flags, snapshot_id=manifest["snapshot_id"], embedding_model=model, promocao_autorizada=True)
+    index_path.write_text(json.dumps(data), encoding="utf-8")
+    manifest["files"]["index_manifest"]["sha256"] = _hash(index_path)
+    manifest["operator_acceptance"] = {
+        "scope": "historical_embedding_provenance", "approved": True,
+        "approved_by": "test-operator", "approved_at": "2026-10-27T00:00:00Z",
+        "snapshot_id": manifest["snapshot_id"], "embedding_model": model,
+        "index_manifest_sha256": _hash(index_path),
+    }
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def test_operator_acceptance_allows_exact_release_without_falsifying_proof(tmp_path):
+    path, manifest = _manifest(tmp_path)
+    _accept_historical_provenance(path, manifest)
+    assert snapshot.validate_bundle(path)["ready"] is True
+    index = json.loads((path.parent / "index/manifest.json").read_text(encoding="utf-8"))
+    assert index["proveniencia_encoding_completa"] is False
+    del manifest["operator_acceptance"]
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(snapshot.SnapshotValidationError, match="proveniencia_incompleta"):
+        snapshot.validate_bundle(path)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("approved", False), ("approved_by", ""), ("approved_at", ""),
+    ("scope", "all_checks"), ("snapshot_id", "another-release"),
+    ("embedding_model", "other-model"), ("index_manifest_sha256", "0" * 64),
+])
+def test_operator_acceptance_cannot_be_reused_for_another_release(tmp_path, field, value):
+    path, manifest = _manifest(tmp_path)
+    _accept_historical_provenance(path, manifest)
+    manifest["operator_acceptance"][field] = value
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(snapshot.SnapshotValidationError, match="aceite_operador_invalido"):
+        snapshot.validate_bundle(path)
+
+
+@pytest.mark.parametrize("corruption", ["hash", "coverage", "model", "faiss"])
+def test_operator_acceptance_does_not_bypass_integrity(tmp_path, corruption):
+    path, manifest = _manifest(tmp_path)
+    _accept_historical_provenance(path, manifest)
+    if corruption == "hash":
+        (path.parent / "index/contratos_estruturado/vectors.jsonl").write_text("{}\n", encoding="utf-8")
+        expected = "hash_divergente"
+    else:
+        relative = "index/contratos_estruturado/manifest.json"
+        artifact = path.parent / relative
+        data = json.loads(artifact.read_text(encoding="utf-8"))
+        if corruption == "coverage":
+            data["total_vectors"] = 0
+            expected = "vetores_ausentes"
+        elif corruption == "model":
+            data["embedding_model"] = "another-model"
+            expected = "modelo_indice_divergente"
+        else:
+            relative = "index/contratos_estruturado/vectors.faiss"
+            artifact = path.parent / relative
+            faiss.write_index(faiss.IndexFlatIP(2), str(artifact))
+            expected = "vetores_ausentes"
+        if corruption != "faiss":
+            artifact.write_text(json.dumps(data), encoding="utf-8")
+        next(item for item in manifest["index_artifacts"] if item["path"] == relative)["sha256"] = _hash(artifact)
+        path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(snapshot.SnapshotValidationError, match=expected):
+        snapshot.validate_bundle(path)
