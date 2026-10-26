@@ -44,7 +44,7 @@ def _cliente(pergunta: str, chamadas: list | None = None):
         "e quanto ao valor total?",
         "Desses, qual tem o maior valor?",
         "Qual o órgão contratante desse contrato?",
-        "Considerando os três contratos encontrados em 2025, qual a modalidade predominante?",
+        "Quais são os contratos citados acima em 2025?",
         "Quem é o fornecedor dele?",
         "E os outros órgãos?",
         "Isso vale também para 2023?",
@@ -62,11 +62,90 @@ def test_reconhece_pergunta_de_continuacao(pergunta):
         "É possível consultar contratos de ambulância em 2025?",
         "O que o e-mail sintético da DPRJ diz sobre papel A4?",
         "Quais órgãos contrataram manutenção de computadores em 2025?",
+        "Considerando os três contratos encontrados em 2025, qual a modalidade predominante?",
         "",
     ],
 )
 def test_pergunta_que_se_sustenta_sozinha_nao_e_continuacao(pergunta):
     assert parece_continuacao(pergunta) is False
+
+
+def test_pergunta_com_encontrados_em_2025_nao_chama_o_llm():
+    pergunta = "Considerando os três contratos encontrados em 2025, qual a modalidade predominante?"
+
+    def cliente(_mensagens):
+        pytest.fail("não deve consultar o LLM quando a pergunta já é autossuficiente")
+
+    resultado = reformular_pergunta(pergunta, HISTORICO, cliente=cliente)
+
+    assert resultado == Reformulacao(pergunta, False, "autossuficiente")
+
+
+def test_pistas_fortes_com_ano_presente_ainda_sao_continuacao():
+    for pergunta in (
+        "Quais são os contratos citados acima em 2025?",
+        "Considerando os mesmos contratos de manutenção de computadores em 2025, quais regras do corpus se aplicam?",
+        "Quais são os contratos encontrados acima em 2025?",
+    ):
+        assert parece_continuacao(pergunta) is True
+
+
+def test_pistas_fortes_sem_ano_sao_continuacao():
+    for pergunta in (
+        "Quais são os contratos citados acima?",
+        "Considerando os mesmos contratos...",
+        "E os da esfera federal?",
+    ):
+        assert parece_continuacao(pergunta) is True
+
+
+def test_regra_troca_de_lugar_nao_chama_o_llm():
+    pergunta = "E em Niterói?"
+
+    def cliente(_mensagens):
+        pytest.fail("troca_de_lugar deve ser resolvida por regra")
+
+    resultado = reformular_pergunta(pergunta, HISTORICO, cliente=cliente)
+
+    assert resultado.motivo == "troca_de_lugar"
+    assert resultado.reescrita is True
+    assert "Niterói" in resultado.pergunta or "niteroi" in resultado.pergunta.lower()
+
+
+def test_regra_troca_de_esfera_nao_chama_o_llm():
+    pergunta = "E os da esfera municipal?"
+
+    def cliente(_mensagens):
+        pytest.fail("troca_de_esfera deve ser resolvida por regra")
+
+    resultado = reformular_pergunta(pergunta, HISTORICO, cliente=cliente)
+
+    assert resultado.motivo == "troca_de_esfera"
+    assert resultado.reescrita is True
+    assert "esfera municipal" in resultado.pergunta.lower()
+
+
+def test_prioridade_das_regras():
+    assert reformular_pergunta("E em 2024?", HISTORICO, cliente=lambda _m: pytest.fail("regra ano não deve cair no LLM")).motivo == "troca_de_ano"
+    assert reformular_pergunta("E em Niterói?", HISTORICO, cliente=lambda _m: pytest.fail("regra lugar não deve cair no LLM")).motivo == "troca_de_lugar"
+    assert reformular_pergunta("E os da esfera estadual?", HISTORICO, cliente=lambda _m: pytest.fail("regra esfera não deve cair no LLM")).motivo == "troca_de_esfera"
+
+
+def test_timeout_da_reformulacao_faz_fallback(monkeypatch):
+    monkeypatch.setattr(reformulacao, "REFORMULACAO_TIMEOUT", 0.01)
+
+    def cliente_lento(_mensagens):
+        import time
+        time.sleep(0.1)
+        return json.dumps({"pergunta": "reformulada"})
+
+    monkeypatch.setattr(reformulacao, "_cliente_padrao", lambda diagnostics: cliente_lento)
+
+    resultado = reformular_pergunta(P43, HISTORICO, cliente=None)
+
+    assert resultado.reescrita is True
+    assert resultado.motivo == "llm_falhou"
+    assert "continuação da pergunta anterior" in resultado.pergunta
 
 
 # --- reformular_pergunta ---------------------------------------------------
