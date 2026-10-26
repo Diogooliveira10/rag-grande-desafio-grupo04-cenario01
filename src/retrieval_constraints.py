@@ -10,7 +10,14 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
+from functools import lru_cache
 from typing import Any, Mapping
+
+# Os filtros de objeto rodam sobre cada registro do recorte (107 mil contratos
+# na v7) e, numa pergunta de aparelho, levavam ~100 s: o JSON do contrato era
+# lido e o objeto normalizado a cada pergunta. As funções abaixo são puras do
+# texto, então o resultado fica guardado; o tamanho cobre o corpus inteiro.
+_CACHE_POR_REGISTRO = 1 << 18
 
 
 def _normalizar(texto: str) -> str:
@@ -72,8 +79,9 @@ def tema_bem_completo(query: str) -> str | None:
     return radical_lexical(match[1])
 
 
-def radicais_do_objeto(objeto: str) -> set[str]:
-    return {radical_lexical(t) for t in re.findall(r"[a-z]+", _normalizar(objeto))}
+@lru_cache(maxsize=_CACHE_POR_REGISTRO)
+def radicais_do_objeto(objeto: str) -> frozenset[str]:
+    return frozenset(radical_lexical(t) for t in re.findall(r"[a-z]+", _normalizar(objeto)))
 
 
 def objeto_do_registro(metadata: Mapping[str, Any], content: str = "") -> str | None:
@@ -81,6 +89,11 @@ def objeto_do_registro(metadata: Mapping[str, Any], content: str = "") -> str | 
     for fields in (metadata, extras if isinstance(extras, Mapping) else {}):
         if isinstance(fields.get("objeto"), str) and fields["objeto"].strip():
             return fields["objeto"]
+    return _objeto_do_conteudo(content)
+
+
+@lru_cache(maxsize=_CACHE_POR_REGISTRO)
+def _objeto_do_conteudo(content: str) -> str | None:
     if content.lstrip().startswith("{"):
         try:
             payload = json.loads(content)
@@ -94,6 +107,7 @@ def objeto_do_registro(metadata: Mapping[str, Any], content: str = "") -> str | 
     return content.strip() or None
 
 
+@lru_cache(maxsize=_CACHE_POR_REGISTRO)
 def objeto_auxiliar(objeto: str) -> bool:
     texto = re.sub(r"^(?:\s*\[[^\]]+\]\s*)+", "", _normalizar(objeto))
     tokens = re.findall(r"[a-z]+|\d+", texto)

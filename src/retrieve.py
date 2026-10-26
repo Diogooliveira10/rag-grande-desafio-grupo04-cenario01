@@ -98,8 +98,10 @@ _RE_EMBEDDING = re.compile(r'"embedding":\s*\[[^\]]*\]\s*,?\s*')
 def _read_jsonl(path: Path, *, sem_vetor: bool = False) -> list[dict[str, Any]]:
     """Registros do arquivo, lidos uma vez enquanto ele não muda.
 
-    Os dicts são compartilhados entre as chamadas: quem precisar alterar um
-    registro copia antes (``dict(record)``), como ``_records_for`` já faz.
+    Os dicts são compartilhados entre as chamadas e ninguém os altera: a busca
+    só lê, e o que sai dela (``_result``) leva cópia própria. Copiar os ~144 mil
+    registros a cada pergunta custava ~0,75 s por seleção. Quem precisar
+    alterar um registro copia antes (``dict(record)``).
 
     ``sem_vetor`` descarta o campo ``embedding`` antes de decodificar a linha:
     com o FAISS ao lado, o vetor não é usado na consulta. Na v7, os vetores dos
@@ -391,6 +393,15 @@ def _filtro_aplicavel(metadata: Mapping[str, Any], key: str, expected: Any) -> b
     return True
 
 
+_CONECTORES_DE_NOME = frozenset({"de", "do", "da", "dos", "das", "e"})
+
+
+@lru_cache(maxsize=1 << 16)
+def _tokens_de_nome(texto: str) -> frozenset[str]:
+    """Tokens de um nome de órgão/unidade: ~1.800 nomes se repetem nos 107 mil contratos."""
+    return frozenset(_tokens(texto))
+
+
 def _matches_filters(metadata: Mapping[str, Any], filters: Mapping[str, Any] | None,
                      *, content: str = "") -> bool:
     if not filters:
@@ -422,9 +433,8 @@ def _matches_filters(metadata: Mapping[str, Any], filters: Mapping[str, Any] | N
                 # PNCP: "Secretaria de Estado de Saúde" casa com "SECRET ESTADO
                 # SAUDE". Exigir cada termo informativo no campo da entidade,
                 # sem procurar no objeto ou fornecedor.
-                conectores = {"de", "do", "da", "dos", "das", "e"}
-                requeridos = set(_tokens(str(value))) - conectores
-                disponiveis = set(_tokens(actual))
+                requeridos = _tokens_de_nome(str(value)) - _CONECTORES_DE_NOME
+                disponiveis = _tokens_de_nome(actual)
                 casa = lambda termo: any(
                     token == termo or (len(token) >= 4 and termo.startswith(token))
                     or (len(termo) >= 4 and token.startswith(termo))
@@ -457,7 +467,7 @@ def _records_for(
         )]
         raw = [record for path in paths for record in _registros_do_indice(path)]
     else:
-        raw = [dict(record) for record in records]
+        raw = records
     filtered: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
     for record in raw:
@@ -509,7 +519,7 @@ def _filtrar_por_base(
     por_base: dict[str, list[dict[str, Any]]] = {}
     for record in records:
         base_id = _record_base_id(record, _metadata_of(record))
-        por_base.setdefault(base_id, []).append(dict(record))
+        por_base.setdefault(base_id, []).append(record)
     selecionados: list[dict[str, Any]] = []
     ignorados: dict[str, dict[str, list[str]]] = {}
     for base_id, registros in por_base.items():

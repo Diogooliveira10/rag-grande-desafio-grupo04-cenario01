@@ -1529,3 +1529,33 @@ def test_retrieve_traz_compras_diferentes_no_topo_sem_perder_recall(tmp_path, mo
     # com mais espaço no corte o excedente volta: nada é descartado
     ampla = retrieve("ambulancia", top_k=6, **indice)
     assert [r.chunk_id for r in ampla] == ["a0", "a1", "b0", "c0", "a2", "a3"]
+
+
+def test_busca_nao_altera_os_registros_compartilhados_do_cache(tmp_path):
+    """A seleção de candidatos deixou de copiar os ~144 mil registros a cada
+    pergunta; isso só é seguro enquanto nada na busca os altera."""
+    import copy
+
+    documentos = tmp_path / "documents.jsonl"
+    registros = [
+        _record("c1", text='{"objetoContrato": "Aquisição de tomógrafo"}',
+                metadata_extra={"orgao": "Fundo Municipal de Saúde de Niterói"}),
+        _record("c2", text='{"objetoContrato": "Peças para tomógrafo"}',
+                metadata_extra={"orgao": "Secretaria de Estado de Saúde"}),
+        _record("c3", text="manutenção de ambulância", base_id="atas_conversacional"),
+    ]
+    documentos.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in registros) + "\n", encoding="utf-8")
+    em_cache = retrieve_module._read_jsonl(documentos)
+    antes = copy.deepcopy(em_cache)
+    filtros = {
+        "orgao": {"operator": "contains", "value": "Fundo Municipal de Saúde", "optional": True},
+        "objeto_auxiliar": {"operator": "==", "value": False, "optional": False},
+        "objeto_termo": {"operator": "contains", "value": "tomograf", "optional": False},
+    }
+
+    resultados = bm25_retrieve("tomógrafo", documents_file=documentos, filters=filtros)
+    retrieve_module._filtrar_por_base(em_cache, filtros)
+    resultados[0]._record["text"] = "alterado fora da busca"
+
+    assert [item.chunk_id for item in resultados] == ["c1"]
+    assert retrieve_module._read_jsonl(documentos) == antes
