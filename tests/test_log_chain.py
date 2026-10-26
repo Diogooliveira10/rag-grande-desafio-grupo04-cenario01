@@ -167,3 +167,41 @@ def test_comando_verificar(tmp_path, capsys):
     caminho.write_text(caminho.read_text(encoding="utf-8").replace("linha 1", "linha 7"), encoding="utf-8")
     assert log_chain.main(["verificar", str(tmp_path)]) == 1
     assert "CADEIA QUEBRADA" in capsys.readouterr().out
+
+
+def test_linhas_de_antes_da_chave_continuam_validas(tmp_path, monkeypatch):
+    # Os logs de 2026-10-24 e 25 foram encadeados sem chave; a chave veio depois.
+    monkeypatch.setattr(config, "LOG_CHAIN_KEY", "")
+    _gravar(tmp_path, "pipeline-2026-10-24.jsonl", 3)
+    monkeypatch.setattr(config, "LOG_CHAIN_KEY", "chave-de-teste")
+    _gravar(tmp_path, "pipeline-2026-10-26.jsonl", 3, inicio=3)
+    relatorio = _verificar(tmp_path)
+    assert relatorio.integra
+    assert (relatorio.sem_chave, relatorio.com_chave) == (3, 3)
+
+
+def test_linha_sem_chave_depois_da_primeira_com_chave_e_quebra(tmp_path, monkeypatch):
+    # Quem não tem a chave não pode acrescentar linhas "sem chave" depois que ela existe.
+    _gravar(tmp_path, "pipeline-2026-10-26.jsonl", 2)
+    monkeypatch.setattr(config, "LOG_CHAIN_KEY", "")
+    _gravar(tmp_path, "pipeline-2026-10-26.jsonl", 1, inicio=2)
+    relatorio = _verificar(tmp_path)
+    assert relatorio.problemas == ["pipeline-2026-10-26.jsonl:3: conteúdo alterado (ou chave diferente)"]
+
+
+def test_reescrever_o_trecho_sem_chave_quebra_na_primeira_linha_com_chave(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "LOG_CHAIN_KEY", "")
+    antigo = _gravar(tmp_path, "pipeline-2026-10-24.jsonl", 3)
+    monkeypatch.setattr(config, "LOG_CHAIN_KEY", "chave-de-teste")
+    _gravar(tmp_path, "pipeline-2026-10-26.jsonl", 2, inicio=3)
+    # Reescreve o arquivo antigo inteiro, com hashes SHA-256 válidos entre si.
+    linhas = [json.loads(l) for l in antigo.read_text(encoding="utf-8").splitlines()]
+    linhas[1]["output"] = "adulterado"
+    anterior = log_chain.GENESE
+    refeitas = []
+    for registro in linhas:
+        linha, anterior = log_chain.encadear(json.dumps(registro), anterior, "")
+        refeitas.append(linha)
+    antigo.write_text("\n".join(refeitas) + "\n", encoding="utf-8")
+    relatorio = _verificar(tmp_path)
+    assert relatorio.problemas[0].startswith("pipeline-2026-10-26.jsonl:1: hash_anterior não bate")

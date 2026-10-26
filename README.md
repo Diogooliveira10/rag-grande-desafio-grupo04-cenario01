@@ -660,7 +660,10 @@ python -m src.log_chain verificar          # logs/pipeline por padrão
 O comando aponta a primeira linha quebrada e imprime o último hash. Guardar
 esse hash fora do servidor de tempos em tempos (num e-mail ao grupo, por
 exemplo) impede reescrever o log inteiro sem ser notado. Linhas gravadas
-antes da cadeia ficam como estão. O índice SQLite do trace continua só índice,
+antes da cadeia ficam como estão. Linhas encadeadas antes de existir a chave
+(SHA-256) continuam válidas, mas só antes da primeira linha com chave: ela guarda
+o hash da última sem chave, então reescrever esse trecho quebra a corrente ali, e
+uma linha sem chave depois dela é acusada. O índice SQLite do trace continua só índice,
 reconstruível a partir do JSONL. Escolhemos a cadeia de hashes, e não uma
 blockchain: com um operador e um servidor, não há partes que precisem chegar a
 consenso, e a cadeia dá a mesma prova de adulteração sem nós nem custo.
