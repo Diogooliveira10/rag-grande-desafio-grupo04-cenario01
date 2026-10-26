@@ -20,6 +20,7 @@ usa ``validar_banco`` e nunca o reconstrói durante uma pergunta.
 Uso::
 
     py -m src.structured_db build
+    py -m src.structured_db fts     # índice do objeto numa base já montada (ex.: baixada do Drive)
     py -m src.structured_db sql "SELECT modalidade, COUNT(*) FROM contratacoes GROUP BY 1"
 """
 
@@ -129,6 +130,61 @@ _INDICES = (
     "CREATE INDEX idx_pca_ano ON pca_planos (ano_pca)",
 )
 
+# Filtro do objeto contratado, escrito uma vez por quem monta o WHERE. Sem
+# índice, ``LIKE '%termo%'`` lê as ~107 mil linhas a cada consulta (~140 ms; uma
+# pergunta faz umas 10). No SQLite com o índice FTS5 de trigramas, o mesmo LIKE
+# vai ao índice e devolve as mesmas linhas: o trigram aceita LIKE com a mesma
+# semântica (sem caixa, só ASCII, e o texto já vem normalizado). Postgres e
+# SQLite sem o índice seguem com o LIKE.
+FILTRO_DE_OBJETO = "objeto_normalizado LIKE ?"
+_INDICE_DE_OBJETO = "contratacoes_objeto_fts"
+_FILTRO_DE_OBJETO_INDEXADO = (
+    f"rowid IN (SELECT rowid FROM {_INDICE_DE_OBJETO} WHERE {_INDICE_DE_OBJETO}.objeto_normalizado LIKE ?)"
+)
+
+
+def _criar_indice_de_objeto(cursor: Any) -> bool:
+    """(Re)cria o índice FTS5 do objeto a partir de ``contratacoes``.
+
+    Só acelera: se o SQLite não tem FTS5/trigram (anterior a 3.34), devolve
+    False e as consultas continuam no LIKE.
+    """
+    try:
+        cursor.execute(f"DROP TABLE IF EXISTS {_INDICE_DE_OBJETO}")
+        cursor.execute(
+            f"CREATE VIRTUAL TABLE {_INDICE_DE_OBJETO} USING fts5(objeto_normalizado, "
+            "content='contratacoes', content_rowid='rowid', tokenize='trigram')"
+        )
+        cursor.execute(f"INSERT INTO {_INDICE_DE_OBJETO}({_INDICE_DE_OBJETO}) VALUES ('rebuild')")
+    except sqlite3.OperationalError:
+        return False
+    return True
+
+
+def _assinatura_do_arquivo(path: Path) -> Optional[tuple[str, int, int]]:
+    """Muda quando o arquivo muda (build, ``fts``); None se ele não existe."""
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return str(path.resolve()), stat.st_mtime_ns, stat.st_size
+
+
+@lru_cache(maxsize=8)
+def _tem_indice_de_objeto(assinatura: tuple[str, int, int]) -> bool:
+    try:
+        with closing(sqlite3.connect(f"file:{assinatura[0]}?mode=ro", uri=True)) as conexao:
+            return conexao.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", [_INDICE_DE_OBJETO]
+            ).fetchone() is not None
+    except sqlite3.Error:
+        return False
+
+
+# Valores distintos (nomes de órgão, unidade, modalidade) por versão do arquivo
+# SQLite: eram relidos a cada pergunta, ~11% do tempo do SQL.
+_DISTINTOS: dict[tuple[tuple[str, int, int], str], frozenset] = {}
+
 
 _sql_observation: ContextVar[dict[str, Any] | None] = ContextVar("sql_observation", default=None)
 
@@ -184,7 +240,27 @@ class Banco:
         return "postgres" if self.dialeto == "postgres" else self.descricao()
 
     def _sql(self, sql: str) -> str:
-        return sql.replace("?", "%s") if self.dialeto == "postgres" else sql
+        if self.dialeto == "postgres":
+            return sql.replace("?", "%s")
+        if FILTRO_DE_OBJETO in sql:
+            assinatura = _assinatura_do_arquivo(Path(self.sqlite_path))
+            if assinatura and _tem_indice_de_objeto(assinatura):
+                return sql.replace(FILTRO_DE_OBJETO, _FILTRO_DE_OBJETO_INDEXADO)
+        return sql
+
+    def distintos(self, tabela: str, coluna: str) -> frozenset:
+        """Valores distintos não nulos de ``coluna``; no SQLite, lidos uma vez por versão do arquivo.
+
+        ``tabela`` e ``coluna`` vêm do código, nunca do usuário.
+        """
+        sql = f"SELECT DISTINCT {coluna} AS v FROM {tabela} WHERE {coluna} IS NOT NULL"
+        assinatura = None if self.dialeto == "postgres" else _assinatura_do_arquivo(Path(self.sqlite_path))
+        if assinatura is None:
+            return frozenset(linha["v"] for linha in self.consultar(sql))
+        chave = (assinatura, sql)
+        if chave not in _DISTINTOS:
+            _DISTINTOS[chave] = frozenset(linha["v"] for linha in self.consultar(sql))
+        return _DISTINTOS[chave]
 
     def conectar(self, *, somente_leitura: bool = True) -> Any:
         if self.dialeto == "postgres":
@@ -495,6 +571,21 @@ def _gravar(banco: Banco, conexao: Any, tabelas: dict[str, list[dict[str, Any]]]
             banco._sql(f"INSERT INTO {tabela} ({', '.join(colunas)}) VALUES ({', '.join('?' for _ in colunas)})"),
             [[linha.get(coluna) for coluna in colunas] for linha in linhas],
         )
+    if banco.dialeto == "sqlite":
+        _criar_indice_de_objeto(cursor)
+
+
+def indexar_objeto(banco: Optional[Banco] = None) -> bool:
+    """Cria o índice do objeto num SQLite já montado, sem remontar a base.
+
+    O ``build`` já cria; isto serve à base baixada pronta (Drive). Devolve
+    False no Postgres e no SQLite sem FTS5. Não roda durante uma pergunta.
+    """
+    banco = banco or banco_padrao()
+    if banco.dialeto != "sqlite" or not banco.existe():
+        return False
+    with closing(sqlite3.connect(Path(banco.sqlite_path))) as conexao, conexao:
+        return _criar_indice_de_objeto(conexao.cursor())
 
 
 def construir_banco(documents_file: Path = DOCUMENTS_FILE, banco: Optional[Banco] = None) -> dict[str, Any]:
@@ -641,6 +732,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sqlite", type=Path, default=SQLITE_PATH, help="arquivo SQLite (sem DATABASE_URL)")
     comandos = parser.add_subparsers(dest="comando", required=True)
     comandos.add_parser("build", help="recria a base a partir do documents.jsonl")
+    comandos.add_parser("fts", help="cria o índice do objeto (FTS5) numa base SQLite já montada")
     consulta = comandos.add_parser("sql", help="roda uma consulta somente leitura")
     consulta.add_argument("consulta")
     args = parser.parse_args(argv)
@@ -649,6 +741,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.comando == "build":
         print(json.dumps(construir_banco(args.documents, banco), ensure_ascii=False, indent=2))
         return 0
+    if args.comando == "fts":
+        criado = indexar_objeto(banco)
+        print("índice do objeto criado" if criado else "índice não criado (Postgres, base ausente ou SQLite sem FTS5)")
+        return 0 if criado else 1
     validar_banco(args.documents, banco)
     linhas = banco.consultar(args.consulta)
     if linhas:

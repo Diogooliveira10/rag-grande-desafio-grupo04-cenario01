@@ -250,6 +250,14 @@ V7-dados/
 └── index/                   → raiz do projeto
 ```
 
+Com a base do Drive copiada, crie uma vez o índice do objeto (≈5 s, +60 MB).
+Ele acelera as contas por objeto ("contratos de ambulância") sem mudar o
+resultado; sem ele, o SQL continua funcionando, só mais devagar:
+
+```bash
+python -m src.structured_db fts
+```
+
 Ou, sem o Drive, reconstrua do manifesto (lento, ~2h+):
 ```bash
 python -m src.fetch_corpus fetch --manifest corpus_manifest.yaml
@@ -540,8 +548,13 @@ A base SQL é montada a partir de `data/normalized/documents.jsonl` (registros J
 
 ```bash
 py -m src.structured_db build
+py -m src.structured_db fts   # só para base já montada (ex.: Drive); o build já cria o índice
 py -m src.structured_db sql "SELECT modalidade, COUNT(*) AS n FROM contratacoes GROUP BY modalidade ORDER BY n DESC"
 ```
+
+No SQLite, o filtro do objeto (`objeto_normalizado LIKE '%termo%'`) usa o índice
+FTS5 de trigramas `contratacoes_objeto_fts` quando ele existe, com as mesmas
+linhas do LIKE; no Postgres, ou sem o índice, fica o LIKE.
 
 Onde a base fica depende de `DATABASE_URL` no `.env` — o mesmo código e o mesmo SQL valem para os dois:
 

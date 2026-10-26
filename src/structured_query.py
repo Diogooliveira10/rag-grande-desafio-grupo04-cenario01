@@ -375,12 +375,9 @@ def _resolver_valores(consulta: Consulta, banco: Banco) -> Consulta:
         except Exception:
             pass
     if consulta.modalidade_termos and consulta.tabela == "contratacoes":
-        valores = banco.consultar(
-            "SELECT DISTINCT modalidade AS v FROM contratacoes WHERE modalidade IS NOT NULL"
-        )
         mudancas["modalidades"] = tuple(sorted(
-            l["v"] for l in valores
-            if all(t in structured_db.normalizar(l["v"]) for t in consulta.modalidade_termos)
+            v for v in banco.distintos("contratacoes", "modalidade")
+            if all(t in structured_db.normalizar(v) for t in consulta.modalidade_termos)
         ))
     # Órgão que o query_analysis não reconheceu (minúsculas, "Fundo", "Comando"…)
     # chega como termos do objeto; com duas palavras ou mais que formam o nome de
@@ -394,11 +391,7 @@ def _resolver_valores(consulta: Consulta, banco: Banco) -> Consulta:
             "orgao": ("orgao_nome",),
             "unidade": ("unidade_nome",),
         }.get(consulta.papel_orgao, ("orgao_nome", "unidade_nome"))
-        nomes_por_coluna = {
-            coluna: {l["v"] for l in banco.consultar(
-                f"SELECT DISTINCT {coluna} AS v FROM {consulta.tabela} WHERE {coluna} IS NOT NULL")}
-            for coluna in colunas
-        }
+        nomes_por_coluna = {coluna: banco.distintos(consulta.tabela, coluna) for coluna in colunas}
         nomes = set().union(*nomes_por_coluna.values())
         if consulta.orgao_termos:
             mudancas["orgaos"] = tuple(sorted(n for n in nomes if _orgao_casa(consulta.orgao_termos, n)))
