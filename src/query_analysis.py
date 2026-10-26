@@ -222,7 +222,10 @@ em valor monetário. Campos ausentes ficam ausentes. Não acrescente campos fora
 def _analysis_key(query: str) -> str:
     inventory = config.ROOT_DIR / "data" / "inventory" / "v6.json"
     version = hashlib.sha256(inventory.read_bytes()).hexdigest() if inventory.exists() else "sem-inventario"
+    catalogo = _catalogo_de_orgaos()
+    assinatura_catalogo = catalogo.assinatura if catalogo else "sem-catalogo"
     return hashlib.sha256(json.dumps([query, config.GENERATION_MODEL, PROMPT_VERSION, _PROMPT, version,
+        assinatura_catalogo,
         date.today().isoformat(), config.OPENROUTER_MODEL_FALLBACK, bool(config.OPENROUTER_API_KEY),
         config.LLM_PROVIDER_MODE, config.OLLAMA_URL, config.OPENROUTER_BASE_URL,
         config.OPENROUTER_MAX_TOKENS], ensure_ascii=False).encode()).hexdigest()

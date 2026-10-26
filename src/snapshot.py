@@ -259,6 +259,20 @@ def _validar_catalogo(catalog_path: Path, database_path: Path) -> None:
     if (catalog.get("fonte_sha256") != expected or catalog.get("nomes") != sorted(names)
             or catalog.get("municipios") != municipalities or catalog.get("fornecedores") != suppliers):
         raise SnapshotValidationError("catalogo_divergente")
+    if catalog.get("versao", 0) >= 3:
+        from src.analysis.entities import (
+            _GENERICAS_DE_FORNECEDOR, _NAO_SAO_NOME, _VERBOS_COMUNS_DEPOIS_DO_NOME,
+        )
+        from src.analysis.suppliers import compor_fornecedores
+        identities = compor_fornecedores(
+            banco, _GENERICAS_DE_FORNECEDOR | _NAO_SAO_NOME | _VERBOS_COMUNS_DEPOIS_DO_NOME,
+            sorted(names), municipalities,
+        )
+        signature = hashlib.sha256(json.dumps(
+            identities, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+        if (catalog.get("fornecedores_sha256") != signature
+                or any(catalog.get(key) != value for key, value in identities.items())):
+            raise SnapshotValidationError("catalogo_divergente")
 
 
 def readiness(manifest_path: Path | str | None = None) -> dict[str, Any]:
