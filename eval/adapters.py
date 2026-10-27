@@ -88,6 +88,26 @@ def pipeline_completo(pergunta: str, historico: Optional[list[dict[str, str]]] =
     return resposta
 
 
+def _preparar_como_a_api() -> None:
+    """A pré-carga que a API faz ao subir (``app/api.py``), antes da primeira pergunta.
+
+    Sem ela, a primeira pergunta do golden pagava o carregamento do cross-encoder
+    (16 a 36 s nos logs de 26/10) e a pergunta que lê o documents.jsonl pagava a
+    montagem do índice da BM25 (~30 s), o que não acontece com o backend no ar.
+    """
+    import config
+    from src import rerank, retrieve
+
+    if config.RERANK_ENABLED and config.RERANK_PRELOAD:
+        rerank.pre_carregar()
+    if config.INDEX_PRELOAD:
+        retrieve.pre_carregar_indices()
+
+
+# eval/run_eval.py chama ``preparar`` uma vez, fora da medição de cada pergunta.
+pipeline_completo.preparar = _preparar_como_a_api
+
+
 def cli_resposta(pergunta: str, *, openrouter_only: bool = False) -> dict[str, Any]:
     """Integração explícita ECOA via os comandos existentes, sem mudar a CLI.
 

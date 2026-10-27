@@ -845,6 +845,19 @@ def _relative(path: Path) -> str:
         return str(path)
 
 
+def _preparar(pipeline_fn: PipelineFn) -> float | None:
+    """Roda ``pipeline_fn.preparar`` (pré-carga, como a API ao subir), se houver.
+
+    Fica fora da latência de cada caso; devolve quanto levou, ou ``None``.
+    """
+    preparar = getattr(pipeline_fn, "preparar", None)
+    if not callable(preparar):
+        return None
+    inicio = time.perf_counter()
+    preparar()
+    return time.perf_counter() - inicio
+
+
 def _load_pipeline(spec: str) -> PipelineFn:
     module_name, _, func_name = spec.partition(":")
     if not module_name or not func_name:
@@ -905,6 +918,9 @@ def main() -> int:
 
     run_id = args.run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     built_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    preparo = _preparar(pipeline_fn)
+    if preparo is not None:
+        print(f"pré-carga do pipeline: {preparo:.1f} s (fora da latência dos casos)", file=sys.stderr, flush=True)
     report = run_eval(cases, pipeline_fn)
     json_path, md_path = save_run(report, args.output / run_id, run_id, built_at)
     summary = {

@@ -68,3 +68,24 @@ def test_metricas_do_log_soma_so_o_run_id_pedido(tmp_path):
     assert metricas["tokens_total"] == 510
     assert metricas["etapas"]["geracao"] == {"tokens": 501, "latencia_ms": 1005}
     assert metricas["etapas"]["retrieval_denso"] == {"tokens": 9, "latencia_ms": 20}
+
+
+def test_golden_faz_a_pre_carga_da_api_fora_da_latencia_dos_casos(monkeypatch):
+    """Sem a pré-carga, a primeira pergunta de cada rodada pagava o carregamento do
+    cross-encoder (16 a 36 s) e outra pagava a montagem do índice da BM25."""
+    import config
+    from eval import adapters, run_eval
+    from src import rerank, retrieve
+
+    chamadas = []
+    monkeypatch.setattr(config, "RERANK_ENABLED", True)
+    monkeypatch.setattr(config, "RERANK_PRELOAD", True)
+    monkeypatch.setattr(config, "INDEX_PRELOAD", True)
+    monkeypatch.setattr(rerank, "pre_carregar", lambda: chamadas.append("rerank"))
+    monkeypatch.setattr(retrieve, "pre_carregar_indices", lambda: chamadas.append("indices"))
+
+    assert run_eval._preparar(adapters.pipeline_completo) is not None
+    assert chamadas == ["rerank", "indices"]
+    # Adaptador sem pré-carga segue igual.
+    assert run_eval._preparar(adapters.rota_apenas) is None
+
