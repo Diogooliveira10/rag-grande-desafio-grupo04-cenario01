@@ -508,6 +508,48 @@ def _records_for(
     return filtered
 
 
+# Seleção sem filtro (bases e escopos) por versão dos arquivos lidos. Uma pergunta
+# percorria os ~144 mil registros 3 ou 4 vezes (busca densa, BM25, identificadores,
+# base dos filtros), ~0,2 s cada, para chegar sempre à mesma lista.
+_SELECAO_CACHE: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+
+
+def _assinatura_da_origem(index_dir: Path, documents_file: Path | None) -> tuple[Any, ...] | None:
+    """Muda quando muda o arquivo de onde a seleção sai; ``None`` se ele não existe."""
+    try:
+        if documents_file is not None:
+            stat = Path(documents_file).stat()
+            return ("documents", str(documents_file), stat.st_mtime_ns, stat.st_size)
+        vetores = sorted(Path(index_dir).glob("*/vectors.jsonl"))
+        return ("indice", str(index_dir), tuple(
+            (str(v), v.stat().st_mtime_ns, v.stat().st_size, (v.parent / "vectors.faiss").exists()) for v in vetores))
+    except OSError:
+        return None
+
+
+def _selecionar(index_dir: Path, bases: Iterable[Any] | None, escopos: Iterable[str] | None,
+                *, documents_file: Path | None = None) -> list[dict[str, Any]]:
+    """``_records_for`` sem filtros, do índice ou do ``documents.jsonl``, calculado
+    uma vez por versão dos arquivos. Devolve cópia da lista; os registros são os
+    mesmos dicts compartilhados de sempre (ninguém os altera)."""
+    origem = _assinatura_da_origem(index_dir, documents_file)
+    fonte = _read_jsonl(documents_file) if documents_file is not None else None
+    if origem is None:
+        return _records_for(index_dir, bases, None, fonte, escopos)
+    selecao = _split_selection(bases)
+    chave = (origem,
+             None if selecao is None else (tuple(sorted(selecao[0])), tuple(sorted(selecao[1]))),
+             None if escopos is None else tuple(sorted(set(escopos))))
+    guardado = _SELECAO_CACHE.get(chave)
+    if guardado is None:
+        # Versão anterior do mesmo arquivo não fica presa na memória.
+        for antiga in [c for c in _SELECAO_CACHE if c[0][:2] == origem[:2] and c[0] != origem]:
+            del _SELECAO_CACHE[antiga]
+        guardado = _records_for(index_dir, bases, None, fonte, escopos)
+        _SELECAO_CACHE[chave] = guardado
+    return list(guardado)
+
+
 def _metadata_of(record: Mapping[str, Any]) -> Mapping[str, Any]:
     """Metadados do registro: o índice guarda em ``metadata``; o
     ``documents.jsonl`` de ``prepare_documents.py`` guarda no próprio registro."""
@@ -1100,7 +1142,8 @@ def dense_retrieve(
     """Recupera chunks próximos pelo FAISS e aplica filtros de metadados."""
     if top_k <= 0 or not query.strip():
         return []
-    candidates = _records_for(index_dir, bases, filters, records, escopos)
+    candidates = (_selecionar(index_dir, bases, escopos) if not filters and records is None
+                  else _records_for(index_dir, bases, filters, records, escopos))
     if not candidates:
         return []
 
@@ -1273,6 +1316,7 @@ def bm25_retrieve(
     candidates = (
         _records_for(index_dir, bases, filters, records, escopos)
         if records is not None
+        else _selecionar(index_dir, bases, escopos, documents_file=documents_file) if not filters
         else _records_for(index_dir, bases, filters, _read_jsonl(documents_file), escopos)
     )
     documents = [(record, str(record.get("text", ""))) for record in candidates]
@@ -1507,7 +1551,7 @@ class _Recuperacao:
         """Registros que a BM25 pode ver; sem filtro, todos os das bases escolhidas."""
         if self.sparse_records is not None:
             return self.sparse_records
-        return _records_for(self.index_dir, self.bases, None, _read_jsonl(self.documents_file), self.escopos)
+        return _selecionar(self.index_dir, self.bases, self.escopos, documents_file=self.documents_file)
 
 
 def _bases_e_filtros_da_rota(query: str, route: Any, filters: Mapping[str, Any] | None) -> tuple[Any, Any]:
@@ -1545,13 +1589,13 @@ def _registros_elegiveis(index_dir: Path, documents_file: Path, bases: Any, esco
     # Seleção de bases e escopos antes, para decidir o filtro só entre as
     # bases que o roteador escolheu.
     sparse_records, ignorados_bm25 = _filtrar_por_base(
-        _records_for(index_dir, bases, None, _read_jsonl(documents_file), escopos), route_filters
+        _selecionar(index_dir, bases, escopos, documents_file=documents_file), route_filters
     )
     # O payload vetorial não repete o texto JSON com o CNPJ do fornecedor.
     # Os IDs dos documentos filtrados delimitam também os candidatos densos.
     dense_filters = {key: value for key, value in route_filters.items() if key != "cnpj"}
     dense_records, ignorados_denso = _filtrar_por_base(
-        _records_for(index_dir, bases, None, None, escopos), dense_filters
+        _selecionar(index_dir, bases, escopos), dense_filters
     )
     if "cnpj" in route_filters:
         eligible = {str(record.get("chunk_id")) for record in sparse_records}
@@ -1643,9 +1687,10 @@ def _busca_bm25(r: _Recuperacao) -> tuple[list[RetrievalResult], list[RetrievalR
         candidatos_norma: list[RetrievalResult] = []
         pedidas = _normas_mencionadas(r.query)
         if pedidas:
-            elegiveis = r.sparse_records if r.sparse_records is not None else _records_for(
-                r.index_dir, r.bases, r.route_filters, _read_jsonl(r.documents_file), r.escopos,
-            )
+            elegiveis = r.sparse_records if r.sparse_records is not None else (
+                _selecionar(r.index_dir, r.bases, r.escopos, documents_file=r.documents_file)
+                if not r.route_filters else
+                _records_for(r.index_dir, r.bases, r.route_filters, _read_jsonl(r.documents_file), r.escopos))
             primarios = [registro for registro in elegiveis
                          if _record_natureza(registro, _metadata_of(registro)) == Natureza.NORMATIVA.value
                          and _norma_do_documento(_metadata_of(registro)) & pedidas]

@@ -1559,3 +1559,30 @@ def test_busca_nao_altera_os_registros_compartilhados_do_cache(tmp_path):
 
     assert [item.chunk_id for item in resultados] == ["c1"]
     assert retrieve_module._read_jsonl(documentos) == antes
+
+
+def test_selecao_sem_filtro_e_calculada_uma_vez_por_versao_do_arquivo(tmp_path, monkeypatch):
+    """A mesma pergunta percorria os ~144 mil registros 3 ou 4 vezes para chegar
+    à mesma lista; agora a seleção por base e escopo fica guardada até o arquivo mudar."""
+    documentos = tmp_path / "documents.jsonl"
+    registros = [_record("c1", text="ambulancia"), _record("a1", text="ata", base_id="atas_conversacional")]
+    documentos.write_text("".join(json.dumps(r) + "\n" for r in registros), encoding="utf-8")
+    chamadas = []
+    original = retrieve_module._records_for
+    monkeypatch.setattr(retrieve_module, "_records_for", lambda *a, **k: chamadas.append(1) or original(*a, **k))
+
+    primeira = retrieve_module._selecionar(tmp_path, ["contratos_estruturado"], None, documents_file=documentos)
+    segunda = retrieve_module._selecionar(tmp_path, ["contratos_estruturado"], None, documents_file=documentos)
+    assert [r["chunk_id"] for r in primeira] == [r["chunk_id"] for r in segunda] == ["c1"]
+    assert len(chamadas) == 1
+
+    primeira.clear()  # quem recebe a lista pode mexer nela sem estragar a guardada
+    assert [r["chunk_id"] for r in retrieve_module._selecionar(
+        tmp_path, ["contratos_estruturado"], None, documents_file=documentos)] == ["c1"]
+
+    registros.append(_record("c2", text="tomografo"))
+    documentos.write_text("".join(json.dumps(r) + "\n" for r in registros), encoding="utf-8")
+    assert [r["chunk_id"] for r in retrieve_module._selecionar(
+        tmp_path, ["contratos_estruturado"], None, documents_file=documentos)] == ["c1", "c2"]
+    assert len(chamadas) == 2
+
