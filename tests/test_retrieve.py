@@ -1635,3 +1635,48 @@ def test_aviso_de_vetor_descartado_grava_contagem_e_poucos_exemplos(monkeypatch)
     assert len(aviso["extra"]["embedding_dimension_mismatches"]) == 20
     assert aviso["extra"]["total_descartados"] == 5000
 
+
+def test_metadado_do_indice_reaproveita_o_do_documento_so_quando_e_igual():
+    """Os 18 campos do metadado do índice repetem os do documents.jsonl; a visão
+    evita a segunda cópia (~930 MB) e se comporta como o dict original."""
+    documento = {"chunk_id": "c1", "base_id": "contratos_estruturado", "natureza": "estruturada",
+                 "extras": {"orgao": "X"}, "text": "texto que não é metadado"}
+    original = {"chunk_id": "c1", "base_id": "contratos_estruturado", "extras": {"orgao": "X"}}
+    registro = {"chunk_id": "c1", "metadata": dict(original)}
+
+    retrieve_module._compartilhar_metadado(registro, {"c1": documento})
+
+    visao = registro["metadata"]
+    assert isinstance(visao, retrieve_module._MetadadoDoDocumento)
+    assert dict(visao) == original and list(visao) == list(original) and len(visao) == 3
+    assert "text" not in visao and visao.get("text") is None and visao.get("natureza", "-") == "-"
+    assert retrieve_module._metadata_value(visao, "orgao") == "X"
+    with pytest.raises(KeyError):
+        visao["natureza"]
+
+    diferente = {"chunk_id": "c1", "metadata": {"chunk_id": "c1", "base_id": "outra_base"}}
+    retrieve_module._compartilhar_metadado(diferente, {"c1": documento})
+    assert type(diferente["metadata"]) is dict
+
+
+def test_pre_carga_le_os_documentos_antes_e_o_indice_usa_os_metadados_deles(tmp_path, monkeypatch):
+    normalizados = tmp_path / "normalized"
+    normalizados.mkdir()
+    monkeypatch.setattr(retrieve_module.config, "NORMALIZED_DATA_DIR", normalizados)
+    documentos = normalizados / "documents.jsonl"
+    metadado = {"chunk_id": "a", "base_id": "contratos_estruturado", "source_file": "a.json"}
+    documentos.write_text(json.dumps({**metadado, "text": "ambulancia"}) + "\n", encoding="utf-8")
+    indice = tmp_path / "index"
+    (indice / "contratos_estruturado").mkdir(parents=True)
+    (indice / "contratos_estruturado" / "vectors.jsonl").write_text(
+        json.dumps({"chunk_id": "a", "metadata": metadado, "embedding": [1.0, 0.0], "base_id": "contratos_estruturado"})
+        + "\n", encoding="utf-8")
+    (indice / "contratos_estruturado" / "vectors.faiss").write_bytes(b"")  # só para ler sem o vetor
+
+    monkeypatch.setattr(retrieve_module, "_ler_indice_faiss", lambda caminho: None)
+    monkeypatch.setattr(retrieve_module, "_indice_lexico", lambda *a, **k: None)
+    retrieve_module.pre_carregar_indices(indice, documentos)
+
+    (registro,) = retrieve_module._registros_do_indice(indice / "contratos_estruturado" / "vectors.jsonl")
+    assert isinstance(registro["metadata"], retrieve_module._MetadadoDoDocumento)
+    assert dict(registro["metadata"]) == metadado and "embedding" not in registro

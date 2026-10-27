@@ -116,12 +116,84 @@ def _read_jsonl(path: Path, *, sem_vetor: bool = False) -> list[dict[str, Any]]:
     if guardado and guardado[0] == stat.st_mtime_ns and guardado[1] == stat.st_size:
         return list(guardado[2])
     records: list[dict[str, Any]] = []
+    documentos = _documentos_por_id() if sem_vetor else None
     with path.open(encoding="utf-8") as handle:
         for line in handle:
             if line.strip():
-                records.append(_registro_sem_vetor(line) if sem_vetor else json.loads(line))
+                record = _registro_sem_vetor(line) if sem_vetor else json.loads(line)
+                if documentos:
+                    _compartilhar_metadado(record, documentos)
+                records.append(record)
     _JSONL_CACHE[chave] = (stat.st_mtime_ns, stat.st_size, records)
     return list(records)
+
+
+class _MetadadoDoDocumento(Mapping):
+    """Metadados de um registro do índice, lidos do registro do documents.jsonl.
+
+    Os 18 campos do metadado do índice são idênticos aos do documento; guardar a
+    cópia custava ~930 MB nos 144 mil registros (os dicionários pesam mais que o
+    JSON). A visão mostra só as chaves do metadado original, na mesma ordem, e só
+    lê: quem precisa de um ``dict`` copia (``_result`` já faz ``dict(...)``).
+    """
+
+    __slots__ = ("_documento", "_chaves", "_conjunto")
+
+    def __init__(self, documento: Mapping[str, Any], chaves: tuple[str, ...], conjunto: frozenset[str]) -> None:
+        self._documento = documento
+        self._chaves = chaves
+        self._conjunto = conjunto
+
+    def __getitem__(self, chave: str) -> Any:
+        if chave in self._conjunto:
+            return self._documento[chave]
+        raise KeyError(chave)
+
+    # Os filtros perguntam por chaves ausentes milhões de vezes por pergunta:
+    # o get/in herdados do Mapping passam por KeyError, bem mais lento.
+    def get(self, chave: str, padrao: Any = None) -> Any:
+        return self._documento[chave] if chave in self._conjunto else padrao
+
+    def __contains__(self, chave: object) -> bool:
+        return chave in self._conjunto
+
+    def __iter__(self):
+        return iter(self._chaves)
+
+    def __len__(self) -> int:
+        return len(self._chaves)
+
+
+# Chaves (em ordem e como conjunto) compartilhadas entre registros com o mesmo metadado.
+_CHAVES_DE_METADADO: dict[tuple[str, ...], tuple[tuple[str, ...], frozenset[str]]] = {}
+# (assinatura do documents.jsonl em cache, chunk_id -> registro).
+_DOCUMENTOS_POR_ID: list[Any] = [None, None]
+
+
+def _documentos_por_id() -> dict[str, Mapping[str, Any]] | None:
+    """Registros do documents.jsonl por ``chunk_id``, se ele já está em cache.
+
+    Não lê o arquivo: a pré-carga lê os documentos antes do índice; fora dela,
+    sem documentos carregados, o índice fica com os próprios metadados.
+    """
+    guardado = _JSONL_CACHE.get(str(config.NORMALIZED_DATA_DIR / "documents.jsonl"))
+    if not guardado:
+        return None
+    if _DOCUMENTOS_POR_ID[0] != guardado[:2]:
+        _DOCUMENTOS_POR_ID[:] = [guardado[:2], {str(d.get("chunk_id")): d for d in guardado[2]}]
+    return _DOCUMENTOS_POR_ID[1]
+
+
+def _compartilhar_metadado(record: dict[str, Any], documentos: Mapping[str, Mapping[str, Any]]) -> None:
+    """Troca o metadado do registro pela visão do documento, só se todos os campos são iguais."""
+    metadado = record.get("metadata")
+    documento = documentos.get(str(record.get("chunk_id")))
+    if not isinstance(metadado, dict) or documento is None:
+        return
+    if all(chave in documento and documento[chave] == valor for chave, valor in metadado.items()):
+        chaves = tuple(metadado)
+        record["metadata"] = _MetadadoDoDocumento(
+            documento, *_CHAVES_DE_METADADO.setdefault(chaves, (chaves, frozenset(chaves))))
 
 
 def _registro_sem_vetor(line: str) -> dict[str, Any]:
@@ -1046,16 +1118,17 @@ def pre_carregar_indices(
     """
     lidos = 0
     try:
+        # Documentos antes do índice: o índice reaproveita os metadados deles.
+        for path in (documents_file, QUERY_CACHE_PATH):
+            if path.exists():
+                _read_jsonl(path)
+                lidos += 1
         for vectors_path in sorted(index_dir.glob("*/vectors.jsonl")):
             _registros_do_indice(vectors_path)
             lidos += 1
             faiss_path = vectors_path.parent / "vectors.faiss"
             if faiss_path.exists():
                 _ler_indice_faiss(faiss_path)
-                lidos += 1
-        for path in (documents_file, QUERY_CACHE_PATH):
-            if path.exists():
-                _read_jsonl(path)
                 lidos += 1
         # Monta o índice da BM25 agora, e não na primeira pergunta.
         _indice_lexico(documents_file, construir=True)
