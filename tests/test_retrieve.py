@@ -1586,3 +1586,52 @@ def test_selecao_sem_filtro_e_calculada_uma_vez_por_versao_do_arquivo(tmp_path, 
         tmp_path, ["contratos_estruturado"], None, documents_file=documentos)] == ["c1", "c2"]
     assert len(chamadas) == 2
 
+
+def _indice_com_faiss(tmp_path, vetores):
+    import faiss
+    import numpy as np
+
+    base = tmp_path / "contratos_estruturado"
+    base.mkdir()
+    registros = [_record(chunk_id, text=chunk_id, embedding=vetor) for chunk_id, vetor in vetores]
+    (base / "vectors.jsonl").write_text("".join(json.dumps(r) + "\n" for r in registros), encoding="utf-8")
+    matriz = np.ascontiguousarray([v for _, v in vetores], dtype=np.float32)
+    faiss.normalize_L2(matriz)
+    indice = faiss.IndexFlatIP(matriz.shape[1])
+    indice.add(matriz)
+    faiss.write_index(indice, str(base / "vectors.faiss"))
+    return base
+
+
+def test_busca_densa_com_filtro_usa_o_faiss_dos_registros_lidos_sem_vetor(tmp_path, monkeypatch):
+    """Com filtro, os candidatos vêm do índice já sem o vetor (ele fica no FAISS).
+    Desde 2026-10-19 o FAISS não era usado nesse caminho: todos viravam "dimensão 0"
+    e a busca densa ficava vazia em qualquer pergunta com filtro."""
+    base = _indice_com_faiss(tmp_path, [("longe", [-1.0, 0.0]), ("perto", [0.9, 0.1]), ("meio", [0.0, 1.0])])
+    avisos = []
+    monkeypatch.setattr(retrieve_module, "registrar", lambda **k: avisos.append(k))
+    sem_vetor = retrieve_module._registros_do_indice(base / "vectors.jsonl")
+    assert all("embedding" not in r for r in sem_vetor)
+
+    filtrados = [r for r in sem_vetor if r["chunk_id"] != "meio"]  # o recorte de um filtro
+    resultados = dense_retrieve("consulta", records=filtrados, index_dir=tmp_path,
+                                documents_file=tmp_path / "sem-documents.jsonl",
+                                embed_fn=lambda textos: [[1.0, 0.0] for _ in textos], top_k=2)
+
+    assert [r.chunk_id for r in resultados] == ["perto", "longe"]
+    assert avisos == []
+
+
+def test_aviso_de_vetor_descartado_grava_contagem_e_poucos_exemplos(monkeypatch):
+    """O aviso listava os 106 mil contratos a cada pergunta: 461 MB do log de 26/10."""
+    avisos = []
+    monkeypatch.setattr(retrieve_module, "registrar", lambda **k: avisos.append(k))
+    incompativeis = [{"chunk_id": f"c{i}", "expected_dimension": 1024, "actual_dimension": 0} for i in range(5000)]
+
+    retrieve_module._avisar_vetores_descartados("q", incompativeis, [], run_id="r", query_id="q")
+
+    (aviso,) = avisos
+    assert aviso["output"].startswith("5000 embedding(s) incompatível(is)")
+    assert len(aviso["extra"]["embedding_dimension_mismatches"]) == 20
+    assert aviso["extra"]["total_descartados"] == 5000
+

@@ -119,9 +119,24 @@ def _read_jsonl(path: Path, *, sem_vetor: bool = False) -> list[dict[str, Any]]:
     with path.open(encoding="utf-8") as handle:
         for line in handle:
             if line.strip():
-                records.append(json.loads(_RE_EMBEDDING.sub("", line, count=1) if sem_vetor else line))
+                records.append(_registro_sem_vetor(line) if sem_vetor else json.loads(line))
     _JSONL_CACHE[chave] = (stat.st_mtime_ns, stat.st_size, records)
     return list(records)
+
+
+def _registro_sem_vetor(line: str) -> dict[str, Any]:
+    """A linha sem o campo ``embedding``, cortado antes de decodificar (o caro é o vetor).
+
+    O corte pressupõe que o campo não é o último da linha (nos índices da v7 é o
+    4º de 8); se for, sobra uma vírgula e o JSON fica inválido: aí a linha é lida
+    inteira e o campo sai depois.
+    """
+    try:
+        return json.loads(_RE_EMBEDDING.sub("", line, count=1))
+    except json.JSONDecodeError:
+        registro = json.loads(line)
+        registro.pop("embedding", None)
+        return registro
 
 
 def _registros_do_indice(vectors_path: Path) -> list[dict[str, Any]]:
@@ -1196,7 +1211,18 @@ def _indices_das_bases(index_dir: Path, candidates_by_base: dict[str, list[Mappi
     Com ``records`` dados por quem chama, o próprio grupo de candidatos é o índice.
     """
     if records is not None:
-        return dict(candidates_by_base), {}
+        indexed_by_base_recebidos: dict[str, list] = dict(candidates_by_base)
+        caminhos: dict[str, Path] = {}
+        # Recorte filtrado que veio do índice: os registros foram lidos sem o
+        # vetor, que está no FAISS. Sem o FAISS aqui, todos viravam "dimensão 0"
+        # e a busca densa ficava vazia em qualquer pergunta com filtro (desde
+        # 2026-10-19, quando o índice passou a ser lido sem o vetor).
+        for base_id, grupo in candidates_by_base.items():
+            faiss_path = index_dir / base_id / "vectors.faiss"
+            if faiss_path.exists() and any("embedding" not in registro for registro in grupo):
+                indexed_by_base_recebidos[base_id] = _registros_do_indice(index_dir / base_id / "vectors.jsonl")
+                caminhos[base_id] = faiss_path
+        return indexed_by_base_recebidos, caminhos
     indexed_by_base: dict[str, list[dict[str, Any]]] = {}
     index_paths: dict[str, Path] = {}
     # Só as bases que têm candidatos: com a v7, ler todas custava 3,4 GB
@@ -1249,9 +1275,15 @@ def _candidatos_com_vetor(candidates: Iterable[Mapping[str, Any]], bases_com_fai
     return compativeis, incompativeis, ausentes
 
 
+# Exemplos de vetor descartado que vão para o log; o resto entra só na contagem.
+# O aviso listava todos: 106 mil contratos por pergunta, 461 MB do log de 26/10.
+_EXEMPLOS_DE_DESCARTE = 20
+
+
 def _avisar_vetores_descartados(query: str, incompativeis: list[dict[str, Any]], ausentes: list[dict[str, str]],
                                 *, run_id: str, query_id: str) -> None:
-    """Aviso no log (stage ``retrieval_denso``) para cada tipo de vetor descartado."""
+    """Aviso no log (stage ``retrieval_denso``) para cada tipo de vetor descartado,
+    com a contagem e até ``_EXEMPLOS_DE_DESCARTE`` exemplos."""
     if incompativeis:
         registrar(
             run_id=run_id,
@@ -1261,7 +1293,8 @@ def _avisar_vetores_descartados(query: str, incompativeis: list[dict[str, Any]],
             latencia_ms=0,
             input=query,
             output=f"{len(incompativeis)} embedding(s) incompatível(is) excluído(s)",
-            extra={"embedding_dimension_mismatches": incompativeis},
+            extra={"embedding_dimension_mismatches": incompativeis[:_EXEMPLOS_DE_DESCARTE],
+                   "total_descartados": len(incompativeis)},
         )
     if ausentes:
         registrar(
@@ -1272,7 +1305,8 @@ def _avisar_vetores_descartados(query: str, incompativeis: list[dict[str, Any]],
             latencia_ms=0,
             input=query,
             output=f"{len(ausentes)} embedding(s) ausente(s)/nulo(s) ignorado(s)",
-            extra={"missing_embeddings": ausentes},
+            extra={"missing_embeddings": ausentes[:_EXEMPLOS_DE_DESCARTE],
+                   "total_descartados": len(ausentes)},
         )
 
 
