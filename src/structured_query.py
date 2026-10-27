@@ -422,9 +422,16 @@ def executar_consulta(consulta: Consulta, banco: Banco, recorte: Optional[dict] 
     total = banco.consultar(f"SELECT COUNT(*) AS n FROM {consulta.tabela}")[0]["n"]
     consulta = _resolver_valores(consulta, banco)
 
+    # A mesma tentativa é contada para decidir e de novo para o recorte: uma
+    # consulta a cada vez (~0,08 s numa varredura da tabela).
+    contagens: dict[tuple[tuple[str, ...], str], int] = {}
+
     def contagem(termos: tuple[str, ...], juncao: str = "AND") -> int:
-        where, parametros = _where(consulta, termos, juncao)
-        return banco.consultar(f"SELECT COUNT(*) AS n FROM {consulta.tabela}{where}", parametros)[0]["n"]
+        if (termos, juncao) not in contagens:
+            where, parametros = _where(consulta, termos, juncao)
+            contagens[(termos, juncao)] = banco.consultar(
+                f"SELECT COUNT(*) AS n FROM {consulta.tabela}{where}", parametros)[0]["n"]
+        return contagens[(termos, juncao)]
 
     tentativas = [(consulta.termos_objeto, "AND")]
     if len(consulta.termos_objeto) > 1:
@@ -504,17 +511,27 @@ def _snapshot_do_banco(banco: Banco) -> tuple[Optional[str], Optional[str]]:
     return valores.get("schema_version"), valores.get("source_sha256")
 
 
+def _vazio(campo: str) -> str:
+    """Condição de campo ausente: NULL, e também string vazia nos de texto."""
+    return f"{campo} IS NULL" if campo in _CAMPOS_NUMERICOS else f"({campo} IS NULL OR {campo} = '')"
+
+
 def _completude(banco: Banco, tabela: str, where: str, parametros: list[Any],
                 campos: Sequence[str]) -> list[dict[str, Any]]:
-    """Conhecidos/desconhecidos por campo, sobre o recorte já filtrado."""
+    """Conhecidos/desconhecidos por campo, sobre o recorte já filtrado.
+
+    Uma consulta para todos os campos (era uma por campo, cada uma varrendo o
+    mesmo recorte); ``campos`` vem das colunas reais do esquema.
+    """
+    if not campos:
+        return []
+    somas = ", ".join(f"SUM(CASE WHEN {_vazio(campo)} THEN 1 ELSE 0 END) AS d{indice}"
+                      for indice, campo in enumerate(campos))
+    linha = banco.consultar(f"SELECT COUNT(*) AS n, {somas} FROM {tabela}{where}", parametros)[0]
+    total_campo = int(linha["n"] or 0)
     saida: list[dict[str, Any]] = []
-    for campo in campos:
-        vazio = f"{campo} IS NULL" if campo in _CAMPOS_NUMERICOS else f"({campo} IS NULL OR {campo} = '')"
-        linha = banco.consultar(
-            f"SELECT COUNT(*) AS n, SUM(CASE WHEN {vazio} THEN 1 ELSE 0 END) AS d FROM {tabela}{where}",
-            parametros)[0]
-        total_campo = int(linha["n"] or 0)
-        desconhecidos = int(linha["d"] or 0)
+    for indice, campo in enumerate(campos):
+        desconhecidos = int(linha[f"d{indice}"] or 0)
         saida.append({"campo": campo, "conhecidos": total_campo - desconhecidos, "desconhecidos": desconhecidos})
     return saida
 
