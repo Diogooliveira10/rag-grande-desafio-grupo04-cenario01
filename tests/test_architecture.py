@@ -86,3 +86,11 @@ def test_nome_antigo_de_arquivo_renomeado_e_o_mesmo_modulo(antigo, novo):
 
     assert importlib.import_module(antigo) is importlib.import_module(novo)
 
+
+@pytest.mark.parametrize("arquivo", sorted((RAIZ / "src" / "retrieval").glob("*.py")), ids=lambda p: p.name)
+def test_partes_da_busca_nao_importam_a_entrada(arquivo):
+    """src/retrieval/ são as partes; src/retrieve.py é a entrada que as junta.
+    Uma parte importando a entrada criaria um ciclo (2026-10-27, divisão do retrieve)."""
+    assert not any(n == "src.retrieve" or n.startswith("src.retrieve.") for n in _importados(arquivo)), (
+        f"{arquivo.name} importa src.retrieve")
+

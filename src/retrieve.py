@@ -1,552 +1,134 @@
 from __future__ import annotations
 
-import heapq
 import json
 import math
-import re
 import time
-import unicodedata
-from collections import Counter
-from dataclasses import dataclass, field, replace
-from functools import lru_cache
-from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import config
-from src.domain import fusion
 from src.obs import Stage, TokenUsage, default_logger, registrar, token_usage_from_response
 from src.schema import Natureza
 
-
-DEFAULT_RRF_K = 60
-DEFAULT_TOP_K = 10
-DEFAULT_FETCH_K = 50
-_TOKEN_RE = re.compile(r"\w+", re.UNICODE)
-_PNCP_CONTROL_RE = re.compile(r"(?<!\d)\d{14}-\d-\d{6}/\d{4}(?:-\d{6})?(?!\d)")
-# CNPJ com ou sem pontuação; os 14 dígitos no começo de um número de controle
-# ficam de fora pelo "-" que vem depois deles.
-_CNPJ_RE = re.compile(r"(?<![\d./-])(\d{2})\.?(\d{3})\.?(\d{3})/?(\d{4})-?(\d{2})(?![\d/-])")
-_CONTRACT_NUMBER_RE = re.compile(
-    r"\bcontrato\s*(?:n(?:[uú]mero|ro)?\.?\s*[º°o]?\s*)?"
-    r"(\d+)\s*/\s*(\d{4})(?!\d)", re.IGNORECASE
+# As partes da busca moram em src/retrieval/ desde 2026-10-27; todos os nomes
+# continuam importáveis daqui (from src.retrieve import ..., retrieve_module.X).
+from src.retrieval.records import (  # noqa: F401
+    EmbeddingUnavailable,
+    MANIFEST_PATH,
+    RetrievalResult,
+    _CHAVES_DE_METADADO,
+    _DOCUMENTOS_POR_ID,
+    _JSONL_CACHE,
+    _MetadadoDoDocumento,
+    _NATUREZAS,
+    _RE_EMBEDDING,
+    _compartilhar_metadado,
+    _documentos_por_id,
+    _manifest_bases,
+    _metadata_of,
+    _read_jsonl,
+    _record_base_id,
+    _record_escopo,
+    _record_natureza,
+    _registro_sem_vetor,
+    _registros_do_indice,
+    _result,
+    _split_selection,
 )
-MANIFEST_PATH = config.ROOT_DIR / "corpus_manifest.yaml"
-_NATUREZAS = frozenset(item.value for item in Natureza)
+from src.retrieval.lexical import (  # noqa: F401
+    _INDICE_LEXICO_CACHE,
+    _Pontuado,
+    _TERMOS_CACHE,
+    _TOKEN_RE,
+    _bm25_pelo_indice,
+    _bm25_por_varredura,
+    _chunk_id_do_registro,
+    _indice_lexico,
+    _termos,
+    _tokens,
+)
+from src.retrieval.identifiers import (  # noqa: F401
+    _CNPJ_RE,
+    _CONTRACT_NUMBER_RE,
+    _PNCP_CONTROL_RE,
+    _contrato_corresponde,
+    _diagnostico_identificadores,
+    _identificador_em_resultado,
+    _identificadores_pncp,
+    _promover_identificadores_exatos,
+    _referencias_contrato,
+    _resultados_identificador_exato,
+    _variantes,
+)
+from src.retrieval.filters import (  # noqa: F401
+    _COMPARACOES,
+    _CONECTORES_DE_NOME,
+    _comparable_values,
+    _condicao_satisfeita,
+    _condicoes,
+    _filtrar_por_base,
+    _filtro_aplicavel,
+    _filtro_opcional,
+    _matches_filters,
+    _metadata_value,
+    _parse_date,
+    _parse_number,
+    _sem_caixa_e_acento,
+    _sem_valor_comparavel,
+    _tokens_de_nome,
+    _values_equal,
+    filtro_opcional,
+)
+from src.retrieval.norms import (  # noqa: F401
+    _ARTIGO_INICIAL,
+    _NORMA_RE,
+    _VISAO_GERAL_NORMA,
+    _consulta_topica_norma,
+    _norma_do_documento,
+    _normas_mencionadas,
+    _ordenar_candidatos_norma,
+    _priorizar_norma_solicitada,
+)
+from src.retrieval.evidence import (  # noqa: F401
+    _evidencias,
+    _registrar_evidencias,
+    _resumo,
+)
+from src.retrieval.ranking import (  # noqa: F401
+    DEFAULT_RRF_K,
+    _BASES_COM_VARIEDADE,
+    _COMPRA_RE,
+    _chave_da_compra,
+    _variar_por_compra,
+    reciprocal_rank_fusion,
+)
+
+
+DEFAULT_TOP_K = 10
+
+
+DEFAULT_FETCH_K = 50
+
 
 EmbedFn = Callable[[list[str]], list[list[float]]]
+
+
 RerankFn = Callable[[str, list["RetrievalResult"]], Sequence[Any]]
+
+
 QUERY_INSTRUCTION = "Given a public procurement question, retrieve relevant passages that answer the query"
+
+
 QUERY_CACHE_PATH = config.ROOT_DIR / "data" / "embeddings" / "query_cache.jsonl"
+
+
 _EMBEDDING_FAILURES: dict[tuple[str, str], float] = {}
-
-
-class EmbeddingUnavailable(ConnectionError):
-    """Endpoint em cooldown ou busca densa desabilitada explicitamente."""
 
 
 def embedding_query_text(query: str) -> str:
     """Instrução Qwen exclusiva da busca densa; BM25/roteamento recebem o original."""
     return f"Instruct: {QUERY_INSTRUCTION}\nQuery:{query}"
-
-
-@dataclass
-class RetrievalResult:
-    """Resultado de uma estratégia ou da fusão, com proveniência preservada."""
-
-    chunk_id: str
-    content: str
-    metadata: dict[str, Any]
-    score: float
-    dense_score: float | None = None
-    sparse_score: float | None = None
-    rrf_score: float | None = None
-    rerank_score: float | None = None
-    document_id: str | None = None
-    source_path: str | None = None
-    _record: dict[str, Any] = field(default_factory=dict, repr=False)
-
-    def __getitem__(self, key: str) -> Any:
-        """Permite consumo como mapeamento sem perder o acesso tipado."""
-        return self.to_dict()[key]
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "chunk_id": self.chunk_id,
-            "content": self.content,
-            "metadata": self.metadata,
-            "score": self.score,
-            "dense_score": self.dense_score,
-            "sparse_score": self.sparse_score,
-            "rrf_score": self.rrf_score,
-            "rerank_score": self.rerank_score,
-            "document_id": self.document_id,
-            "source_path": self.source_path,
-        }
-
-
-# Arquivo lido -> (mtime, tamanho, registros). Cada pergunta lia de novo os
-# vectors.jsonl e o documents.jsonl (~150 MB de JSON), uns 3 s por consulta;
-# a assinatura do arquivo invalida a entrada quando ele é regravado.
-_JSONL_CACHE: dict[str, tuple[int, int, list[dict[str, Any]]]] = {}
-
-
-_RE_EMBEDDING = re.compile(r'"embedding":\s*\[[^\]]*\]\s*,?\s*')
-
-
-def _read_jsonl(path: Path, *, sem_vetor: bool = False) -> list[dict[str, Any]]:
-    """Registros do arquivo, lidos uma vez enquanto ele não muda.
-
-    Os dicts são compartilhados entre as chamadas e ninguém os altera: a busca
-    só lê, e o que sai dela (``_result``) leva cópia própria. Copiar os ~144 mil
-    registros a cada pergunta custava ~0,75 s por seleção. Quem precisar
-    alterar um registro copia antes (``dict(record)``).
-
-    ``sem_vetor`` descarta o campo ``embedding`` antes de decodificar a linha:
-    com o FAISS ao lado, o vetor não é usado na consulta. Na v7, os vetores dos
-    contratos passam de ~4 GB e 3 min para ~700 MB e 12 s.
-    """
-    try:
-        stat = path.stat()
-    except FileNotFoundError:
-        return []
-    chave = f"{path}|sem_vetor" if sem_vetor else str(path)
-    guardado = _JSONL_CACHE.get(chave)
-    if guardado and guardado[0] == stat.st_mtime_ns and guardado[1] == stat.st_size:
-        return list(guardado[2])
-    records: list[dict[str, Any]] = []
-    documentos = _documentos_por_id() if sem_vetor else None
-    with path.open(encoding="utf-8") as handle:
-        for line in handle:
-            if line.strip():
-                record = _registro_sem_vetor(line) if sem_vetor else json.loads(line)
-                if documentos:
-                    _compartilhar_metadado(record, documentos)
-                records.append(record)
-    _JSONL_CACHE[chave] = (stat.st_mtime_ns, stat.st_size, records)
-    return list(records)
-
-
-class _MetadadoDoDocumento(Mapping):
-    """Metadados de um registro do índice, lidos do registro do documents.jsonl.
-
-    Os 18 campos do metadado do índice são idênticos aos do documento; guardar a
-    cópia custava ~930 MB nos 144 mil registros (os dicionários pesam mais que o
-    JSON). A visão mostra só as chaves do metadado original, na mesma ordem, e só
-    lê: quem precisa de um ``dict`` copia (``_result`` já faz ``dict(...)``).
-    """
-
-    __slots__ = ("_documento", "_chaves", "_conjunto")
-
-    def __init__(self, documento: Mapping[str, Any], chaves: tuple[str, ...], conjunto: frozenset[str]) -> None:
-        self._documento = documento
-        self._chaves = chaves
-        self._conjunto = conjunto
-
-    def __getitem__(self, chave: str) -> Any:
-        if chave in self._conjunto:
-            return self._documento[chave]
-        raise KeyError(chave)
-
-    # Os filtros perguntam por chaves ausentes milhões de vezes por pergunta:
-    # o get/in herdados do Mapping passam por KeyError, bem mais lento.
-    def get(self, chave: str, padrao: Any = None) -> Any:
-        return self._documento[chave] if chave in self._conjunto else padrao
-
-    def __contains__(self, chave: object) -> bool:
-        return chave in self._conjunto
-
-    def __iter__(self):
-        return iter(self._chaves)
-
-    def __len__(self) -> int:
-        return len(self._chaves)
-
-
-# Chaves (em ordem e como conjunto) compartilhadas entre registros com o mesmo metadado.
-_CHAVES_DE_METADADO: dict[tuple[str, ...], tuple[tuple[str, ...], frozenset[str]]] = {}
-# (assinatura do documents.jsonl em cache, chunk_id -> registro).
-_DOCUMENTOS_POR_ID: list[Any] = [None, None]
-
-
-def _documentos_por_id() -> dict[str, Mapping[str, Any]] | None:
-    """Registros do documents.jsonl por ``chunk_id``, se ele já está em cache.
-
-    Não lê o arquivo: a pré-carga lê os documentos antes do índice; fora dela,
-    sem documentos carregados, o índice fica com os próprios metadados.
-    """
-    guardado = _JSONL_CACHE.get(str(config.NORMALIZED_DATA_DIR / "documents.jsonl"))
-    if not guardado:
-        return None
-    if _DOCUMENTOS_POR_ID[0] != guardado[:2]:
-        _DOCUMENTOS_POR_ID[:] = [guardado[:2], {str(d.get("chunk_id")): d for d in guardado[2]}]
-    return _DOCUMENTOS_POR_ID[1]
-
-
-def _compartilhar_metadado(record: dict[str, Any], documentos: Mapping[str, Mapping[str, Any]]) -> None:
-    """Troca o metadado do registro pela visão do documento, só se todos os campos são iguais."""
-    metadado = record.get("metadata")
-    documento = documentos.get(str(record.get("chunk_id")))
-    if not isinstance(metadado, dict) or documento is None:
-        return
-    if all(chave in documento and documento[chave] == valor for chave, valor in metadado.items()):
-        chaves = tuple(metadado)
-        record["metadata"] = _MetadadoDoDocumento(
-            documento, *_CHAVES_DE_METADADO.setdefault(chaves, (chaves, frozenset(chaves))))
-
-
-def _registro_sem_vetor(line: str) -> dict[str, Any]:
-    """A linha sem o campo ``embedding``, cortado antes de decodificar (o caro é o vetor).
-
-    O corte pressupõe que o campo não é o último da linha (nos índices da v7 é o
-    4º de 8); se for, sobra uma vírgula e o JSON fica inválido: aí a linha é lida
-    inteira e o campo sai depois.
-    """
-    try:
-        return json.loads(_RE_EMBEDDING.sub("", line, count=1))
-    except json.JSONDecodeError:
-        registro = json.loads(line)
-        registro.pop("embedding", None)
-        return registro
-
-
-def _registros_do_indice(vectors_path: Path) -> list[dict[str, Any]]:
-    """Registros de uma base do índice, na ordem do FAISS.
-
-    Com ``vectors.faiss`` ao lado, os vetores ficam no FAISS e o JSON é lido
-    sem eles; sem o FAISS, o vetor é necessário para montar o índice em memória.
-    """
-    return _read_jsonl(vectors_path, sem_vetor=(vectors_path.parent / "vectors.faiss").exists())
-
-
-@lru_cache(maxsize=4)
-def _manifest_bases(manifest_path: Path = MANIFEST_PATH) -> dict[str, dict[str, Any]]:
-    """``base_id`` -> declaração da base no manifesto (natureza, escopo...)."""
-    if not manifest_path.exists():
-        return {}
-    from src.fetch_corpus import load_manifest
-
-    return {str(base["base_id"]): base for base in load_manifest(manifest_path)["bases"]}
-
-
-def _split_selection(bases: Iterable[Any] | None) -> tuple[set[str], set[str]] | None:
-    """Separa a seleção do roteador em (naturezas, base_ids explícitos).
-
-    Um item que é nome de natureza (``Natureza`` ou "estruturada") seleciona
-    todas as bases daquela natureza; qualquer outro valor é tratado como
-    ``base_id``.
-    """
-    if bases is None:
-        return None
-    if isinstance(bases, str):
-        bases = [bases]
-    naturezas: set[str] = set()
-    base_ids: set[str] = set()
-    for base in bases:
-        value = str(getattr(base, "value", base))
-        (naturezas if value in _NATUREZAS else base_ids).add(value)
-    return naturezas, base_ids
-
-
-def _record_base_id(record: Mapping[str, Any], metadata: Mapping[str, Any]) -> str:
-    return str(record.get("base_id") or metadata.get("base_id") or "")
-
-
-def _record_natureza(record: Mapping[str, Any], metadata: Mapping[str, Any]) -> str | None:
-    """Natureza do registro; sem o campo, vem do manifesto pelo ``base_id``."""
-    natureza = record.get("natureza") or metadata.get("natureza")
-    if natureza:
-        return str(getattr(natureza, "value", natureza))
-    declarada = _manifest_bases().get(_record_base_id(record, metadata), {}).get("natureza")
-    return str(declarada) if declarada else None
-
-
-def _record_escopo(record: Mapping[str, Any], metadata: Mapping[str, Any]) -> str | None:
-    escopo = _manifest_bases().get(_record_base_id(record, metadata), {}).get("escopo")
-    return str(escopo) if escopo else None
-
-
-def _metadata_value(metadata: Mapping[str, Any], key: str) -> Any:
-    if key in metadata:
-        return metadata[key]
-    extras = metadata.get("extras")
-    if isinstance(extras, Mapping):
-        return extras.get(key)
-    return None
-
-
-def _values_equal(left: Any, right: Any) -> bool:
-    left_normalized, right_normalized = _comparable_values(left, right)
-    return left_normalized == right_normalized
-
-
-def _parse_date(value: Any) -> date | None:
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    if not isinstance(value, str):
-        return None
-    candidate = value.strip()
-    for formatter in (date.fromisoformat, lambda item: datetime.strptime(item, "%Y%m%d").date()):
-        try:
-            return formatter(candidate)
-        except ValueError:
-            continue
-    try:
-        return datetime.fromisoformat(candidate.replace("Z", "+00:00")).date()
-    except ValueError:
-        return None
-
-
-def _parse_number(value: Any) -> Decimal | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float, Decimal)):
-        return Decimal(str(value))
-    if not isinstance(value, str):
-        return None
-    candidate = value.strip().replace("R$", "").replace(" ", "")
-    if not candidate:
-        return None
-    if "," in candidate:
-        if candidate.count(",") != 1:
-            return None
-        integer, fraction = candidate.split(",")
-        if "." in integer:
-            if not re.fullmatch(r"[+-]?[1-9]\d{0,2}(?:\.\d{3})+", integer):
-                return None
-            integer = integer.replace(".", "")
-        candidate = f"{integer}.{fraction}"
-    elif candidate.count(".") > 1:
-        if not re.fullmatch(r"[+-]?[1-9]\d{0,2}(?:\.\d{3})+", candidate):
-            return None
-        candidate = candidate.replace(".", "")
-    elif candidate.count(".") == 1:
-        integer, fraction = candidate.split(".")
-        if len(fraction) == 3 and re.fullmatch(r"[+-]?[1-9]\d{0,2}", integer):
-            candidate = f"{integer}{fraction}"
-    try:
-        return Decimal(candidate)
-    except InvalidOperation:
-        return None
-
-
-def _comparable_values(left: Any, right: Any) -> tuple[Any, Any]:
-    left_date, right_date = _parse_date(left), _parse_date(right)
-    if left_date is not None and right_date is not None:
-        return left_date, right_date
-    left_number, right_number = _parse_number(left), _parse_number(right)
-    if left_number is not None and right_number is not None:
-        return left_number, right_number
-    return left, right
-
-
-def _condicoes(expected: Any) -> list[tuple[str, Any]]:
-    """Normaliza o valor de um filtro numa lista de condições (operator, value).
-
-    Mantém os formatos já suportados (valor direto = igualdade; dict com
-    "operator"/"op" e "value"; tupla/lista de 2 elementos (operator, value))
-    e acrescenta um formato novo: lista de dicts, para expressar várias
-    condições sobre a MESMA chave com semântica E — ex. uma faixa de valor
-    (>= mínimo e <= máximo) ou um intervalo de datas (>= início do ano e <
-    início do ano seguinte), usado por ``src/query_analysis.py``.
-    """
-    if isinstance(expected, Mapping):
-        operator = str(expected.get("operator", expected.get("op", "==")))
-        return [(operator, expected.get("value"))]
-    if isinstance(expected, (tuple, list)):
-        if expected and all(isinstance(item, Mapping) for item in expected):
-            return [
-                (str(item.get("operator", item.get("op", "=="))), item.get("value"))
-                for item in expected
-            ]
-        if len(expected) == 2:
-            return [(str(expected[0]), expected[1])]
-    return [("==", expected)]
-
-
-def _sem_caixa_e_acento(texto: str) -> str:
-    sem_acento = "".join(
-        char for char in unicodedata.normalize("NFKD", texto.casefold()) if not unicodedata.combining(char)
-    )
-    return " ".join(sem_acento.split())
-
-
-def _condicao_satisfeita(actual: Any, operator: str, value: Any) -> bool:
-    try:
-        if operator in {"==", "="}:
-            return _values_equal(actual, value)
-        if operator == "!=":
-            return not _values_equal(actual, value)
-        if operator in {">", ">=", "<", "<="}:
-            left_date, right_date = _parse_date(actual), _parse_date(value)
-            if left_date is not None or right_date is not None:
-                if left_date is None or right_date is None:
-                    return False
-                left, right = left_date, right_date
-            else:
-                left_number, right_number = _parse_number(actual), _parse_number(value)
-                if left_number is not None or right_number is not None:
-                    if left_number is None or right_number is None:
-                        return False
-                    left, right = left_number, right_number
-                else:
-                    left, right = actual, value
-            if type(left) is not type(right):
-                return False
-            comparisons = {
-                ">": left > right,
-                ">=": left >= right,
-                "<": left < right,
-                "<=": left <= right,
-            }
-            return comparisons[operator]
-        if operator == "in":
-            candidates = value if isinstance(value, (list, tuple, set)) else [value]
-            return any(_values_equal(actual, candidate) for candidate in candidates)
-        if operator == "contains":
-            if isinstance(actual, str):
-                # Sem caixa nem acento: "Secretaria de Saúde" (pergunta) casa
-                # com "SECRETARIA DE ESTADO DE SAUDE" (razaoSocial do PNCP).
-                return _sem_caixa_e_acento(str(value)) in _sem_caixa_e_acento(actual)
-            return value in actual
-        return False
-    except (TypeError, ValueError, KeyError):
-        return False
-
-
-def filtro_opcional(expected: Any) -> bool:
-    """Filtro com ``"optional": True`` não descarta chunk que não tem o campo."""
-    if isinstance(expected, Mapping):
-        return bool(expected.get("optional"))
-    if isinstance(expected, (tuple, list)) and expected:
-        return all(isinstance(item, Mapping) and item.get("optional") for item in expected)
-    return False
-
-
-# Nome antigo, usado dentro deste módulo e pelos testes.
-_filtro_opcional = filtro_opcional
-
-
-_COMPARACOES = frozenset({">", ">=", "<", "<="})
-
-
-def _sem_valor_comparavel(actual: Any, expected: Any) -> bool:
-    """Campo presente, mas vazio ou ilegível para uma comparação (``""``,
-    ``"Sigiloso"``, ``{}``): num filtro opcional, conta como campo ausente."""
-    if actual in ("", [], {}) or (isinstance(actual, str) and not actual.strip()):
-        return True
-    operadores = {operator for operator, _ in _condicoes(expected)}
-    if operadores and operadores <= _COMPARACOES:
-        return _parse_date(actual) is None and _parse_number(actual) is None
-    return False
-
-
-def _filtro_aplicavel(metadata: Mapping[str, Any], key: str, expected: Any) -> bool:
-    """Recortes do analisador são obrigatórios só na natureza correspondente.
-
-    Filtros diretos da API (sem optional=False explícito) conservam a semântica
-    estrita original. Natureza desconhecida também nunca afrouxa um filtro.
-    """
-    conditions = expected if isinstance(expected, list) else [expected]
-    if not conditions or not all(isinstance(c, Mapping) and c.get("optional") is False for c in conditions):
-        return True
-    natureza = _record_natureza(metadata, metadata)
-    if natureza not in _NATUREZAS:
-        return True
-    if key in {"objeto_auxiliar", "objeto_termo"}:
-        return natureza in {"estruturada", "conversacional"}
-    if key == "data_vigencia_inicio":
-        return natureza == "normativa"
-    if key == "ano_pca":
-        return natureza == "agregada"
-    if key in {"data_assinatura", "data_resultado", "orgao_cnpj", "fornecedor_cnpj"}:
-        return natureza == "estruturada"
-    if key == "unidade_nome":
-        return natureza in {"estruturada", "agregada"}
-    if key == "data_publicacao":
-        return natureza in {"estruturada", "normativa", "conversacional"}
-    if key == "data_vigencia":
-        # Vigência normativa usa início; ano de PCA usa ano_pca, não este campo.
-        return natureza in {"estruturada", "conversacional"}
-    if natureza == "normativa" and key in {
-        "valor", "fornecedor", "modalidade", "cnpj", "orgao_cnpj", "fornecedor_cnpj", "data_assinatura", "data_resultado",
-    }:
-        # Normas têm órgão emissor/UF e data de publicação; estes filtros
-        # continuam aplicáveis. Só ignorar critérios próprios de contratação.
-        return False
-    return True
-
-
-_CONECTORES_DE_NOME = frozenset({"de", "do", "da", "dos", "das", "e"})
-
-
-@lru_cache(maxsize=1 << 16)
-def _tokens_de_nome(texto: str) -> frozenset[str]:
-    """Tokens de um nome de órgão/unidade: ~1.800 nomes se repetem nos 107 mil contratos."""
-    return frozenset(_tokens(texto))
-
-
-def _matches_filters(metadata: Mapping[str, Any], filters: Mapping[str, Any] | None,
-                     *, content: str = "") -> bool:
-    if not filters:
-        return True
-    for key, expected in filters.items():
-        if not _filtro_aplicavel(metadata, key, expected):
-            continue
-        actual = _metadata_value(metadata, key)
-        if key in {"objeto_auxiliar", "objeto_termo"}:
-            from src.retrieval_constraints import objeto_auxiliar, objeto_do_registro, radicais_do_objeto
-            objeto = objeto_do_registro(metadata, content)
-            actual = None if objeto is None else (
-                objeto_auxiliar(objeto) if key == "objeto_auxiliar" else radicais_do_objeto(objeto)
-            )
-        if key in {"orgao_cnpj", "fornecedor_cnpj"}:
-            actual = re.sub(r"\D", "", str(actual)) if actual is not None else None
-        if key == "cnpj":
-            # União dos identificadores do corpo e dos campos canônicos. Não
-            # confundir CNPJ com CPF nem com prefixo do controle PNCP.
-            text = content + " " + json.dumps(dict(metadata), ensure_ascii=False, default=str)
-            actual = ["".join(match.groups()) for match in _CNPJ_RE.finditer(text)]
-        if actual is None or (_filtro_opcional(expected) and _sem_valor_comparavel(actual, expected)):
-            if _filtro_opcional(expected):
-                continue
-            return False
-        for operator, value in _condicoes(expected):
-            # A análise pede "==" e a API costuma pedir "contains": nos dois, o
-            # mesmo CNPJ raiz é a mesma empresa, com qualquer grafia do nome.
-            if key == "fornecedor" and operator in {"==", "contains"}:
-                from src.analysis.suppliers import mesma_razao_social, raizes_do_fornecedor, raiz_cnpj
-                raizes = raizes_do_fornecedor(str(value))
-                cnpj = _metadata_value(metadata, "fornecedor_cnpj")
-                # O payload vetorial antigo só tem o nome. Resolva sua grafia
-                # pelo catálogo; não exija regravar os 143 mil vetores antigos.
-                raizes_atuais = (raiz_cnpj(cnpj),) if cnpj is not None else raizes_do_fornecedor(str(actual))
-                if raizes and raizes_atuais:
-                    if not set(raizes).intersection(raizes_atuais):
-                        return False
-                elif not (_condicao_satisfeita(actual, operator, value)
-                          or mesma_razao_social(str(actual), str(value), exata=operator == "==")):
-                    return False
-            elif key in {"orgao", "unidade_nome"} and operator == "contains" and isinstance(actual, str):
-                # Nomes admitem qualificadores intermediários e abreviações do
-                # PNCP: "Secretaria de Estado de Saúde" casa com "SECRET ESTADO
-                # SAUDE". Exigir cada termo informativo no campo da entidade,
-                # sem procurar no objeto ou fornecedor.
-                requeridos = _tokens_de_nome(str(value)) - _CONECTORES_DE_NOME
-                disponiveis = _tokens_de_nome(actual)
-                casa = lambda termo: any(
-                    token == termo or (len(token) >= 4 and termo.startswith(token))
-                    or (len(termo) >= 4 and token.startswith(termo))
-                    for token in disponiveis
-                )
-                if not requeridos or not all(casa(termo) for termo in requeridos):
-                    return False
-            elif not _condicao_satisfeita(actual, operator, value):
-                return False
-    return True
 
 
 def _records_for(
@@ -635,396 +217,6 @@ def _selecionar(index_dir: Path, bases: Iterable[Any] | None, escopos: Iterable[
         guardado = _records_for(index_dir, bases, None, fonte, escopos)
         _SELECAO_CACHE[chave] = guardado
     return list(guardado)
-
-
-def _metadata_of(record: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Metadados do registro: o índice guarda em ``metadata``; o
-    ``documents.jsonl`` de ``prepare_documents.py`` guarda no próprio registro."""
-    metadata = record.get("metadata")
-    return metadata if isinstance(metadata, Mapping) else record
-
-
-def _filtrar_por_base(
-    records: Iterable[Mapping[str, Any]],
-    filters: Mapping[str, Any],
-) -> tuple[list[dict[str, Any]], dict[str, dict[str, list[str]]]]:
-    """Aplica filtros obrigatórios; só os explicitamente opcionais podem relaxar.
-
-    No relaxamento opcional, um filtro só vale se ao menos um chunk tem o campo (ex.:
-    ``valor`` não existe na base normativa) e se ao menos um desses chunks
-    passa nele: um filtro que reprova todos os chunks que têm o campo está
-    lendo errado aquela base (ex.: órgão "Secretaria de Saúde" contra os
-    indicadores do PCA, cujo órgão é "Estado do Rio de Janeiro"), e deixaria
-    só os chunks sem o campo. Se os filtros que sobram, juntos, excluem todos
-    os chunks da base, ela entra sem filtro. Devolve os registros e, por
-    ``base_id``, as chaves ignoradas (``sem_campo`` / ``nenhum_chunk_passou``
-    / ``zerou_resultados``).
-    """
-    por_base: dict[str, list[dict[str, Any]]] = {}
-    for record in records:
-        base_id = _record_base_id(record, _metadata_of(record))
-        por_base.setdefault(base_id, []).append(record)
-    selecionados: list[dict[str, Any]] = []
-    ignorados: dict[str, dict[str, list[str]]] = {}
-    for base_id, registros in por_base.items():
-        metadados = [_metadata_of(record) for record in registros]
-        motivo: dict[str, list[str]] = {}
-        obrigatorios = {key: value for key, value in filters.items() if not _filtro_opcional(value)}
-        aplicaveis: dict[str, Any] = dict(obrigatorios)
-        for key, value in filters.items():
-            if key in obrigatorios:
-                continue
-            com_campo = [m for m in metadados if _metadata_value(m, key) is not None]
-            if not com_campo:
-                motivo.setdefault("sem_campo", []).append(key)
-            elif not any(_matches_filters(m, {key: value}) for m in com_campo):
-                motivo.setdefault("nenhum_chunk_passou", []).append(key)
-            else:
-                aplicaveis[key] = value
-        for chave in motivo:
-            motivo[chave].sort()
-        passam = [
-            record
-            for record, metadata in zip(registros, metadados)
-            if _matches_filters(metadata, aplicaveis, content=str(record.get("text", "")))
-        ]
-        if aplicaveis and not passam and not obrigatorios:
-            passam = registros
-            motivo["zerou_resultados"] = sorted(aplicaveis)
-        if motivo:
-            ignorados[base_id] = motivo
-        selecionados.extend(passam)
-    return selecionados, ignorados
-
-
-def _result(record: Mapping[str, Any], score: float, content: str = "") -> RetrievalResult:
-    metadata = dict(_metadata_of(record))
-    metadata.pop("text", None)
-    metadata.pop("embedding", None)
-    return RetrievalResult(
-        chunk_id=str(record.get("chunk_id") or metadata.get("chunk_id", "")),
-        content=content or str(record.get("text", "")),
-        metadata=metadata,
-        score=score,
-        document_id=record.get("document_id"),
-        source_path=record.get("source_path"),
-        _record=dict(record),
-    )
-
-
-def _identificadores_pncp(query: str) -> list[str]:
-    """Números de controle do PNCP e CNPJs (só dígitos) citados na pergunta.
-
-    O CNPJ entra pelo mesmo caminho: busca exata no texto e nos metadados, e
-    o trecho que o contém sobe na fusão (marcado ``identificador_pncp_exato``).
-    """
-    cnpjs = ["".join(match.groups()) for match in _CNPJ_RE.finditer(query)]
-    return list(dict.fromkeys(_PNCP_CONTROL_RE.findall(query) + cnpjs))
-
-
-def _variantes(identificador: str) -> tuple[str, ...]:
-    """Formas em que o identificador aparece no corpus.
-
-    O JSON dos contratos traz o CNPJ só com dígitos ("niFornecedor"); o PDF das
-    atas, com pontuação ("44.292.391/0001-30").
-    """
-    if len(identificador) == 14 and identificador.isdigit():
-        d = identificador
-        return d, f"{d[:2]}.{d[2:5]}.{d[5:8]}/{d[8:12]}-{d[12:]}"
-    return (identificador,)
-
-
-def _identificador_em_resultado(identificador: str, item: RetrievalResult) -> bool:
-    metadata = item.metadata
-    extras = metadata.get("extras")
-    extras_texto = json.dumps(extras, ensure_ascii=False, default=str) if isinstance(extras, Mapping) else ""
-    return any(forma in item.content or forma in extras_texto for forma in _variantes(identificador))
-
-
-def _diagnostico_identificadores(
-    query: str, resultados: Sequence[RetrievalResult]
-) -> list[dict[str, Any]]:
-    diagnosticos = []
-    for identificador in _identificadores_pncp(query):
-        matches = [
-            {
-                "rank": rank,
-                "chunk_id": item.chunk_id,
-                "score": item.score,
-                "dense_score": item.dense_score,
-                "sparse_score": item.sparse_score,
-                "rrf_score": item.rrf_score,
-                "exact_lookup": bool((item.metadata.get("extras") or {}).get("identificador_pncp_exato")),
-            }
-            for rank, item in enumerate(resultados, start=1)
-            if _identificador_em_resultado(identificador, item)
-        ]
-        diagnosticos.append({"identificador": identificador, "matches": matches})
-    return diagnosticos
-
-
-def _referencias_contrato(query: str) -> set[tuple[int, int]]:
-    """Só número/ano explicitamente associados a 'contrato', nunca uma data solta."""
-    return {(int(numero), int(ano)) for numero, ano in _CONTRACT_NUMBER_RE.findall(query)}
-
-
-def _contrato_corresponde(record: Mapping[str, Any], referencias: set[tuple[int, int]]) -> bool:
-    """Confere campos do contrato, não números de compra/ata citados em seu objeto."""
-    if not referencias:
-        return False
-    metadata = _metadata_of(record)
-    extras = metadata.get("extras") or {}
-    texto = str(record.get("text", ""))
-    try:
-        payload = json.loads(texto) if texto.lstrip().startswith("{") else {}
-    except ValueError:
-        payload = {}
-    if not isinstance(payload, Mapping):
-        payload = {}
-    numero = payload.get("numeroContratoEmpenho") or extras.get("numero_contrato")
-    if numero is None:
-        return False
-    match = re.fullmatch(r"\s*(\d+)\s*(?:/\s*(\d{4}))?\s*", str(numero))
-    if not match:
-        return False
-    ano = match[2] or payload.get("anoContrato") or extras.get("ano_contrato")
-    try:
-        return (int(match[1]), int(ano)) in referencias
-    except (ValueError, TypeError):
-        return False
-
-
-def _resultados_identificador_exato(
-    query: str,
-    records: Iterable[Mapping[str, Any]],
-) -> list[RetrievalResult]:
-    identificadores = [forma for identificador in _identificadores_pncp(query)
-                       for forma in _variantes(identificador)]
-    referencias_contrato = _referencias_contrato(query)
-    if not identificadores and not referencias_contrato:
-        return []
-    cnpjs_consulta = {identificador for identificador in _identificadores_pncp(query)
-                      if identificador.isdigit() and len(identificador) == 14}
-    consulta_fornecedor = bool(cnpjs_consulta and re.search(r"\bfornecedor(?:a)?\b", query, re.IGNORECASE))
-    termos_consulta = set(_tokens(query))
-    resultados: list[RetrievalResult] = []
-    vistos: set[str] = set()
-    for record in records:
-        metadata = _metadata_of(record)
-        extras = metadata.get("extras")
-        texto_busca = str(record.get("text", ""))
-        if isinstance(extras, Mapping):
-            texto_busca += json.dumps(extras, ensure_ascii=False, default=str)
-        pncp_exato = any(identificador in texto_busca for identificador in identificadores)
-        payload: Mapping[str, Any] = {}
-        if consulta_fornecedor or referencias_contrato:
-            try:
-                parsed = json.loads(str(record.get("text", "")))
-                payload = parsed if isinstance(parsed, Mapping) else {}
-            except ValueError:
-                pass
-        if consulta_fornecedor and "niFornecedor" in payload:
-            # O mesmo CNPJ no órgão/compra não torna o fornecedor correto.
-            pncp_exato = re.sub(r"\D", "", str(payload["niFornecedor"])) in cnpjs_consulta
-        contrato_exato = _contrato_corresponde(record, referencias_contrato)
-        # Quando ambos foram explicitados, não promover um contrato de outro
-        # número só porque compartilha o CNPJ (nem o inverso).
-        if (identificadores and not pncp_exato) or (referencias_contrato and not contrato_exato):
-            continue
-        item = _result(record, 0.0, str(record.get("text", "")))
-        if item.chunk_id in vistos:
-            continue
-        vistos.add(item.chunk_id)
-        # Número/ano não é globalmente único: um nome de fornecedor citado
-        # também na pergunta deve desambiguar ANTES do corte do rerank.
-        nome_fornecedor = payload.get("nomeRazaoSocialFornecedor") or (
-            extras.get("fornecedor") if isinstance(extras, Mapping) else ""
-        )
-        termos_fornecedor = set(_tokens(str(nome_fornecedor or ""))) - {
-            "s", "a", "sa", "ltda", "me", "epp", "eireli", "de", "da", "do", "e",
-        }
-        coincidentes = sorted(termos_fornecedor & termos_consulta) if contrato_exato else []
-        item.metadata = {
-            **item.metadata,
-            "extras": {
-                **(item.metadata.get("extras") or {}),
-                "identificador_pncp_exato": pncp_exato,
-                "identificador_contrato_exato": contrato_exato,
-                "fornecedor_termos_coincidentes": coincidentes,
-            },
-        }
-        resultados.append(item)
-    return sorted(resultados, key=lambda item: (
-        -len(item.metadata["extras"]["fornecedor_termos_coincidentes"]), item.chunk_id
-    ))
-
-
-def _promover_identificadores_exatos(
-    resultados: Sequence[RetrievalResult],
-    identificadores_exatos: Sequence[RetrievalResult],
-    limite: int,
-) -> list[RetrievalResult]:
-    por_id = {item.chunk_id: item for item in resultados}
-    exatos = []
-    for item in identificadores_exatos:
-        existente = por_id.get(item.chunk_id)
-        if existente is not None:
-            existente.metadata = item.metadata
-            exatos.append(existente)
-        else:
-            exatos.append(item)
-    ids_exatos = {item.chunk_id for item in exatos}
-    # Identidade tem precedência, mas a relevância entre os matches continua
-    # sendo a da fusão/reranker, e não a ordem lexicográfica do hash do chunk.
-    exatos_por_id = {item.chunk_id: item for item in exatos}
-    ordenados = [exatos_por_id[item.chunk_id] for item in resultados if item.chunk_id in ids_exatos]
-    presentes = {item.chunk_id for item in ordenados}
-    ordenados += [item for item in exatos if item.chunk_id not in presentes]
-    # Mais identificadores explícitos concordantes precedem matches só de
-    # número/ano; empates mantêm a ordem de relevância já calculada.
-    ordenados.sort(key=lambda item: -len(
-        (item.metadata.get("extras") or {}).get("fornecedor_termos_coincidentes", [])
-    ))
-    ordenados += [item for item in resultados if item.chunk_id not in ids_exatos]
-    return ordenados[:limite]
-
-
-_NORMA_RE = re.compile(
-    r"\b(lei(?: complementar)?|decreto|portaria|resolucao)\s*"
-    r"(?:(?:federal|estadual|municipal)\s+)?(?:n(?:o|umero)?[.°º]?\s*)?(\d[\d.]*)"
-)
-
-
-def _normas_mencionadas(texto: str) -> set[tuple[str, str]]:
-    return {(m.group(1), m.group(2).replace(".", ""))
-            for m in _NORMA_RE.finditer(_sem_caixa_e_acento(texto))}
-
-
-def _norma_do_documento(metadata: Mapping[str, Any]) -> set[tuple[str, str]]:
-    # Só identidade declarada, nunca uma menção incidental no corpo de um
-    # decreto, edital ou catálogo de links para legislação.
-    extras = metadata.get("extras") or {}
-    return _normas_mencionadas(str(extras.get("numero_norma") or extras.get("titulo_documento") or ""))
-
-
-_VISAO_GERAL_NORMA = "âmbito aplicação princípios objetivos normas gerais"
-_ARTIGO_INICIAL = re.compile(r"^\s*art\.?\s*(\d+)(?!\d|\.\d)", re.I)
-
-
-def _ordenar_candidatos_norma(query: str, candidatos: Sequence[RetrievalResult]) -> list[RetrievalResult]:
-    topico = _consulta_topica_norma(query)
-    visao_geral = topico == _VISAO_GERAL_NORMA
-    pede_fases = bool(re.search(r"\b(?:fases|etapas)\b", topico))
-    artigo_pedido = re.search(r"\bart(?:igo)?\.?\s*(\d+)\b", _sem_caixa_e_acento(query))
-
-    def prioridade(item: RetrievalResult):
-        texto = _sem_caixa_e_acento(item.content)
-        artigo = _ARTIGO_INICIAL.match(texto)
-        numero = int(artigo.group(1)) if artigo else None
-        if artigo_pedido:
-            return (numero != int(artigo_pedido.group(1)),)
-        if visao_geral:
-            # Visão geral: disposições iniciais antes de alterações de outras
-            # leis no fim do texto; a pontuação original desempata.
-            return (numero is None, numero if numero is not None else 100000)
-        definicao_fases = pede_fases and bool(re.search(r"\bseguintes (?:fases|etapas)\b", texto))
-        return (not definicao_fases, not bool(re.search(r"\bart\.?\s*\d|§", texto)))
-
-    ordenados = sorted(candidatos, key=prioridade)
-    if visao_geral:
-        diversos, repetidos, vistos = [], [], set()
-        for item in ordenados:
-            artigo = _ARTIGO_INICIAL.match(_sem_caixa_e_acento(item.content))
-            chave = (tuple(sorted(_norma_do_documento(item.metadata))), artigo.group(1)) if artigo else None
-            if chave is not None and chave in vistos:
-                repetidos.append(item)
-            else:
-                diversos.append(item)
-                vistos.add(chave)
-        ordenados = diversos + repetidos
-    return ordenados
-
-
-def _consulta_topica_norma(query: str) -> str:
-    texto = _sem_caixa_e_acento(query)
-    texto = _NORMA_RE.sub(" ", texto)
-    texto = re.sub(r"/\s*\d{4}\b", " ", texto)
-    vazias = {"o", "a", "os", "as", "que", "qual", "quais", "estabelece", "diz", "sobre", "segundo",
-              "conforme", "de", "do", "da", "dos", "das", "em", "no", "na", "e", "cite", "fontes",
-              "corpus", "acervo", "resuma", "resumo", "explique", "ano"}
-    termos = [t for t in _tokens(texto) if t not in vazias and not re.fullmatch(r"\d{4}", t)]
-    # A identidade já delimitou os documentos: repetir número/ano no BM25
-    # favorecia capas, cabeçalhos de impressão e catálogos, não os artigos.
-    return " ".join(termos) or _VISAO_GERAL_NORMA
-
-
-def _priorizar_norma_solicitada(
-    query: str, resultados: Sequence[RetrievalResult],
-    candidatos_norma: Sequence[RetrievalResult], limite: int,
-) -> list[RetrievalResult]:
-    pedidas = _normas_mencionadas(query)
-    if not pedidas or not candidatos_norma:
-        return list(resultados[:limite])
-    por_id = {r.chunk_id: r for r in candidatos_norma}
-    # Mantém o score do reranker quando ele recebeu o candidato.
-    por_id.update({r.chunk_id: r for r in resultados if r.chunk_id in por_id})
-    primarios = [por_id[r.chunk_id] for r in resultados if r.chunk_id in por_id]
-    vistos = {r.chunk_id for r in primarios}
-    primarios += [r for r in candidatos_norma if r.chunk_id not in vistos]
-    # Uma fonte de cada norma explicitamente citada antes de repetir a mesma.
-    primeiros, demais, cobertas = [], [], set()
-    for item in primarios:
-        identidades = _norma_do_documento(item.metadata) & pedidas
-        if identidades - cobertas:
-            primeiros.append(item)
-            cobertas.update(identidades)
-        else:
-            demais.append(item)
-    primarios = _ordenar_candidatos_norma(query, primeiros + demais)
-    reserva = min(len(primarios), max(1, limite - 1), limite)
-    escolhidos = primarios[:reserva]
-    ids = {r.chunk_id for r in escolhidos}
-    escolhidos += [r for r in resultados if r.chunk_id not in ids]
-    return escolhidos[:limite]
-
-
-def _registrar_evidencias(
-    span: Any, resultados: Sequence[RetrievalResult], *,
-    antes_do_top_k: Sequence[RetrievalResult] | None = None,
-) -> None:
-    from src.log_evidence import auditoria_completa, auditar_candidatos
-    span.extra["evidencias"] = _evidencias(resultados)
-    span.extra["evidencias_fora_do_log"] = max(0, len(resultados) - 10)
-    if auditoria_completa():
-        audit = auditar_candidatos(antes_do_top_k if antes_do_top_k is not None else resultados)
-        if antes_do_top_k is not None:
-            selecionados = {item.chunk_id for item in resultados}
-            for item in audit["candidatos"]:
-                item["selecionado_apos_top_k"] = item["chunk_id"] in selecionados
-        span.extra["auditoria_evidencias"] = audit
-
-
-def _evidencias(resultados: Sequence[RetrievalResult], limite: int = 10) -> list[dict[str, Any]]:
-    return [
-        {
-            "rank": rank,
-            "chunk_id": item.chunk_id,
-            "base_id": item.metadata.get("base_id"),
-            "source_file": item.metadata.get("source_file"),
-            "score": item.score,
-            "dense_score": item.dense_score,
-            "sparse_score": item.sparse_score,
-            "rrf_score": item.rrf_score,
-            "rerank_score": item.rerank_score,
-            "identificador_contrato_exato": bool(
-                (item.metadata.get("extras") or {}).get("identificador_contrato_exato")
-            ),
-            "identificador_pncp_exato": bool(
-                (item.metadata.get("extras") or {}).get("identificador_pncp_exato")
-            ),
-        }
-        for rank, item in enumerate(resultados[:limite], start=1)
-    ]
 
 
 def _cosine(left: Sequence[float], right: Sequence[float]) -> float:
@@ -1383,29 +575,6 @@ def _avisar_vetores_descartados(query: str, incompativeis: list[dict[str, Any]],
         )
 
 
-def _tokens(text: str) -> list[str]:
-    """Tokens em minúsculas e sem acento: "médico" casa com "MEDICO" do catálogo."""
-    sem_acento = "".join(
-        char for char in unicodedata.normalize("NFKD", text) if not unicodedata.combining(char)
-    )
-    return [token.lower() for token in _TOKEN_RE.findall(sem_acento)]
-
-
-# Texto do chunk -> (contagem dos termos, número de termos). O BM25 tokenizava
-# todos os candidatos a cada pergunta: com os 106.667 contratos da v7, ~2 min.
-# A chave é o próprio texto, que vem dos registros já guardados em cache.
-_TERMOS_CACHE: dict[str, tuple[Counter[str], int]] = {}
-
-
-def _termos(text: str) -> tuple[Counter[str], int]:
-    guardado = _TERMOS_CACHE.get(text)
-    if guardado is None:
-        tokens = _tokens(text)
-        guardado = (Counter(tokens), len(tokens))
-        _TERMOS_CACHE[text] = guardado
-    return guardado
-
-
 def bm25_retrieve(
     query: str,
     *,
@@ -1437,124 +606,6 @@ def bm25_retrieve(
     if melhores is None:
         melhores = _bm25_por_varredura(query_terms, documents, top_k)
     return [_result(record, score, text) for score, _, record, text in melhores]
-
-
-_Pontuado = tuple[float, str, Mapping[str, Any], str]
-
-
-def _chunk_id_do_registro(record: Mapping[str, Any]) -> str:
-    return str(record.get("chunk_id") or _metadata_of(record).get("chunk_id", ""))
-
-
-def _bm25_por_varredura(query_terms: list[str], documents: list[tuple[Mapping[str, Any], str]],
-                        top_k: int) -> list[_Pontuado]:
-    """BM25 trecho a trecho: a referência do índice e o caminho sem ele."""
-    tokenized = [(record, text, *_termos(text)) for record, text in documents]
-    average_length = sum(length for _, _, _, length in tokenized) / len(tokenized)
-    # Só os termos da pergunta entram na conta: a frequência é a mesma que a
-    # contagem sobre todos os termos daria para eles.
-    document_frequency = {term: sum(1 for _, _, counts, _ in tokenized if term in counts)
-                          for term in set(query_terms)}
-    scored: list[_Pontuado] = []
-    for record, text, counts, length in tokenized:
-        score = 0.0
-        for term in query_terms:
-            if term not in counts:
-                continue
-            idf = math.log(1 + (len(tokenized) - document_frequency[term] + 0.5) / (document_frequency[term] + 0.5))
-            denominator = counts[term] + 1.5 * (1 - 0.75 + 0.75 * length / (average_length or 1))
-            score += idf * counts[term] * 2.5 / denominator
-        if score > 0:
-            scored.append((score, _chunk_id_do_registro(record), record, text))
-    # Só os top_k viram RetrievalResult: com a v7, quase todos os 106 mil
-    # contratos pontuam e montar o resultado de cada um custava ~3 s.
-    return heapq.nsmallest(top_k, scored, key=lambda item: (-item[0], item[1]))
-
-
-def _bm25_pelo_indice(indice: Any, query_terms: list[str], documents: list[tuple[Mapping[str, Any], str]],
-                      top_k: int) -> list[_Pontuado] | None:
-    """A mesma BM25 pelo índice invertido; ``None`` se algum texto não está nele."""
-    import numpy as np
-
-    ids = indice.ids_dos_textos([text for _, text in documents])
-    if ids is None:
-        return None
-    notas = indice.notas(query_terms, ids)
-    positivos = np.flatnonzero(notas > 0)
-    if len(positivos) > top_k:
-        # Só quem pode entrar no top_k vira tupla: os empatados no corte entram
-        # todos, e o desempate por chunk_id decide, como na varredura.
-        corte = np.partition(notas[positivos], len(positivos) - top_k)[len(positivos) - top_k]
-        positivos = positivos[notas[positivos] >= corte]
-    escolhidos = [(float(notas[i]), _chunk_id_do_registro(documents[i][0]), documents[i][0], documents[i][1])
-                  for i in positivos]
-    return heapq.nsmallest(top_k, escolhidos, key=lambda item: (-item[0], item[1]))
-
-
-# documents.jsonl -> (mtime, tamanho, índice), refeito quando o arquivo muda.
-_INDICE_LEXICO_CACHE: dict[str, tuple[int, int, Any]] = {}
-
-
-def _indice_lexico(documents_file: Path, *, construir: bool) -> Any:
-    """Índice invertido dos textos do ``documents.jsonl``; ``None`` sem o arquivo
-    ou, com ``construir=False``, enquanto ninguém o montou."""
-    try:
-        stat = Path(documents_file).stat()
-    except OSError:
-        return None
-    chave = str(documents_file)
-    guardado = _INDICE_LEXICO_CACHE.get(chave)
-    if guardado and guardado[0] == stat.st_mtime_ns and guardado[1] == stat.st_size:
-        return guardado[2]
-    if not construir:
-        return None
-    from src.lexical_index import IndiceLexico
-
-    indice = IndiceLexico((str(record.get("text", "")) for record in _read_jsonl(Path(documents_file))), _tokens)
-    _INDICE_LEXICO_CACHE[chave] = (stat.st_mtime_ns, stat.st_size, indice)
-    return indice
-
-
-def reciprocal_rank_fusion(
-    ranked_lists: Sequence[Sequence[RetrievalResult]],
-    *,
-    k: int = DEFAULT_RRF_K,
-    top_k: int | None = None,
-) -> list[RetrievalResult]:
-    """Combina rankings por identificador estável usando Reciprocal Rank Fusion.
-
-    A conta é do domínio (src/domain/fusion.py); aqui só se monta o resultado.
-    """
-    scores = fusion.pontuacoes_rrf([[item.chunk_id for item in ranked] for ranked in ranked_lists], k=k)
-    merged: dict[str, RetrievalResult] = {}
-    dense_scores: dict[str, float] = {}
-    sparse_scores: dict[str, float] = {}
-    for list_number, ranked in enumerate(ranked_lists):
-        for item in ranked:
-            key = item.chunk_id
-            if list_number == 0:
-                dense_scores[key] = item.score
-            else:
-                sparse_scores[key] = item.score
-            if key not in merged:
-                merged[key] = item
-    result: list[RetrievalResult] = []
-    for key, item in merged.items():
-        value = scores[key]
-        result.append(
-            RetrievalResult(
-                **{field: getattr(item, field) for field in (
-                    "chunk_id", "content", "metadata",
-                    "document_id", "source_path", "_record"
-                )},
-                score=value,
-                rrf_score=value,
-                dense_score=dense_scores.get(key),
-                sparse_score=sparse_scores.get(key),
-            )
-        )
-    result.sort(key=lambda item: (-item.score, item.chunk_id))
-    return result[:top_k] if top_k is not None else result
 
 
 def retrieve(
@@ -1836,42 +887,6 @@ def _identificadores_exatos(r: _Recuperacao) -> list[RetrievalResult]:
     return _resultados_identificador_exato(r.query, r.registros_bm25())
 
 
-# Só as atas repetem muitos trechos da mesma compra (as páginas do PDF); nas
-# demais bases cada chunk já é um registro próprio e não há o que variar.
-_BASES_COM_VARIEDADE = frozenset({"atas_conversacional"})
-_COMPRA_RE = re.compile(r"\d{14}-\d-\d{6}/\d{4}")
-
-
-def _chave_da_compra(item: RetrievalResult) -> str | None:
-    """Compra a que o trecho pertence; ``None`` se a base não entra na regra.
-
-    Usa o número de controle da compra gravado nos extras; se faltar, o do PNCP
-    da ata (``cnpj-d-seq/ano-seqAta``) sem o sufixo da ata; por último, o
-    arquivo de origem, que numa ata é o próprio PDF.
-    """
-    if item.metadata.get("base_id") not in _BASES_COM_VARIEDADE:
-        return None
-    extras = item.metadata.get("extras") or {}
-    for campo in ("numero_controle_compra", "numero_controle_pncp"):
-        achado = _COMPRA_RE.search(str(extras.get(campo) or ""))
-        if achado:
-            return achado.group(0)
-    origem = item.metadata.get("source_file") or item.source_path
-    return f"arquivo:{origem}" if origem else None
-
-
-def _variar_por_compra(query: str, resultados: list[RetrievalResult]) -> tuple[list[RetrievalResult], int]:
-    """No máximo ``RETRIEVAL_MAX_PER_PURCHASE`` trechos por compra à frente do corte.
-
-    Não vale quando a pergunta cita um número do PNCP ou de contrato: aí o
-    usuário quer justamente os trechos daquele registro.
-    """
-    maximo = config.RETRIEVAL_MAX_PER_PURCHASE
-    if maximo <= 0 or _identificadores_pncp(query) or _referencias_contrato(query):
-        return resultados, 0
-    return fusion.limitar_repeticoes(resultados, _chave_da_compra, maximo)
-
-
 def _fundir(r: _Recuperacao, dense: list[RetrievalResult], sparse: list[RetrievalResult],
             candidatos_norma: list[RetrievalResult], identificadores_exatos: list[RetrievalResult],
             corte: int, *, recuperacao_degradada: bool,
@@ -1942,16 +957,6 @@ def _reordenar(r: _Recuperacao, reranker: RerankFn, fused: list[RetrievalResult]
         return reranked
     except Exception:  # o span registra o erro; segue com os candidatos originais
         return fused[:r.top_k]
-
-
-def _resumo(resultados: Sequence[Any]) -> str:
-    """Resumo curto para o campo ``output`` do log (ex.: "12 chunks; top base: x")."""
-    if not resultados:
-        return "0 chunks"
-    primeiro = resultados[0]
-    metadata = getattr(primeiro, "metadata", None) or {}
-    base = metadata.get("base_id") or getattr(primeiro, "_record", {}).get("base_id")
-    return f"{len(resultados)} chunks; top base: {base}" if base else f"{len(resultados)} chunks"
 
 
 __all__ = [
