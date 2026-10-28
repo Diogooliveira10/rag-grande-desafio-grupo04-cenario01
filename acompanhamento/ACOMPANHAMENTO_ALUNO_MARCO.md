@@ -221,3 +221,13 @@ Um problema meu no caminho: uma cópia local do `documents.jsonl` do v6 (19 MB, 
 
 **Uso de IA:** Utilizei o claude para diagnosticar a falha do golden (base estruturada local desatualizada).
 
+
+## Encontro 17 — 28/10/2026
+
+**Contexto:** Nova atividade da residência: gravar um vídeo de até 5 minutos apresentando o projeto (problema, solução, tecnologias e uma demonstração do sistema rodando) e preparar um repositório individual e público no GitHub, com README claro o bastante para qualquer pessoa instalar e executar o sistema. O vídeo deve ser publicado no YouTube e linkado no README, que também deve citar os usernames dos colegas que contribuíram.
+
+**O que fiz:** Comecei verificando o estado do Git na minha máquina: conferi a branch, que estava limpa e igual ao remoto, e voltei para a main atualizada antes de planejar o repositório individual. Revisei o README e a estrutura do projeto pensando em quem chega de fora, e identifiquei três pontos que precisam ficar explícitos: os dados da V7 (5,3 GB) ficam fora do Git e são baixados do Drive do grupo, o sistema depende de um provedor de LLM configurado no `.env`, e a interface fica em um repositório separado. Também listei o que deve sair da versão individual (arquivos de acompanhamento, logs e dados pesados de `eval/runs`) e decidi comparar duas opções, fork com histórico completo ou repositório novo com histórico limpo e créditos no README, depois de medir o tamanho do repositório.
+
+Para o vídeo, estruturei o roteiro em 10 slides, com tempo por slide e o texto de fala nas notas: abertura, o problema do PNCP, o que é RAG explicado do zero, as quatro naturezas de conhecimento e o roteamento, o caminho de uma pergunta (análise, busca híbrida, rerank, geração, validação e o atalho SQL), confiança e proteção de dados, tecnologias, resultados com a minha parte (regra de comparação entre esferas, investigação do caso da LC 123 e a variedade na busca), a demonstração com três perguntas e os créditos do Grupo 04. O plano é gravar a tela com áudio, apresentando os slides e fechando com o sistema rodando na minha máquina com a base V7. Antes da gravação ainda preciso baixar a V7, subir a API com tempo de aquecimento, testar as três perguntas da demonstração, preencher o link do repositório e confirmar os usernames dos colegas.
+
+
