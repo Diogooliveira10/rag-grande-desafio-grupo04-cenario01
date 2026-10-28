@@ -730,3 +730,76 @@ João Pedro Félix Reis e Eduarda não participaram deste encontro por questões
 
 - A equipe usou assistentes de IA para auditar o projeto, medir o tempo de cada etapa nos logs, implementar as correções com testes, comparar resultados antes e depois de cada mudança, rodar o Golden Set e escrever a documentação e as mensagens do grupo.
 - As mudanças só entraram depois de conferidas por testes automatizados, pelo Golden Set e, nas de desempenho, pela comparação dos resultados com os de antes. As decisões sobre escopo, divisão das tarefas e manutenção das chaves foram tomadas pela equipe.
+
+## Encontro 18 — 2026-10-28
+
+## Entregamos hoje:
+
+- **Período coberto:** este registro reúne o que entrou na `main` depois do registro de 26/10, até hoje. A partir de 26/10 a equipe passou a trabalhar direto na `main`, e cada mudança entrou com a suíte de testes e, no caminho da pergunta, com o Golden Set.
+
+- **Golden Set e testes:** o Golden Set seguiu em **36/36**, com 100% de citação, nas rodadas que fecharam cada etapa de 27/10. A suíte de testes passou de 2.301 para **2.400 testes aprovados**.
+
+- **Reconhecimento de fornecedores (João e Renato):** a regressão pendente de 26/10 foi resolvida. O João restaurou o reconhecimento de fornecedores de nome composto e atualizou o pacote da v7. Renato corrigiu três casos:
+  - "Casa da Moeda", escrito como nome próprio, volta a virar fornecedor;
+  - "Defensoria Pública do Estado do Rio de Janeiro" deixou de ser lida como empresa;
+  - o filtro de fornecedor passou a comparar pela raiz do CNPJ também na igualdade exata e, quando o vetor não traz CNPJ (48 mil contratos só têm o nome), pela razão social sem pontuação nem forma jurídica ("S.A" = "SA").
+
+  Em 435 perguntas reais e de avaliação, só houve melhoras.
+
+- **Pacote da v7 com o índice do SQL:** o pacote publicado no Drive (`V7-qwen-q8-promovida-2026-10-26-fts.zip`) já traz a base SQL com o índice do filtro do objeto, e o `runtime_bundle.json` foi atualizado com o hash dela. Quem baixa o pacote não precisa mais rodar `python -m src.structured_db fts`, e a rota `/ready` responde 200 com o pacote extraído.
+
+- **Correção na busca densa:** desde 19/10, toda pergunta com filtro (órgão, ano, fornecedor) ficava sem resultados da busca densa. O índice FAISS não chegava a esse caminho, e a resposta saía só com a busca por palavras. Com a correção, nas 36 perguntas do Golden Set:
+  - a etapa de rerank caiu de 51,9 s para 17,5 s;
+  - a busca densa caiu de 21,0 s para 6,1 s.
+
+  No mesmo ajuste, um aviso do log deixou de listar os 106 mil contratos a cada pergunta. Ele tinha gerado 461 MB de log em 26/10, com cerca de 6 s por pergunta.
+
+- **Desempenho e memória da busca:**
+  - A busca por palavras (BM25) ganhou um índice invertido, com o mesmo ranking. Nas 47 perguntas do conjunto de busca, os trechos, a ordem e as notas ficaram idênticos; o tempo total caiu de 81,1 s para 53,9 s, e a memória da BM25, de 1.376 MB para 185 MB.
+  - A lista de registros de cada base deixou de ser recalculada a cada pergunta. Nas mesmas 47 buscas, o tempo caiu de 59,3 s para 40,4 s, e a mediana por busca, de 0,59 s para 0,22 s.
+  - Os metadados do índice passaram a ser lidos do próprio documento, sem uma segunda cópia na memória. A pré-carga caiu de 5.143 MB para 4.218 MB.
+  - No SQL, a contagem do recorte passou a ser reaproveitada, e a completude dos campos passou a sair numa consulta só. Nas 89 perguntas SQL dos logs, as respostas ficaram idênticas, e as consultas caíram de 1.095 para 1.040.
+  - Na rodada do Golden Set, a primeira pergunta pagava o carregamento do modelo de rerank (16 a 36 s). A rodada agora faz a mesma pré-carga do backend antes dos casos.
+
+- **SOLID e Clean Code no projeto inteiro:** a organização em camadas descrita em 26/10 foi estendida para todo o código de `src/`. **Nenhuma função de `src/` passa mais de 100 linhas.**
+  - **Busca e geração:** o `retrieve.py` (1.964 linhas) foi separado em `src/retrieval/` (filtros, busca por palavras, ranking, registros, identificadores, normas e evidências). O `generate.py` (1.502 linhas) foi separado em `src/generation/` (salvaguardas, contexto, avisos, respostas, resposta pelo SQL, leitura da resposta do LLM, log e citações). Os dois arquivos continuam como entrada e reexportam todos os nomes. Um teste falha se alguma parte passar a importar a sua entrada.
+  - **Funções longas fora do caminho da pergunta:** foram divididas 31 funções em quatro grupos:
+    - scripts de montagem da v7: 8;
+    - índice, embeddings e indicadores: 8;
+    - provedor PNCP e preparação dos documentos: 6;
+    - coleta do corpus (`fetch_corpus.py`): 9, entre elas duas com cerca de 570 linhas cada.
+  - **Duplicações removidas:** as buscas de publicações e de contratos no PNCP repetiam o mesmo esquema de paginação retomável, que virou um objeto único. Na preparação dos documentos, o trecho que transforma unidades em chunks e documentos aparecia duas vezes e virou um só.
+  - **Nomes de arquivo em inglês:** 15 arquivos de `src/` com nome em português foram renomeados (por exemplo, `coletar_direto` → `direct_collection` e `qualidade_corpus` → `corpus_quality`). Os nomes antigos continuam importáveis, e um teste confere isso para cada um.
+  - **Como o comportamento foi conferido:** no caminho da pergunta, pelas 47 buscas e pelas 90 perguntas SQL dos logs, com resultados idênticos, e pelo Golden Set. Fora dele:
+    - pelos arquivos gerados nos testes, idênticos byte a byte antes e depois;
+    - onde os testes cobriam pouco, comparando a versão antiga com a nova em milhares de entradas sintéticas aleatórias, com resultado, chamadas externas e estado gravado idênticos;
+    - nas funções maiores, injetando defeitos de propósito na versão nova para confirmar que a comparação os detecta.
+
+    Funções que não tinham nenhum teste ganharam testes que descrevem o comportamento atual.
+
+- **Indisponibilidade do backend em 27/10 e correção do `/ready`:** na noite de 27/10, o backend parou de responder, embora o processo continuasse ativo.
+  - **Causa:** desde 26/10, cada chamada ao `/ready` relia cerca de 290 mil linhas do índice e recompunha o catálogo de fornecedores, o que levava cerca de 55 s de CPU. Chamadas simultâneas repetiam esse trabalho em paralelo, e nenhuma terminava.
+  - **Correção:** o resultado válido da validação fica guardado enquanto nenhum arquivo do pacote muda de tamanho ou de data, o mesmo critério do cache de hashes que já existia. Além disso, só uma validação roda por vez: quem chama durante ela recebe na hora "validação em andamento" (503).
+  - **Resultado:** a primeira validação, ao subir o backend, leva cerca de 2 minutos, e as seguintes, de 5 a 25 ms. A regra de validação não mudou. O backend foi religado, e as perguntas pelo túnel voltaram a responder em menos de 1 s.
+
+- **Cache do índice do SQL:** um teste do índice do filtro do objeto falhava em cerca de 1 de cada 3 execuções. O cache que diz se a base tem o índice usava como chave só a data e o tamanho do arquivo, e apagar e recriar o índice na mesma fração de segundo pode deixar os dois iguais. A chave passou a incluir o contador de alterações do cabeçalho do SQLite. O teste passou em 15 de 15 execuções, e as 90 perguntas SQL dos logs deram respostas idênticas.
+
+## Ficou pendente:
+
+- Eduarda: selo "iniciado" no trace e exibição da mensagem do limite de requisições (429) no frontend.
+- Congelar o código na noite de 29/10 e rodar o Golden Set final antes da entrega.
+- Entrega final do projeto em 30/10/2026.
+- **Próximos passos depois da entrega:**
+  - **Vetores separados dos metadados no disco:** o backend subiria cerca de 20 s mais rápido. Exige um pacote novo da v7, o aceite do operador, a publicação no Drive e o download por todos.
+  - **Módulos grandes fora do caminho da pergunta:** dividir em pacotes, como foi feito com a busca e a geração, o `fetch_corpus.py` (4.735 linhas), o `prepare_documents.py` (1.716 linhas) e o `providers/pncp.py` (1.262 linhas). No `fetch_corpus.py`, os caminhos de dados, que hoje são variáveis globais reescritas em tempo de execução, passariam a ficar num objeto de configuração.
+  - **Funções médias:** revisar as 47 funções entre 71 e 100 linhas.
+
+## Bloqueios em aberto:
+
+- **Provedor de LLM:** o tempo de resposta do ECOA continua variando entre rodadas. A P4.3 segue sensível a isso, porque a reescrita da pergunta pode atingir o prazo de 60 s.
+- **Recursos da máquina:** o backend chegou a um pico de cerca de 4,4 GB de memória e, depois de subir, leva cerca de 2 minutos para a primeira validação do `/ready`.
+
+### Uso de assistentes de IA:
+
+- A equipe usou assistentes de IA para dividir os módulos e as funções longas, escrever os testes que descrevem o comportamento atual, montar as comparações entre a versão antiga e a nova, investigar a indisponibilidade do backend e o teste intermitente, medir o tempo e a memória de cada etapa e redigir as mensagens de commit e este registro.
+- Cada mudança só entrou depois de conferida pela suíte de testes e pelas comparações com a versão anterior e, no caminho da pergunta, pelo Golden Set. Os commits e as decisões de escopo foram tomados pela equipe, entre elas a de deixar para depois da entrega a divisão dos módulos grandes e a separação dos vetores no disco.
