@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping
@@ -305,12 +306,55 @@ def _validar_catalogo(catalog_path: Path, database_path: Path) -> None:
             raise SnapshotValidationError("catalogo_divergente")
 
 
+# Validar o bundle relê ~290 mil linhas do índice e recompõe o catálogo
+# (~1 min de CPU). Chamadas simultâneas ao /ready repetiam tudo em paralelo
+# e nenhuma terminava (2026-10-27). O resultado válido fica guardado enquanto
+# nenhum arquivo lido mudar de tamanho ou data, o critério do cache de hashes.
+_VALIDACAO_EM_ANDAMENTO = threading.Lock()
+_BUNDLES_VALIDOS: dict[tuple[tuple[str, int, int], ...], dict[str, Any]] = {}
+
+
+def _assinatura_do_bundle(manifest_path: Path | str) -> tuple[tuple[str, int, int], ...] | None:
+    """Caminho, tamanho e data do manifesto e de cada arquivo que a validação lê; None se não der para listar."""
+    try:
+        path = Path(manifest_path).resolve()
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        files = [(path.parent / item["path"]).resolve() for item in manifest["files"].values()]
+        bundle_root = (path.parent / manifest["files"]["index_manifest"]["path"]).resolve().parent.parent
+        artifacts = [(bundle_root / item["path"]).resolve() for item in manifest.get("index_artifacts") or []]
+        assinatura = []
+        for arquivo in sorted({path, *files, *artifacts}):
+            stat = arquivo.stat()
+            assinatura.append((str(arquivo), stat.st_size, stat.st_mtime_ns))
+        return tuple(assinatura)
+    except (OSError, UnicodeError, ValueError, TypeError, KeyError, AttributeError):
+        return None
+
+
 def readiness(manifest_path: Path | str | None = None) -> dict[str, Any]:
-    """Retorna estado sem paths, hashes internos ou mensagens de exceção."""
+    """Retorna estado sem paths, hashes internos ou mensagens de exceção.
+
+    Só uma validação por vez: quem chega enquanto ela roda recebe na hora
+    ``validacao_em_andamento``, em vez de abrir outra leitura do bundle.
+    """
     configured = manifest_path if manifest_path is not None else config.SNAPSHOT_MANIFEST
     if not configured:
         return {"ready": False, "reason": "manifesto_nao_configurado"}
+    if not _VALIDACAO_EM_ANDAMENTO.acquire(blocking=False):
+        return {"ready": False, "reason": "validacao_em_andamento"}
     try:
-        return validate_bundle(configured)
-    except SnapshotValidationError as error:
-        return {"ready": False, "reason": error.code}
+        assinatura = _assinatura_do_bundle(configured)
+        if assinatura is not None and assinatura in _BUNDLES_VALIDOS:
+            resultado = _BUNDLES_VALIDOS[assinatura]
+        else:
+            try:
+                resultado = validate_bundle(configured)
+            except SnapshotValidationError as error:
+                return {"ready": False, "reason": error.code}
+            if assinatura is not None:
+                if len(_BUNDLES_VALIDOS) >= 8:
+                    _BUNDLES_VALIDOS.clear()
+                _BUNDLES_VALIDOS[assinatura] = resultado
+        return {**resultado, "capabilities": list(resultado["capabilities"])}
+    finally:
+        _VALIDACAO_EM_ANDAMENTO.release()

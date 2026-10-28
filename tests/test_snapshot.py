@@ -244,3 +244,46 @@ def test_operator_acceptance_does_not_bypass_integrity(tmp_path, corruption):
         path.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(snapshot.SnapshotValidationError, match=expected):
         snapshot.validate_bundle(path)
+
+
+def _contar_validacoes(monkeypatch):
+    chamadas = []
+    original = snapshot.validate_bundle
+    monkeypatch.setattr(snapshot, "validate_bundle", lambda path: chamadas.append(path) or original(path))
+    monkeypatch.setattr(snapshot, "_BUNDLES_VALIDOS", {})
+    return chamadas
+
+
+def test_readiness_valida_o_bundle_uma_vez_enquanto_os_arquivos_nao_mudam(tmp_path, monkeypatch):
+    """O /ready relia ~290 mil linhas a cada chamada (2026-10-27): o resultado válido fica guardado."""
+    path, _ = _manifest(tmp_path)
+    chamadas = _contar_validacoes(monkeypatch)
+
+    primeira = snapshot.readiness(path)
+    primeira["capabilities"].append("alterada pelo chamador")
+    assert snapshot.readiness(path) == {"ready": True, "snapshot_id": "fixture-v1",
+                                        "schema_version": structured_db.SCHEMA_VERSION,
+                                        "capabilities": ["contratos", "pca"]}
+    assert len(chamadas) == 1
+
+
+def test_readiness_valida_de_novo_quando_um_arquivo_muda(tmp_path, monkeypatch):
+    path, _ = _manifest(tmp_path)
+    chamadas = _contar_validacoes(monkeypatch)
+    assert snapshot.readiness(path)["ready"] is True
+
+    vetores = tmp_path / "bundle" / "index" / "pca_agregado" / "vectors.jsonl"
+    vetores.write_text(vetores.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+
+    assert snapshot.readiness(path) == {"ready": False, "reason": "hash_divergente"}
+    assert snapshot.readiness(path) == {"ready": False, "reason": "hash_divergente"}
+    assert len(chamadas) == 3  # falha não fica guardada
+
+
+def test_readiness_nao_abre_segunda_validacao_simultanea(tmp_path, monkeypatch):
+    path, _ = _manifest(tmp_path)
+    chamadas = _contar_validacoes(monkeypatch)
+    with snapshot._VALIDACAO_EM_ANDAMENTO:
+        assert snapshot.readiness(path) == {"ready": False, "reason": "validacao_em_andamento"}
+    assert chamadas == []
+    assert snapshot.readiness(path)["ready"] is True
