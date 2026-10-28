@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any
+from typing import Any, Callable
 
 try:
     from .providers.pncp import PNCPProvider
@@ -123,17 +123,7 @@ def lookup_pncp(
     matches: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     pages_consulted = 0
-    last_request_at: float | None = None
-
-    def request(url: str) -> dict[str, Any]:
-        nonlocal last_request_at
-        if last_request_at is not None and rate_limit_seconds > 0:
-            delay = rate_limit_seconds - (time.monotonic() - last_request_at)
-            if delay > 0:
-                time.sleep(delay)
-        result = source_catalog.request_url(url, "json", attempts=attempts, timeout=timeout)
-        last_request_at = time.monotonic()
-        return result
+    request = _paced_request(source_catalog, attempts=attempts, timeout=timeout, rate_limit_seconds=rate_limit_seconds)
 
     for page in range(1, max_pages + 1):
         page_params = {**filters, "pagina": page}
@@ -157,55 +147,7 @@ def lookup_pncp(
         for record in records:
             if not _matches(record, query):
                 continue
-            purchase = source_catalog.sample_purchase([record])
-            source_ref = provider.purchase_ref(purchase) if purchase else None
-            detail_url = None
-            documents: list[dict[str, Any]] = []
-            if purchase:
-                detail_url = source_catalog.make_api_url(
-                    f"/v1/orgaos/{purchase['cnpj']}/compras/{purchase['ano']}/{purchase['sequencial']}"
-                )
-                documents_url = detail_url + "/arquivos"
-                documents_result = request(documents_url)
-                if source_catalog._is_available(documents_result):
-                    documents = _document_rows(documents_result.get("json"))
-                else:
-                    errors.append(
-                        {
-                            "external_id": _first(record, "numeroControlePNCP", "numeroControlePncp"),
-                            "url": documents_url,
-                            "status": documents_result.get("status"),
-                            "error": documents_result.get("erro") or "documentos indisponíveis",
-                        }
-                    )
-            matches.append(
-                {
-                    "source_id": "pncp",
-                    "external_id": _first(
-                        record,
-                        "numeroControlePNCP",
-                        "numeroControlePncp",
-                        "numeroCompra",
-                        "sequencialCompra",
-                    )
-                    or (f"{purchase['cnpj']}:{purchase['ano']}:{purchase['sequencial']}" if purchase else None),
-                    "title": _first(
-                        record,
-                        "objetoCompra",
-                        "objeto",
-                        "descricaoObjeto",
-                        "nomeCompra",
-                        "numeroCompra",
-                    )
-                    or "Contratação PNCP",
-                    "url": detail_url or url,
-                    "document_urls": [document["url"] for document in documents],
-                    "documents": documents,
-                    "source_ref": source_ref.to_dict() if source_ref else None,
-                    "provider": "pncp",
-                    "metadata": record,
-                }
-            )
+            matches.append(_lookup_match(record, url, request, provider, source_catalog, errors))
             if len(matches) >= max_results:
                 break
         if len(matches) >= max_results or len(records) < page_size:
@@ -218,4 +160,81 @@ def lookup_pncp(
         "pages_consulted": pages_consulted,
         "results": matches,
         "errors": errors,
+    }
+
+
+def _paced_request(
+    source_catalog: Any, *, attempts: int, timeout: float, rate_limit_seconds: float
+) -> Callable[[str], dict[str, Any]]:
+    """Consulta ao PNCP que espera ``rate_limit_seconds`` desde o fim da anterior."""
+    last_request_at: float | None = None
+
+    def request(url: str) -> dict[str, Any]:
+        nonlocal last_request_at
+        if last_request_at is not None and rate_limit_seconds > 0:
+            delay = rate_limit_seconds - (time.monotonic() - last_request_at)
+            if delay > 0:
+                time.sleep(delay)
+        result = source_catalog.request_url(url, "json", attempts=attempts, timeout=timeout)
+        last_request_at = time.monotonic()
+        return result
+
+    return request
+
+
+def _lookup_match(
+    record: dict[str, Any],
+    page_url: str,
+    request: Callable[[str], dict[str, Any]],
+    provider: PNCPProvider,
+    source_catalog: Any,
+    errors: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Resultado da busca para uma publicação, com os documentos da compra quando ela é identificável."""
+    purchase = source_catalog.sample_purchase([record])
+    source_ref = provider.purchase_ref(purchase) if purchase else None
+    detail_url = None
+    documents: list[dict[str, Any]] = []
+    if purchase:
+        detail_url = source_catalog.make_api_url(
+            f"/v1/orgaos/{purchase['cnpj']}/compras/{purchase['ano']}/{purchase['sequencial']}"
+        )
+        documents_url = detail_url + "/arquivos"
+        documents_result = request(documents_url)
+        if source_catalog._is_available(documents_result):
+            documents = _document_rows(documents_result.get("json"))
+        else:
+            errors.append(
+                {
+                    "external_id": _first(record, "numeroControlePNCP", "numeroControlePncp"),
+                    "url": documents_url,
+                    "status": documents_result.get("status"),
+                    "error": documents_result.get("erro") or "documentos indisponíveis",
+                }
+            )
+    return {
+        "source_id": "pncp",
+        "external_id": _first(
+            record,
+            "numeroControlePNCP",
+            "numeroControlePncp",
+            "numeroCompra",
+            "sequencialCompra",
+        )
+        or (f"{purchase['cnpj']}:{purchase['ano']}:{purchase['sequencial']}" if purchase else None),
+        "title": _first(
+            record,
+            "objetoCompra",
+            "objeto",
+            "descricaoObjeto",
+            "nomeCompra",
+            "numeroCompra",
+        )
+        or "Contratação PNCP",
+        "url": detail_url or page_url,
+        "document_urls": [document["url"] for document in documents],
+        "documents": documents,
+        "source_ref": source_ref.to_dict() if source_ref else None,
+        "provider": "pncp",
+        "metadata": record,
     }

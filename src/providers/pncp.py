@@ -11,7 +11,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from ..pncp_client import PncpClient
-from ..coleta_policy import ano_assinatura, nome_instrumento, uf_unidade
+from ..collection_policy import ano_assinatura, nome_instrumento, uf_unidade
 from .base import ResolvedSource, SourceArtifact, SourceCandidate, SourceRef
 
 

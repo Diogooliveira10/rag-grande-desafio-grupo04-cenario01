@@ -887,7 +887,7 @@ def filtros_para_retrieve(filtros: QueryFilters) -> dict[str, Any]:
             resultado["ano_pca"] = anos
     elif filtros.referencia_temporal == "vigencia":
         # Norma vigente no período = começou a valer antes do fim dele. O
-        # início da vigência vem de src/qualidade_corpus.py (só a base
+        # início da vigência vem de src/corpus_quality.py (só a base
         # normativa tem o campo). Nenhuma norma do corpus foi revogada; quando
         # houver, entra também data_vigencia_fim >= início do período.
         if ultimo_ano is not None:

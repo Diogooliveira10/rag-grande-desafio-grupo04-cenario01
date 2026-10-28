@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from src.index import build_index
-from src import reparar_candidato_v7 as repair
+from src import repair_candidate_v7 as repair
 
 
 def _document(base, natureza, cid, sensitivity="publico"):

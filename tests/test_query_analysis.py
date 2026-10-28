@@ -583,7 +583,7 @@ def test_texto_sem_filtros_tira_so_as_expressoes_que_viraram_filtro(pergunta, es
 
 # --------------------------------------------------------------------------
 # Vigência das normas (item 7): o início da vigência vem de
-# src/qualidade_corpus.py, só na base normativa.
+# src/corpus_quality.py, só na base normativa.
 # --------------------------------------------------------------------------
 
 

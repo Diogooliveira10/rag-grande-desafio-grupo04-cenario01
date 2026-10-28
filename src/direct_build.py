@@ -24,12 +24,12 @@ Dois pontos de entrada:
 - ``construir_direto`` — lotes em memória, uma passada só (testes e lotes
   pequenos);
 - ``chunk_de_registro`` + ``finalizar_direto`` — o caminho de streaming do
-  coletor (``src/coletar_direto.py``), que acumula ``documents.jsonl`` por
+  coletor (``src/direct_collection.py``), que acumula ``documents.jsonl`` por
   janelas retomáveis e finaliza no fim.
 
 Uso (CLI):
 
-    python -m src.build_direto --registros registros.jsonl \
+    python -m src.direct_build --registros registros.jsonl \
         --manifest corpus_manifest.yaml --base-id contratos_estruturado \
         --destino data/v7_direto
 
@@ -56,7 +56,7 @@ from src.prepare_documents import (
     _declared_record_metadata,
     _record_logical_id,
 )
-from src.projecao import (
+from src.embedding_projection import (
     MODO_COMPLETA,
     MODOS,
     embed_fn_com_fallback,

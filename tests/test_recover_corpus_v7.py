@@ -4,7 +4,7 @@ from pathlib import Path
 import sqlite3
 
 import pytest
-from src.recuperar_corpus_v7 import construir_staging, destino_novo, url_compra
+from src.recover_corpus_v7 import construir_staging, destino_novo, url_compra
 
 CNPJ = "11111111000100"
 
@@ -85,7 +85,7 @@ def test_resolve_ata_por_unidade_sem_inferir_nome(tmp_path):
 
 
 def test_alvos_preservam_orgaos_sem_unidade_no_snapshot(tmp_path):
-    from src.recuperar_corpus_v7 import preparar_alvos
+    from src.recover_corpus_v7 import preparar_alvos
     observadas = tmp_path / "observadas.json"
     observadas.write_text(json.dumps({"orgaos": [CNPJ], "unidades": []}))
     roster = tmp_path / "roster.json"

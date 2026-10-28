@@ -10,7 +10,7 @@ from pathlib import Path
 
 from eval.ablacao_rerank import CasoRecuperacao
 from eval.medir_regressao import Alvo, medir_regressao
-from src.build_direto import RegistroDireto, chunk_de_registro
+from src.direct_build import RegistroDireto, chunk_de_registro
 from src.index import build_index
 
 BASE = {

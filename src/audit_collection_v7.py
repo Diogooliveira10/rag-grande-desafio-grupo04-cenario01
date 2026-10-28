@@ -14,11 +14,11 @@ import json
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from src.coleta_policy import PoliticaColeta, periodos, uf_unidade
-from src.coletar_direto import ENDPOINT_CONTRATOS
+from src.collection_policy import PoliticaColeta, periodos, uf_unidade
+from src.direct_collection import ENDPOINT_CONTRATOS
 from src.index import file_sha256
 from src.fetch_corpus import load_manifest
-from src.recuperar_corpus_v7 import agora, destino_novo, gravar_json
+from src.recover_corpus_v7 import agora, destino_novo, gravar_json
 
 
 def auditar(documents: Path, estado: Path, destino: Path, *, baseline: Path | None = None) -> dict:

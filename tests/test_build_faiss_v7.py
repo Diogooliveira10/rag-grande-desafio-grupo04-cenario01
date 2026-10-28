@@ -1,4 +1,4 @@
-"""Caracterização de src/montar_faiss_v7.py: o que a montagem do índice do candidato_05 grava.
+"""Caracterização de src/build_faiss_v7.py: o que a montagem do índice do candidato_05 grava.
 
 O script não tinha teste. Estes fixam o comportamento (ordem dos vetores,
 reaproveitamento v7/v6, embedding só dos faltantes, checkpoint, FAISS e
@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from src import montar_faiss_v7 as montar
+from src import build_faiss_v7 as montar
 
 
 def _escrever(path, linhas):

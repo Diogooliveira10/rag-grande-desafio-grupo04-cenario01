@@ -1,8 +1,8 @@
 import json
 import pytest
-from src.complementar_corpus_v7 import ConsultasOrcadas, compras_pendentes, unidades_oficiais
-from tests.test_recuperar_corpus_v7 import CNPJ, chunk, salvar
-from src.recuperar_corpus_v7 import construir_staging
+from src.supplement_corpus_v7 import ConsultasOrcadas, compras_pendentes, unidades_oficiais
+from tests.test_recover_corpus_v7 import CNPJ, chunk, salvar
+from src.recover_corpus_v7 import construir_staging
 from src.providers.pncp import PNCPProvider
 
 
@@ -84,8 +84,8 @@ def test_host_cooldown_respeita_retry_after(monkeypatch):
     class Limitado:
         def request_url(self, *args, **kwargs):
             return {"http_status": 429, "retry_after": "120"}
-    monkeypatch.setattr("src.complementar_corpus_v7.time.monotonic", lambda: 10.0)
-    monkeypatch.setattr("src.complementar_corpus_v7.time.sleep", lambda _: None)
+    monkeypatch.setattr("src.supplement_corpus_v7.time.monotonic", lambda: 10.0)
+    monkeypatch.setattr("src.supplement_corpus_v7.time.sleep", lambda _: None)
     rede = ConsultasOrcadas(1, 0, Limitado())
     rede.get("https://teste")
     assert rede.proxima == 130.0

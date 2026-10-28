@@ -1,4 +1,4 @@
-"""Controle de qualidade do corpus (src/qualidade_corpus.py) e quem usa o resultado.
+"""Controle de qualidade do corpus (src/corpus_quality.py) e quem usa o resultado.
 
 Item 7 do documento de correções: atas ilegíveis fora do índice, vigência das
 normas, contrato ligado à compra e valor simbólico. Nada aqui muda o texto de
@@ -11,7 +11,7 @@ import json
 
 import pytest
 
-from src import qualidade_corpus as qc
+from src import corpus_quality as qc
 from src.index import build_index
 from src.retrieve import _matches_filters
 from src.schema import ChunkMetadata, Natureza

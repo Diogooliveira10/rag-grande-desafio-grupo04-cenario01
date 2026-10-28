@@ -87,78 +87,14 @@ class PncpClient:
             )
             try:
                 with urlopen(request, timeout=timeout, context=criar_contexto_ssl()) as response:
-                    raw = response.read(self.read_limit + 1)
-                    content_type = response.headers.get("Content-Type", "")
-                    body = raw[: self.read_limit]
-                    result: dict[str, Any] = {
-                        "status": "disponivel",
-                        "http_status": response.status,
-                        "content_type": content_type,
-                        "bytes_lidos": len(body),
-                        "url_final": response.geturl(),
-                        "previa": _preview(body, content_type),
-                        "tentativas": attempt,
-                        "etag": response.headers.get("ETag"),
-                        "last_modified": response.headers.get("Last-Modified"),
-                    }
-
-                    if len(raw) > self.read_limit:
-                        result["status"] = "resposta_truncada"
-                        result["observacao"] = (
-                            f"resposta excedeu o limite local de {self.read_limit} bytes"
-                        )
-                        return result
-
-                    if response.status == 204 or not body:
-                        result["observacao"] = "resposta sem conteúdo"
-                        return result
-
-                    if kind == "json":
-                        try:
-                            result["json"] = json.loads(body)
-                        except json.JSONDecodeError as error:
-                            result["status"] = "resposta_invalida"
-                            result["erro"] = f"esperado JSON: {error.msg}"
-                    return result
+                    return self._response_result(response, kind, attempt)
 
             except HTTPError as error:
-                response_headers = error.headers
-                if error.code == 304:
-                    return {
-                        "status": "nao_modificado",
-                        "http_status": 304,
-                        "content_type": response_headers.get("Content-Type", "") if response_headers else "",
-                        "bytes_lidos": 0,
-                        "url_final": url,
-                        "etag": response_headers.get("ETag") if response_headers else None,
-                        "last_modified": response_headers.get("Last-Modified") if response_headers else None,
-                        "tentativas": attempt,
-                    }
-                body = error.read(4096)
-                content_type = response_headers.get("Content-Type", "") if response_headers else ""
-                retry_after = response_headers.get("Retry-After") if response_headers else None
-                if error.code in self.retryable_http and attempt < attempts:
+                result, retry_after = self._http_error_result(error, url, attempt, attempts)
+                if result is None:
                     time.sleep(retry_delay(attempt, retry_after))
                     continue
-                if error.code in self.retryable_http:
-                    status = "indisponivel_temporariamente"
-                elif 400 <= error.code < 500:
-                    status = "erro_requisicao"
-                else:
-                    status = "erro_http"
-                return {
-                    "status": status,
-                    "http_status": error.code,
-                    "retry_after": retry_after,
-                    "content_type": content_type,
-                    "bytes_lidos": len(body),
-                    "url_final": url,
-                    "previa": _preview(body, content_type),
-                    "erro": str(error.reason),
-                    "tentativas": attempt,
-                    "etag": response_headers.get("ETag") if response_headers else None,
-                    "last_modified": response_headers.get("Last-Modified") if response_headers else None,
-                }
+                return result
 
             except (TimeoutError, URLError, OSError) as error:
                 last_network_error = error
@@ -176,3 +112,80 @@ class PncpClient:
             "erro": str(getattr(last_network_error, "reason", last_network_error)),
             "tentativas": attempts,
         }
+
+    def _response_result(self, response: Any, kind: str, attempt: int) -> dict[str, Any]:
+        """Resposta recebida: disponível, truncada, vazia ou JSON inválido."""
+        raw = response.read(self.read_limit + 1)
+        content_type = response.headers.get("Content-Type", "")
+        body = raw[: self.read_limit]
+        result: dict[str, Any] = {
+            "status": "disponivel",
+            "http_status": response.status,
+            "content_type": content_type,
+            "bytes_lidos": len(body),
+            "url_final": response.geturl(),
+            "previa": _preview(body, content_type),
+            "tentativas": attempt,
+            "etag": response.headers.get("ETag"),
+            "last_modified": response.headers.get("Last-Modified"),
+        }
+
+        if len(raw) > self.read_limit:
+            result["status"] = "resposta_truncada"
+            result["observacao"] = (
+                f"resposta excedeu o limite local de {self.read_limit} bytes"
+            )
+            return result
+
+        if response.status == 204 or not body:
+            result["observacao"] = "resposta sem conteúdo"
+            return result
+
+        if kind == "json":
+            try:
+                result["json"] = json.loads(body)
+            except json.JSONDecodeError as error:
+                result["status"] = "resposta_invalida"
+                result["erro"] = f"esperado JSON: {error.msg}"
+        return result
+
+    def _http_error_result(
+        self, error: HTTPError, url: str, attempt: int, attempts: int
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        """(resultado, Retry-After) do erro HTTP; resultado None quando vale tentar de novo."""
+        response_headers = error.headers
+        if error.code == 304:
+            return {
+                "status": "nao_modificado",
+                "http_status": 304,
+                "content_type": response_headers.get("Content-Type", "") if response_headers else "",
+                "bytes_lidos": 0,
+                "url_final": url,
+                "etag": response_headers.get("ETag") if response_headers else None,
+                "last_modified": response_headers.get("Last-Modified") if response_headers else None,
+                "tentativas": attempt,
+            }, None
+        body = error.read(4096)
+        content_type = response_headers.get("Content-Type", "") if response_headers else ""
+        retry_after = response_headers.get("Retry-After") if response_headers else None
+        if error.code in self.retryable_http and attempt < attempts:
+            return None, retry_after
+        if error.code in self.retryable_http:
+            status = "indisponivel_temporariamente"
+        elif 400 <= error.code < 500:
+            status = "erro_requisicao"
+        else:
+            status = "erro_http"
+        return {
+            "status": status,
+            "http_status": error.code,
+            "retry_after": retry_after,
+            "content_type": content_type,
+            "bytes_lidos": len(body),
+            "url_final": url,
+            "previa": _preview(body, content_type),
+            "erro": str(error.reason),
+            "tentativas": attempt,
+            "etag": response_headers.get("ETag") if response_headers else None,
+            "last_modified": response_headers.get("Last-Modified") if response_headers else None,
+        }, retry_after

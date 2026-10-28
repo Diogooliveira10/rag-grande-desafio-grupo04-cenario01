@@ -491,7 +491,7 @@ As opções de provedor são `ecoa`, `ollama`, `openai` e `custom`. O cache regi
 provedor, endpoint e modelo para impedir a mistura de espaços vetoriais
 diferentes.
 
-Antes do índice, `src/qualidade_corpus.py` faz o controle de qualidade dos
+Antes do índice, `src/corpus_quality.py` faz o controle de qualidade dos
 JSONL de `data/normalized/` (o da raiz, o combinado da v6 e os da v6 por base).
 Ele não muda o texto dos chunks, só status e metadados, então os vetores
 continuam valendo:
@@ -509,8 +509,8 @@ continuam valendo:
 O relatório fica em [`data/inventory/qualidade_v6.json`](data/inventory/qualidade_v6.json).
 
 ```bash
-py -m src.qualidade_corpus --verificar   # só conta, sem gravar
-py -m src.qualidade_corpus               # aplica e grava o relatório
+py -m src.corpus_quality --verificar   # só conta, sem gravar
+py -m src.corpus_quality               # aplica e grava o relatório
 ```
 
 `src/index.py` monta o índice usado pela busca: particiona por `base_id`, grava

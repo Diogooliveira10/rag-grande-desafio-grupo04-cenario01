@@ -2,11 +2,11 @@ import json
 from urllib.parse import parse_qs, urlparse
 import pytest
 
-from src.complementar_contratos_v7 import executar, _selecionar
-from src.complementar_corpus_v7 import ConsultasOrcadas
-from src.coleta_policy import PoliticaColeta
-from src.coletar_direto import ENDPOINT_CONTRATOS
-from tests.test_recuperar_corpus_v7 import CNPJ
+from src.supplement_contracts_v7 import executar, _selecionar
+from src.supplement_corpus_v7 import ConsultasOrcadas
+from src.collection_policy import PoliticaColeta
+from src.direct_collection import ENDPOINT_CONTRATOS
+from tests.test_recover_corpus_v7 import CNPJ
 
 
 def registro(n, uf='RJ', ano=2025):
@@ -117,7 +117,7 @@ def test_tempo_invalido_nao_cria_destino(tmp_path):
 
 
 def test_congelar_export_e_independente_da_retomada(tmp_path):
-    from src.complementar_contratos_v7 import congelar_exportacao
+    from src.supplement_contracts_v7 import congelar_exportacao
     p=plano(tmp_path);out=tmp_path/'out'
     executar(p,out,rede=ConsultasOrcadas(2,0,Paginas()))
     snapshot=tmp_path/'snapshot';r=congelar_exportacao(out,snapshot)

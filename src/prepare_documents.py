@@ -38,7 +38,7 @@ from src.offline_observation import observar_offline
 from src.fetch_corpus import load_manifest
 from src.ingest import chunk_text, sha256_file
 from src.pca_indicators import eh_csv_pca, indicadores_pca
-from src.qualidade_corpus import decodificar_codigos_unicode, motivo_de_texto_ilegivel
+from src.corpus_quality import decodificar_codigos_unicode, motivo_de_texto_ilegivel
 from src.pncp_result_indicators import indicadores_resultados_homologados
 
 
@@ -766,7 +766,7 @@ def _texto_legivel_da_pagina(path: Path, page_index: int, text: str) -> tuple[st
     """(texto, status, extração) da página de PDF; extração ``None`` = mantém o texto.
 
     Página escaneada (sem camada de texto) ou com texto ilegível vai para o
-    OCR (src/ocr.py). "Ilegível" é o critério de src/qualidade_corpus.py:
+    OCR (src/ocr.py). "Ilegível" é o critério de src/corpus_quality.py:
     glifos sem mapa de caracteres ("/12 /3 □") ou códigos no lugar das letras
     ("/U0044"), que são só decodificados, sem OCR.
     """

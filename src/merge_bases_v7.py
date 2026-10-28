@@ -5,7 +5,7 @@ agregada, emails sintéticos). Não gera embeddings, não reconstrói índice,
 não promove. A v6 continua ativa.
 
 Uso:
-    python -m src.incorporar_bases_v7 --v6 data/normalized/v6/documents.jsonl \
+    python -m src.merge_bases_v7 --v6 data/normalized/v6/documents.jsonl \
         --candidato data/v7_recuperacao/.../candidato_04 --destino data/v7_recuperacao/.../candidato_05
 """
 from __future__ import annotations
@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 
 from src.index import file_sha256
-from src.recuperar_corpus_v7 import agora, destino_novo, gravar_json
+from src.recover_corpus_v7 import agora, destino_novo, gravar_json
 
 HERDADAS = {"editais_normativo", "pca_agregado"}
 

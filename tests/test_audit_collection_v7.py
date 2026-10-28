@@ -2,9 +2,9 @@ import json
 from pathlib import Path
 import pytest
 
-from src.auditar_coleta_v7 import auditar, planejar
+from src.audit_collection_v7 import auditar, planejar
 from src.index import file_sha256
-from tests.test_recuperar_corpus_v7 import CNPJ, chunk, salvar
+from tests.test_recover_corpus_v7 import CNPJ, chunk, salvar
 
 OUTRO = "22222222000100"
 

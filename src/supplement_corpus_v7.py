@@ -14,12 +14,12 @@ from pathlib import Path
 import time
 from typing import Any
 
-from src.build_direto import RegistroDireto, chunk_de_registro
-from src.coleta_policy import PoliticaColeta, uf_unidade
-from src.coletar_direto import ENDPOINT_PUBLICACOES, Janela, _payload_de_resposta, coletar_direto
+from src.direct_build import RegistroDireto, chunk_de_registro
+from src.collection_policy import PoliticaColeta, uf_unidade
+from src.direct_collection import ENDPOINT_PUBLICACOES, Janela, _payload_de_resposta, coletar_direto
 from src.fetch_corpus import load_manifest
 from src.pncp_client import PncpClient
-from src.recuperar_corpus_v7 import agora, destino_novo, gravar_json, url_compra
+from src.recover_corpus_v7 import agora, destino_novo, gravar_json, url_compra
 
 
 class ConsultasOrcadas:

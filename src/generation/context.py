@@ -21,7 +21,7 @@ def _natureza_label(metadata: ChunkMetadata) -> str:
 
 
 def _modalidade_vinculada(metadata: ChunkMetadata) -> Optional[str]:
-    """Modalidade que o contrato herda da compra vinculada (src/qualidade_corpus.py)."""
+    """Modalidade que o contrato herda da compra vinculada (src/corpus_quality.py)."""
     if metadata.extras.get("modalidade_fonte") == "compra_vinculada" and metadata.extras.get("modalidade"):
         return f"{metadata.extras['modalidade']} (da compra vinculada)"
     return None
@@ -41,7 +41,7 @@ def _cabecalho(metadata: ChunkMetadata, evidence_id: str | None = None) -> str:
         campos.append(f"documento={metadata.extras['titulo_documento']}")
     if metadata.data_vigencia is not None:
         campos.append(f"vigencia_ate={metadata.data_vigencia.isoformat()}")
-    # Metadados de src/qualidade_corpus.py: início da vigência das normas,
+    # Metadados de src/corpus_quality.py: início da vigência das normas,
     # valor simbólico do PNCP e modalidade herdada da compra.
     if metadata.extras.get("data_publicacao"):
         campos.append(f"publicacao_informada={metadata.extras['data_publicacao']}")
@@ -103,7 +103,7 @@ def _representar_registro(conteudo: str, modalidade_vinculada: Optional[str] = N
     """Visão compacta dos campos relevantes, sem alterar o documento original.
 
     ``modalidade_vinculada`` é a modalidade da compra ligada ao contrato
-    (src/qualidade_corpus.py). Sem ela, o campo dizia "não informada" enquanto o
+    (src/corpus_quality.py). Sem ela, o campo dizia "não informada" enquanto o
     cabeçalho do mesmo trecho trazia a modalidade.
     """
     try:

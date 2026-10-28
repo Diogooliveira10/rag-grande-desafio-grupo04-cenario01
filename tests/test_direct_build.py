@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from src.build_direto import RegistroDireto, construir_direto, finalizar_direto
+from src.direct_build import RegistroDireto, construir_direto, finalizar_direto
 from src.corpus_validator import validate_inventory_contract
 
 BASE = {
@@ -156,8 +156,8 @@ def test_inventario_traz_proveniencia_por_origem(tmp_path):
 
 def test_dedup_preserva_as_linhas_originais(tmp_path, monkeypatch):
     '''A deduplicação preserva cada linha byte a byte e não sobra temporário.'''
-    monkeypatch.setattr("src.build_direto.index_mod.build_index", lambda **_k: {"chunks": 0})
-    monkeypatch.setattr("src.build_direto.construir_banco", lambda **_k: {"ok": True})
+    monkeypatch.setattr("src.direct_build.index_mod.build_index", lambda **_k: {"chunks": 0})
+    monkeypatch.setattr("src.direct_build.construir_banco", lambda **_k: {"ok": True})
     destino = tmp_path / "base"
     destino.mkdir()
 
@@ -186,8 +186,8 @@ def test_dedup_preserva_as_linhas_originais(tmp_path, monkeypatch):
 
 def test_falha_na_reescrita_preserva_o_documents(tmp_path, monkeypatch):
     '''Linha corrompida interrompe a dedup sem tocar no arquivo original.'''
-    monkeypatch.setattr("src.build_direto.index_mod.build_index", lambda **_k: {"chunks": 0})
-    monkeypatch.setattr("src.build_direto.construir_banco", lambda **_k: {"ok": True})
+    monkeypatch.setattr("src.direct_build.index_mod.build_index", lambda **_k: {"chunks": 0})
+    monkeypatch.setattr("src.direct_build.construir_banco", lambda **_k: {"ok": True})
     destino = tmp_path / "base"
     destino.mkdir()
     arquivo = destino / "documents.jsonl"

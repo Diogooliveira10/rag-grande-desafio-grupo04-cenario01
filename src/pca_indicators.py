@@ -158,6 +158,29 @@ def _ranking(grupos: Mapping[str, _Grupo]) -> list[tuple[str, _Grupo]]:
     return sorted(grupos.items(), key=lambda kv: (-kv[1].total, kv[0]))
 
 
+@dataclass
+class _Agrupamento:
+    """Os itens do plano somados no todo e por categoria, unidade, classe e mês."""
+
+    geral: _Grupo = field(default_factory=_Grupo)
+    por_categoria: dict[str, _Grupo] = field(default_factory=lambda: defaultdict(_Grupo))
+    por_unidade: dict[str, _Grupo] = field(default_factory=lambda: defaultdict(_Grupo))
+    por_classe: dict[str, _Grupo] = field(default_factory=lambda: defaultdict(_Grupo))
+    por_mes: dict[str, _Grupo] = field(default_factory=lambda: defaultdict(_Grupo))
+
+
+def _agrupar(itens: list[_Item]) -> _Agrupamento:
+    grupos = _Agrupamento()
+    for item in itens:
+        grupos.geral.add(item, "categoria", "unidade", "classe")
+        grupos.por_categoria[item.categoria].add(item, "classe", "unidade")
+        grupos.por_unidade[item.unidade].add(item, "categoria", "classe")
+        grupos.por_classe[item.classe].add(item, "unidade", "categoria")
+        if item.mes:
+            grupos.por_mes[item.mes].add(item, "classe", "categoria")
+    return grupos
+
+
 def indicadores_pca(
     linhas: Iterable[Mapping[str, str]],
     *,
@@ -177,19 +200,8 @@ def indicadores_pca(
         ano = anos.most_common(1)[0][0] if anos else "(ano não informado)"
     rotulo = f"PCA {ano} de {orgao}"
 
-    geral = _Grupo()
-    por_categoria: dict[str, _Grupo] = defaultdict(_Grupo)
-    por_unidade: dict[str, _Grupo] = defaultdict(_Grupo)
-    por_classe: dict[str, _Grupo] = defaultdict(_Grupo)
-    por_mes: dict[str, _Grupo] = defaultdict(_Grupo)
-    for item in itens:
-        geral.add(item, "categoria", "unidade", "classe")
-        por_categoria[item.categoria].add(item, "classe", "unidade")
-        por_unidade[item.unidade].add(item, "categoria", "classe")
-        por_classe[item.classe].add(item, "unidade", "categoria")
-        if item.mes:
-            por_mes[item.mes].add(item, "classe", "categoria")
-
+    grupos = _agrupar(itens)
+    geral = grupos.geral
     total = geral.total
     comum = {"orgao": orgao, "ano": str(ano), "fonte": "PCA/PNCP"}
     resultado: list[Indicador] = [
@@ -199,7 +211,7 @@ def indicadores_pca(
             texto=(
                 f"Visão geral e valor total do Plano de Contratações Anual ({rotulo}). "
                 f"Valor total planejado (estimado) do plano: {brl(total)}, em {geral.itens} itens, "
-                f"por {len(por_unidade)} unidades responsáveis e {len(por_classe)} classes de catálogo. "
+                f"por {len(grupos.por_unidade)} unidades responsáveis e {len(grupos.por_classe)} classes de catálogo. "
                 f"Por categoria: {_lista(geral.top('categoria', 10), total)}. "
                 f"Unidades com maior valor: {_lista(geral.top('unidade'), total)}. "
                 f"Classes com maior valor: {_lista(geral.top('classe'), total)}."
@@ -207,8 +219,17 @@ def indicadores_pca(
             metadados={**comum, "valor_total": float(total), "itens": geral.itens},
         )
     ]
+    resultado += _indicadores_por_recorte(grupos, total, ano, comum)
+    resultado += _resumos_e_rankings(grupos, total, ano, orgao, rotulo, comum)
+    return resultado
 
-    for posicao, (categoria, grupo) in enumerate(_ranking(por_categoria), start=1):
+
+def _indicadores_por_recorte(
+    grupos: _Agrupamento, total: Decimal, ano: int | str, comum: dict[str, Any]
+) -> list[Indicador]:
+    """Um indicador por categoria, unidade e classe (na ordem do valor) e por mês."""
+    resultado: list[Indicador] = []
+    for posicao, (categoria, grupo) in enumerate(_ranking(grupos.por_categoria), start=1):
         resultado.append(
             Indicador(
                 id=f"categoria-{_slug(categoria)}",
@@ -225,7 +246,7 @@ def indicadores_pca(
             )
         )
 
-    for posicao, (unidade, grupo) in enumerate(_ranking(por_unidade), start=1):
+    for posicao, (unidade, grupo) in enumerate(_ranking(grupos.por_unidade), start=1):
         resultado.append(
             Indicador(
                 id=f"unidade-{_slug(unidade)}",
@@ -233,7 +254,7 @@ def indicadores_pca(
                 texto=(
                     f"Unidade \"{unidade}\" no PCA {ano}: a unidade {unidade} planeja "
                     f"{brl(grupo.total)} ({_pct(grupo.total, total)} do plano), em {grupo.itens} itens; "
-                    f"{posicao}ª de {len(por_unidade)} unidades em valor. "
+                    f"{posicao}ª de {len(grupos.por_unidade)} unidades em valor. "
                     f"Por categoria: {_lista(grupo.top('categoria', 10), grupo.total)}. "
                     f"Classes com maior valor: {_lista(grupo.top('classe'), grupo.total)}. "
                     f"Maiores itens: {_lista_itens(grupo.maiores_itens())}."
@@ -243,7 +264,7 @@ def indicadores_pca(
             )
         )
 
-    for posicao, (classe, grupo) in enumerate(_ranking(por_classe), start=1):
+    for posicao, (classe, grupo) in enumerate(_ranking(grupos.por_classe), start=1):
         resultado.append(
             Indicador(
                 id=f"classe-{_slug(classe)}",
@@ -251,7 +272,7 @@ def indicadores_pca(
                 texto=(
                     f"Classe \"{classe}\" no PCA {ano}: o total planejado para {classe} é "
                     f"{brl(grupo.total)} ({_pct(grupo.total, total)} do plano), em {grupo.itens} itens; "
-                    f"{posicao}ª de {len(por_classe)} classes em valor. "
+                    f"{posicao}ª de {len(grupos.por_classe)} classes em valor. "
                     f"Unidades com maior valor: {_lista(grupo.top('unidade'), grupo.total)}. "
                     f"Maiores itens: {_lista_itens(grupo.maiores_itens())}."
                 ),
@@ -260,7 +281,7 @@ def indicadores_pca(
             )
         )
 
-    for mes, grupo in sorted(por_mes.items()):
+    for mes, grupo in sorted(grupos.por_mes.items()):
         resultado.append(
             Indicador(
                 id=f"mes-{mes}",
@@ -276,12 +297,19 @@ def indicadores_pca(
                 metadados={**comum, "mes": mes, "valor_total": float(grupo.total), "itens": grupo.itens},
             )
         )
+    return resultado
 
+
+def _resumos_e_rankings(
+    grupos: _Agrupamento, total: Decimal, ano: int | str, orgao: str, rotulo: str, comum: dict[str, Any]
+) -> list[Indicador]:
+    """Valor total, as 10 maiores classes e unidades e os rankings completos."""
+    geral = grupos.geral
     # Resumos curtos para as perguntas mais comuns ("qual o valor total?",
     # "quais as classes de maior valor?"): listas longas diluem o vetor da busca
     # densa e são penalizadas pelo BM25, então a resposta direta vira um chunk
     # próprio.
-    resultado.append(
+    resultado = [
         Indicador(
             id="valor-total",
             dimensao="resumo",
@@ -291,13 +319,13 @@ def indicadores_pca(
             ),
             metadados={**comum, "valor_total": float(total), "itens": geral.itens},
         )
-    )
-    for dimensao, grupos, nome in (
-        ("classe", por_classe, "classes de catálogo"),
-        ("unidade", por_unidade, "unidades responsáveis"),
+    ]
+    for dimensao, por_chave, nome in (
+        ("classe", grupos.por_classe, "classes de catálogo"),
+        ("unidade", grupos.por_unidade, "unidades responsáveis"),
     ):
         maiores = "; ".join(
-            f"{i}. {chave} ({brl(g.total)})" for i, (chave, g) in enumerate(_ranking(grupos)[:10], start=1)
+            f"{i}. {chave} ({brl(g.total)})" for i, (chave, g) in enumerate(_ranking(por_chave)[:10], start=1)
         )
         resultado.append(
             Indicador(
@@ -311,11 +339,11 @@ def indicadores_pca(
             )
         )
 
-    for dimensao, grupos, nome in (
-        ("unidade", por_unidade, "unidades responsáveis"),
-        ("classe", por_classe, "classes de catálogo"),
+    for dimensao, por_chave, nome in (
+        ("unidade", grupos.por_unidade, "unidades responsáveis"),
+        ("classe", grupos.por_classe, "classes de catálogo"),
     ):
-        ranking = _ranking(grupos)[:TOP_RANKING]
+        ranking = _ranking(por_chave)[:TOP_RANKING]
         linhas_ranking = "; ".join(
             f"{i}. {chave}: {brl(g.total)} ({_pct(g.total, total)})" for i, (chave, g) in enumerate(ranking, start=1)
         )
@@ -327,7 +355,6 @@ def indicadores_pca(
                 metadados={**comum, "valor_total": float(total), "itens": geral.itens},
             )
         )
-
     return resultado
 
 

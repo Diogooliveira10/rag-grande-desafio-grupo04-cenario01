@@ -268,6 +268,71 @@ def create_embeddings(
     chunks = _read_jsonl(input_path)
     cache = _read_cache(output_path)
     by_digest: dict[str, dict[str, Any]] = dict(cache)
+    pending, reutilizados, embedding_dimension = _reusable_or_pending(
+        chunks, by_digest, provider=provider, endpoint=endpoint, model=model, encoding_config=encoding_config
+    )
+
+    summary: dict[str, int | str | bool] = {
+        "chunks": len(chunks),
+        "reutilizados": reutilizados,
+        "pendentes": len(pending),
+        "lotes": 0,
+        "gerados": 0,
+        "partes_geradas": 0,
+        "dimensao": 0,
+        "modelo": model,
+        "provedor": provider,
+        "endpoint": endpoint,
+        "dry_run": dry_run,
+        "encoding_config": encoding_config,
+    }
+    summary["dimensao"] = embedding_dimension or 0
+    report_path = report_path or output_path.with_name("embedding_report.json")
+    run = {
+        "input": _display_path(input_path),
+        "output": _display_path(output_path),
+        "model": model,
+        "provider": provider,
+        "endpoint": endpoint,
+        "batch_size": batch_size,
+        "pause_seconds": pause_seconds,
+        "max_part_bytes": max_part_bytes,
+    }
+    if not dry_run and not pending:
+        _materialize_cache(output_path, chunks, by_digest)
+    if dry_run or not pending:
+        _write_run_report(report_path, output_path, run, "dry_run" if dry_run else "complete", summary)
+        return summary
+
+    embedder = embed_batch or _configured_embed_batch(provider, endpoint, api_key, model)
+    _embed_pending(
+        pending, by_digest, summary, embedder, output_path,
+        embedding_dimension=embedding_dimension, batch_size=batch_size, pause_seconds=pause_seconds,
+        max_part_bytes=max_part_bytes, provider=provider, endpoint=endpoint, model=model,
+        encoding_config=encoding_config,
+    )
+
+    # Cada lote já está persistido atomicamente em partes para retomada.
+    # Materializar o corpus completo uma vez evita reescrever gigabytes a cada texto.
+    _materialize_cache(output_path, chunks, by_digest)
+    _write_run_report(report_path, output_path, run, "complete", summary)
+    return summary
+
+
+def _reusable_or_pending(
+    chunks: list[dict[str, Any]],
+    by_digest: dict[str, dict[str, Any]],
+    *,
+    provider: str,
+    endpoint: str,
+    model: str,
+    encoding_config: dict[str, Any] | None,
+) -> tuple[dict[str, tuple[str, str]], int, int | None]:
+    """(pendentes por conteúdo, quantos o cache reaproveita, dimensão do cache).
+
+    Só reaproveita o vetor gerado com o mesmo esquema, entrada, encoding,
+    provedor, endpoint e modelo; vetor inválido no cache interrompe.
+    """
     pending: dict[str, tuple[str, str]] = {}
     reutilizados = 0
     embedding_dimension: int | None = None
@@ -300,63 +365,26 @@ def create_embeddings(
             reutilizados += 1
         else:
             pending.setdefault(digest, (str(chunk["text"]), input_digest))
+    return pending, reutilizados, embedding_dimension
 
-    summary: dict[str, int | str | bool] = {
-        "chunks": len(chunks),
-        "reutilizados": reutilizados,
-        "pendentes": len(pending),
-        "lotes": 0,
-        "gerados": 0,
-        "partes_geradas": 0,
-        "dimensao": 0,
-        "modelo": model,
-        "provedor": provider,
-        "endpoint": endpoint,
-        "dry_run": dry_run,
-        "encoding_config": encoding_config,
-    }
-    summary["dimensao"] = embedding_dimension or 0
-    report_path = report_path or output_path.with_name("embedding_report.json")
-    if not dry_run and not pending:
-        ordered = [
-            _materialize_record(
-                chunk,
-                by_digest[_content_sha256(str(chunk["text"]))],
-                _content_sha256(str(chunk["text"])),
-            )
-            for chunk in chunks
-        ]
-        _write_cache(output_path, ordered)
-        _remove_part_files(output_path)
-    if dry_run or not pending:
-        _write_report(
-            report_path,
-            {
-                "schema_version": 1,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "input": _display_path(input_path),
-                "output": _display_path(output_path),
-                "model": model,
-                "provider": provider,
-                "endpoint": endpoint,
-                "batch_size": batch_size,
-                "pause_seconds": pause_seconds,
-                "max_part_bytes": max_part_bytes,
-                "status": "dry_run" if dry_run else "complete",
-                **summary,
-                "cache_parts": [
-                    _display_path(path)
-                    for path in sorted(
-                        output_path.parent.glob(
-                            f"{output_path.stem}.part-*{output_path.suffix}"
-                        )
-                    )
-                ],
-            },
-        )
-        return summary
 
-    embedder = embed_batch or _configured_embed_batch(provider, endpoint, api_key, model)
+def _embed_pending(
+    pending: dict[str, tuple[str, str]],
+    by_digest: dict[str, dict[str, Any]],
+    summary: dict[str, int | str | bool],
+    embedder: EmbeddingBatch,
+    output_path: Path,
+    *,
+    embedding_dimension: int | None,
+    batch_size: int,
+    pause_seconds: float,
+    max_part_bytes: int,
+    provider: str,
+    endpoint: str,
+    model: str,
+    encoding_config: dict[str, Any] | None,
+) -> None:
+    """Embeda os pendentes em lotes, gravando cada lote em partes para retomada e atualizando o resumo."""
     pending_items = list(pending.items())
     next_part_number = _next_part_number(output_path)
     generated_parts: list[Path] = []
@@ -405,8 +433,9 @@ def create_embeddings(
         if start + batch_size < len(pending_items) and pause_seconds:
             time.sleep(pause_seconds)
 
-    # Cada lote já está persistido atomicamente em partes para retomada.
-    # Materializar o corpus completo uma vez evita reescrever gigabytes a cada texto.
+
+def _materialize_cache(output_path: Path, chunks: list[dict[str, Any]], by_digest: dict[str, dict[str, Any]]) -> None:
+    """Cache completo na ordem dos chunks, no lugar das partes da retomada."""
     ordered = [
         _materialize_record(
             chunk,
@@ -418,23 +447,20 @@ def create_embeddings(
     _write_cache(output_path, ordered)
     _remove_part_files(output_path)
 
+
+def _write_run_report(
+    report_path: Path, output_path: Path, run: dict[str, Any], status: str, summary: dict[str, int | str | bool]
+) -> None:
     _write_report(
         report_path,
         {
             "schema_version": 1,
             "created_at": datetime.now(timezone.utc).isoformat(),
-            "input": _display_path(input_path),
-            "output": _display_path(output_path),
-            "model": model,
-            "provider": provider,
-            "endpoint": endpoint,
-            "batch_size": batch_size,
-            "pause_seconds": pause_seconds,
-            "max_part_bytes": max_part_bytes,
-            "status": "complete",
+            **run,
+            "status": status,
             **summary,
             "cache_parts": [
-                    _display_path(path)
+                _display_path(path)
                 for path in sorted(
                     output_path.parent.glob(
                         f"{output_path.stem}.part-*{output_path.suffix}"
@@ -443,7 +469,6 @@ def create_embeddings(
             ],
         },
     )
-    return summary
 
 
 def main(argv: list[str] | None = None) -> int:

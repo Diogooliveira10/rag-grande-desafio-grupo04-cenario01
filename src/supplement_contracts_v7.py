@@ -21,13 +21,13 @@ from typing import Callable
 from uuid import uuid4
 from urllib.parse import urlencode
 
-from src.build_direto import RegistroDireto, chunk_de_registro
-from src.coleta_policy import PoliticaColeta, tipo_instrumento
-from src.coletar_direto import ENDPOINT_CONTRATOS, FalhaDeColeta, _payload_de_resposta, _e_fim_de_paginacao
-from src.complementar_corpus_v7 import ConsultasOrcadas
+from src.direct_build import RegistroDireto, chunk_de_registro
+from src.collection_policy import PoliticaColeta, tipo_instrumento
+from src.direct_collection import ENDPOINT_CONTRATOS, FalhaDeColeta, _payload_de_resposta, _e_fim_de_paginacao
+from src.supplement_corpus_v7 import ConsultasOrcadas
 from src.fetch_corpus import load_manifest
 from src.index import file_sha256
-from src.recuperar_corpus_v7 import ROOT, agora, destino_novo, gravar_json
+from src.recover_corpus_v7 import ROOT, agora, destino_novo, gravar_json
 from src.pncp_client import PncpClient
 
 CACHE_VERSION = 1

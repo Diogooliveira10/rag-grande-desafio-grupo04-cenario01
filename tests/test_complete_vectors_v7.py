@@ -5,7 +5,7 @@ import pytest
 
 from src import complete_vectors_v7 as tool
 from src.index import build_index, file_sha256
-from tests.test_reparar_candidato_v7 import _document, _write
+from tests.test_repair_candidate_v7 import _document, _write
 
 
 @pytest.fixture

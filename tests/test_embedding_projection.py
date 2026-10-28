@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from src.build_direto import RegistroDireto, construir_direto
-from src.projecao import embed_fn_concorrente, embed_fn_projetado, texto_projecao
+from src.direct_build import RegistroDireto, construir_direto
+from src.embedding_projection import embed_fn_concorrente, embed_fn_projetado, texto_projecao
 
 REGISTRO = {
     "numeroControlePNCP": "11111111000001-2-000001/2025",

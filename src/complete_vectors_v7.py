@@ -15,8 +15,8 @@ from typing import Any
 
 from src.create_embeddings import _content_sha256
 from src.index import file_sha256, _relative
-from src.recuperar_corpus_v7 import agora, destino_novo, gravar_json
-from src.reparar_candidato_v7 import _linhas, _metadata
+from src.recover_corpus_v7 import agora, destino_novo, gravar_json
+from src.repair_candidate_v7 import _linhas, _metadata
 
 
 def lacunas(candidato: Path) -> dict[str, dict[str, Any]]:

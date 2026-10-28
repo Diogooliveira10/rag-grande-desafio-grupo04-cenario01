@@ -127,7 +127,7 @@ bases:
           ambito: "Poder Executivo estadual direto, autárquico e fundacional do RJ"
           fonte_oficial: "Controladoria Geral do Estado do Rio de Janeiro — Diário Oficial"
         # Endereços de onde a v6 coletou as normas (reuso de versões anteriores,
-        # sem passar por metadados_por_url). src/qualidade_corpus.py aplica estes
+        # sem passar por metadados_por_url). src/corpus_quality.py aplica estes
         # metadados aos chunks pela origem.
         "https://www.mppi.mp.br/internet/wp-content/uploads/2021/04/L14133.pdf":
           titulo: "Lei nº 14.133/2021"

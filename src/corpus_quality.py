@@ -24,8 +24,8 @@ novo exigiria gerar vetores de novo. Muda só status e metadados:
 
 Uso::
 
-    py -m src.qualidade_corpus              # aplica nos JSONL e grava o relatório
-    py -m src.qualidade_corpus --verificar  # só conta, sem gravar nada
+    py -m src.corpus_quality              # aplica nos JSONL e grava o relatório
+    py -m src.corpus_quality --verificar  # só conta, sem gravar nada
 """
 
 from __future__ import annotations

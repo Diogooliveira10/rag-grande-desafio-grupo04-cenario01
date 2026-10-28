@@ -5,7 +5,7 @@ Condição da §7 do plano v7: **medição obrigatória antes de promover** qual
 encoder — só muda o texto enviado ao encoder de documento:
 
 - ``completa`` — o texto do chunk inteiro (comportamento da v6);
-- ``compacta`` — só os campos de descrição (``src/projecao.py``).
+- ``compacta`` — só os campos de descrição (``src/embedding_projection.py``).
 
 A métrica é a da ablação de rerank (``eval/ablacao_rerank.py``): posição do
 primeiro chunk relevante, ``hit@k`` e ``mrr@10`` sobre
@@ -38,7 +38,7 @@ from eval.ablacao_rerank import (  # noqa: E402
     resumir,
 )
 from src import index as index_mod  # noqa: E402
-from src.projecao import MODO_COMPLETA, MODOS, embed_fn_projetado  # noqa: E402
+from src.embedding_projection import MODO_COMPLETA, MODOS, embed_fn_projetado  # noqa: E402
 from src.retrieve import DEFAULT_TOP_K, dense_retrieve  # noqa: E402
 
 EmbedFn = Callable[[list[str]], list[list[float]]]

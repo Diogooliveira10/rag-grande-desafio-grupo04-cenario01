@@ -16,7 +16,7 @@ from pathlib import Path
 
 from eval.ablacao_rerank import CasoRecuperacao
 from eval.medir_projecao import medir_projecao
-from src.build_direto import RegistroDireto, chunk_de_registro
+from src.direct_build import RegistroDireto, chunk_de_registro
 
 BASE = {
     "base_id": "contratos_estruturado", "natureza": "estruturada",

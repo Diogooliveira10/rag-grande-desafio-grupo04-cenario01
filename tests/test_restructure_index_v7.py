@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from src.reestruturar_indice_v7 import reestruturar
+from src.restructure_index_v7 import reestruturar
 
 
 @pytest.fixture

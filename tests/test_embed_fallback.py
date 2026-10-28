@@ -1,6 +1,6 @@
 '''Fallback de embeddings (ECOA primário, encoder local reserva) e pausas.'''
 
-from src.projecao import embed_fn_com_fallback, embed_fn_com_pausa
+from src.embedding_projection import embed_fn_com_fallback, embed_fn_com_pausa
 
 
 def _resposta_fixa(valor):

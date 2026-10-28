@@ -498,6 +498,69 @@ def run_checks(config: CheckConfig) -> tuple[str, list[dict[str, Any]]]:
     checked_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     results: list[dict[str, Any]] = []
 
+    publication, contracts, purchase = _check_purchases(config, results)
+    for source_id, name, url, kind in WEB_SOURCES:
+        results.append(_requested(source_id, name, url, config, kind))
+    _check_atas(config, results)
+    results.append(
+        {
+            "id": "emails_sinteticos",
+            "nome": "Base sintética — e-mails de compras",
+            "url": "não há URL pública indicada",
+            **empty_result("nao_aplicavel", "fonte local/sintética; localizar a base fornecida pelo desafio"),
+        }
+    )
+    _check_pca(config, results)
+
+    if purchase:
+        results.append(_requested(
+            "resultados_itens",
+            "PNCP — resultados do item 1",
+            make_api_url(
+                f"/v1/orgaos/{purchase['cnpj']}/compras/{purchase['ano']}/{purchase['sequencial']}/itens/1/resultados"
+            ),
+            config,
+        ))
+    else:
+        dependency = publication if not _is_available(publication) else contracts
+        results.append(_blocked("resultados_itens", "PNCP — resultados por item", "as consultas de contratação", dependency))
+
+    results.append(
+        {
+            "id": "pipeline_agregacoes",
+            "nome": "Pipeline — totais, médias e séries",
+            "url": "sem API própria",
+            **empty_result(
+                "nao_aplicavel",
+                "processamento local; disponibilidade depende da implementação do pipeline",
+            ),
+        }
+    )
+    return checked_at, results
+
+
+def _requested(result_id: str, name: str, url: str, config: CheckConfig, kind: str = "json") -> dict[str, Any]:
+    """Resultado de uma consulta feita agora, com o id, o nome e a URL da fonte."""
+    return {
+        "id": result_id,
+        "nome": name,
+        "url": url,
+        **request_url(url, kind, attempts=config.attempts, timeout=config.timeout),
+    }
+
+
+def _blocked(result_id: str, name: str, upstream_name: str, upstream: dict[str, Any]) -> dict[str, Any]:
+    """Fonte parametrizada que não foi consultada porque a consulta de que depende não trouxe amostra."""
+    return {"id": result_id, "nome": name, "url": "parametrizada", **blocked_result(upstream_name, upstream)}
+
+
+def _check_purchases(
+    config: CheckConfig, results: list[dict[str, Any]]
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, str] | None]:
+    """Publicação, contratos e, com uma compra de amostra, o detalhe e os arquivos dela.
+
+    Devolve (publicação, contratos, compra de amostra) para os resultados por item, consultados depois.
+    """
     publication_url, publication, purchase = query_for_sample(
         "/v1/contratacoes/publicacao",
         lambda start, end: {
@@ -543,54 +606,28 @@ def run_checks(config: CheckConfig) -> tuple[str, list[dict[str, Any]]]:
         purchase = sample_purchase(contracts.get("json"))
 
     if purchase:
-        purchase_url = make_api_url(
-            f"/v1/orgaos/{purchase['cnpj']}/compras/{purchase['ano']}/{purchase['sequencial']}"
-        )
-        detail = request_url(purchase_url, "json", attempts=config.attempts, timeout=config.timeout)
-        results.append(
-            {
-                "id": "detalhe_contratacao",
-                "nome": "PNCP — detalhe da contratação encontrada",
-                "url": purchase_url,
-                **detail,
-            }
-        )
-
-        files_url = make_api_url(
-            f"/v1/orgaos/{purchase['cnpj']}/compras/{purchase['ano']}/{purchase['sequencial']}/arquivos"
-        )
-        files = request_url(files_url, "json", attempts=config.attempts, timeout=config.timeout)
-        results.append(
-            {
-                "id": "arquivos_edital",
-                "nome": "PNCP — arquivos/editais da contratação",
-                "url": files_url,
-                **files,
-            }
-        )
+        purchase_path = f"/v1/orgaos/{purchase['cnpj']}/compras/{purchase['ano']}/{purchase['sequencial']}"
+        results.append(_requested(
+            "detalhe_contratacao", "PNCP — detalhe da contratação encontrada", make_api_url(purchase_path), config
+        ))
+        results.append(_requested(
+            "arquivos_edital", "PNCP — arquivos/editais da contratação", make_api_url(purchase_path + "/arquivos"), config
+        ))
     else:
         dependency = publication if not _is_available(publication) else contracts
         results.extend(
             [
-                {
-                    "id": "detalhe_contratacao",
-                    "nome": "PNCP — detalhe da contratação encontrada",
-                    "url": "parametrizada",
-                    **blocked_result("as consultas de contratação", dependency),
-                },
-                {
-                    "id": "arquivos_edital",
-                    "nome": "PNCP — arquivos/editais da contratação",
-                    "url": "parametrizada",
-                    **blocked_result("as consultas de contratação", dependency),
-                },
+                _blocked("detalhe_contratacao", "PNCP — detalhe da contratação encontrada",
+                         "as consultas de contratação", dependency),
+                _blocked("arquivos_edital", "PNCP — arquivos/editais da contratação",
+                         "as consultas de contratação", dependency),
             ]
         )
+    return publication, contracts, purchase
 
-    for source_id, name, url, kind in WEB_SOURCES:
-        result = request_url(url, kind, attempts=config.attempts, timeout=config.timeout)
-        results.append({"id": source_id, "nome": name, "url": url, **result})
 
+def _check_atas(config: CheckConfig, results: list[dict[str, Any]]) -> None:
+    """Atas e, com uma ata de amostra, os arquivos dela."""
     ata_url, atas, ata = query_for_sample(
         "/v1/atas",
         lambda start, end: {
@@ -605,37 +642,20 @@ def run_checks(config: CheckConfig) -> tuple[str, list[dict[str, Any]]]:
     results.append({"id": "atas", "nome": "PNCP — atas", "url": ata_url, **atas})
 
     if ata:
-        ata_files_url = make_api_url(
-            f"/v1/orgaos/{ata['cnpj']}/compras/{ata['ano']}/{ata['sequencial']}/atas/{ata['seq_ata']}/arquivos"
-        )
-        ata_files = request_url(ata_files_url, "json", attempts=config.attempts, timeout=config.timeout)
-        results.append(
-            {
-                "id": "arquivos_atas",
-                "nome": "PNCP — arquivos das atas",
-                "url": ata_files_url,
-                **ata_files,
-            }
-        )
+        results.append(_requested(
+            "arquivos_atas",
+            "PNCP — arquivos das atas",
+            make_api_url(
+                f"/v1/orgaos/{ata['cnpj']}/compras/{ata['ano']}/{ata['sequencial']}/atas/{ata['seq_ata']}/arquivos"
+            ),
+            config,
+        ))
     else:
-        results.append(
-            {
-                "id": "arquivos_atas",
-                "nome": "PNCP — arquivos das atas",
-                "url": "parametrizada",
-                **blocked_result("a consulta de atas", atas),
-            }
-        )
+        results.append(_blocked("arquivos_atas", "PNCP — arquivos das atas", "a consulta de atas", atas))
 
-    results.append(
-        {
-            "id": "emails_sinteticos",
-            "nome": "Base sintética — e-mails de compras",
-            "url": "não há URL pública indicada",
-            **empty_result("nao_aplicavel", "fonte local/sintética; localizar a base fornecida pelo desafio"),
-        }
-    )
 
+def _check_pca(config: CheckConfig, results: list[dict[str, Any]]) -> None:
+    """Consulta de PCA e, com um plano de amostra, o consolidado e os itens dele."""
     pca_params: dict[str, Any] = {
         "anoPca": str(config.ano),
         "pagina": str(config.pagina),
@@ -650,83 +670,17 @@ def run_checks(config: CheckConfig) -> tuple[str, list[dict[str, Any]]]:
 
     if pca_sample:
         pca_base = make_api_url(f"/v1/orgaos/{pca_sample['cnpj']}/pca/{pca_sample['ano']}")
-        consolidated_url = pca_base + "/consolidado"
-        consolidated = request_url(
-            consolidated_url, "json", attempts=config.attempts, timeout=config.timeout
-        )
-        results.append(
-            {
-                "id": "pca_consolidado",
-                "nome": "PNCP — PCA consolidado por órgão",
-                "url": consolidated_url,
-                **consolidated,
-            }
-        )
-
-        pca_items_url = pca_base + f"/{pca_sample['sequencial']}/itens/contratacao"
-        pca_items = request_url(pca_items_url, "json", attempts=config.attempts, timeout=config.timeout)
-        results.append(
-            {
-                "id": "pca_itens",
-                "nome": "PNCP — itens do PCA",
-                "url": pca_items_url,
-                **pca_items,
-            }
-        )
+        results.append(_requested("pca_consolidado", "PNCP — PCA consolidado por órgão", pca_base + "/consolidado", config))
+        results.append(_requested(
+            "pca_itens", "PNCP — itens do PCA", pca_base + f"/{pca_sample['sequencial']}/itens/contratacao", config
+        ))
     else:
         results.extend(
             [
-                {
-                    "id": "pca_consolidado",
-                    "nome": "PNCP — PCA consolidado por órgão",
-                    "url": "parametrizada",
-                    **blocked_result("a consulta de PCA", pca),
-                },
-                {
-                    "id": "pca_itens",
-                    "nome": "PNCP — itens do PCA",
-                    "url": "parametrizada",
-                    **blocked_result("a consulta de PCA", pca),
-                },
+                _blocked("pca_consolidado", "PNCP — PCA consolidado por órgão", "a consulta de PCA", pca),
+                _blocked("pca_itens", "PNCP — itens do PCA", "a consulta de PCA", pca),
             ]
         )
-
-    if purchase:
-        results_url = make_api_url(
-            f"/v1/orgaos/{purchase['cnpj']}/compras/{purchase['ano']}/{purchase['sequencial']}/itens/1/resultados"
-        )
-        item_results = request_url(results_url, "json", attempts=config.attempts, timeout=config.timeout)
-        results.append(
-            {
-                "id": "resultados_itens",
-                "nome": "PNCP — resultados do item 1",
-                "url": results_url,
-                **item_results,
-            }
-        )
-    else:
-        dependency = publication if not _is_available(publication) else contracts
-        results.append(
-            {
-                "id": "resultados_itens",
-                "nome": "PNCP — resultados por item",
-                "url": "parametrizada",
-                **blocked_result("as consultas de contratação", dependency),
-            }
-        )
-
-    results.append(
-        {
-            "id": "pipeline_agregacoes",
-            "nome": "Pipeline — totais, médias e séries",
-            "url": "sem API própria",
-            **empty_result(
-                "nao_aplicavel",
-                "processamento local; disponibilidade depende da implementação do pipeline",
-            ),
-        }
-    )
-    return checked_at, results
 
 
 def find_result(results: list[dict[str, Any]], result_id: str) -> dict[str, Any] | None:

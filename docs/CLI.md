@@ -15,7 +15,7 @@ CLI nem dispara chamadas extras ao modelo. Veja [OBSERVABILIDADE.md](OBSERVABILI
 
 A v6 é a versão ativa: 1.400 arquivos, cinco arquivos por órgão/base no máximo
 e 5.090 chunks normalizados e indexados após a recuperação OCR de 2026-10-07,
-com zero trechos ilegíveis (ver `py -m src.qualidade_corpus` no README).
+com zero trechos ilegíveis (ver `py -m src.corpus_quality` no README).
 Com os 25 chunks sintéticos, o índice ativo contém 5.115 chunks. As
 referências a v3 nas seções de coleta abaixo são exemplos históricos; para
 consultar o snapshot pronto, use a CLI existente:

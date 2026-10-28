@@ -1,6 +1,6 @@
 """Recortes são funções puras: não há rede/modelos nestes testes."""
 import pytest
-from src.coleta_policy import PoliticaColeta, ano_assinatura, periodos, tipo_instrumento, uf_unidade
+from src.collection_policy import PoliticaColeta, ano_assinatura, periodos, tipo_instrumento, uf_unidade
 
 
 def contrato(**kwargs):

@@ -2,9 +2,9 @@ import json
 from pathlib import Path
 import pytest
 
-from src.reconciliar_unidades_v7 import reconciliar
-from src.recuperar_corpus_v7 import construir_staging
-from tests.test_recuperar_corpus_v7 import CNPJ, chunk, salvar
+from src.reconcile_units_v7 import reconciliar
+from src.recover_corpus_v7 import construir_staging
+from tests.test_recover_corpus_v7 import CNPJ, chunk, salvar
 
 
 def fontes(tmp_path, unidades, observadas):

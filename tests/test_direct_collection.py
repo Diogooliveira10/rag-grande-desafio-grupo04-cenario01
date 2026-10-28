@@ -6,8 +6,8 @@ import json
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from src.build_direto import finalizar_direto
-from src.coletar_direto import (
+from src.direct_build import finalizar_direto
+from src.direct_collection import (
     FalhaDeColeta,
     Janela,
     coletar_direto,
@@ -160,7 +160,7 @@ def test_finalizar_deduplica_registros_repetidos_e_gera_artefatos(tmp_path):
 def test_resposta_204_vira_janela_vazia_nao_erro():
     '''A API do PNCP devolve 204 "resposta sem conteúdo" para janela sem
     registros — resultado vazio, não falha (achado da primeira coleta).'''
-    from src.coletar_direto import _payload_de_resposta
+    from src.direct_collection import _payload_de_resposta
 
     resposta = {"status": "disponivel", "http_status": 204, "json": None,
                 "observacao": "resposta sem conteúdo"}
@@ -168,7 +168,7 @@ def test_resposta_204_vira_janela_vazia_nao_erro():
 
 
 def test_resposta_invalida_continua_levantando():
-    from src.coletar_direto import _payload_de_resposta
+    from src.direct_collection import _payload_de_resposta
 
     try:
         _payload_de_resposta({"status": "erro_requisicao", "erro": "400"},
@@ -181,7 +181,7 @@ def test_resposta_invalida_continua_levantando():
 
 def test_janela_falha_registra_e_continua_sem_abortar(tmp_path):
     '''Regra do desafio: registra falhas sem abortar — e a retomada re-tenta.'''
-    from src.coletar_direto import FalhaDeColeta
+    from src.direct_collection import FalhaDeColeta
 
     janelas = [
         Janela(id="ok", endpoint="https://exemplo.teste/x", params={"tamanhoPagina": 50}),
@@ -219,7 +219,7 @@ def test_janela_falha_registra_e_continua_sem_abortar(tmp_path):
 
 
 def test_429_faz_backoff_e_tenta_de_novo(tmp_path):
-    from src.coletar_direto import FalhaDeColeta
+    from src.direct_collection import FalhaDeColeta
 
     janela = Janela(id="a", endpoint="https://exemplo.teste/x", params={"tamanhoPagina": 50})
     url = _build_request_url("https://exemplo.teste/x", {"tamanhoPagina": 50, "pagina": 1})
@@ -341,7 +341,7 @@ def test_so_atas_exige_base_de_ata(tmp_path):
 
 
 def test_politica_filtra_rj_assinatura_e_preserva_empenho(tmp_path):
-    from src.coleta_policy import PoliticaColeta
+    from src.collection_policy import PoliticaColeta
     registros = [_registro(f"11111111000001-2-00000{i}/2025") for i in range(1, 4)]
     for r in registros:
         r["dataPublicacaoPncp"] = "2025-05-06"
@@ -356,7 +356,7 @@ def test_politica_filtra_rj_assinatura_e_preserva_empenho(tmp_path):
 
 
 def test_teto_paginas_nao_certifica_janela(tmp_path, monkeypatch):
-    monkeypatch.setattr("src.coletar_direto.MAX_PAGINAS_POR_JANELA", 1)
+    monkeypatch.setattr("src.direct_collection.MAX_PAGINAS_POR_JANELA", 1)
     janela = Janela("cheia", "https://teste", {"tamanhoPagina": 1})
     r = coletar_direto([janela], BASE, tmp_path, request_fn=lambda _: {"data": [_registro("a")]}, taxa_seg=0)
     assert r["janelas_falhadas"] == 1
@@ -365,7 +365,7 @@ def test_teto_paginas_nao_certifica_janela(tmp_path, monkeypatch):
 
 def test_mudar_politica_recusa_checkpoint_sem_tocar_documents(tmp_path):
     import pytest
-    from src.coleta_policy import PoliticaColeta
+    from src.collection_policy import PoliticaColeta
     janela = Janela("a", "https://teste", {"tamanhoPagina": 50})
     coletar_direto([janela], BASE, tmp_path, request_fn=lambda _: {"data": [_registro("a")]}, taxa_seg=0)
     antes = (tmp_path / "documents.jsonl").read_bytes()
@@ -400,7 +400,7 @@ def test_fevereiro_bissexto():
 
 
 def test_ata_unidade_verificada_inclui_territorio_sem_campo_uf(tmp_path):
-    from src.coleta_policy import PoliticaColeta
+    from src.collection_policy import PoliticaColeta
     j = janelas_atas([], unidades=[{"cnpj": "33333333000001", "codigoUnidadeAdministrativa": "1", "ufSigla": "RJ"}])[0]
     r = coletar_direto([j], BASE_ATA, tmp_path, politica=PoliticaColeta(), taxa_seg=0, request_fn=lambda _: {"data": [{**_registro_ata("ata", 2025), "codigoUnidadeOrgao": "1"}]})
     assert r["registros"] == 1
@@ -410,8 +410,8 @@ def test_ata_unidade_verificada_inclui_territorio_sem_campo_uf(tmp_path):
 def test_janela_que_falha_conta_para_o_intervalo_da_proxima(tmp_path, monkeypatch):
     """O intervalo entre chamadas (taxa_seg) vale também depois de uma janela que
     falhou: a chamada dela aconteceu e conta para a espera da janela seguinte."""
-    from src import coletar_direto as modulo
-    from src.coletar_direto import FalhaDeColeta
+    from src import direct_collection as modulo
+    from src.direct_collection import FalhaDeColeta
 
     relogio = {"agora": 100.0}
     esperas: list[float] = []

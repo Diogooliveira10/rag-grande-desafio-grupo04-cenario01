@@ -78,10 +78,25 @@ def test_caminho_do_catalogo_de_orgaos_aponta_para_a_raiz():
 @pytest.mark.parametrize("antigo,novo", [
     ("src.reformulacao", "src.reformulation"),
     ("src.completar_vetores_v7", "src.complete_vectors_v7"),
+    ("src.acompanhar_cadastro_v7", "src.watch_registry_v7"),
+    ("src.auditar_coleta_v7", "src.audit_collection_v7"),
+    ("src.build_direto", "src.direct_build"),
+    ("src.coleta_policy", "src.collection_policy"),
+    ("src.coletar_direto", "src.direct_collection"),
+    ("src.complementar_contratos_v7", "src.supplement_contracts_v7"),
+    ("src.complementar_corpus_v7", "src.supplement_corpus_v7"),
+    ("src.incorporar_bases_v7", "src.merge_bases_v7"),
+    ("src.montar_faiss_v7", "src.build_faiss_v7"),
+    ("src.projecao", "src.embedding_projection"),
+    ("src.qualidade_corpus", "src.corpus_quality"),
+    ("src.reconciliar_unidades_v7", "src.reconcile_units_v7"),
+    ("src.recuperar_corpus_v7", "src.recover_corpus_v7"),
+    ("src.reestruturar_indice_v7", "src.restructure_index_v7"),
+    ("src.reparar_candidato_v7", "src.repair_candidate_v7"),
 ])
 def test_nome_antigo_de_arquivo_renomeado_e_o_mesmo_modulo(antigo, novo):
-    """Arquivos renomeados para inglês (2026-10-26): o nome antigo segue importável
-    e devolve o próprio módulo, então trocar um valor por ele vale para o novo."""
+    """Arquivos renomeados para inglês (2026-10-26 e 2026-10-27): o nome antigo segue
+    importável e devolve o próprio módulo, então trocar um valor por ele vale para o novo."""
     import importlib
 
     assert importlib.import_module(antigo) is importlib.import_module(novo)

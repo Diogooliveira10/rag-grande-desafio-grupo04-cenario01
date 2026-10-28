@@ -15,10 +15,10 @@ from pathlib import Path
 import sqlite3
 from typing import Any, Callable
 
-from src.coleta_policy import PoliticaColeta, chave_unidade, uf_unidade
-from src.coletar_direto import janelas_contratos
+from src.collection_policy import PoliticaColeta, chave_unidade, uf_unidade
+from src.direct_collection import janelas_contratos
 from src.index import file_sha256
-from src.recuperar_corpus_v7 import agora, destino_novo, gravar_json
+from src.recover_corpus_v7 import agora, destino_novo, gravar_json
 
 
 def reconciliar(observadas: Path, cadastro: Path, destino: Path, *, catalogo_aquisicao: Path | None = None,

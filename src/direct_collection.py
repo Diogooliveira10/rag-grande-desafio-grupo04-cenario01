@@ -2,7 +2,7 @@
 
 Percorre janelas determinísticas da API do PNCP e acumula o ``documents.jsonl``
 do modo direto **sem materializar ``data/raw/``** — cada registro vira chunk na
-hora (``src.build_direto.chunk_de_registro``) e é só então descartado.
+hora (``src.direct_build.chunk_de_registro``) e é só então descartado.
 
 Janelas (as mesmas URLs que a v6 registrou no inventário):
 
@@ -23,7 +23,7 @@ As retentativas/paletas são as do ``src/source_check.py``
 
 Uso (CLI):
 
-    python -m src.coletar_direto --manifest corpus_manifest.yaml \
+    python -m src.direct_collection --manifest corpus_manifest.yaml \
         --base-id contratos_estruturado --destino data/v7_direto \
         --orgaos orgaos_v6.json [--sem-publicacoes] [--so-publicacoes] [--so-atas]
 '''
@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from src.build_direto import (
+from src.direct_build import (
     CHUNK_SIZE_PADRAO,
     OVERLAP_PADRAO,
     RegistroDireto,
@@ -51,7 +51,7 @@ from src.build_direto import (
     finalizar_direto,
 )
 from src.fetch_corpus import _build_request_url, _payload_records, load_manifest
-from src.coleta_policy import PoliticaColeta, chave_unidade, periodos, tipo_instrumento
+from src.collection_policy import PoliticaColeta, chave_unidade, periodos, tipo_instrumento
 
 RequestFn = Callable[[str], Any]
 

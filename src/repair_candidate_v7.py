@@ -15,7 +15,7 @@ from typing import Any
 
 from src.fetch_corpus import load_manifest
 from src.index import REQUIRED_METADATA_FIELDS, _chunk_metadata, _relative, file_sha256
-from src.recuperar_corpus_v7 import agora, destino_novo, gravar_json
+from src.recover_corpus_v7 import agora, destino_novo, gravar_json
 from src.schema import ChunkMetadata
 
 

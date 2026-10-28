@@ -18,7 +18,7 @@ import sqlite3
 import subprocess
 from typing import Any, Iterable
 
-from src.coleta_policy import PoliticaColeta, chave_unidade, compra_vinculada, nome_instrumento, tipo_instrumento, uf_unidade
+from src.collection_policy import PoliticaColeta, chave_unidade, compra_vinculada, nome_instrumento, tipo_instrumento, uf_unidade
 from src.index import file_sha256
 from src.structured_db import _COLUNAS_CONTRATACOES, _linha_contratacao
 

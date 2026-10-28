@@ -278,7 +278,74 @@ def analyze(inventory_path: Path, project_root: Path, top: int = 20) -> dict[str
     )
     rows, read_errors = _load_contracts(inventory, project_root)
     total = len(rows)
+    date_coverage = _date_coverage(rows)
 
+    return {
+        "analysis": "structured_corpus_profile",
+        "inventory": {
+            "path": str(inventory_path),
+            "version": inventory.get("version"),
+            "coletado_em": inventory.get("coletado_em"),
+            "completo": inventory.get("completo"),
+            "manifest_hash": inventory.get("manifest_hash"),
+            "base_status": structured_base.get("status"),
+            "volume_alvo": structured_base.get("volume_alvo"),
+            "volume_obtido": structured_base.get("volume_obtido"),
+            "artifacts": structured_base.get("arquivos"),
+            "inventory_failures": structured_base.get("failure_count"),
+        },
+        "population": {
+            "contract_records_unique": total,
+            "signed_in_2025": date_coverage["signature_years"].get("2025", 0),
+            "distinct_contract_ids": len({row["contract_id"] for row in rows if row.get("contract_id")}),
+            "distinct_purchase_ids": len({row["purchase_id"] for row in rows if row.get("purchase_id")}),
+            "contract_ids_missing": read_errors.get("contratos_sem_id_pncp", 0),
+            "duplicate_rows_omitted": read_errors.get("duplicatas_descartadas_para_metricas", 0),
+            "empenho_like_records": sum(bool(row.get("is_empenho")) for row in rows),
+        },
+        "source_read_errors": {key: value for key, value in sorted(read_errors.items()) if value},
+        "field_coverage": _field_coverage(rows),
+        "date_coverage": date_coverage,
+        "geographic_and_administrative_coverage": {
+            "ufs": _count((row.get("uf") for row in rows), top),
+            "municipalities": _count((row.get("municipality") for row in rows), top),
+            "spheres": _count((row.get("sphere") for row in rows), top),
+            "organs": _count((row.get("org_name") or row.get("org_cnpj") for row in rows), top),
+            "distinct_org_cnpjs": len({row.get("org_cnpj") for row in rows if row.get("org_cnpj")}),
+            "distinct_units": len({(row.get("org_cnpj"), row.get("unit_code")) for row in rows if row.get("unit_code")}),
+            "distinct_municipalities": len({row.get("municipality") for row in rows if row.get("municipality")}),
+            "distinct_spheres": len({row.get("sphere") for row in rows if row.get("sphere")}),
+            "contracts_located_in_rj": sum(str(row.get("uf") or "").upper() == "RJ" for row in rows),
+        },
+        "distributions": {
+            "modalities": _count((row.get("modality") for row in rows), top),
+            "process_categories": _count((row.get("process_category") for row in rows), top),
+            "contract_types": _count((row.get("contract_type") for row in rows), top),
+            "suppliers": _count((row.get("supplier_name") or row.get("supplier_cnpj") for row in rows), top),
+            "distinct_supplier_ids": len({row.get("supplier_cnpj") for row in rows if row.get("supplier_cnpj")}),
+        },
+        "contract_values": _contract_values(rows),
+        "object_keyword_hits_non_exclusive": _object_keyword_hits(rows),
+        "contract_value_by": {
+            "sphere": _grouped_amounts(rows, "sphere", top),
+            "municipality": _grouped_amounts(rows, "municipality", top),
+            "modality": _grouped_amounts(rows, "modality", top),
+            "contract_type": _grouped_amounts(rows, "contract_type", top),
+            "process_category": _grouped_amounts(rows, "process_category", top),
+            "signature_month": _signature_month_values(rows),
+        },
+        "aggregate_link_coverage_in_current_inventory": _aggregate_link_coverage(inventory, rows),
+        "interpretation_limits": [
+            "Os registros analisados são contratos; a contratação vinculada é outra unidade lógica.",
+            "As distribuições refletem somente o conteúdo desta versão e não provam cobertura censitária do RJ.",
+            "ValorGlobal do contrato não é valor unitário homologado nem pagamento efetivo.",
+            "Menções no objeto são triagem textual; itens e editais precisam confirmar produto e unidade comparáveis.",
+        ],
+    }
+
+
+def _date_coverage(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Contratos por ano e mês de assinatura e de publicação, e as datas que não batem."""
     signature_years = Counter(str(row["signature_date"].year) for row in rows if row.get("signature_date"))
     publication_years = Counter(str(row["publication_date"].year) for row in rows if row.get("publication_date"))
     signature_months = Counter(row["signature_date"].strftime("%Y-%m") for row in rows if row.get("signature_date"))
@@ -289,7 +356,24 @@ def analyze(inventory_path: Path, project_root: Path, top: int = 20) -> dict[str
         and str(row.get("signature_date").year) != str(row.get("contract_year"))
         for row in rows
     )
+    return {
+        "signature_years": dict(sorted(signature_years.items())),
+        "publication_years": dict(sorted(publication_years.items())),
+        "signature_months": dict(sorted(signature_months.items())),
+        "publication_months": dict(sorted(publication_months.items())),
+        "contract_year_differs_from_signature_year": mismatch_year,
+        "signed_2025_but_published_before_2025": sum(
+            row.get("signature_date") is not None
+            and row["signature_date"].year == 2025
+            and row.get("publication_date") is not None
+            and row["publication_date"].year < 2025
+            for row in rows
+        ),
+    }
 
+
+def _field_coverage(rows: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    """Quantos contratos trazem cada campo do PNCP preenchido."""
     field_values = {
         "dataAssinatura": [row.get("signature_date") for row in rows],
         "dataPublicacaoPncp": [row.get("publication_date") for row in rows],
@@ -309,33 +393,42 @@ def analyze(inventory_path: Path, project_root: Path, top: int = 20) -> dict[str
         "modalidade": [row.get("modality") for row in rows],
         "valorGlobal": [row.get("value_global") for row in rows],
     }
-    fields = {
-        name: {"preenchidos": sum(value not in (None, "") for value in values), "total": total}
+    return {
+        name: {"preenchidos": sum(value not in (None, "") for value in values), "total": len(rows)}
         for name, values in field_values.items()
     }
 
+
+def _object_keyword_hits(rows: list[dict[str, Any]]) -> dict[str, int]:
+    """Contratos cujo objeto menciona cada termo de interesse (um contrato pode contar em vários)."""
     focus_terms = {
         "arroz": re.compile(r"\barroz\b", re.I),
         "ambulancia": re.compile(r"ambul[aâ]ncia", re.I),
         "tecnologia": re.compile(r"tecnologia|computador|notebook|software|inform[aá]tica", re.I),
         "manutencao": re.compile(r"manuten[cç][aã]o", re.I),
     }
-    object_hits = {
+    return {
         term: sum(bool(pattern.search(row.get("object") or "")) for row in rows)
         for term, pattern in focus_terms.items()
     }
 
+
+def _contract_values(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Resumo numérico de cada campo de valor, com os contratos sem o valor."""
     value_fields = {
         "valorGlobal": [row.get("value_global") for row in rows],
         "valorInicial": [row.get("value_initial") for row in rows],
         "valorParcela": [row.get("value_installment") for row in rows],
         "valorAcumulado": [row.get("value_accumulated") for row in rows],
     }
-    values = {}
-    for field, field_data in value_fields.items():
-        summary = _numeric_summary(field_data)
-        values[field] = _with_missing_count(summary, total)
+    return {
+        field: _with_missing_count(_numeric_summary(field_data), len(rows))
+        for field, field_data in value_fields.items()
+    }
 
+
+def _signature_month_values(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Valor global dos contratos por mês de assinatura."""
     by_signature_month: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         if row.get("signature_date"):
@@ -345,82 +438,7 @@ def analyze(inventory_path: Path, project_root: Path, top: int = 20) -> dict[str
         summary = _numeric_summary(row.get("value_global") for row in group)
         _with_missing_count(summary, len(group))
         signature_month_value.append({"mes_assinatura": month, "contratos": len(group), "valor_global": summary})
-
-    return {
-        "analysis": "structured_corpus_profile",
-        "inventory": {
-            "path": str(inventory_path),
-            "version": inventory.get("version"),
-            "coletado_em": inventory.get("coletado_em"),
-            "completo": inventory.get("completo"),
-            "manifest_hash": inventory.get("manifest_hash"),
-            "base_status": structured_base.get("status"),
-            "volume_alvo": structured_base.get("volume_alvo"),
-            "volume_obtido": structured_base.get("volume_obtido"),
-            "artifacts": structured_base.get("arquivos"),
-            "inventory_failures": structured_base.get("failure_count"),
-        },
-        "population": {
-            "contract_records_unique": total,
-            "signed_in_2025": signature_years.get("2025", 0),
-            "distinct_contract_ids": len({row["contract_id"] for row in rows if row.get("contract_id")}),
-            "distinct_purchase_ids": len({row["purchase_id"] for row in rows if row.get("purchase_id")}),
-            "contract_ids_missing": read_errors.get("contratos_sem_id_pncp", 0),
-            "duplicate_rows_omitted": read_errors.get("duplicatas_descartadas_para_metricas", 0),
-            "empenho_like_records": sum(bool(row.get("is_empenho")) for row in rows),
-        },
-        "source_read_errors": {key: value for key, value in sorted(read_errors.items()) if value},
-        "field_coverage": fields,
-        "date_coverage": {
-            "signature_years": dict(sorted(signature_years.items())),
-            "publication_years": dict(sorted(publication_years.items())),
-            "signature_months": dict(sorted(signature_months.items())),
-            "publication_months": dict(sorted(publication_months.items())),
-            "contract_year_differs_from_signature_year": mismatch_year,
-            "signed_2025_but_published_before_2025": sum(
-                row.get("signature_date") is not None
-                and row["signature_date"].year == 2025
-                and row.get("publication_date") is not None
-                and row["publication_date"].year < 2025
-                for row in rows
-            ),
-        },
-        "geographic_and_administrative_coverage": {
-            "ufs": _count((row.get("uf") for row in rows), top),
-            "municipalities": _count((row.get("municipality") for row in rows), top),
-            "spheres": _count((row.get("sphere") for row in rows), top),
-            "organs": _count((row.get("org_name") or row.get("org_cnpj") for row in rows), top),
-            "distinct_org_cnpjs": len({row.get("org_cnpj") for row in rows if row.get("org_cnpj")}),
-            "distinct_units": len({(row.get("org_cnpj"), row.get("unit_code")) for row in rows if row.get("unit_code")}),
-            "distinct_municipalities": len({row.get("municipality") for row in rows if row.get("municipality")}),
-            "distinct_spheres": len({row.get("sphere") for row in rows if row.get("sphere")}),
-            "contracts_located_in_rj": sum(str(row.get("uf") or "").upper() == "RJ" for row in rows),
-        },
-        "distributions": {
-            "modalities": _count((row.get("modality") for row in rows), top),
-            "process_categories": _count((row.get("process_category") for row in rows), top),
-            "contract_types": _count((row.get("contract_type") for row in rows), top),
-            "suppliers": _count((row.get("supplier_name") or row.get("supplier_cnpj") for row in rows), top),
-            "distinct_supplier_ids": len({row.get("supplier_cnpj") for row in rows if row.get("supplier_cnpj")}),
-        },
-        "contract_values": values,
-        "object_keyword_hits_non_exclusive": object_hits,
-        "contract_value_by": {
-            "sphere": _grouped_amounts(rows, "sphere", top),
-            "municipality": _grouped_amounts(rows, "municipality", top),
-            "modality": _grouped_amounts(rows, "modality", top),
-            "contract_type": _grouped_amounts(rows, "contract_type", top),
-            "process_category": _grouped_amounts(rows, "process_category", top),
-            "signature_month": signature_month_value,
-        },
-        "aggregate_link_coverage_in_current_inventory": _aggregate_link_coverage(inventory, rows),
-        "interpretation_limits": [
-            "Os registros analisados são contratos; a contratação vinculada é outra unidade lógica.",
-            "As distribuições refletem somente o conteúdo desta versão e não provam cobertura censitária do RJ.",
-            "ValorGlobal do contrato não é valor unitário homologado nem pagamento efetivo.",
-            "Menções no objeto são triagem textual; itens e editais precisam confirmar produto e unidade comparáveis.",
-        ],
-    }
+    return signature_month_value
 
 
 def _markdown(report: dict[str, Any]) -> str:

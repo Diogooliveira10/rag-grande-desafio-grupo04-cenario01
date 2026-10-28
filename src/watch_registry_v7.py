@@ -11,8 +11,8 @@ import os
 from pathlib import Path
 import time
 
-from src.reconciliar_unidades_v7 import reconciliar
-from src.recuperar_corpus_v7 import agora, gravar_json
+from src.reconcile_units_v7 import reconciliar
+from src.recover_corpus_v7 import agora, gravar_json
 
 
 def acompanhar(cadastro: Path, observadas: Path, destino: Path, estado: Path, *,

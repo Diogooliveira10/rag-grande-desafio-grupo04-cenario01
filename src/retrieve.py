@@ -159,7 +159,7 @@ def _records_for(
         chunk_id = str(record.get("chunk_id") or metadata.get("chunk_id") or "")
         if not chunk_id or chunk_id in seen_ids or not _matches_filters(metadata, filters, content=str(record.get("text", ""))):
             continue
-        # Texto ilegível (src/qualidade_corpus.py) não é evidência: já fica fora
+        # Texto ilegível (src/corpus_quality.py) não é evidência: já fica fora
         # do índice denso, e o BM25 lê o documents.jsonl, onde ele continua.
         if _metadata_value(metadata, "status_extracao") == "texto_ilegivel":
             continue
