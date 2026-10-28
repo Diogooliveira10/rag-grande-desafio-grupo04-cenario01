@@ -127,11 +127,20 @@ Estágios de consulta (nomes fixos no campo `stage`): `interacao`, `reformulacao
 
 - `query_analysis` ([src/query_analysis.py](src/query_analysis.py)): extrai da pergunta, sem LLM, filtros de ano, valor (mínimo, máximo, faixa) e órgão.
 - `roteamento` ([src/router.py](src/router.py)): escolhe as bases antes de buscar.
-- `retrieval_denso` / `retrieval_bm25` / `fusao_rrf` ([src/retrieve.py](src/retrieve.py)): busca híbrida com filtros de metadado. Os filtros são aplicados base a base: numa base sem o campo filtrado, ou em que o filtro excluiria todos os chunks, ele é ignorado e o log registra isso em `extra.filtros_ignorados`. Se ainda assim os filtros zerarem o resultado, [src/pipeline.py](src/pipeline.py) refaz a busca sem eles.
+- `retrieval_denso` / `retrieval_bm25` / `fusao_rrf` ([src/retrieve.py](src/retrieve.py)): busca híbrida com filtros de metadado. Os filtros são aplicados base a base: numa base sem o campo filtrado, ou em que o filtro excluiria todos os chunks, ele é ignorado e o log registra isso em `extra.filtros_ignorados`. Se ainda assim os filtros zerarem o resultado, [src/pipeline.py](src/pipeline.py) refaz a busca sem eles. As partes da busca ficam em [src/retrieval/](src/retrieval/), e `retrieve.py` é a entrada. Depois da fusão, no máximo `RETRIEVAL_MAX_PER_PURCHASE` trechos por compra (padrão 2; `0` desliga) ficam à frente, e os demais vão para o fim da lista, sem serem descartados: nas atas, uma compra tem muitas páginas e podia ocupar o topo inteiro. A regra não vale quando a pergunta cita um número do PNCP ou de contrato. Nas 9 perguntas de ata do conjunto de busca, as compras distintas no top 10 passaram de 4,67 para 6,44.
 - `rerank` ([src/rerank.py](src/rerank.py)): um cross-encoder local (`RERANK_MODEL`, padrão `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`, roda em CPU) reordena os `RERANK_CANDIDATES` (padrão 10) primeiros do RRF. Chunks JSON vão para o modelo com os campos de conteúdo primeiro (`objetoCompra`, título, órgão...), porque o modelo só lê 512 tokens. Se o modelo falhar, o log registra erro e o resultado volta a ser o do RRF. O `retrieve` aplica o reranker que receber; `reranker_padrao()` devolve o cross-encoder, ou `None` com `RERANK_ENABLED=false`. O `responder` ([src/pipeline.py](src/pipeline.py)) usa o `reranker_padrao()` quando nenhum reranker é passado. Na ablação no corpus v6 (47 perguntas rotuladas, 13 delas de identificador como CNPJ e número de contrato), o hit@3 sobe de 0,64 (só RRF) para 0,83 com o rerank, a melhor configuração medida; o denso sozinho não acha identificadores (0,31) e o BM25 sozinho erra as perguntas parafraseadas: ver [docs/ABLACAO_RERANK.md](docs/ABLACAO_RERANK.md). Na primeira execução o modelo (~470 MB) é baixado para o cache do Hugging Face.
 - `consulta_sql` ([src/structured_query.py](src/structured_query.py) + [src/structured_db.py](src/structured_db.py)): perguntas de conta sobre as bases estruturada e agregada (ranking, estatística com média e mediana, comparação entre esferas, evolução no tempo, agrupamento) são respondidas por uma consulta SQL pré-escrita e parametrizada — o LLM nunca escreve SQL. O resultado entra como chunk (`doc_type="sql"`, `chunk_id` começando com `sql:`) antes dos chunks da busca. Perguntas exclusivamente analíticas tentam SQL primeiro: com cálculo suficiente, pulam busca densa/BM25/RRF/rerank. A LLM escreve somente um template com `{{sql}}`, e o backend injeta os resultados completos depois, sem reescrita dos números pela LLM. O marcador precisa aparecer uma única vez, em linha própria; marcadores extras, números/citações na narrativa ou falha do modelo acionam fallback determinístico (`sql_template_fallback` no log). A validação do template é sintática, não prova semântica de toda a narrativa. Perguntas mistas mantêm a recuperação e a geração normal. Totais incluem zeros/centavos registrados, enquanto média/mediana e extremos informativos são qualificados para valores >= R$ 1,00. Validação real CLI/frontend e valores conferidos no bruto em [docs/NUMERICAL_VALIDATION.md](docs/NUMERICAL_VALIDATION.md). Se o termo pedido não existe no objeto de nenhuma contratação, o resultado diz isso em vez de calcular sobre outro assunto. Falha no banco é registrada no log e a resposta segue só com a busca.
-- `geracao` ([src/generate.py](src/generate.py)): guardrails determinísticos antes do LLM, prompt limitado à janela do modelo (`GENERATION_CONTEXT_CHARS` no total e `GENERATION_CHUNK_CHARS` por chunk; o log registra `chunks_no_prompt` e `chunks_fora_do_orcamento`) e saída pedida em JSON (`response_format`).
-- `validacao` ([src/generate.py](src/generate.py)): checa a saída do LLM. no caminho normal, JSON inválido vira recusa segura (no template SQL, preserva o resultado calculado como fallback); citação de chunk que não foi recuperado é descartada (`extra.citacoes_descartadas`) e dado pessoal na resposta é mascarado.
+- `interacao` ([src/conversation.py](src/conversation.py)) e `reformulacao` ([src/reformulation.py](src/reformulation.py)):
+  - **Interação:** a mensagem com rota já reconhecida não passa pelo LLM de intenção. Nas 36 perguntas do golden set, a etapa caiu de 62,8 s para 0 s.
+  - **Reformulação:** as continuações de troca de ano, de lugar e de esfera ("E em 2025?", "E em Niterói?", "E só os da esfera federal?") são resolvidas por regras, sem LLM. As pistas de continuação se dividem em fortes ("desses", "os mesmos") e fracas ("em 2025").
+  - **LLM da reformulação:** o restante vai ao LLM com `max_tokens` de 4.096 e prazo próprio (`REFORMULACAO_TIMEOUT`, padrão 60 s), que corta o tempo de fato. Se o prazo estourar, a pergunta segue com a anterior anexada (plano B).
+- `geracao` ([src/generate.py](src/generate.py) e as partes em [src/generation/](src/generation/)): guardrails determinísticos antes do LLM, prompt limitado à janela do modelo (`GENERATION_CONTEXT_CHARS` no total e `GENERATION_CHUNK_CHARS` por chunk; o log registra `chunks_no_prompt` e `chunks_fora_do_orcamento`) e saída pedida em JSON (`response_format`).
+- `validacao` ([src/generate.py](src/generate.py)): checa a saída do LLM. no caminho normal, JSON inválido vira recusa segura (no template SQL, preserva o resultado calculado como fallback); citação de chunk que não foi recuperado é descartada (`extra.citacoes_descartadas`) e dado pessoal na resposta é mascarado. As regras de citação ficam em [src/generation/citations.py](src/generation/citations.py):
+  - a menção a um trecho no texto ("o registro E1", "em E3") vira fonte numerada;
+  - a resposta sem nenhuma fonte pede a citação ao LLM uma vez;
+  - a recusa indevida, que só reconhece evidência insuficiente, volta a ser resposta.
+
+  O prompt do sistema, em `generate.py`, pede que a resposta que conclui pela ausência de dados cite os trechos examinados.
 
 [src/pipeline.py](src/pipeline.py) une as etapas numa única função (`responder`).
 
@@ -170,7 +179,7 @@ SQLite compatível, cobertura vetorial, validação e rollback.
 ├── tests/                       ← testes de contrato (pytest), offline
 ├── app/
 │   ├── cli.py                   ← interface de linha de comando: rota e resposta completa do pipeline
-│   ├── api.py                   ← API HTTP (FastAPI): /health, /api/v1/query, /api/v1/feedback, /api/v1/history, /api/v1/trace
+│   ├── api.py                   ← API HTTP (FastAPI): /health, /ready, /api/v1/query, /api/v1/feedback, /api/v1/history, /api/v1/trace
 │   └── rate_limit.py            ← limite de requisições por cliente (IP real atrás do túnel), 429 com Retry-After
 ├── src/
 │   ├── fetch_corpus.py          ← coleta determinística e versionada do corpus
@@ -188,18 +197,23 @@ SQLite compatível, cobertura vetorial, validação e rollback.
 │   ├── prepare_documents.py     ← extração por formato (PDF/HTML/CSV/JSON/JSONL), chunking e metadados canônicos
 │   ├── pca_indicators.py        ← indicadores agregados do PCA (1 indicador = 1 chunk) para a base agregada
 │   ├── ocr.py                   ← OCR (Tesseract) das páginas de PDF escaneadas, usado por prepare_documents.py
-│   ├── qualidade_corpus.py      ← controle de qualidade do normalizado: texto ilegível, vigência das normas, contrato↔compra, valor simbólico
+│   ├── corpus_quality.py        ← controle de qualidade do normalizado: texto ilegível, vigência das normas, contrato↔compra, valor simbólico
 │   ├── create_embeddings.py     ← embeddings com cache, multi-provedor e escrita incremental
 │   ├── index.py                 ← índice vetorial por base; gera embeddings ou reaproveita os de data/embeddings/
 │   ├── query_analysis.py        ← extrai filtros de ano, valor e órgão da pergunta (entrada; análise por LLM)
-│   ├── analysis/entities.py     ← órgão, município, fornecedor e CNPJ citados, pelo catálogo do corpus
+│   ├── analysis/                ← entities.py (órgão, município, fornecedor e CNPJ citados, pelo catálogo do corpus) e suppliers.py (fornecedor pela raiz do CNPJ e pela razão social)
+│   ├── conversation.py          ← etapa interacao: conversa, pedido de ajuda, injeção e role-play com resposta fixa, sem LLM
+│   ├── reformulation.py         ← etapa reformulacao: continuações ("E em 2025?") por regras ou pelo LLM, com prazo próprio
 │   ├── structured_db.py         ← base estruturada em SQL (Postgres/Neon ou SQLite): tabelas contratacoes e pca_planos
 │   ├── structured_query.py      ← consultas SQL fixas (ranking, estatística, evolução, agrupamento) como evidência (entrada)
 │   ├── sql_query/               ← detection.py (que conta a pergunta pede) e execution.py (WHERE e um executor por tipo)
 │   ├── router.py                ← roteamento determinístico (Adaptive RAG)
-│   ├── retrieve.py              ← recuperação híbrida: denso + BM25 + RRF, filtros de metadado por base, rerank plugável
+│   ├── retrieve.py              ← entrada da recuperação híbrida (denso + BM25 + RRF + rerank plugável); reexporta os nomes das partes
+│   ├── retrieval/               ← partes da busca: filters, lexical, ranking (inclui a variedade por compra), records, identifiers, norms, evidence
+│   ├── lexical_index.py         ← índice invertido da BM25 (arrays numpy), com o mesmo ranking da varredura
 │   ├── rerank.py                ← rerank por cross-encoder local sobre os candidatos do RRF
-│   ├── generate.py              ← geração com guardrails, prompt na janela do modelo e validação da saída do LLM
+│   ├── generate.py              ← entrada da geração: cliente LLM, prompt do sistema, gerar_resposta e validação; reexporta os nomes das partes
+│   ├── generation/              ← partes da geração: guardrails, context, notices, responses, sql_answer, parsing, generation_log, citations
 │   ├── sensitivity.py           ← política de sensibilidade: mascaramento de CPF/telefone/e-mail e filtro de restritos
 │   ├── pipeline.py              ← caso de uso: une query_analysis + roteamento + recuperação + geração (responder)
 │   ├── ports.py                 ← contratos (Protocol) que o pipeline espera da busca, do SQL, do LLM e do roteador
@@ -212,6 +226,7 @@ SQLite compatível, cobertura vetorial, validação e rollback.
 │   ├── offline_observation.py   ← contrato JSONL e correlação para operações offline
 │   ├── model_observation.py     ← chamadas SDK, uso disponível e cobertura de tentativas
 │   ├── trace.py                 ← caminho de uma pergunta ou de uma sessão, montado a partir do log
+│   ├── snapshot.py              ← validação do pacote de dados (runtime_bundle.json) usada pelo /ready
 │   └── schema.py                ← modelos Pydantic (chunk, roteamento, resposta, recusa)
 ├── llm_ecoa.py                  ← exemplo mínimo de geração e embedding via endpoint compartilhado
 ├── corpus_manifest.yaml         ← o que entra no corpus (fonte única de verdade)
@@ -219,6 +234,23 @@ SQLite compatível, cobertura vetorial, validação e rollback.
 ├── PERSONAS.md                  ← personas e perguntas de referência
 └── .env.example                 ← variáveis necessárias, sem valores reais
 ```
+
+**Organização do código (2026-10-26 a 2026-10-28).** O caminho da pergunta segue
+camadas, com a dependência apontando para dentro:
+- **domínio:** regras puras em `src/domain/`;
+- **portas:** contratos em `src/ports.py`;
+- **caso de uso:** `src/pipeline.py`, que recebe as implementações por injeção;
+- **adaptadores:** `src/retrieval/`, `src/generation/`, `src/sql_query/` e `src/analysis/`.
+
+O [tests/test_architecture.py](tests/test_architecture.py) falha se o domínio
+importar infraestrutura ou se uma parte importar a sua entrada. Nenhuma função
+de `src/` passa de 100 linhas.
+
+Os arquivos de `src/` com nome em português foram renomeados para inglês (por
+exemplo, `coletar_direto.py` → `direct_collection.py` e `qualidade_corpus.py` →
+`corpus_quality.py`). O nome antigo continua importável e executável
+(`python -m src.coletar_direto` funciona), e o teste de arquitetura confere cada
+um. Detalhes em [ARQUITETURA.md](ARQUITETURA.md).
 
 ## Como rodar
 
@@ -256,6 +288,18 @@ SNAPSHOT_MANIFEST=runtime_bundle.json
 ```
 
 Inicie ou reinicie a API e confira `/ready`. Não distribua o `.env` local.
+
+O `/ready` confere o pacote inteiro: os hashes dos arquivos, a versão do
+esquema SQL, a cobertura do índice e o catálogo. A primeira validação depois de
+subir leva **cerca de 2 minutos**. Enquanto ela roda, outras chamadas recebem na
+hora 503 com `validacao_em_andamento`, em vez de começar outra leitura. Depois,
+o resultado fica guardado enquanto nenhum arquivo do pacote mudar de tamanho ou
+de data, e as chamadas respondem em milissegundos.
+
+Desde 2026-10-27, só uma validação roda por vez. Antes, cada chamada repetia a
+validação inteira (cerca de 55 s de CPU), e chamadas seguidas chegaram a travar
+o backend. Para esperar a API ficar pronta, chame o `/ready` a cada 10 s, sem
+disparar várias chamadas ao mesmo tempo.
 Checksum do pacote, validação e rollback em
 [docs/REPARO_V7.md](docs/REPARO_V7.md).
 
@@ -280,14 +324,21 @@ Depois de ter os dados:
 .venv\Scripts\python -m uvicorn app.api:app --host 127.0.0.1 --port 8080
 ```
 
-Com a v7, a API leva cerca de 2 minutos para ficar pronta depois de subir: ela
-lê os índices e prepara o BM25 em segundo plano (`INDEX_PRELOAD`), e ocupa
-~4,6 GB de RAM ao subir e cerca de 6 GB depois de responder pelo LLM (medido em
-2026-10-19 e 2026-10-20 numa máquina de 16 GB). Desde 2026-10-26 o BM25 usa um
-índice invertido (`src/lexical_index.py`), que ocupa ~185 MB no lugar dos
-~1,4 GB das contagens por trecho, com o mesmo ranking; os números acima são de
-antes dessa mudança. Feche o que não
-for necessário antes da demonstração e faça uma pergunta de aquecimento.
+Com a v7, a API leva cerca de 1 minuto para subir e mais cerca de 2 minutos para
+a primeira validação do `/ready`. Ela lê os índices e prepara o BM25 em segundo
+plano (`INDEX_PRELOAD`).
+
+A memória caiu em 2026-10-26 e 2026-10-27, com o mesmo resultado nas buscas:
+- O BM25 passou a usar um índice invertido (`src/lexical_index.py`), que ocupa
+  ~185 MB no lugar dos ~1,4 GB das contagens por trecho.
+- Os metadados do índice passaram a ser lidos do próprio documento, sem uma
+  segunda cópia (−925 MB).
+- A pré-carga caiu de 5,1 GB para 4,2 GB, e o pico com o backend no ar ficou em
+  ~4,4 GB numa máquina de 16 GB (antes, ~6 GB depois de responder pelo LLM).
+
+Nas 47 buscas do conjunto de avaliação, o tempo total caiu de 179 s para cerca de
+40 s, com a mediana de 0,22 s por busca. Feche o que não for necessário antes da
+demonstração e faça uma pergunta de aquecimento.
 O golden set roda o pipeline no próprio processo e carrega a v7 de novo:
 desligue o backend antes de rodá-lo, para os dois não disputarem a memória.
 
@@ -624,6 +675,20 @@ py .\eval\ablacao_rerank.py --candidatos 10 30                 # ablação da re
 `eval/adapters.py:rota_apenas` avalia só o estágio de roteamento, sem chamar o LLM — útil para checar regressão rápida. `src/pipeline.py:responder` roda o pipeline completo (roteamento + recuperação híbrida via `retrieve.py` + geração via `generate.py`), chamando o LLM de verdade a cada pergunta do golden set.
 
 O relatório (`eval/runs/<run_id>/REPORT.md`) traz rota e recusa (o que define o acerto), citação, confiança, latência e tokens, e o texto de cada resposta. Um caso que dá erro aparece como ERRO sem interromper a rodada. Além de rota, recusa e citação, cada caso pode ter critérios de conteúdo (`deve_conter`, `deve_conter_qualquer`, `nao_deve_conter`, critérios numéricos, fonte esperada e teto de confiança). A rodada auditada mais recente e a análise de cada caso estão em [docs/registro_execucao_v6.md](docs/registro_execucao_v6.md), e o resultado vigente em [ARQUITETURA.md](ARQUITETURA.md). Os casos `G1`–`G3` testam os guardrails do cenário (dados bancários, credenciais em e-mail, juízo de fraude), e `E1`–`E3` os e-mails sintéticos: um e-mail público encontrado com os dados pessoais mascarados e duas recusas de conteúdo restrito (dados bancários e credencial). `I1`–`I4` buscam por identificador: número de controle de contrato e de ata e CNPJ de fornecedor e de órgão. P1.3, P4.2 e P4.3 continuam a pergunta anterior ("esses contratos", "os mesmos contratos"): declaram `depende_de`, e o avaliador manda as perguntas anteriores da persona como `historico` a `pipeline_completo`, como o frontend faz. A ablação do rerank usa outro conjunto, [eval/retrieval_set.jsonl](eval/retrieval_set.jsonl), com o trecho relevante de cada pergunta rotulado; resultado e decisão em [docs/ABLACAO_RERANK.md](docs/ABLACAO_RERANK.md).
+
+**Resultado vigente (2026-10-27, v7): 36/36, com 100% de citação**, nas
+rodadas que fecharam cada etapa da reorganização do código:
+- `golden-2026-10-27-v7-36-generate-modulos`;
+- `golden-2026-10-27-v7-36-pncp-preparacao`, depois da correção do cache do
+  índice do SQL.
+
+A P4.3 deixou de falhar com o ajuste da Pâmela: a resposta que reconhece
+evidência insuficiente não é tratada como recusa. Ela continua sensível ao
+tempo do ECOA, porque a reescrita da pergunta pode atingir o prazo de 60 s e
+seguir pelo plano B. Desde 2026-10-26, o golden set faz antes dos casos a mesma
+pré-carga do backend (modelo de rerank e índice da BM25), e a primeira pergunta
+não paga mais esse carregamento na latência. A suíte de testes tem **2.400
+testes**.
 
 **Conferência do complemento (2026-10-26):** o derivado com vetores completos
 deu **35/36 no golden original**. A união de grafias por CNPJ revelou que V1
