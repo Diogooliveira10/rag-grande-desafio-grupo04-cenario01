@@ -161,17 +161,25 @@ def _criar_indice_de_objeto(cursor: Any) -> bool:
     return True
 
 
-def _assinatura_do_arquivo(path: Path) -> Optional[tuple[str, int, int]]:
-    """Muda quando o arquivo muda (build, ``fts``); None se ele não existe."""
+def _assinatura_do_arquivo(path: Path) -> Optional[tuple[str, int, int, int]]:
+    """Muda quando o arquivo muda (build, ``fts``); None se ele não existe.
+
+    Data e tamanho não bastam: apagar e recriar o índice na mesma fração de
+    segundo reaproveita as páginas e deixa os dois iguais. O contador de
+    alterações do cabeçalho do SQLite (bytes 24-27) sobe a cada escrita.
+    """
     try:
         stat = path.stat()
+        with path.open("rb") as arquivo:
+            cabecalho = arquivo.read(28)
     except OSError:
         return None
-    return str(path.resolve()), stat.st_mtime_ns, stat.st_size
+    contador = int.from_bytes(cabecalho[24:28], "big") if len(cabecalho) == 28 else 0
+    return str(path.resolve()), stat.st_mtime_ns, stat.st_size, contador
 
 
 @lru_cache(maxsize=8)
-def _tem_indice_de_objeto(assinatura: tuple[str, int, int]) -> bool:
+def _tem_indice_de_objeto(assinatura: tuple[str, int, int, int]) -> bool:
     try:
         with closing(sqlite3.connect(f"file:{assinatura[0]}?mode=ro", uri=True)) as conexao:
             return conexao.execute(
@@ -183,7 +191,7 @@ def _tem_indice_de_objeto(assinatura: tuple[str, int, int]) -> bool:
 
 # Valores distintos (nomes de órgão, unidade, modalidade) por versão do arquivo
 # SQLite: eram relidos a cada pergunta, ~11% do tempo do SQL.
-_DISTINTOS: dict[tuple[tuple[str, int, int], str], frozenset] = {}
+_DISTINTOS: dict[tuple[tuple[str, int, int, int], str], frozenset] = {}
 
 
 _sql_observation: ContextVar[dict[str, Any] | None] = ContextVar("sql_observation", default=None)

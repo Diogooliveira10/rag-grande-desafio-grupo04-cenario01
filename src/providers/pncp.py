@@ -5,14 +5,129 @@ from __future__ import annotations
 import json
 import re
 import time
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from urllib.parse import urlencode
 
 from ..pncp_client import PncpClient
 from ..collection_policy import ano_assinatura, nome_instrumento, uf_unidade
 from .base import ResolvedSource, SourceArtifact, SourceCandidate, SourceRef
+
+
+@dataclass
+class _DiscoveryScan:
+    """Varredura paginada do PNCP, retomável pelo checkpoint de descoberta.
+
+    Guarda o que as buscas de publicação e de contratos têm em comum: páginas e
+    janelas já concluídas, total de páginas por janela, orçamento de páginas da
+    execução e o intervalo entre requisições.
+    """
+
+    candidates: dict[str, SourceCandidate]
+    completed_pages: set[str]
+    completed_windows: set[str]
+    pages_by_window: dict[str, Any]
+    page_size: int
+    rate_limit: float
+    page_budget: int
+    pages_requested: int = 0
+    budget_hit: bool = False
+    first_request: bool = True
+    expected_windows: set[str] = field(default_factory=set)
+
+    @classmethod
+    def from_state(
+        cls,
+        discovery_state: Any,
+        candidates: dict[str, SourceCandidate],
+        *,
+        page_size: int,
+        rate_limit: float,
+        page_budget: int,
+    ) -> "_DiscoveryScan":
+        resumed = isinstance(discovery_state, dict)
+        return cls(
+            candidates=candidates,
+            completed_pages=set(discovery_state.get("completed_pages") or []) if resumed else set(),
+            completed_windows=set(discovery_state.get("completed_windows") or []) if resumed else set(),
+            pages_by_window=dict(discovery_state.get("total_paginas_por_janela") or {}) if resumed else {},
+            page_size=page_size,
+            rate_limit=rate_limit,
+            page_budget=page_budget,
+        )
+
+    def starts_window(self, window_key: str) -> bool:
+        """Registra a janela como esperada; False quando o checkpoint já a concluiu."""
+        self.expected_windows.add(window_key)
+        if window_key in self.completed_windows:
+            return False
+        int(self.pages_by_window.get(window_key) or 0)  # total do checkpoint ilegível falha antes de pedir a janela
+        return True
+
+    def pages(self, window_key: str, max_pages: int) -> Iterator[tuple[int, str]]:
+        """Páginas a pedir na janela: pula as concluídas e para no orçamento da execução."""
+        for page in range(1, max_pages + 1):
+            if self.page_budget and self.pages_requested >= self.page_budget:
+                self.budget_hit = True
+                return
+            page_key = f"{window_key}:pagina={page}"
+            if page_key in self.completed_pages:
+                expected_total_pages = int(self.pages_by_window.get(window_key) or 0)
+                if expected_total_pages and page >= expected_total_pages:
+                    return
+                continue
+            if self.rate_limit and not self.first_request:
+                time.sleep(self.rate_limit)
+            self.first_request = False
+            yield page, page_key
+
+    def record_page(self, window_key: str, page: int, payload: Any, records: list[dict[str, Any]]) -> bool:
+        """Guarda o total de páginas informado e diz se a janela terminou nesta página."""
+        total_pages = payload.get("totalPaginas") if isinstance(payload, dict) else None
+        if total_pages is not None:
+            self.pages_by_window[window_key] = int(total_pages)
+        return (
+            not records
+            or (total_pages is not None and page >= int(total_pages))
+            or (total_pages is None and len(records) < self.page_size)
+        )
+
+    def notify(
+        self,
+        query: dict[str, Any],
+        window_key: str,
+        page: int,
+        page_key: str,
+        payload: Any,
+        window_done: bool,
+        candidates: list[SourceCandidate],
+        **extra: Any,
+    ) -> None:
+        on_page = query.get("on_discovery_page")
+        if callable(on_page):
+            on_page(
+                {
+                    "window": window_key,
+                    "page": page,
+                    "page_key": page_key,
+                    "total_paginas": int(self.pages_by_window.get(window_key) or 0) or None,
+                    "total_registros": payload.get("totalRegistros") if isinstance(payload, dict) else None,
+                    "window_done": window_done,
+                    "candidates": candidates,
+                    **extra,
+                }
+            )
+
+    def finish(self, discovery_state: Any) -> None:
+        if isinstance(discovery_state, dict):
+            discovery_state["pages_this_run"] = self.pages_requested
+            discovery_state["max_pages_this_run"] = self.page_budget or None
+            discovery_state["limite_execucao_atingido"] = self.budget_hit
+            discovery_state["scan_completo"] = self.expected_windows.issubset(
+                set(discovery_state.get("completed_windows") or [])
+            )
 
 
 class PNCPProvider:
@@ -204,21 +319,45 @@ class PNCPProvider:
             )
         return self._records(response.get("json"))
 
+    def _date_windows(self, start: date, end: date) -> list[tuple[str, str]]:
+        """Janelas de até 365 dias cobrindo o período, com as datas no formato da API."""
+        if end < start:
+            raise ValueError("dataFinal deve ser igual ou posterior a dataInicial")
+        windows: list[tuple[str, str]] = []
+        window_start = start
+        while window_start <= end:
+            window_end = min(end, window_start + timedelta(days=364))
+            windows.append((self._api_date(window_start.isoformat()), self._api_date(window_end.isoformat())))
+            window_start = window_end + timedelta(days=1)
+        return windows
+
+    @staticmethod
+    def _restored_candidates(discovery_state: Any, key: str, title: str, by_contract: bool = False) -> dict[str, SourceCandidate]:
+        """Candidatos já descobertos que o checkpoint guardou, sem os metadados da página."""
+        candidates: dict[str, SourceCandidate] = {}
+        if not isinstance(discovery_state, dict):
+            return candidates
+        for stable_id, source_value in (discovery_state.get(key) or {}).items():
+            try:
+                source_ref = SourceRef.from_dict(source_value)
+            except (TypeError, ValueError, KeyError):
+                continue
+            candidate_id = str(source_ref.key.get("numeroControlePNCP") or stable_id) if by_contract else stable_id
+            candidates[candidate_id] = SourceCandidate(
+                candidate_id=candidate_id,
+                source_ref=source_ref,
+                title=title,
+                metadata={},
+            )
+        return candidates
+
     def _search_publication(self, query: dict[str, Any], target: int) -> list[SourceCandidate]:
         params = dict(query.get("params") or {})
         year = int(params.get("ano") or query.get("ano") or 2025)
-        publication_start = date.fromisoformat(str(params.get("dataInicial") or f"{year}-01-01"))
-        publication_end = date.fromisoformat(str(params.get("dataFinal") or f"{year}-12-31"))
-        if publication_end < publication_start:
-            raise ValueError("dataFinal deve ser igual ou posterior a dataInicial")
-        publication_windows: list[tuple[str, str]] = []
-        window_start = publication_start
-        while window_start <= publication_end:
-            window_end = min(publication_end, window_start + timedelta(days=364))
-            publication_windows.append(
-                (self._api_date(window_start.isoformat()), self._api_date(window_end.isoformat()))
-            )
-            window_start = window_end + timedelta(days=1)
+        publication_windows = self._date_windows(
+            date.fromisoformat(str(params.get("dataInicial") or f"{year}-01-01")),
+            date.fromisoformat(str(params.get("dataFinal") or f"{year}-12-31")),
+        )
         page_size = max(10, min(int(params.get("tamanhoPagina") or 50), 50))
         max_pages = max(
             1,
@@ -231,147 +370,112 @@ class PNCPProvider:
         if isinstance(modalities, (str, int)):
             modalities = [modalities]
         discovery_state = query.get("discovery_state")
-        completed_pages = set(discovery_state.get("completed_pages") or []) if isinstance(discovery_state, dict) else set()
-        completed_windows = set(discovery_state.get("completed_windows") or []) if isinstance(discovery_state, dict) else set()
-        pages_by_window = dict(discovery_state.get("total_paginas_por_janela") or {}) if isinstance(discovery_state, dict) else {}
-        candidates: dict[str, SourceCandidate] = {}
-        if isinstance(discovery_state, dict):
-            for stable_id, source_value in (discovery_state.get("publication_sources") or {}).items():
-                try:
-                    source_ref = SourceRef.from_dict(source_value)
-                except (TypeError, ValueError, KeyError):
-                    continue
-                candidates[stable_id] = SourceCandidate(
-                    candidate_id=stable_id,
-                    source_ref=source_ref,
-                    title="Contratação PNCP",
-                    metadata={},
-                )
-        rate_limit = max(0.0, float(params.get("rate_limit_seg") or query.get("rate_limit_seg") or 0))
-        page_budget = max(0, int(query.get("max_pages") or 0)) if query.get("discovery_only") else 0
-        pages_requested = 0
-        budget_hit = False
-        expected_windows: set[str] = set()
-        first_request = True
+        scan = _DiscoveryScan.from_state(
+            discovery_state,
+            self._restored_candidates(discovery_state, "publication_sources", "Contratação PNCP"),
+            page_size=page_size,
+            rate_limit=max(0.0, float(params.get("rate_limit_seg") or query.get("rate_limit_seg") or 0)),
+            page_budget=max(0, int(query.get("max_pages") or 0)) if query.get("discovery_only") else 0,
+        )
+        uf = params.get("uf") or "RJ"
         for modality in modalities:
             for range_start, range_end in publication_windows:
-                window_key = f"{range_start}:{range_end}:modalidade={modality}:uf={params.get('uf') or 'RJ'}"
-                expected_windows.add(window_key)
-                if window_key in completed_windows:
+                window_key = f"{range_start}:{range_end}:modalidade={modality}:uf={uf}"
+                if not scan.starts_window(window_key):
                     continue
                 request_params = {
                     "dataInicial": range_start,
                     "dataFinal": range_end,
                     "codigoModalidadeContratacao": modality,
-                    "uf": params.get("uf") or "RJ",
+                    "uf": uf,
                     "tamanhoPagina": page_size,
                 }
-                expected_total_pages = int(pages_by_window.get(window_key) or 0)
-                for page in range(1, max_pages + 1):
-                    if page_budget and pages_requested >= page_budget:
-                        budget_hit = True
-                        break
-                    page_key = f"{window_key}:pagina={page}"
-                    if page_key in completed_pages:
-                        if expected_total_pages and page >= expected_total_pages:
-                            break
-                        continue
-                    if rate_limit and not first_request:
-                        time.sleep(rate_limit)
-                    first_request = False
-                    try:
-                        response = self.client.request_url(
-                            self.client.consulta_url(
-                                "/v1/contratacoes/publicacao", {**request_params, "pagina": page}
-                            ),
-                            "json",
-                            attempts=5,
-                            timeout=45.0,
-                        )
-                    except RuntimeError:
-                        if query.get("censo"):
-                            raise
-                        break
-                    if response.get("status") not in {"disponivel", "nao_modificado"}:
-                        if query.get("censo"):
-                            raise RuntimeError(
-                                f"PNCP indisponível em /v1/contratacoes/publicacao para UF {request_params['uf']}, "
-                                f"modalidade {modality}, janela {range_start}–{range_end}, página {page}: "
-                                f"{response.get('erro') or response.get('status') or 'resposta sem status'}"
-                            )
-                        break
-                    payload = response.get("json") or {}
-                    records = self._records(payload)
-                    pages_requested += 1
-                    page_candidates: list[SourceCandidate] = []
-                    page_organizations: list[dict[str, Any]] = []
-                    for record in records:
-                        organization = record.get("orgaoEntidade") or {}
-                        unit = record.get("unidadeOrgao") or {}
-                        organization_cnpj = self._first(
-                            organization,
-                            "cnpj",
-                            "cnpjOrgao",
-                        ) if isinstance(organization, dict) else None
-                        if organization_cnpj:
-                            page_organizations.append(
-                                {
-                                    "cnpj": str(organization_cnpj),
-                                    "unidadeOrgao": unit if isinstance(unit, dict) else {},
-                                }
-                            )
-                        source_ref = self.purchase_ref(record)
-                        if source_ref is None:
-                            continue
-                        candidate = SourceCandidate(
-                            candidate_id=source_ref.stable_id,
-                            source_ref=source_ref,
-                            title=self._candidate_title(record, "Contratação PNCP"),
-                            metadata={
-                                **record,
-                                "_source_url": self.client.consulta_base + self._purchase_path(source_ref),
-                            },
-                        )
-                        candidates[source_ref.stable_id] = candidate
-                        page_candidates.append(candidate)
-                    total_pages = payload.get("totalPaginas") if isinstance(payload, dict) else None
-                    if total_pages is not None:
-                        expected_total_pages = int(total_pages)
-                        pages_by_window[window_key] = expected_total_pages
-                    window_done = (
-                        not records
-                        or (total_pages is not None and page >= int(total_pages))
-                        or (total_pages is None and len(records) < page_size)
-                    )
-                    on_page = query.get("on_discovery_page")
-                    if callable(on_page):
-                        on_page(
-                            {
-                                "window": window_key,
-                                "page": page,
-                                "page_key": page_key,
-                                "total_paginas": expected_total_pages or None,
-                                "total_registros": payload.get("totalRegistros") if isinstance(payload, dict) else None,
-                                "window_done": window_done,
-                                "candidates": page_candidates,
-                                "publication_organizations": page_organizations,
-                            }
-                        )
-                    if window_done:
-                        break
-                if budget_hit:
+                self._scan_publication_window(scan, query, window_key, request_params, max_pages)
+                if scan.budget_hit:
                     break
-            if budget_hit:
+            if scan.budget_hit:
                 break
-        if isinstance(discovery_state, dict):
-            discovery_state["pages_this_run"] = pages_requested
-            discovery_state["max_pages_this_run"] = page_budget or None
-            discovery_state["limite_execucao_atingido"] = budget_hit
-            discovery_state["scan_completo"] = expected_windows.issubset(
-                set(discovery_state.get("completed_windows") or [])
-            )
-        ordered = [candidates[key] for key in sorted(candidates)]
+        scan.finish(discovery_state)
+        ordered = [scan.candidates[key] for key in sorted(scan.candidates)]
         return [] if query.get("discovery_only") else ordered if query.get("censo") else ordered[:target]
+
+    def _scan_publication_window(
+        self,
+        scan: _DiscoveryScan,
+        query: dict[str, Any],
+        window_key: str,
+        request_params: dict[str, Any],
+        max_pages: int,
+    ) -> None:
+        for page, page_key in scan.pages(window_key, max_pages):
+            try:
+                response = self.client.request_url(
+                    self.client.consulta_url(
+                        "/v1/contratacoes/publicacao", {**request_params, "pagina": page}
+                    ),
+                    "json",
+                    attempts=5,
+                    timeout=45.0,
+                )
+            except RuntimeError:
+                if query.get("censo"):
+                    raise
+                break
+            if response.get("status") not in {"disponivel", "nao_modificado"}:
+                if query.get("censo"):
+                    raise RuntimeError(
+                        f"PNCP indisponível em /v1/contratacoes/publicacao para UF {request_params['uf']}, "
+                        f"modalidade {request_params['codigoModalidadeContratacao']}, "
+                        f"janela {request_params['dataInicial']}–{request_params['dataFinal']}, página {page}: "
+                        f"{response.get('erro') or response.get('status') or 'resposta sem status'}"
+                    )
+                break
+            payload = response.get("json") or {}
+            records = self._records(payload)
+            scan.pages_requested += 1
+            page_candidates, page_organizations = self._publication_page(records)
+            for candidate in page_candidates:
+                scan.candidates[candidate.candidate_id] = candidate
+            window_done = scan.record_page(window_key, page, payload, records)
+            scan.notify(query, window_key, page, page_key, payload, window_done, page_candidates,
+                        publication_organizations=page_organizations)
+            if window_done:
+                break
+
+    def _publication_page(self, records: list[dict[str, Any]]) -> tuple[list[SourceCandidate], list[dict[str, Any]]]:
+        """(compras da página, órgãos que publicaram nela)."""
+        page_candidates: list[SourceCandidate] = []
+        page_organizations: list[dict[str, Any]] = []
+        for record in records:
+            organization = record.get("orgaoEntidade") or {}
+            unit = record.get("unidadeOrgao") or {}
+            organization_cnpj = self._first(
+                organization,
+                "cnpj",
+                "cnpjOrgao",
+            ) if isinstance(organization, dict) else None
+            if organization_cnpj:
+                page_organizations.append(
+                    {
+                        "cnpj": str(organization_cnpj),
+                        "unidadeOrgao": unit if isinstance(unit, dict) else {},
+                    }
+                )
+            source_ref = self.purchase_ref(record)
+            if source_ref is None:
+                continue
+            page_candidates.append(
+                SourceCandidate(
+                    candidate_id=source_ref.stable_id,
+                    source_ref=source_ref,
+                    title=self._candidate_title(record, "Contratação PNCP"),
+                    metadata={
+                        **record,
+                        "_source_url": self.client.consulta_base + self._purchase_path(source_ref),
+                    },
+                )
+            )
+        return page_candidates, page_organizations
 
     def _ata_candidate(self, record: dict[str, Any]) -> SourceCandidate | None:
         control_number = self._first(
@@ -506,50 +610,10 @@ class PNCPProvider:
                 if rate_limit and not first_request:
                     time.sleep(rate_limit)
                 first_request = False
-                response = self.client.request_url(
-                    self.client.api_url(f"/v1/orgaos/{cnpj}/unidades"),
-                    "json",
-                    attempts=5,
-                    timeout=45.0,
-                )
-                if response.get("status") not in {"disponivel", "nao_modificado"}:
-                    verification = {
-                        "status": "falhou",
-                        "erro": response.get("erro") or response.get("status") or "resposta sem status",
-                    }
-                    verifications[cnpj] = verification
-                    if callable(on_organization_verified):
-                        on_organization_verified(cnpj, verification)
+                units = self._request_rj_units(cnpj, verifications, on_organization_verified)
+                if units is None:
                     continue
-                units = []
-                for unit in self._records(response.get("json")):
-                    code = self._first(
-                        unit,
-                        "codigoUnidadeAdministrativa",
-                        "codigoUnidade",
-                        "codigo",
-                    )
-                    if not code or self._unit_uf({"unidadeOrgao": unit}) != "RJ":
-                        continue
-                    municipality_code = self._first(
-                        unit,
-                        "codigoIbge",
-                        "codigoMunicipioIbge",
-                        "municipioCodigoIbge",
-                    )
-                    units.append(
-                        {
-                            "codigoUnidadeAdministrativa": str(code),
-                            "ufSigla": "RJ",
-                            **(
-                                {"codigoIbge": str(municipality_code)}
-                                if municipality_code not in (None, "")
-                                else {}
-                            ),
-                        }
-                    )
-                verification = {"status": "verificado", "unidades_rj": units}
-                verifications[cnpj] = verification
+            verification = verifications[cnpj]
             observed_codes = {
                 str(code).strip()
                 for code in (observed_by_cnpj.get(cnpj) or {})
@@ -560,7 +624,6 @@ class PNCPProvider:
                 for unit in units
                 if str(unit.get("codigoUnidadeAdministrativa") or "").strip()
             }
-            verification = verifications[cnpj]
             verification["unidades_publicadas_observadas"] = len(observed_codes)
             verification["unidades_observadas_nao_listadas_pelo_orgao"] = sorted(
                 observed_codes - verified_codes
@@ -583,6 +646,66 @@ class PNCPProvider:
                         ),
                     }
         result = [scopes[key] for key in sorted(scopes)]
+        self._summarize_unit_verification(discovery_state, organizations, verifications, observed_by_cnpj, result)
+        return result
+
+    def _request_rj_units(
+        self, cnpj: str, verifications: dict[str, Any], on_organization_verified: Any
+    ) -> list[dict[str, str]] | None:
+        """Unidades RJ do cadastro oficial do órgão, registradas em ``verifications``; None se a consulta falhou."""
+        response = self.client.request_url(
+            self.client.api_url(f"/v1/orgaos/{cnpj}/unidades"),
+            "json",
+            attempts=5,
+            timeout=45.0,
+        )
+        if response.get("status") not in {"disponivel", "nao_modificado"}:
+            verification = {
+                "status": "falhou",
+                "erro": response.get("erro") or response.get("status") or "resposta sem status",
+            }
+            verifications[cnpj] = verification
+            if callable(on_organization_verified):
+                on_organization_verified(cnpj, verification)
+            return None
+        units = []
+        for unit in self._records(response.get("json")):
+            code = self._first(
+                unit,
+                "codigoUnidadeAdministrativa",
+                "codigoUnidade",
+                "codigo",
+            )
+            if not code or self._unit_uf({"unidadeOrgao": unit}) != "RJ":
+                continue
+            municipality_code = self._first(
+                unit,
+                "codigoIbge",
+                "codigoMunicipioIbge",
+                "municipioCodigoIbge",
+            )
+            units.append(
+                {
+                    "codigoUnidadeAdministrativa": str(code),
+                    "ufSigla": "RJ",
+                    **(
+                        {"codigoIbge": str(municipality_code)}
+                        if municipality_code not in (None, "")
+                        else {}
+                    ),
+                }
+            )
+        verifications[cnpj] = {"status": "verificado", "unidades_rj": units}
+        return units
+
+    @staticmethod
+    def _summarize_unit_verification(
+        discovery_state: dict[str, Any],
+        organizations: list[str],
+        verifications: dict[str, Any],
+        observed_by_cnpj: dict[str, Any],
+        result: list[dict[str, str]],
+    ) -> None:
         discovery_state["verified_unit_scopes"] = result
         discovery_state["unidades_rj_catalogadas"] = sum(
             len((verification.get("unidades_rj") or []))
@@ -605,7 +728,6 @@ class PNCPProvider:
         discovery_state["verificacao_completa"] = discovery_state["organizacoes_verificadas"] == len(
             organizations
         )
-        return result
 
     def validate_configuration(self, query: dict[str, Any]) -> None:
         """Fail closed on an incomplete RJ CNPJ roster before resuming or collecting a census."""
@@ -619,72 +741,27 @@ class PNCPProvider:
 
     def _search_signed_contracts(self, query: dict[str, Any], target: int) -> list[SourceCandidate]:
         params = dict(query.get("params") or {})
-        unit_scopes = query.get("verified_unit_scopes") or params.get("verified_unit_scopes") or []
-        if (query.get("require_verified_unit_scopes") or query.get("censo_nacional")) and not unit_scopes:
-            raise RuntimeError("nenhuma unidade RJ verificada disponível para consultar contratos")
-        if unit_scopes:
-            normalized_scopes = sorted(
-                {
-                    (
-                        str(scope.get("cnpj") or "").strip(),
-                        str(scope.get("codigoUnidadeAdministrativa") or "").strip(),
-                    )
-                    for scope in unit_scopes
-                    if isinstance(scope, dict)
-                    and str(scope.get("cnpj") or "").strip()
-                    and str(scope.get("codigoUnidadeAdministrativa") or "").strip()
-                    and str(scope.get("ufSigla") or "").upper() == "RJ"
-                }
-            )
-            if (query.get("require_verified_unit_scopes") or query.get("censo_nacional")) and len(normalized_scopes) != len(unit_scopes):
-                raise RuntimeError("escopos de unidade inválidos ou fora do RJ no checkpoint")
-            cnpj_scopes: list[tuple[str | None, str | None]] = list(normalized_scopes)
-        else:
-            cnpj_scopes = [(cnpj, None) for cnpj in self._load_contract_cnpjs(query, params)] or [(None, None)]
+        cnpj_scopes = self._contract_scopes(query, params)
         signature_year = str(params.get("anoAssinatura") or query.get("anoAssinatura") or "2025")
-        publication_start = date.fromisoformat(str(params.get("dataInicial") or "2025-01-01"))
-        publication_end = date.fromisoformat(str(params.get("dataFinal") or "2026-09-25"))
-        if publication_end < publication_start:
-            raise ValueError("dataFinal deve ser igual ou posterior a dataInicial")
-        publication_windows: list[tuple[str, str]] = []
-        window_start = publication_start
-        while window_start <= publication_end:
-            window_end = min(publication_end, window_start + timedelta(days=364))
-            publication_windows.append(
-                (self._api_date(window_start.isoformat()), self._api_date(window_end.isoformat()))
-            )
-            window_start = window_end + timedelta(days=1)
+        publication_windows = self._date_windows(
+            date.fromisoformat(str(params.get("dataInicial") or "2025-01-01")),
+            date.fromisoformat(str(params.get("dataFinal") or "2026-09-25")),
+        )
         page_size = max(1, min(int(params.get("tamanhoPagina") or 500), 500))
         rate_limit = max(0.0, float(params.get("rate_limit_seg") or query.get("rate_limit_seg") or 0))
-        candidates: dict[str, SourceCandidate] = {}
         discovery_state = query.get("discovery_state")
-        if isinstance(discovery_state, dict):
-            for stable_id, source_value in (discovery_state.get("eligible_sources") or {}).items():
-                try:
-                    source_ref = SourceRef.from_dict(source_value)
-                except (TypeError, ValueError, KeyError):
-                    continue
-                contract_id = str(source_ref.key.get("numeroControlePNCP") or stable_id)
-                candidates[contract_id] = SourceCandidate(
-                    candidate_id=contract_id,
-                    source_ref=source_ref,
-                    title="Contrato PNCP",
-                    metadata={},
-                )
-        completed_pages = set(discovery_state.get("completed_pages") or []) if isinstance(discovery_state, dict) else set()
-        completed_windows = set(discovery_state.get("completed_windows") or []) if isinstance(discovery_state, dict) else set()
-        pages_by_window = dict(discovery_state.get("total_paginas_por_janela") or {}) if isinstance(discovery_state, dict) else {}
-        first_request = True
-        page_budget = max(0, int(query.get("max_pages") or 0)) if query.get("discovery_only") else 0
-        pages_requested = 0
-        budget_hit = False
-        expected_windows: set[str] = set()
+        scan = _DiscoveryScan.from_state(
+            discovery_state,
+            self._restored_candidates(discovery_state, "eligible_sources", "Contrato PNCP", by_contract=True),
+            page_size=page_size,
+            rate_limit=rate_limit,
+            page_budget=max(0, int(query.get("max_pages") or 0)) if query.get("discovery_only") else 0,
+        )
         for cnpj, unit_code in cnpj_scopes:
             for range_start, range_end in publication_windows:
                 scope_key = f"{cnpj or 'nacional'}:{unit_code or 'todas'}"
                 window_key = f"{range_start}:{range_end}:{scope_key}"
-                expected_windows.add(window_key)
-                if window_key in completed_windows:
+                if not scan.starts_window(window_key):
                     continue
                 first_params = {
                     "dataInicial": range_start,
@@ -696,139 +773,147 @@ class PNCPProvider:
                     first_params["cnpjOrgao"] = cnpj
                 if unit_code:
                     first_params["codigoUnidadeAdministrativa"] = unit_code
-                expected_total_pages = int(pages_by_window.get(window_key) or 0)
-                for page in range(1, 100_001):
-                    if page_budget and pages_requested >= page_budget:
-                        budget_hit = True
-                        break
-                    page_key = f"{window_key}:pagina={page}"
-                    if page_key in completed_pages:
-                        if expected_total_pages and page >= expected_total_pages:
-                            break
-                        continue
-                    if rate_limit and not first_request:
-                        time.sleep(rate_limit)
-                    first_request = False
-                    request_params = {**first_params, "pagina": page}
-                    response = self.client.request_url(
-                        self.client.consulta_url("/v1/contratos", request_params),
-                        "json",
-                        attempts=5,
-                        timeout=45.0,
-                    )
-                    pages_requested += 1
-                    if response.get("status") not in {"disponivel", "nao_modificado"}:
-                        raise RuntimeError(
-                            f"PNCP indisponível em /v1/contratos para CNPJ {cnpj or 'consulta nacional'}, "
-                            f"janela {range_start}–{range_end}, página {page}: "
-                            f"{response.get('erro') or response.get('status') or 'resposta sem status'}"
-                        )
-                    payload = response.get("json") or {}
-                    records = self._records(payload)
-                    page_candidates: list[SourceCandidate] = []
-                    for record in records:
-                        parts = self._contract_parts(record)
-                        if parts is None or self._is_empenho(record):
-                            continue
-                        unit_record = self._first(record, "unidadeOrgao", "unidadeAdministrativa") or {}
-                        record_unit = self._first(
-                            record,
-                            "codigoUnidadeAdministrativa",
-                            "codigoUnidade",
-                        ) or self._first(
-                            unit_record,
-                            "codigoUnidadeAdministrativa",
-                            "codigoUnidade",
-                            "codigo",
-                        )
-                        if (
-                            self._signature_year(record) != signature_year
-                            or self._unit_uf(record) != "RJ"
-                            or (unit_code and str(record_unit or "") != unit_code)
-                        ):
-                            continue
-                        control, contract_cnpj, year, sequence = parts
-                        purchase_control = self._first(
-                            record,
-                            "numeroControlePNCPCompra",
-                            "numeroControlePncpCompra",
-                        )
-                        source_ref = SourceRef(
-                            provider=self.name,
-                            resource_type="contrato_assinado",
-                            key={
-                                "numeroControlePNCP": control,
-                                "cnpj": contract_cnpj,
-                                "ano": year,
-                                "sequencial": sequence,
-                                **(
-                                    {"codigoUnidadeAdministrativa": str(record_unit)}
-                                    if record_unit not in (None, "")
-                                    else {}
-                                ),
-                                **({"numeroControlePNCPCompra": str(purchase_control)} if purchase_control else {}),
-                            },
-                        )
-                        candidate = SourceCandidate(
-                            candidate_id=control,
-                            source_ref=source_ref,
-                            title=self._candidate_title(record, "Contrato PNCP"),
-                            metadata={
-                                **record,
-                                "_source_url": self.client.consulta_url("/v1/contratos", request_params),
-                                "_resource_kind": "contrato",
-                            },
-                        )
-                        previous_candidate = candidates.get(control)
-                        previous_purchase = (
-                            previous_candidate.source_ref.key.get("numeroControlePNCPCompra")
-                            if previous_candidate
-                            else None
-                        )
-                        current_purchase = source_ref.key.get("numeroControlePNCPCompra")
-                        if previous_candidate is None or (
-                            current_purchase
-                            and (not previous_purchase or str(current_purchase) < str(previous_purchase))
-                        ):
-                            candidates[control] = candidate
-                        page_candidates.append(candidates[control])
-                    total_pages = payload.get("totalPaginas") if isinstance(payload, dict) else None
-                    if total_pages is not None:
-                        expected_total_pages = int(total_pages)
-                        pages_by_window[window_key] = expected_total_pages
-                    window_done = (
-                        not records
-                        or (total_pages is not None and page >= int(total_pages))
-                        or (total_pages is None and len(records) < page_size)
-                    )
-                    on_page = query.get("on_discovery_page")
-                    if callable(on_page):
-                        on_page(
-                            {
-                                "window": window_key,
-                                "page": page,
-                                "page_key": page_key,
-                                "total_paginas": expected_total_pages or None,
-                                "total_registros": payload.get("totalRegistros") if isinstance(payload, dict) else None,
-                                "window_done": window_done,
-                                "candidates": page_candidates,
-                            }
-                        )
-                    if window_done:
-                        break
-                if budget_hit:
+                self._scan_contract_window(scan, query, window_key, first_params, cnpj, unit_code, signature_year)
+                if scan.budget_hit:
                     break
-            if budget_hit:
+            if scan.budget_hit:
                 break
-        if isinstance(discovery_state, dict):
-            discovery_state["pages_this_run"] = pages_requested
-            discovery_state["max_pages_this_run"] = page_budget or None
-            discovery_state["limite_execucao_atingido"] = budget_hit
-            discovery_state["scan_completo"] = expected_windows.issubset(
-                set(discovery_state.get("completed_windows") or [])
-            )
-        ordered = [candidates[key] for key in sorted(candidates)]
+        scan.finish(discovery_state)
+        ordered = [scan.candidates[key] for key in sorted(scan.candidates)]
         return ordered if query.get("censo") else ordered[:target]
+
+    def _contract_scopes(self, query: dict[str, Any], params: dict[str, Any]) -> list[tuple[str | None, str | None]]:
+        """(CNPJ, unidade) a consultar: unidades RJ verificadas ou, sem elas, os CNPJs configurados."""
+        unit_scopes = query.get("verified_unit_scopes") or params.get("verified_unit_scopes") or []
+        if (query.get("require_verified_unit_scopes") or query.get("censo_nacional")) and not unit_scopes:
+            raise RuntimeError("nenhuma unidade RJ verificada disponível para consultar contratos")
+        if not unit_scopes:
+            return [(cnpj, None) for cnpj in self._load_contract_cnpjs(query, params)] or [(None, None)]
+        normalized_scopes = sorted(
+            {
+                (
+                    str(scope.get("cnpj") or "").strip(),
+                    str(scope.get("codigoUnidadeAdministrativa") or "").strip(),
+                )
+                for scope in unit_scopes
+                if isinstance(scope, dict)
+                and str(scope.get("cnpj") or "").strip()
+                and str(scope.get("codigoUnidadeAdministrativa") or "").strip()
+                and str(scope.get("ufSigla") or "").upper() == "RJ"
+            }
+        )
+        if (query.get("require_verified_unit_scopes") or query.get("censo_nacional")) and len(normalized_scopes) != len(unit_scopes):
+            raise RuntimeError("escopos de unidade inválidos ou fora do RJ no checkpoint")
+        return list(normalized_scopes)
+
+    def _scan_contract_window(
+        self,
+        scan: _DiscoveryScan,
+        query: dict[str, Any],
+        window_key: str,
+        first_params: dict[str, Any],
+        cnpj: str | None,
+        unit_code: str | None,
+        signature_year: str,
+    ) -> None:
+        for page, page_key in scan.pages(window_key, 100_000):
+            request_params = {**first_params, "pagina": page}
+            response = self.client.request_url(
+                self.client.consulta_url("/v1/contratos", request_params),
+                "json",
+                attempts=5,
+                timeout=45.0,
+            )
+            scan.pages_requested += 1
+            if response.get("status") not in {"disponivel", "nao_modificado"}:
+                raise RuntimeError(
+                    f"PNCP indisponível em /v1/contratos para CNPJ {cnpj or 'consulta nacional'}, "
+                    f"janela {first_params['dataInicial']}–{first_params['dataFinal']}, página {page}: "
+                    f"{response.get('erro') or response.get('status') or 'resposta sem status'}"
+                )
+            payload = response.get("json") or {}
+            records = self._records(payload)
+            page_candidates: list[SourceCandidate] = []
+            for record in records:
+                candidate = self._contract_candidate(record, request_params, signature_year, unit_code)
+                if candidate is None:
+                    continue
+                control = candidate.candidate_id
+                previous_candidate = scan.candidates.get(control)
+                previous_purchase = (
+                    previous_candidate.source_ref.key.get("numeroControlePNCPCompra")
+                    if previous_candidate
+                    else None
+                )
+                current_purchase = candidate.source_ref.key.get("numeroControlePNCPCompra")
+                # A mesma compra vinculada vence de forma estável: a de menor controle.
+                if previous_candidate is None or (
+                    current_purchase
+                    and (not previous_purchase or str(current_purchase) < str(previous_purchase))
+                ):
+                    scan.candidates[control] = candidate
+                page_candidates.append(scan.candidates[control])
+            window_done = scan.record_page(window_key, page, payload, records)
+            scan.notify(query, window_key, page, page_key, payload, window_done, page_candidates)
+            if window_done:
+                break
+
+    def _contract_candidate(
+        self, record: dict[str, Any], request_params: dict[str, Any], signature_year: str, unit_code: str | None
+    ) -> SourceCandidate | None:
+        """Contrato assinado no ano, numa unidade do RJ (e na unidade pedida); empenhos ficam de fora."""
+        parts = self._contract_parts(record)
+        if parts is None or self._is_empenho(record):
+            return None
+        unit_record = self._first(record, "unidadeOrgao", "unidadeAdministrativa") or {}
+        record_unit = self._first(
+            record,
+            "codigoUnidadeAdministrativa",
+            "codigoUnidade",
+        ) or self._first(
+            unit_record,
+            "codigoUnidadeAdministrativa",
+            "codigoUnidade",
+            "codigo",
+        )
+        if (
+            self._signature_year(record) != signature_year
+            or self._unit_uf(record) != "RJ"
+            or (unit_code and str(record_unit or "") != unit_code)
+        ):
+            return None
+        control, contract_cnpj, year, sequence = parts
+        purchase_control = self._first(
+            record,
+            "numeroControlePNCPCompra",
+            "numeroControlePncpCompra",
+        )
+        source_ref = SourceRef(
+            provider=self.name,
+            resource_type="contrato_assinado",
+            key={
+                "numeroControlePNCP": control,
+                "cnpj": contract_cnpj,
+                "ano": year,
+                "sequencial": sequence,
+                **(
+                    {"codigoUnidadeAdministrativa": str(record_unit)}
+                    if record_unit not in (None, "")
+                    else {}
+                ),
+                **({"numeroControlePNCPCompra": str(purchase_control)} if purchase_control else {}),
+            },
+        )
+        return SourceCandidate(
+            candidate_id=control,
+            source_ref=source_ref,
+            title=self._candidate_title(record, "Contrato PNCP"),
+            metadata={
+                **record,
+                "_source_url": self.client.consulta_url("/v1/contratos", request_params),
+                "_resource_kind": "contrato",
+            },
+        )
 
     def _search_atas(self, query: dict[str, Any], target: int) -> list[SourceCandidate]:
         params = dict(query.get("params") or {})
@@ -908,191 +993,137 @@ class PNCPProvider:
 
         resource_type = source_ref.resource_type.casefold()
         if resource_type in {"contrato_assinado", "contrato_pncp"}:
-            cnpj, year, sequence = self._key(source_ref, "cnpj", "ano", "sequencial")
-            base = f"{self.client.api_base}/v1/orgaos/{cnpj}/contratos/{year}/{sequence}"
-            artifacts = (
-                SourceArtifact(
-                    artifact_id=f"{source_ref.stable_id}:detalhe",
-                    source_ref=source_ref,
-                    url=base,
-                    artifact_type="json",
-                    content_type="application/json",
-                    filename="contrato_detalhe.json",
-                    metadata={"logical_unit": True, "resource_kind": "contrato"},
-                ),
-                SourceArtifact(
-                    artifact_id=f"{source_ref.stable_id}:arquivos",
-                    source_ref=source_ref,
-                    url=base + "/arquivos",
-                    artifact_type="json",
-                    content_type="application/json",
-                    filename="contrato_arquivos.json",
-                    metadata={"logical_unit": False, "resource_kind": "documentos_contrato"},
-                ),
-            )
-            linked_purchase = source_ref.key.get("numeroControlePNCPCompra")
-            if linked_purchase:
-                purchase = self.purchase_ref({"numeroControlePNCP": linked_purchase})
-                if purchase is not None:
-                    purchase_base = self.client.api_base + self._purchase_path(purchase)
-                    artifacts += (
-                        SourceArtifact(
-                            artifact_id=f"{source_ref.stable_id}:contratacao_vinculada",
-                            source_ref=source_ref,
-                            url=self.client.consulta_base + self._purchase_path(purchase),
-                            artifact_type="json",
-                            content_type="application/json",
-                            filename="contratacao_vinculada.json",
-                            metadata={
-                                "logical_unit": False,
-                                "resource_kind": "contratacao_vinculada",
-                                "comprasgov_fallback": {
-                                    "resource": "contratacao",
-                                    "numeroControlePNCPCompra": linked_purchase,
-                                },
-                            },
-                        ),
-                        SourceArtifact(
-                            artifact_id=f"{source_ref.stable_id}:atas_compra",
-                            source_ref=source_ref,
-                            url=purchase_base + "/atas",
-                            artifact_type="json",
-                            content_type="application/json",
-                            filename="atas_compra.json",
-                            metadata={"logical_unit": False, "resource_kind": "atas_compra"},
-                        ),
-                        SourceArtifact(
-                            artifact_id=f"{source_ref.stable_id}:itens_vinculados",
-                            source_ref=source_ref,
-                            url=purchase_base + "/itens",
-                            artifact_type="json",
-                            content_type="application/json",
-                            filename="itens_vinculados.json",
-                            metadata={
-                                "logical_unit": False,
-                                "resource_kind": "itens",
-                                "params": {"pagina": 1, "tamanhoPagina": 100},
-                                "paginacao": {"campo": "pagina", "tamanho": 100},
-                                "comprasgov_fallback": {
-                                    "resource": "itens",
-                                    "numeroControlePNCPCompra": linked_purchase,
-                                },
-                            },
-                        ),
-                    )
-            return ResolvedSource(source_ref=source_ref, artifacts=artifacts)
-        if resource_type in {"contratacao", "contratação", "contrato"}:
-            base = self.client.consulta_base + self._purchase_path(source_ref)
-            artifacts = (
-                SourceArtifact(
-                    artifact_id=f"{source_ref.stable_id}:metadata",
-                    source_ref=source_ref,
-                    url=base,
-                    artifact_type="json",
-                    content_type="application/json",
-                    filename="contratacao.json",
-                    metadata={"logical_unit": False, "resource_kind": "contratacao_detalhe"},
-                ),
-                SourceArtifact(
-                    artifact_id=f"{source_ref.stable_id}:itens",
-                    source_ref=source_ref,
-                    url=self.client.api_base + self._purchase_path(source_ref) + "/itens",
-                    artifact_type="json",
-                    content_type="application/json",
-                    filename="itens.json",
-                    metadata={
-                        "logical_unit": False,
-                        "resource_kind": "itens",
-                        "params": {"pagina": 1, "tamanhoPagina": 100},
-                        "paginacao": {"campo": "pagina", "tamanho": 100},
-                        "comprasgov_fallback": {
-                            "resource": "itens",
-                            "numeroControlePNCPCompra": self._purchase_control_number(source_ref),
-                        },
-                    },
-                ),
-                SourceArtifact(
-                    artifact_id=f"{source_ref.stable_id}:arquivos_edital",
-                    source_ref=source_ref,
-                    url=self.client.api_base + self._purchase_path(source_ref) + "/arquivos",
-                    artifact_type="json",
-                    content_type="application/json",
-                    filename="edital_arquivos.json",
-                    metadata={"logical_unit": False, "resource_kind": "documentos_edital"},
-                ),
-                SourceArtifact(
-                    artifact_id=f"{source_ref.stable_id}:atas_compra",
-                    source_ref=source_ref,
-                    url=self.client.api_base + self._purchase_path(source_ref) + "/atas",
-                    artifact_type="json",
-                    content_type="application/json",
-                    filename="atas_compra.json",
-                    metadata={"logical_unit": False, "resource_kind": "atas_compra"},
-                ),
-            )
+            artifacts = self._contract_artifacts(source_ref)
+        elif resource_type in {"contratacao", "contratação", "contrato"}:
+            artifacts = self._purchase_artifacts(source_ref)
         elif resource_type in {"ata", "ata_registro_preco"}:
-            base = self.client.api_base + self._ata_path(source_ref)
-            artifacts = (
-                SourceArtifact(
-                    artifact_id=f"{source_ref.stable_id}:metadata",
-                    source_ref=source_ref,
-                    url=base,
-                    artifact_type="json",
-                    content_type="application/json",
-                    filename="ata.json",
-                    metadata={"logical_unit": True, "resource_kind": "ata"},
-                ),
-                SourceArtifact(
-                    artifact_id=f"{source_ref.stable_id}:arquivos",
-                    source_ref=source_ref,
-                    url=base + "/arquivos",
-                    artifact_type="json",
-                    content_type="application/json",
-                    filename="ata_arquivos.json",
-                    metadata={"logical_unit": False, "resource_kind": "documentos_ata"},
-                ),
-                SourceArtifact(
-                    artifact_id=f"{source_ref.stable_id}:contratos_vinculados",
-                    source_ref=source_ref,
-                    url=base + "/contratos",
-                    artifact_type="json",
-                    content_type="application/json",
-                    filename="ata_contratos_vinculados.json",
-                    metadata={
-                        "logical_unit": False,
-                        "resource_kind": "contratos_vinculados_ata",
-                        "params": {"pagina": 1, "tamanhoPagina": 100},
-                        "paginacao": {"campo": "pagina", "tamanho": 100},
-                    },
-                ),
-            )
+            artifacts = self._ata_artifacts(source_ref)
         elif resource_type in {"pca", "pca_agregado"}:
-            cnpj, year, sequence = self._pca_parts(source_ref)
-            base = f"{self.client.api_base}/v1/orgaos/{cnpj}/pca/{year}"
-            artifacts = (
-                SourceArtifact(
-                    artifact_id=f"{source_ref.stable_id}:consolidado",
-                    source_ref=source_ref,
-                    url=f"{base}/{sequence}/consolidado",
-                    artifact_type="json",
-                    content_type="application/json",
-                    filename="pca_consolidado.json",
-                    metadata={"logical_unit": True, "resource_kind": "pca_planejado"},
-                ),
-                SourceArtifact(
-                    artifact_id=f"{source_ref.stable_id}:csv",
-                    source_ref=source_ref,
-                    url=f"{base}/csv",
-                    artifact_type="csv",
-                    content_type="text/csv",
-                    filename="pca.csv",
-                    metadata={"logical_unit": False, "resource_kind": "pca_exportacao"},
-                ),
-            )
+            artifacts = self._pca_artifacts(source_ref)
         else:
             raise ValueError(f"resource_type PNCP não suportado: {source_ref.resource_type}")
 
         return ResolvedSource(source_ref=source_ref, artifacts=artifacts)
+
+    @staticmethod
+    def _artifact(
+        source_ref: SourceRef,
+        suffix: str,
+        url: str,
+        filename: str,
+        metadata: dict[str, Any],
+        *,
+        artifact_type: str = "json",
+        content_type: str = "application/json",
+    ) -> SourceArtifact:
+        return SourceArtifact(
+            artifact_id=f"{source_ref.stable_id}:{suffix}",
+            source_ref=source_ref,
+            url=url,
+            artifact_type=artifact_type,
+            content_type=content_type,
+            filename=filename,
+            metadata=metadata,
+        )
+
+    @staticmethod
+    def _paginated_items(purchase_control: str) -> dict[str, Any]:
+        """Metadados dos itens da compra: paginados de 100 em 100, com o Compras.gov.br como alternativa."""
+        return {
+            "logical_unit": False,
+            "resource_kind": "itens",
+            "params": {"pagina": 1, "tamanhoPagina": 100},
+            "paginacao": {"campo": "pagina", "tamanho": 100},
+            "comprasgov_fallback": {
+                "resource": "itens",
+                "numeroControlePNCPCompra": purchase_control,
+            },
+        }
+
+    def _contract_artifacts(self, source_ref: SourceRef) -> tuple[SourceArtifact, ...]:
+        """Detalhe e arquivos do contrato; com a compra vinculada, também ela, as atas e os itens."""
+        cnpj, year, sequence = self._key(source_ref, "cnpj", "ano", "sequencial")
+        base = f"{self.client.api_base}/v1/orgaos/{cnpj}/contratos/{year}/{sequence}"
+        artifacts = (
+            self._artifact(source_ref, "detalhe", base, "contrato_detalhe.json",
+                           {"logical_unit": True, "resource_kind": "contrato"}),
+            self._artifact(source_ref, "arquivos", base + "/arquivos", "contrato_arquivos.json",
+                           {"logical_unit": False, "resource_kind": "documentos_contrato"}),
+        )
+        linked_purchase = source_ref.key.get("numeroControlePNCPCompra")
+        if not linked_purchase:
+            return artifacts
+        purchase = self.purchase_ref({"numeroControlePNCP": linked_purchase})
+        if purchase is None:
+            return artifacts
+        purchase_base = self.client.api_base + self._purchase_path(purchase)
+        return artifacts + (
+            self._artifact(
+                source_ref,
+                "contratacao_vinculada",
+                self.client.consulta_base + self._purchase_path(purchase),
+                "contratacao_vinculada.json",
+                {
+                    "logical_unit": False,
+                    "resource_kind": "contratacao_vinculada",
+                    "comprasgov_fallback": {
+                        "resource": "contratacao",
+                        "numeroControlePNCPCompra": linked_purchase,
+                    },
+                },
+            ),
+            self._artifact(source_ref, "atas_compra", purchase_base + "/atas", "atas_compra.json",
+                           {"logical_unit": False, "resource_kind": "atas_compra"}),
+            self._artifact(source_ref, "itens_vinculados", purchase_base + "/itens", "itens_vinculados.json",
+                           self._paginated_items(linked_purchase)),
+        )
+
+    def _purchase_artifacts(self, source_ref: SourceRef) -> tuple[SourceArtifact, ...]:
+        """Contratação, itens, arquivos do edital e atas da compra."""
+        api_base = self.client.api_base + self._purchase_path(source_ref)
+        return (
+            self._artifact(source_ref, "metadata", self.client.consulta_base + self._purchase_path(source_ref),
+                           "contratacao.json", {"logical_unit": False, "resource_kind": "contratacao_detalhe"}),
+            self._artifact(source_ref, "itens", api_base + "/itens", "itens.json",
+                           self._paginated_items(self._purchase_control_number(source_ref))),
+            self._artifact(source_ref, "arquivos_edital", api_base + "/arquivos", "edital_arquivos.json",
+                           {"logical_unit": False, "resource_kind": "documentos_edital"}),
+            self._artifact(source_ref, "atas_compra", api_base + "/atas", "atas_compra.json",
+                           {"logical_unit": False, "resource_kind": "atas_compra"}),
+        )
+
+    def _ata_artifacts(self, source_ref: SourceRef) -> tuple[SourceArtifact, ...]:
+        """Ata, arquivos e contratos vinculados a ela."""
+        base = self.client.api_base + self._ata_path(source_ref)
+        return (
+            self._artifact(source_ref, "metadata", base, "ata.json", {"logical_unit": True, "resource_kind": "ata"}),
+            self._artifact(source_ref, "arquivos", base + "/arquivos", "ata_arquivos.json",
+                           {"logical_unit": False, "resource_kind": "documentos_ata"}),
+            self._artifact(
+                source_ref,
+                "contratos_vinculados",
+                base + "/contratos",
+                "ata_contratos_vinculados.json",
+                {
+                    "logical_unit": False,
+                    "resource_kind": "contratos_vinculados_ata",
+                    "params": {"pagina": 1, "tamanhoPagina": 100},
+                    "paginacao": {"campo": "pagina", "tamanho": 100},
+                },
+            ),
+        )
+
+    def _pca_artifacts(self, source_ref: SourceRef) -> tuple[SourceArtifact, ...]:
+        """PCA consolidado do órgão e a exportação em CSV."""
+        cnpj, year, sequence = self._pca_parts(source_ref)
+        base = f"{self.client.api_base}/v1/orgaos/{cnpj}/pca/{year}"
+        return (
+            self._artifact(source_ref, "consolidado", f"{base}/{sequence}/consolidado", "pca_consolidado.json",
+                           {"logical_unit": True, "resource_kind": "pca_planejado"}),
+            self._artifact(source_ref, "csv", f"{base}/csv", "pca.csv",
+                           {"logical_unit": False, "resource_kind": "pca_exportacao"},
+                           artifact_type="csv", content_type="text/csv"),
+        )
 
     def list_artifacts(self, source: ResolvedSource) -> tuple[SourceArtifact, ...]:
         """Para atas, acrescenta os PDFs anunciados na listagem ``/arquivos``.
