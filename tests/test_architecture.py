@@ -87,10 +87,16 @@ def test_nome_antigo_de_arquivo_renomeado_e_o_mesmo_modulo(antigo, novo):
     assert importlib.import_module(antigo) is importlib.import_module(novo)
 
 
-@pytest.mark.parametrize("arquivo", sorted((RAIZ / "src" / "retrieval").glob("*.py")), ids=lambda p: p.name)
-def test_partes_da_busca_nao_importam_a_entrada(arquivo):
-    """src/retrieval/ são as partes; src/retrieve.py é a entrada que as junta.
-    Uma parte importando a entrada criaria um ciclo (2026-10-27, divisão do retrieve)."""
-    assert not any(n == "src.retrieve" or n.startswith("src.retrieve.") for n in _importados(arquivo)), (
-        f"{arquivo.name} importa src.retrieve")
+_PARTES_E_ENTRADAS = (("retrieval", "src.retrieve"), ("generation", "src.generate"))
+
+
+@pytest.mark.parametrize("arquivo,entrada", [
+    (arquivo, entrada) for pasta, entrada in _PARTES_E_ENTRADAS for arquivo in sorted((RAIZ / "src" / pasta).glob("*.py"))
+], ids=lambda valor: valor.name if isinstance(valor, Path) else valor)
+def test_partes_nao_importam_a_entrada(arquivo, entrada):
+    """src/retrieval/ e src/generation/ são as partes; src/retrieve.py e src/generate.py,
+    as entradas que as juntam. Uma parte importando a entrada criaria um ciclo
+    (2026-10-27, divisão dos dois módulos)."""
+    assert not any(n == entrada or n.startswith(entrada + ".") for n in _importados(arquivo)), (
+        f"{arquivo.name} importa {entrada}")
 
