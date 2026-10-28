@@ -405,3 +405,41 @@ def test_ata_unidade_verificada_inclui_territorio_sem_campo_uf(tmp_path):
     r = coletar_direto([j], BASE_ATA, tmp_path, politica=PoliticaColeta(), taxa_seg=0, request_fn=lambda _: {"data": [{**_registro_ata("ata", 2025), "codigoUnidadeOrgao": "1"}]})
     assert r["registros"] == 1
     assert j.params["codigoUnidadeAdministrativa"] == "1"
+
+
+def test_janela_que_falha_conta_para_o_intervalo_da_proxima(tmp_path, monkeypatch):
+    """O intervalo entre chamadas (taxa_seg) vale também depois de uma janela que
+    falhou: a chamada dela aconteceu e conta para a espera da janela seguinte."""
+    from src import coletar_direto as modulo
+    from src.coletar_direto import FalhaDeColeta
+
+    relogio = {"agora": 100.0}
+    esperas: list[float] = []
+
+    class _Tempo:
+        @staticmethod
+        def monotonic() -> float:
+            return relogio["agora"]
+
+        @staticmethod
+        def sleep(segundos: float) -> None:
+            esperas.append(segundos)
+            relogio["agora"] += segundos
+
+    monkeypatch.setattr(modulo, "time", _Tempo)
+    janelas = [
+        Janela(id="ruim", endpoint="https://exemplo.teste/y", params={"tamanhoPagina": 50}),
+        Janela(id="ok", endpoint="https://exemplo.teste/x", params={"tamanhoPagina": 50}),
+    ]
+    url_y = _build_request_url("https://exemplo.teste/y", {"tamanhoPagina": 50, "pagina": 1})
+
+    def request_fn(url: str) -> dict:
+        if url == url_y:
+            raise FalhaDeColeta("500 interno", {"http_status": 500})
+        return _payload_com([_registro("11111111000001-2-000001/2025")])
+
+    relatorio = coletar_direto(janelas, BASE, tmp_path, taxa_seg=10.0, request_fn=request_fn)
+
+    assert (relatorio["janelas_falhadas"], relatorio["janelas_completas_agora"]) == (1, 1)
+    assert esperas[-1] == 10.0  # a janela "ok" esperou o intervalo inteiro depois da chamada que falhou
+

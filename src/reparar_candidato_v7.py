@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+from dataclasses import dataclass, field
 import hashlib
 import json
 from pathlib import Path
@@ -42,8 +43,9 @@ def reparar(
     referencia_index: Path, manifest: Path, modelo_declarado: str | None = None,
     fontes_index: tuple[Path, ...] = (),
 ) -> dict[str, Any]:
-    import faiss
-    import numpy as np
+    # Sem FAISS/numpy, falhar antes de criar o destino.
+    import faiss  # noqa: F401
+    import numpy  # noqa: F401
 
     candidato, referencia_index = Path(candidato), Path(referencia_index)
     source_index = candidato / "index"
@@ -52,6 +54,55 @@ def reparar(
     inherited = set(declaration.get("curadoria_v7", {}).get("bases_herdadas_v6", []))
     if not inherited:
         raise ValueError("manifesto sem bases_herdadas_v6 explícitas")
+    bases, added = _reunir_documentos(candidato, referencia_documents, inherited)
+
+    destino = destino_novo(Path(destino), [candidato, referencia_documents, referencia_index, *fontes_index])
+    report: dict[str, Any] = {
+        "gerado_em": agora(), "candidato_origem": _relative(candidato),
+        "manifest_sha256": file_sha256(manifest), "herdados_adicionados": dict(added),
+        "modelo_declarado_pelo_operador": modelo_declarado,
+        "bases": {}, "promocao_autorizada": False, "inferencia_executada": False,
+    }
+    global_hash = hashlib.sha256()
+    with (destino / "documents.jsonl").open("wb") as all_documents:
+        for base, documents in sorted(bases.items()):
+            print(f"Reparando {base}: {len(documents)} documentos", flush=True)
+            target = destino / "index" / base
+            target.mkdir(parents=True)
+            base_hash = _gravar_documentos_da_base(documents, target, all_documents, global_hash)
+            vetores = _VetoresDaBase()
+            source = source_index / base
+            if (source / "manifest.json").exists():
+                vetores.source_manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
+            vetores.dimension = vetores.source_manifest.get("dimension")
+            with (target / "vectors.jsonl").open("w", encoding="utf-8", newline="\n") as output:
+                sources = [(source, "candidato"), (referencia_index / base, "referencia")]
+                sources += [(Path(folder) / base, "recuperacao") for folder in fontes_index]
+                for folder, label in sources:
+                    if not (folder / "vectors.jsonl").exists():
+                        continue
+                    _copiar_vetores_da_fonte(base, folder, label, documents, vetores, output)
+            if vetores.index is not None:
+                import faiss
+
+                faiss.write_index(vetores.index, str(target / "vectors.faiss"))
+            report["bases"][base] = _manifest_da_base(base, documents, target, base_hash, vetores, modelo_declarado)
+            vetores.index = None
+    _gravar_manifest_global(destino, original, bases, report, global_hash, modelo_declarado)
+    report["documents_sha256"] = global_hash.hexdigest()
+    report["cobertura_vetorial_completa"] = all(not b["vetores_ausentes"] for b in report["bases"].values())
+    report["proveniencia_encoding_completa"] = False
+    report["nota_proveniencia_encoding"] = (
+        "Manifests registram declarações/configurações de origem, mas não provam o encoding de cada vetor. "
+        "Sem logs de embedding por lote ou re-embedding verificável, homogeneidade não é certificável."
+    )
+    gravar_json(destino / "reparo.json", report)
+    return report
+
+
+def _reunir_documentos(candidato: Path, referencia_documents: Path,
+                       inherited: set[str]) -> tuple[dict[str, dict[str, dict[str, Any]]], dict[str, int]]:
+    """Documentos do candidato mais os das bases herdadas da referência, por base e chunk_id."""
     bases: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
     for document in _linhas(candidato / "documents.jsonl"):
         base, cid = document["base_id"], document["chunk_id"]
@@ -74,150 +125,155 @@ def reparar(
     missing_bases = inherited - set(bases)
     if missing_bases:
         raise ValueError(f"herança ausente também na referência: {sorted(missing_bases)}")
+    return bases, added
 
-    destino = destino_novo(Path(destino), [candidato, referencia_documents, referencia_index, *fontes_index])
-    report: dict[str, Any] = {
-        "gerado_em": agora(), "candidato_origem": _relative(candidato),
-        "manifest_sha256": file_sha256(manifest), "herdados_adicionados": dict(added),
-        "modelo_declarado_pelo_operador": modelo_declarado,
-        "bases": {}, "promocao_autorizada": False, "inferencia_executada": False,
+
+def _gravar_documentos_da_base(documents: dict[str, dict[str, Any]], target: Path, all_documents: Any,
+                               global_hash: Any) -> Any:
+    """documents.jsonl da base (e o global, junto); devolve o hash da base."""
+    base_hash = hashlib.sha256()
+    with (target / "documents.jsonl").open("wb") as output:
+        for document in documents.values():
+            raw = (json.dumps(document, ensure_ascii=False) + "\n").encode("utf-8")
+            output.write(raw)
+            all_documents.write(raw)
+            base_hash.update(raw)
+            global_hash.update(raw)
+    return base_hash
+
+
+@dataclass
+class _VetoresDaBase:
+    """Vetores reaproveitados de uma base, acumulados fonte a fonte."""
+
+    source_manifest: dict[str, Any] = field(default_factory=dict)
+    dimension: int | None = None
+    index: Any = None
+    vector_count: int = 0
+    recovered: int = 0
+    seen: set[str] = field(default_factory=set)
+    provenance: list[dict[str, Any]] = field(default_factory=list)
+    unmapped: list[dict[str, Any]] = field(default_factory=list)
+    origin_counts: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+
+
+def _copiar_vetores_da_fonte(base: str, folder: Path, label: str, documents: dict[str, dict[str, Any]],
+                             vetores: _VetoresDaBase, output: Any) -> None:
+    """Copia os vetores de uma fonte que pertencem aos documentos, conferindo cada um com a posição no FAISS."""
+    import faiss
+    import numpy as np
+
+    source_info = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+    if not vetores.source_manifest:
+        vetores.source_manifest = dict(source_info)
+    source_faiss = faiss.read_index(str(folder / source_info.get("faiss_index", "vectors.faiss")))
+    if vetores.dimension is None:
+        vetores.dimension = source_faiss.d
+    if vetores.dimension != source_faiss.d:
+        raise ValueError(f"dimensão incompatível na herança: {base}")
+    if vetores.index is None:
+        vetores.index = faiss.IndexFlatIP(vetores.dimension)
+    vetores.provenance.append({
+        "origem": label, "manifest": _relative(folder / "manifest.json"),
+        "manifest_sha256": file_sha256(folder / "manifest.json"),
+        "embedding_model_original": source_info.get("embedding_model"),
+        "encoding_config": source_info.get("encoding_config"),
+    })
+    positions = 0
+    batch = []
+    for record in _linhas(folder / "vectors.jsonl"):
+        cid = record["chunk_id"]
+        position = positions
+        positions += 1
+        if label != "candidato" and (cid in vetores.seen or cid not in documents):
+            continue
+        vector = np.asarray(record.get("embedding"), dtype=np.float32)
+        if vector.shape != (vetores.dimension,) or not np.isfinite(vector).all() or not np.any(vector):
+            raise ValueError(f"vetor inválido: {cid}")
+        normalized = vector / np.linalg.norm(vector)
+        if position >= source_faiss.ntotal or not np.allclose(
+            normalized, source_faiss.reconstruct(position), rtol=1e-5, atol=1e-6,
+        ):
+            raise ValueError(f"posição FAISS não corresponde ao payload: {base}:{position}")
+        if cid in vetores.seen:
+            continue
+        if cid not in documents:
+            if label == "candidato":
+                raise ValueError(f"vetor sem documento: {cid}")
+            continue
+        document = documents[cid]
+        # Vetor da referência só serve para o mesmo input, não só o mesmo ID.
+        if label != "candidato":
+            expected = _metadata(document).get("chunk_content_sha256")
+            actual = record.get("metadata", {}).get("chunk_content_sha256")
+            if not expected or expected != actual:
+                raise ValueError(f"hash da referência não corresponde ao documento: {cid}")
+        metadata = _metadata(document)
+        record.update({
+            "metadata": metadata, "source_file": metadata["source_file"],
+            "base_id": base, "document_id": document.get("document_id"),
+            "embedding_source": label,
+        })
+        output.write(json.dumps(record, ensure_ascii=False) + "\n")
+        vetores.seen.add(cid)
+        vetores.vector_count += 1
+        vetores.origin_counts[label] += 1
+        vetores.recovered += int(label == "recuperacao")
+        batch.append(normalized)
+        if len(batch) == 256:
+            vetores.index.add(np.ascontiguousarray(batch, dtype=np.float32))
+            batch.clear()
+    if batch:
+        vetores.index.add(np.ascontiguousarray(batch, dtype=np.float32))
+    if positions != source_faiss.ntotal:
+        if label != "candidato" or positions > source_faiss.ntotal:
+            raise ValueError(f"quantidade FAISS/payload divergente: {base}/{label}")
+        vetores.unmapped.append({"origem": _relative(folder), "posicoes_sem_payload": source_faiss.ntotal - positions})
+
+
+def _manifest_da_base(base: str, documents: dict[str, dict[str, Any]], target: Path, base_hash: Any,
+                      vetores: _VetoresDaBase, modelo_declarado: str | None) -> dict[str, Any]:
+    """Grava o manifest da base e devolve o resumo dela para o relatório."""
+    absent = sorted(set(documents) - vetores.seen)
+    declared_models = sorted({
+        str(item["embedding_model_original"])
+        for item in vetores.provenance if item.get("embedding_model_original")
+    })
+    manifest_base = {
+        **vetores.source_manifest, "base_id": base,
+        "embedding_model": declared_models[0] if len(declared_models) == 1 else "mixed_or_unknown",
+        "embedding_model_declarado_pelo_operador": modelo_declarado,
+        "dimension": vetores.dimension, "faiss_index": "vectors.faiss",
+        "total_chunks": len(documents), "total_vectors": vetores.vector_count,
+        "source_file": _relative(target / "documents.jsonl"), "source_sha256": base_hash.hexdigest(),
+        "proveniencia": vetores.provenance, "vetores_ausentes": absent,
+        "origens_vetores": {label: vetores.origin_counts.get(label, 0)
+                            for label in ("candidato", "referencia", "recuperacao")},
+        "modelos_declarados_origem": declared_models,
+        "encoding_config_disponivel": bool(vetores.provenance) and all(
+            bool(p["encoding_config"]) for p in vetores.provenance
+        ),
+        # Config presente em manifest não prova a configuração efetiva
+        # usada para produzir os vetores; manter false sem evidência por vetor.
+        "encoding_verificado": False,
     }
-    global_hash = hashlib.sha256()
-    with (destino / "documents.jsonl").open("wb") as all_documents:
-        for base, documents in sorted(bases.items()):
-            print(f"Reparando {base}: {len(documents)} documentos", flush=True)
-            target = destino / "index" / base
-            target.mkdir(parents=True)
-            base_hash = hashlib.sha256()
-            with (target / "documents.jsonl").open("wb") as output:
-                for document in documents.values():
-                    raw = (json.dumps(document, ensure_ascii=False) + "\n").encode("utf-8")
-                    output.write(raw)
-                    all_documents.write(raw)
-                    base_hash.update(raw)
-                    global_hash.update(raw)
-            seen: set[str] = set()
-            provenance = []
-            source = source_index / base
-            source_manifest = {}
-            if (source / "manifest.json").exists():
-                source_manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
-            dimension = source_manifest.get("dimension")
-            index = None
-            vector_count = 0
-            unmapped = []
-            recovered = 0
-            origin_counts: dict[str, int] = defaultdict(int)
-            with (target / "vectors.jsonl").open("w", encoding="utf-8", newline="\n") as output:
-                sources = [(source, "candidato"), (referencia_index / base, "referencia")]
-                sources += [(Path(folder) / base, "recuperacao") for folder in fontes_index]
-                for folder, label in sources:
-                    if not (folder / "vectors.jsonl").exists():
-                        continue
-                    source_info = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
-                    if not source_manifest:
-                        source_manifest = dict(source_info)
-                    source_faiss = faiss.read_index(str(folder / source_info.get("faiss_index", "vectors.faiss")))
-                    if dimension is None:
-                        dimension = source_faiss.d
-                    if dimension != source_faiss.d:
-                        raise ValueError(f"dimensão incompatível na herança: {base}")
-                    if index is None:
-                        index = faiss.IndexFlatIP(dimension)
-                    provenance.append({
-                        "origem": label, "manifest": _relative(folder / "manifest.json"),
-                        "manifest_sha256": file_sha256(folder / "manifest.json"),
-                        "embedding_model_original": source_info.get("embedding_model"),
-                        "encoding_config": source_info.get("encoding_config"),
-                    })
-                    positions = 0
-                    batch = []
-                    for record in _linhas(folder / "vectors.jsonl"):
-                        cid = record["chunk_id"]
-                        position = positions
-                        positions += 1
-                        if label != "candidato" and (cid in seen or cid not in documents):
-                            continue
-                        vector = np.asarray(record.get("embedding"), dtype=np.float32)
-                        if vector.shape != (dimension,) or not np.isfinite(vector).all() or not np.any(vector):
-                            raise ValueError(f"vetor inválido: {cid}")
-                        normalized = vector / np.linalg.norm(vector)
-                        if position >= source_faiss.ntotal or not np.allclose(
-                            normalized, source_faiss.reconstruct(position), rtol=1e-5, atol=1e-6,
-                        ):
-                            raise ValueError(f"posição FAISS não corresponde ao payload: {base}:{position}")
-                        if cid in seen:
-                            continue
-                        if cid not in documents:
-                            if label == "candidato":
-                                raise ValueError(f"vetor sem documento: {cid}")
-                            continue
-                        document = documents[cid]
-                        # Vetor da referência só serve para o mesmo input, não só o mesmo ID.
-                        if label != "candidato":
-                            expected = _metadata(document).get("chunk_content_sha256")
-                            actual = record.get("metadata", {}).get("chunk_content_sha256")
-                            if not expected or expected != actual:
-                                raise ValueError(f"hash da referência não corresponde ao documento: {cid}")
-                        metadata = _metadata(document)
-                        record.update({
-                            "metadata": metadata, "source_file": metadata["source_file"],
-                            "base_id": base, "document_id": document.get("document_id"),
-                            "embedding_source": label,
-                        })
-                        output.write(json.dumps(record, ensure_ascii=False) + "\n")
-                        seen.add(cid)
-                        vector_count += 1
-                        origin_counts[label] += 1
-                        recovered += int(label == "recuperacao")
-                        batch.append(normalized)
-                        if len(batch) == 256:
-                            index.add(np.ascontiguousarray(batch, dtype=np.float32))
-                            batch.clear()
-                    if batch:
-                        index.add(np.ascontiguousarray(batch, dtype=np.float32))
-                    if positions != source_faiss.ntotal:
-                        if label != "candidato" or positions > source_faiss.ntotal:
-                            raise ValueError(f"quantidade FAISS/payload divergente: {base}/{label}")
-                        unmapped.append({"origem": _relative(folder), "posicoes_sem_payload": source_faiss.ntotal - positions})
-            if index is not None:
-                faiss.write_index(index, str(target / "vectors.faiss"))
-            absent = sorted(set(documents) - seen)
-            declared_models = sorted({
-                str(item["embedding_model_original"])
-                for item in provenance if item.get("embedding_model_original")
-            })
-            manifest_base = {
-                **source_manifest, "base_id": base,
-                "embedding_model": declared_models[0] if len(declared_models) == 1 else "mixed_or_unknown",
-                "embedding_model_declarado_pelo_operador": modelo_declarado,
-                "dimension": dimension, "faiss_index": "vectors.faiss",
-                "total_chunks": len(documents), "total_vectors": vector_count,
-                "source_file": _relative(target / "documents.jsonl"), "source_sha256": base_hash.hexdigest(),
-                "proveniencia": provenance, "vetores_ausentes": absent,
-                "origens_vetores": {label: origin_counts.get(label, 0)
-                                    for label in ("candidato", "referencia", "recuperacao")},
-                "modelos_declarados_origem": declared_models,
-                "encoding_config_disponivel": bool(provenance) and all(
-                    bool(p["encoding_config"]) for p in provenance
-                ),
-                # Config presente em manifest não prova a configuração efetiva
-                # usada para produzir os vetores; manter false sem evidência por vetor.
-                "encoding_verificado": False,
-            }
-            gravar_json(target / "manifest.json", manifest_base)
-            report["bases"][base] = {
-                "documentos": len(documents), "vetores": vector_count,
-                "faiss_posicoes_verificadas": True, "vetores_ausentes": absent,
-                "origens_vetores": manifest_base["origens_vetores"],
-                "modelos_declarados_origem": manifest_base["modelos_declarados_origem"],
-                "encoding_config_disponivel": manifest_base["encoding_config_disponivel"],
-                "encoding_verificado": False,
-                "faiss_origem_sem_payload": unmapped, "vetores_recuperados_de_fontes": recovered,
-                "vectors_sha256": file_sha256(target / "vectors.jsonl"),
-                "faiss_sha256": file_sha256(target / "vectors.faiss"),
-            }
-            del index
+    gravar_json(target / "manifest.json", manifest_base)
+    return {
+        "documentos": len(documents), "vetores": vetores.vector_count,
+        "faiss_posicoes_verificadas": True, "vetores_ausentes": absent,
+        "origens_vetores": manifest_base["origens_vetores"],
+        "modelos_declarados_origem": manifest_base["modelos_declarados_origem"],
+        "encoding_config_disponivel": manifest_base["encoding_config_disponivel"],
+        "encoding_verificado": False,
+        "faiss_origem_sem_payload": vetores.unmapped, "vetores_recuperados_de_fontes": vetores.recovered,
+        "vectors_sha256": file_sha256(target / "vectors.jsonl"),
+        "faiss_sha256": file_sha256(target / "vectors.faiss"),
+    }
+
+
+def _gravar_manifest_global(destino: Path, original: dict[str, Any], bases: dict[str, Any], report: dict[str, Any],
+                            global_hash: Any, modelo_declarado: str | None) -> None:
+    """Manifest do índice inteiro, com a proveniência dos vetores; o resumo também vai para o relatório."""
     global_manifest = {
         **original, "source_file": _relative(destino / "documents.jsonl"),
         "source_sha256": global_hash.hexdigest(),
@@ -259,15 +315,6 @@ def reparar(
     )
     gravar_json(destino / "index" / "manifest.json", global_manifest)
     report["proveniencia_vetores"] = provenance_summary
-    report["documents_sha256"] = global_hash.hexdigest()
-    report["cobertura_vetorial_completa"] = all(not b["vetores_ausentes"] for b in report["bases"].values())
-    report["proveniencia_encoding_completa"] = False
-    report["nota_proveniencia_encoding"] = (
-        "Manifests registram declarações/configurações de origem, mas não provam o encoding de cada vetor. "
-        "Sem logs de embedding por lote ou re-embedding verificável, homogeneidade não é certificável."
-    )
-    gravar_json(destino / "reparo.json", report)
-    return report
 
 
 def preparar_sql(candidato: Path, staging_origem: Path) -> dict[str, Any]:

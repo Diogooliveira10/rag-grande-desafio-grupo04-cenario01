@@ -148,132 +148,8 @@ def construir_staging(fontes: list[Path], destino: Path, politica: PoliticaColet
     orgaos_observados: set[str] = set()
     # Catálogo em disco: deduplicação por identidade, sem carregar ~1 GB em RAM.
     with sqlite3.connect(destino / "catalogo_aquisicao.sqlite") as catalogo:
-        catalogo.execute("CREATE TABLE territorio_atas (id TEXT PRIMARY KEY, evidencia TEXT NOT NULL)")
-        if territorio_atas:
-            for _, e in _linhas(territorio_atas):
-                catalogo.execute("INSERT INTO territorio_atas VALUES (?,?)", [e["ata"], json.dumps(e, ensure_ascii=False)])
-        catalogo.execute("CREATE TABLE registros (id TEXT PRIMARY KEY, chunk TEXT NOT NULL, payload TEXT NOT NULL, revisao TEXT NOT NULL, fonte TEXT NOT NULL, linha INTEGER NOT NULL)")
-        for fonte in fontes:
-            for n, chunk in _linhas(fonte):
-                payload = json.loads(chunk["text"])
-                if not isinstance(payload, dict):
-                    raise ValueError(f"registro PNCP não é objeto: {fonte}:{n}")
-                identificador = payload.get("numeroControlePNCPAta") or payload.get("numeroControlePNCP")
-                if not identificador:
-                    raise ValueError(f"registro sem identidade PNCP: {fonte}:{n}")
-                key, uf = chave_unidade(payload), uf_unidade(payload)
-                if key[0]:
-                    orgaos_observados.add(key[0])
-                if all(key):
-                    unidades.setdefault(key, set())
-                    if uf:
-                        unidades[key].add(uf)
-                revisao = str(payload.get("dataAtualizacaoGlobal") or payload.get("dataAtualizacao") or chunk.get("coletado_em") or "")
-                antigo = catalogo.execute("SELECT revisao, chunk FROM registros WHERE id=?", [identificador]).fetchone()
-                if antigo:
-                    contagens["identidades_repetidas"] += 1
-                    chunk_antigo = json.loads(antigo[1])
-                    if chunk_antigo["chunk_id"] != chunk["chunk_id"]:
-                        contagens["identidades_com_drift"] += 1
-                        with (destino / "drift.jsonl").open("a", encoding="utf-8") as audit:
-                            audit.write(json.dumps({"id": identificador, "anterior": chunk_antigo["chunk_id"], "candidato": chunk["chunk_id"], "revisao_anterior": antigo[0], "revisao_candidata": revisao, "fonte_candidata": str(fonte)}, ensure_ascii=False) + "\n")
-                    auxiliar = (chunk.get("extras") or {}).get("papel") == "referencia_auxiliar"
-                    antigo_auxiliar = (chunk_antigo.get("extras") or {}).get("papel") == "referencia_auxiliar"
-                    if (auxiliar and not antigo_auxiliar) or (auxiliar == antigo_auxiliar and revisao < antigo[0]):
-                        continue
-                catalogo.execute("INSERT OR REPLACE INTO registros VALUES (?,?,?,?,?,?)", [identificador, json.dumps(chunk, ensure_ascii=False), json.dumps(payload, ensure_ascii=False), revisao, str(fonte), n])
-                contagens["linhas_catalogadas"] += 1
-        catalogo.commit()
-        # Só compras tipo 1: evidência de vínculo, inclusive se fora do recorte principal.
-        catalogo.execute("CREATE VIEW compras AS SELECT * FROM registros WHERE id GLOB '*-1-*' AND json_extract(payload, '$.numeroControlePNCPAta') IS NULL")
-        colunas = dict(_COLUNAS_CONTRATACOES)
-        colunas.update({"instrumento_id": "INTEGER", "instrumento_nome": "TEXT", "modalidade_id": "INTEGER", "modalidade_origem": "TEXT", "modalidade_compra_pncp": "TEXT", "categoria_processo_id": "INTEGER", "categoria_processo_nome": "TEXT", "codigo_unidade": "TEXT"})
-        with sqlite3.connect(destino / "base_estruturada.sqlite") as banco, (destino / "documents.jsonl").open("w", encoding="utf-8", newline="\n") as docs, (destino / "quarentena.jsonl").open("w", encoding="utf-8", newline="\n") as quarentena:
-            banco.execute("CREATE TABLE contratacoes (" + ",".join(k + " " + v.replace("{REAL}", "REAL") for k, v in colunas.items()) + ")")
-            banco.execute("CREATE TABLE meta (chave TEXT PRIMARY KEY, valor TEXT)")
-            banco.execute("CREATE TABLE vinculos_pendentes (compra TEXT NOT NULL, registro TEXT PRIMARY KEY)")
-            names = list(colunas)
-            insert = "INSERT INTO contratacoes (" + ",".join(names) + ") VALUES (" + ",".join("?" for _ in names) + ")"
-            for identificador, raw_chunk, raw_payload, fonte, n in catalogo.execute("SELECT id,chunk,payload,fonte,linha FROM registros ORDER BY id"):
-                chunk, payload = json.loads(raw_chunk), json.loads(raw_payload)
-                ufs = unidades.get(chave_unidade(payload), set())
-                resolvida = next(iter(ufs)) if len(ufs) == 1 else ""
-                incluir, motivo = politica.decidir(payload, uf_resolvida=resolvida)
-                ata = bool(payload.get("numeroControlePNCPAta"))
-                evidencia_territorio = None
-                if ata and territorio_atas and str(payload.get("anoAta")) == str(politica.ano):
-                    e = catalogo.execute("SELECT evidencia FROM territorio_atas WHERE id=?", [identificador]).fetchone()
-                    evidencia_territorio = json.loads(e[0]) if e else None
-                    if not evidencia_territorio or (str(evidencia_territorio.get("cnpj")), str(evidencia_territorio.get("codigoUnidadeAdministrativa"))) != chave_unidade(payload):
-                        incluir, motivo = False, "territorio_pendente_ou_laudo_divergente"
-                    else:
-                        status, uf = evidencia_territorio.get("situacao"), evidencia_territorio.get("uf_cadastral")
-                        if status in {"confirmada_RJ", "confirmada_fora_RJ"} and uf:
-                            if (status == "confirmada_RJ") != (uf == politica.uf):
-                                raise ValueError("laudo cadastral contradiz sua própria UF")
-                            if uf_unidade(payload) and uf_unidade(payload) != uf:
-                                incluir, motivo = False, "conflito_territorial_laudo_registro"
-                            else:
-                                incluir, motivo = politica.decidir(payload, uf_resolvida=uf)
-                        else:
-                            incluir, motivo = False, "territorio_pendente_laudo"
-                if (chunk.get("extras") or {}).get("papel") == "referencia_auxiliar":
-                    incluir, motivo = False, "referencia_auxiliar_nao_contabilizada"
-                if not incluir:
-                    contagens[motivo] += 1
-                    quarentena.write(json.dumps({"id": identificador, "chunk_id": chunk["chunk_id"], "motivo": motivo, "fonte": fonte, "linha": n}, ensure_ascii=False) + "\n")
-                    continue
-                extras = dict(chunk.get("extras") or {})
-                extras.update({"recorte_policy": asdict(politica), "uf": politica.uf,
-                               "territorio_origem": "registro_pncp" if uf_unidade(payload) else "unidade_observada_no_snapshot",
-                               "codigo_unidade": chave_unidade(payload)[1]})
-                if ata and territorio_atas:
-                    extras["territorio_origem"] = "cadastro_oficial_atual"
-                    extras["territorio_evidencia"] = {"origem": f"https://pncp.gov.br/api/pncp/v1/orgaos/{chave_unidade(payload)[0]}/unidades", "laudo_sha256": laudo_hash, "codigo_unidade": chave_unidade(payload)[1], "evidencia_temporal": evidencia_territorio.get("evidencia_temporal")}
-                contrato = "-2-" in identificador
-                tipo = tipo_instrumento(payload) if contrato else ("ata" if ata else "publicacao_compra")
-                extras["tipo_instrumento"] = tipo
-                referencia = compra_vinculada(payload)
-                modalidade = payload.get("modalidadeNome")
-                modalidade_id = payload.get("modalidadeId")
-                origem_modalidade = "fonte_direta" if modalidade else None
-                if referencia and not modalidade:
-                    compra = catalogo.execute("SELECT payload,chunk FROM compras WHERE id=?", [referencia]).fetchone()
-                    if compra:
-                        compra_payload, compra_chunk = json.loads(compra[0]), json.loads(compra[1])
-                        modalidade = compra_payload.get("modalidadeNome")
-                        modalidade_id = compra_payload.get("modalidadeId")
-                        if modalidade:
-                            origem_modalidade = "compra_vinculada"
-                            extras.update({"modalidade_fonte": origem_modalidade, "modalidade_compra_pncp": referencia, "modalidade_evidencia": {"origem": compra_chunk.get("origem"), "sha256": compra_chunk.get("sha256"), "coletado_em": compra_chunk.get("coletado_em")}})
-                    if not modalidade:
-                        banco.execute("INSERT INTO vinculos_pendentes VALUES (?,?)", [referencia, identificador])
-                if modalidade:
-                    extras.update({"modalidade": modalidade, "modalidade_id": modalidade_id})
-                    contagens[tipo + ":modalidade:" + str(origem_modalidade)] += 1
-                categoria = payload.get("categoriaProcesso") or {}
-                if categoria:
-                    extras["categoria_processo"] = categoria
-                # Texto, identidade e hashes originais inalterados: enriquecimento só em extras.
-                chunk["extras"] = extras
-                docs.write(json.dumps(chunk, ensure_ascii=False, sort_keys=True) + "\n")
-                contagens[tipo] += 1
-                if not ata:
-                    row = _linha_contratacao(chunk, payload)
-                    if row is None:
-                        raise ValueError(f"registro não carregável no SQL: {identificador}")
-                    instrumento = payload.get("tipoContrato") or {}
-                    row.update({"tipo_registro": tipo, "instrumento_id": instrumento.get("id") if isinstance(instrumento, dict) else None, "instrumento_nome": nome_instrumento(payload), "modalidade_id": modalidade_id, "modalidade_origem": origem_modalidade, "modalidade_compra_pncp": referencia if origem_modalidade == "compra_vinculada" else None, "categoria_processo_id": categoria.get("id"), "categoria_processo_nome": categoria.get("nome"), "codigo_unidade": chave_unidade(payload)[1]})
-                    banco.execute(insert, [row.get(k) for k in names])
-            docs.flush()
-            source_hash = file_sha256(destino / "documents.jsonl")
-            banco.executemany("INSERT INTO meta VALUES (?,?)", [("schema_version", "v7-staging-1"), ("source_sha256", source_hash), ("policy", politica.fingerprint()), ("promocao_autorizada", "false")])
-            fila = [{"compra": compra, "registros": count} for compra, count in banco.execute("SELECT compra,COUNT(*) FROM vinculos_pendentes GROUP BY compra ORDER BY compra")]
-            with (destino / "compras_pendentes.jsonl").open("w", encoding="utf-8", newline="\n") as f:
-                for item in fila:
-                    f.write(json.dumps(item) + "\n")
-            contagens["compras_pendentes_unicas"] = len(fila)
-            contagens["registros_com_vinculo_pendente"] = sum(v["registros"] for v in fila)
+        _catalogar_fontes(catalogo, fontes, territorio_atas, destino, contagens, unidades, orgaos_observados)
+        source_hash = _gravar_staging(catalogo, destino, politica, territorio_atas, laudo_hash, unidades, contagens)
         observadas = [{"cnpj": k[0], "codigoUnidadeAdministrativa": k[1], "ufs_observadas": sorted(v), "origem": "snapshot_local_nao_cadastro_oficial"} for k, v in sorted(unidades.items())]
         gravar_json(destino / "unidades_observadas.json", {"completo": False, "orgaos": sorted(orgaos_observados), "unidades": observadas})
     for fonte in fontes_meta:
@@ -282,6 +158,174 @@ def construir_staging(fontes: list[Path], destino: Path, politica: PoliticaColet
     report = {"gerado_em": agora(), "fontes": fontes_meta, "policy": asdict(politica), "source_sha256": source_hash, "contagens": dict(contagens), "cobertura_institucional_comprovada": False, "indice_construido": False, "bases_herdadas_incorporadas": False, "golden_executado": False, "territorio_atas_fonte": str(territorio_atas) if territorio_atas else None, "territorio_atas_validade_historica_comprovada": False, "promocao_autorizada": False}
     gravar_json(destino / "relatorio.json", report)
     return report
+
+
+def _catalogar_fontes(catalogo: sqlite3.Connection, fontes: list[Path], territorio_atas: Path | None, destino: Path,
+                      contagens: Counter, unidades: dict[tuple[str, str], set[str]], orgaos_observados: set[str]) -> None:
+    """Catálogo das fontes por identidade PNCP: fica a revisão escolhida, e o drift vai para drift.jsonl."""
+    catalogo.execute("CREATE TABLE territorio_atas (id TEXT PRIMARY KEY, evidencia TEXT NOT NULL)")
+    if territorio_atas:
+        for _, e in _linhas(territorio_atas):
+            catalogo.execute("INSERT INTO territorio_atas VALUES (?,?)", [e["ata"], json.dumps(e, ensure_ascii=False)])
+    catalogo.execute("CREATE TABLE registros (id TEXT PRIMARY KEY, chunk TEXT NOT NULL, payload TEXT NOT NULL, revisao TEXT NOT NULL, fonte TEXT NOT NULL, linha INTEGER NOT NULL)")
+    for fonte in fontes:
+        for n, chunk in _linhas(fonte):
+            _catalogar_registro(catalogo, fonte, n, chunk, destino, contagens, unidades, orgaos_observados)
+    catalogo.commit()
+    # Só compras tipo 1: evidência de vínculo, inclusive se fora do recorte principal.
+    catalogo.execute("CREATE VIEW compras AS SELECT * FROM registros WHERE id GLOB '*-1-*' AND json_extract(payload, '$.numeroControlePNCPAta') IS NULL")
+
+
+def _catalogar_registro(catalogo: sqlite3.Connection, fonte: Path, n: int, chunk: dict[str, Any], destino: Path,
+                        contagens: Counter, unidades: dict[tuple[str, str], set[str]], orgaos_observados: set[str]) -> None:
+    payload = json.loads(chunk["text"])
+    if not isinstance(payload, dict):
+        raise ValueError(f"registro PNCP não é objeto: {fonte}:{n}")
+    identificador = payload.get("numeroControlePNCPAta") or payload.get("numeroControlePNCP")
+    if not identificador:
+        raise ValueError(f"registro sem identidade PNCP: {fonte}:{n}")
+    key, uf = chave_unidade(payload), uf_unidade(payload)
+    if key[0]:
+        orgaos_observados.add(key[0])
+    if all(key):
+        unidades.setdefault(key, set())
+        if uf:
+            unidades[key].add(uf)
+    revisao = str(payload.get("dataAtualizacaoGlobal") or payload.get("dataAtualizacao") or chunk.get("coletado_em") or "")
+    antigo = catalogo.execute("SELECT revisao, chunk FROM registros WHERE id=?", [identificador]).fetchone()
+    if antigo:
+        contagens["identidades_repetidas"] += 1
+        chunk_antigo = json.loads(antigo[1])
+        if chunk_antigo["chunk_id"] != chunk["chunk_id"]:
+            contagens["identidades_com_drift"] += 1
+            with (destino / "drift.jsonl").open("a", encoding="utf-8") as audit:
+                audit.write(json.dumps({"id": identificador, "anterior": chunk_antigo["chunk_id"], "candidato": chunk["chunk_id"], "revisao_anterior": antigo[0], "revisao_candidata": revisao, "fonte_candidata": str(fonte)}, ensure_ascii=False) + "\n")
+        auxiliar = (chunk.get("extras") or {}).get("papel") == "referencia_auxiliar"
+        antigo_auxiliar = (chunk_antigo.get("extras") or {}).get("papel") == "referencia_auxiliar"
+        if (auxiliar and not antigo_auxiliar) or (auxiliar == antigo_auxiliar and revisao < antigo[0]):
+            return
+    catalogo.execute("INSERT OR REPLACE INTO registros VALUES (?,?,?,?,?,?)", [identificador, json.dumps(chunk, ensure_ascii=False), json.dumps(payload, ensure_ascii=False), revisao, str(fonte), n])
+    contagens["linhas_catalogadas"] += 1
+
+
+def _gravar_staging(catalogo: sqlite3.Connection, destino: Path, politica: PoliticaColeta, territorio_atas: Path | None,
+                    laudo_hash: str | None, unidades: dict[tuple[str, str], set[str]], contagens: Counter) -> str:
+    """documents.jsonl, quarentena e base SQL do staging, na ordem do catálogo; devolve o hash dos documentos."""
+    colunas = dict(_COLUNAS_CONTRATACOES)
+    colunas.update({"instrumento_id": "INTEGER", "instrumento_nome": "TEXT", "modalidade_id": "INTEGER", "modalidade_origem": "TEXT", "modalidade_compra_pncp": "TEXT", "categoria_processo_id": "INTEGER", "categoria_processo_nome": "TEXT", "codigo_unidade": "TEXT"})
+    with sqlite3.connect(destino / "base_estruturada.sqlite") as banco, (destino / "documents.jsonl").open("w", encoding="utf-8", newline="\n") as docs, (destino / "quarentena.jsonl").open("w", encoding="utf-8", newline="\n") as quarentena:
+        banco.execute("CREATE TABLE contratacoes (" + ",".join(k + " " + v.replace("{REAL}", "REAL") for k, v in colunas.items()) + ")")
+        banco.execute("CREATE TABLE meta (chave TEXT PRIMARY KEY, valor TEXT)")
+        banco.execute("CREATE TABLE vinculos_pendentes (compra TEXT NOT NULL, registro TEXT PRIMARY KEY)")
+        names = list(colunas)
+        insert = "INSERT INTO contratacoes (" + ",".join(names) + ") VALUES (" + ",".join("?" for _ in names) + ")"
+        for identificador, raw_chunk, raw_payload, fonte, n in catalogo.execute("SELECT id,chunk,payload,fonte,linha FROM registros ORDER BY id"):
+            chunk, payload = json.loads(raw_chunk), json.loads(raw_payload)
+            incluir, motivo, ata, evidencia_territorio = _decidir_inclusao(
+                identificador, chunk, payload, politica, unidades, catalogo, territorio_atas)
+            if not incluir:
+                contagens[motivo] += 1
+                quarentena.write(json.dumps({"id": identificador, "chunk_id": chunk["chunk_id"], "motivo": motivo, "fonte": fonte, "linha": n}, ensure_ascii=False) + "\n")
+                continue
+            _gravar_registro_incluido(identificador, chunk, payload, ata, evidencia_territorio, politica, territorio_atas,
+                                      laudo_hash, catalogo, banco, docs, insert, names, contagens)
+        docs.flush()
+        source_hash = file_sha256(destino / "documents.jsonl")
+        banco.executemany("INSERT INTO meta VALUES (?,?)", [("schema_version", "v7-staging-1"), ("source_sha256", source_hash), ("policy", politica.fingerprint()), ("promocao_autorizada", "false")])
+        fila = [{"compra": compra, "registros": count} for compra, count in banco.execute("SELECT compra,COUNT(*) FROM vinculos_pendentes GROUP BY compra ORDER BY compra")]
+        with (destino / "compras_pendentes.jsonl").open("w", encoding="utf-8", newline="\n") as f:
+            for item in fila:
+                f.write(json.dumps(item) + "\n")
+        contagens["compras_pendentes_unicas"] = len(fila)
+        contagens["registros_com_vinculo_pendente"] = sum(v["registros"] for v in fila)
+    return source_hash
+
+
+def _decidir_inclusao(identificador: str, chunk: dict[str, Any], payload: dict[str, Any], politica: PoliticaColeta,
+                      unidades: dict[tuple[str, str], set[str]], catalogo: sqlite3.Connection,
+                      territorio_atas: Path | None) -> tuple[bool, str, bool, dict[str, Any] | None]:
+    """(incluir, motivo, é ata, evidência territorial): a política da coleta e, nas atas do ano, o laudo cadastral."""
+    ufs = unidades.get(chave_unidade(payload), set())
+    resolvida = next(iter(ufs)) if len(ufs) == 1 else ""
+    incluir, motivo = politica.decidir(payload, uf_resolvida=resolvida)
+    ata = bool(payload.get("numeroControlePNCPAta"))
+    evidencia_territorio = None
+    if ata and territorio_atas and str(payload.get("anoAta")) == str(politica.ano):
+        e = catalogo.execute("SELECT evidencia FROM territorio_atas WHERE id=?", [identificador]).fetchone()
+        evidencia_territorio = json.loads(e[0]) if e else None
+        if not evidencia_territorio or (str(evidencia_territorio.get("cnpj")), str(evidencia_territorio.get("codigoUnidadeAdministrativa"))) != chave_unidade(payload):
+            incluir, motivo = False, "territorio_pendente_ou_laudo_divergente"
+        else:
+            status, uf = evidencia_territorio.get("situacao"), evidencia_territorio.get("uf_cadastral")
+            if status in {"confirmada_RJ", "confirmada_fora_RJ"} and uf:
+                if (status == "confirmada_RJ") != (uf == politica.uf):
+                    raise ValueError("laudo cadastral contradiz sua própria UF")
+                if uf_unidade(payload) and uf_unidade(payload) != uf:
+                    incluir, motivo = False, "conflito_territorial_laudo_registro"
+                else:
+                    incluir, motivo = politica.decidir(payload, uf_resolvida=uf)
+            else:
+                incluir, motivo = False, "territorio_pendente_laudo"
+    if (chunk.get("extras") or {}).get("papel") == "referencia_auxiliar":
+        incluir, motivo = False, "referencia_auxiliar_nao_contabilizada"
+    return incluir, motivo, ata, evidencia_territorio
+
+
+def _gravar_registro_incluido(identificador: str, chunk: dict[str, Any], payload: dict[str, Any], ata: bool,
+                              evidencia_territorio: dict[str, Any] | None, politica: PoliticaColeta,
+                              territorio_atas: Path | None, laudo_hash: str | None, catalogo: sqlite3.Connection,
+                              banco: sqlite3.Connection, docs: Any, insert: str, names: list[str],
+                              contagens: Counter) -> None:
+    """Enriquece só os extras, grava o chunk e, fora as atas, a linha SQL."""
+    extras = dict(chunk.get("extras") or {})
+    extras.update({"recorte_policy": asdict(politica), "uf": politica.uf,
+                   "territorio_origem": "registro_pncp" if uf_unidade(payload) else "unidade_observada_no_snapshot",
+                   "codigo_unidade": chave_unidade(payload)[1]})
+    if ata and territorio_atas:
+        extras["territorio_origem"] = "cadastro_oficial_atual"
+        extras["territorio_evidencia"] = {"origem": f"https://pncp.gov.br/api/pncp/v1/orgaos/{chave_unidade(payload)[0]}/unidades", "laudo_sha256": laudo_hash, "codigo_unidade": chave_unidade(payload)[1], "evidencia_temporal": evidencia_territorio.get("evidencia_temporal")}
+    contrato = "-2-" in identificador
+    tipo = tipo_instrumento(payload) if contrato else ("ata" if ata else "publicacao_compra")
+    extras["tipo_instrumento"] = tipo
+    referencia = compra_vinculada(payload)
+    modalidade, modalidade_id, origem_modalidade = _resolver_modalidade(identificador, payload, referencia, catalogo, banco, extras)
+    if modalidade:
+        extras.update({"modalidade": modalidade, "modalidade_id": modalidade_id})
+        contagens[tipo + ":modalidade:" + str(origem_modalidade)] += 1
+    categoria = payload.get("categoriaProcesso") or {}
+    if categoria:
+        extras["categoria_processo"] = categoria
+    # Texto, identidade e hashes originais inalterados: enriquecimento só em extras.
+    chunk["extras"] = extras
+    docs.write(json.dumps(chunk, ensure_ascii=False, sort_keys=True) + "\n")
+    contagens[tipo] += 1
+    if not ata:
+        row = _linha_contratacao(chunk, payload)
+        if row is None:
+            raise ValueError(f"registro não carregável no SQL: {identificador}")
+        instrumento = payload.get("tipoContrato") or {}
+        row.update({"tipo_registro": tipo, "instrumento_id": instrumento.get("id") if isinstance(instrumento, dict) else None, "instrumento_nome": nome_instrumento(payload), "modalidade_id": modalidade_id, "modalidade_origem": origem_modalidade, "modalidade_compra_pncp": referencia if origem_modalidade == "compra_vinculada" else None, "categoria_processo_id": categoria.get("id"), "categoria_processo_nome": categoria.get("nome"), "codigo_unidade": chave_unidade(payload)[1]})
+        banco.execute(insert, [row.get(k) for k in names])
+
+
+def _resolver_modalidade(identificador: str, payload: dict[str, Any], referencia: Any, catalogo: sqlite3.Connection,
+                         banco: sqlite3.Connection, extras: dict[str, Any]) -> tuple[Any, Any, str | None]:
+    """Modalidade do registro ou, sem ela, a da compra vinculada; sem nenhuma, o vínculo fica pendente."""
+    modalidade = payload.get("modalidadeNome")
+    modalidade_id = payload.get("modalidadeId")
+    origem_modalidade = "fonte_direta" if modalidade else None
+    if referencia and not modalidade:
+        compra = catalogo.execute("SELECT payload,chunk FROM compras WHERE id=?", [referencia]).fetchone()
+        if compra:
+            compra_payload, compra_chunk = json.loads(compra[0]), json.loads(compra[1])
+            modalidade = compra_payload.get("modalidadeNome")
+            modalidade_id = compra_payload.get("modalidadeId")
+            if modalidade:
+                origem_modalidade = "compra_vinculada"
+                extras.update({"modalidade_fonte": origem_modalidade, "modalidade_compra_pncp": referencia, "modalidade_evidencia": {"origem": compra_chunk.get("origem"), "sha256": compra_chunk.get("sha256"), "coletado_em": compra_chunk.get("coletado_em")}})
+        if not modalidade:
+            banco.execute("INSERT INTO vinculos_pendentes VALUES (?,?)", [referencia, identificador])
+    return modalidade, modalidade_id, origem_modalidade
 
 
 def preparar_alvos(observadas: Path, cadastros: list[Path], destino: Path) -> dict[str, Any]:

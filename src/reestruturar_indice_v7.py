@@ -32,8 +32,29 @@ def reestruturar(
     documents_file: Path,
 ) -> dict[str, Any]:
     global_manifest = json.loads((index_dir / "manifest.json").read_text(encoding="utf-8"))
+    chunk_base, por_base = _agrupar_documentos(documents_file)
+    por_base_vecs = _agrupar_vetores(index_dir / "vectors.jsonl", chunk_base)
 
-    # 1. Build chunk_id → base_id map from documents
+    # 3. Create subdirectories
+    stats: dict[str, Any] = {}
+    for base_id, chunks in por_base.items():
+        stats[base_id] = _gravar_base(index_dir, base_id, chunks, por_base_vecs.get(base_id, []),
+                                      global_manifest, documents_file)
+
+    # 4. Update global manifest
+    global_manifest["bases"] = [
+        {"base_id": bid} for bid in sorted(stats.keys())
+    ]
+    (index_dir / "manifest.json").write_text(
+        json.dumps(global_manifest, ensure_ascii=False, indent=1) + "\n",
+        encoding="utf-8",
+    )
+
+    return stats
+
+
+def _agrupar_documentos(documents_file: Path) -> tuple[dict[str, str], dict[str, list[dict[str, Any]]]]:
+    """1. chunk_id -> base_id e os chunks de cada base, validando os metadados antes de gravar qualquer base."""
     chunk_base: dict[str, str] = {}
     por_base: dict[str, list[dict[str, Any]]] = {}
     with documents_file.open(encoding="utf-8") as f:
@@ -55,9 +76,11 @@ def reestruturar(
             cid = chunk["chunk_id"]
             chunk_base[cid] = base_id
             por_base.setdefault(base_id, []).append(chunk)
+    return chunk_base, por_base
 
-    # 2. Load vectors and group by base_id (streaming to avoid OOM)
-    vectors_path = index_dir / "vectors.jsonl"
+
+def _agrupar_vetores(vectors_path: Path, chunk_base: dict[str, str]) -> dict[str, list[tuple[str, list[float]]]]:
+    """2. Vetores do índice plano agrupados por base (lidos em fluxo, sem carregar o arquivo inteiro)."""
     por_base_vecs: dict[str, list[tuple[str, list[float]]]] = {}
     with vectors_path.open(encoding="utf-8") as f:
         for line in f:
@@ -69,74 +92,64 @@ def reestruturar(
             base_id = chunk_base.get(cid)
             if base_id and cid and emb:
                 por_base_vecs.setdefault(base_id, []).append((cid, emb))
+    return por_base_vecs
 
-    # 3. Create subdirectories
-    stats: dict[str, Any] = {}
-    for base_id, chunks in por_base.items():
-        base_dir = index_dir / base_id
-        base_dir.mkdir(parents=True, exist_ok=True)
 
-        # Documents
-        docs_path = base_dir / "documents.jsonl"
-        with docs_path.open("w", encoding="utf-8", newline="\n") as f:
-            for chunk in chunks:
-                f.write(json.dumps(chunk, ensure_ascii=False, sort_keys=True) + "\n")
+def _gravar_base(index_dir: Path, base_id: str, chunks: list[dict[str, Any]], vecs: list[tuple[str, list[float]]],
+                 global_manifest: dict[str, Any], documents_file: Path) -> dict[str, int]:
+    """Documentos, vetores, FAISS e manifest de uma base no layout por base; devolve as contagens."""
+    base_dir = index_dir / base_id
+    base_dir.mkdir(parents=True, exist_ok=True)
 
-        # Vectors — copy full record from global vectors, not just embedding
-        vecs = por_base_vecs.get(base_id, [])
-        vecs_path = base_dir / "vectors.jsonl"
-        # Build lookup: chunk_id from documents → full metadata
-        doc_meta: dict[str, dict[str, Any]] = {}
+    # Documents
+    docs_path = base_dir / "documents.jsonl"
+    with docs_path.open("w", encoding="utf-8", newline="\n") as f:
         for chunk in chunks:
-            doc_meta[chunk["chunk_id"]] = chunk
-        with vecs_path.open("w", encoding="utf-8", newline="\n") as f:
-            for cid, emb in vecs:
-                doc = doc_meta.get(cid, {})
-                record = {
-                    "chunk_id": cid,
-                    "document_id": doc.get("document_id", ""),
-                    "base_id": base_id,
-                    "embedding": emb,
-                    "source_file": doc.get("source_file", ""),
-                    "sha256": doc.get("sha256", ""),
-                    "metadata": _chunk_metadata(doc),
-                }
-                f.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+            f.write(json.dumps(chunk, ensure_ascii=False, sort_keys=True) + "\n")
 
-        # FAISS
-        if vecs:
-            _write_faiss_index(base_dir / "vectors.faiss", [emb for _, emb in vecs])
+    # Vectors — copy full record from global vectors, not just embedding
+    vecs_path = base_dir / "vectors.jsonl"
+    # Build lookup: chunk_id from documents → full metadata
+    doc_meta: dict[str, dict[str, Any]] = {}
+    for chunk in chunks:
+        doc_meta[chunk["chunk_id"]] = chunk
+    with vecs_path.open("w", encoding="utf-8", newline="\n") as f:
+        for cid, emb in vecs:
+            doc = doc_meta.get(cid, {})
+            record = {
+                "chunk_id": cid,
+                "document_id": doc.get("document_id", ""),
+                "base_id": base_id,
+                "embedding": emb,
+                "source_file": doc.get("source_file", ""),
+                "sha256": doc.get("sha256", ""),
+                "metadata": _chunk_metadata(doc),
+            }
+            f.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
 
-        # Manifest
-        manifest = {
-            "base_id": base_id,
-            "embedding_model": global_manifest["embedding_model"],
-            "dimension": global_manifest["dimension"],
-            "faiss_index": "vectors.faiss",
-            "total_chunks": len(chunks),
-            "total_vectors": len(vecs),
-            "source_file": _relative(documents_file),
-        }
-        for key in ("encoding_config", "embedding_provider", "embedding_endpoint", "projecao_embedding"):
-            if key in global_manifest:
-                manifest[key] = global_manifest[key]
-        (base_dir / "manifest.json").write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=1) + "\n",
-            encoding="utf-8",
-        )
-        stats[base_id] = {"chunks": len(chunks), "vetores": len(vecs)}
-        print(f"  {base_id}: {len(chunks)} chunks, {len(vecs)} vetores", flush=True)
+    # FAISS
+    if vecs:
+        _write_faiss_index(base_dir / "vectors.faiss", [emb for _, emb in vecs])
 
-    # 4. Update global manifest
-    global_manifest["bases"] = [
-        {"base_id": bid} for bid in sorted(stats.keys())
-    ]
-    (index_dir / "manifest.json").write_text(
-        json.dumps(global_manifest, ensure_ascii=False, indent=1) + "\n",
+    # Manifest
+    manifest = {
+        "base_id": base_id,
+        "embedding_model": global_manifest["embedding_model"],
+        "dimension": global_manifest["dimension"],
+        "faiss_index": "vectors.faiss",
+        "total_chunks": len(chunks),
+        "total_vectors": len(vecs),
+        "source_file": _relative(documents_file),
+    }
+    for key in ("encoding_config", "embedding_provider", "embedding_endpoint", "projecao_embedding"):
+        if key in global_manifest:
+            manifest[key] = global_manifest[key]
+    (base_dir / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=1) + "\n",
         encoding="utf-8",
     )
-
-    return stats
+    print(f"  {base_id}: {len(chunks)} chunks, {len(vecs)} vetores", flush=True)
+    return {"chunks": len(chunks), "vetores": len(vecs)}
 
 
 def main(argv: list[str] | None = None) -> int:

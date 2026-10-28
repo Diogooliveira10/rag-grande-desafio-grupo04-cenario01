@@ -17,6 +17,7 @@ from pathlib import Path
 import re
 import shutil
 import time
+from typing import Callable
 from uuid import uuid4
 from urllib.parse import urlencode
 
@@ -95,31 +96,8 @@ def executar(plano: Path, destino: Path, *, rede: ConsultasOrcadas, manifest: Pa
     if max_segundos is not None and max_segundos <= 0:
         raise ValueError("limite de tempo inválido")
     prazo = inicio_execucao + max_segundos if max_segundos is not None else float("inf")
-    plan = json.loads(plano.read_text(encoding="utf-8"))
-    politica = PoliticaColeta(**plan["politica"])
-    if politica.ano != 2025 or politica.uf != "RJ":
-        raise ValueError("esta aquisição só aceita assinatura 2025 e UF RJ")
-    janelas = plan["janelas_a_adquirir"]
-    _validar_janelas(janelas, politica)
-    if manifest:
-        fontes = {str(Path(p["path"]).resolve()): p["sha256"] for p in plan["fontes"]}
-        if fontes.get(str(manifest.resolve())) != file_sha256(manifest):
-            raise ValueError("manifesto difere do plano versionado")
-        base = next(b for b in load_manifest(manifest)["bases"] if b["base_id"] == "contratos_estruturado")
-    else:
-        base = {"base_id": "contratos_estruturado", "natureza": "estruturada", "fonte": "PNCP", "chunking_sugerido": "1 registro = 1 chunk", "sensitivity_default": "publico"}
-    fingerprint = _digest({"plano_sha256": file_sha256(plano), "base": base, "cache_version": CACHE_VERSION})
-    destino = destino.resolve()
-    if retomar:
-        protegidos = [ROOT / p for p in ["index", "data/normalized", "data/structured", "data/v7_direto", "data/v7_direto_atas"]]
-        if any(destino == p.resolve() or destino.is_relative_to(p.resolve()) or p.resolve().is_relative_to(destino) for p in protegidos):
-            raise ValueError("destino protegido")
-        meta = json.loads((destino / "execucao.json").read_text(encoding="utf-8"))
-        if meta.get("fingerprint") != fingerprint:
-            raise ValueError("retomada incompatível com plano/política/base")
-    else:
-        destino = destino_novo(destino, [plano])
-        gravar_json(destino / "execucao.json", {"gerado_em": agora(), "fingerprint": fingerprint, "plano": str(plano.resolve()), "politica": asdict(politica), "promocao_autorizada": False})
+    politica, janelas, base, fingerprint = _carregar_plano(plano, manifest)
+    destino = _preparar_destino(destino.resolve(), plano, politica, fingerprint, retomar)
     # Trava de execução: interrupção abrupta requer revisar/remover só a trava
     # do próprio staging, nunca apagar páginas ou presumir que outro processo saiu.
     lock = destino / ".coleta.lock"
@@ -150,101 +128,11 @@ def executar(plano: Path, destino: Path, *, rede: ConsultasOrcadas, manifest: Pa
         ordem = {"parcial": 0, "completa": 1, "falhou": 3}
         ordenadas = sorted(enumerate(janelas), key=lambda v: (ordem.get(estado["janelas"].get(v[1]["id"], {}).get("status"), 2), v[0]))
         for _, j in ordenadas:
-            folder = _pasta(destino, j)
-            if not (folder / "000001.json").exists() and not pode_http():
-                continue
-            folder.mkdir(parents=True, exist_ok=True)
-            vistos = set(); lidos = incluidos = 0; descartes = Counter(); esperadas = None; esperado_total = None
-            status = "parcial"; pagina = 1; ultimo_erro = None
-            while pagina <= MAX_PAGINAS:
-                path = folder / f"{pagina:06d}.json"
-                if path.exists():
-                    envelope = json.loads(path.read_text(encoding="utf-8"))
-                    cache_lido += 1
-                else:
-                    if not pode_http():
-                        break
-                    inicio_http = time.perf_counter()
-                    resposta = rede.get(_url(j, pagina))
-                    evento = {"ts": agora(), "run_id": run_id, "query_id": None, "stage": "coleta", "status": "ok" if resposta.get("http_status") in (200, 204) else "erro", "latencia_ms": round((time.perf_counter()-inicio_http)*1000), "input": _url(j, pagina), "output": f"HTTP {resposta.get('http_status')}", "tokens": {"prompt": 0, "completion": 0, "total": 0}, "modelo": None, "extra": {"janela_id": j["id"], "pagina": pagina, "bytes_lidos": resposta.get("bytes_lidos"), "latencia_inclui_rate_limit": True, "timeout_http_segundos": rede.timeout}}
-                    with (destino / "eventos_http.jsonl").open("a", encoding="utf-8") as log:
-                        log.write(json.dumps(evento, ensure_ascii=False) + "\n")
-                    try:
-                        payload = _payload_de_resposta(resposta, _url(j, pagina))
-                    except FalhaDeColeta as exc:
-                        if pagina > 1 and (esperadas is None or pagina > esperadas) and _e_fim_de_paginacao(exc):
-                            payload = {"data": []}
-                        else:
-                            status = "falhou"; ultimo_erro = {"http_status": resposta.get("http_status"), "erro": str(exc)[:300]}
-                            break
-                    envelope = {"url": _url(j, pagina), "coletado_em": agora(), "payload": payload, "payload_sha256": _digest(payload), "hash_derivado": True, "http_status": resposta.get("http_status")}
-                    _validar_envelope(envelope, j, pagina)
-                    gravar_json(path, envelope)
-                _validar_envelope(envelope, j, pagina)
-                payload = envelope["payload"]
-                for campo, anterior in [("totalPaginas", esperadas), ("totalRegistros", esperado_total)]:
-                    valor = payload.get(campo)
-                    if valor is not None and (int(valor) < 0 or (anterior is not None and int(valor) != anterior)):
-                        raise ValueError(f"{campo} instável/inválido; páginas preservadas para auditoria")
-                if payload.get("totalPaginas") is not None: esperadas = int(payload["totalPaginas"])
-                if payload.get("totalRegistros") is not None: esperado_total = int(payload["totalRegistros"])
-                registros = payload["data"]
-                for r in registros:
-                    id_ = r.get("numeroControlePNCP")
-                    if id_ in vistos:
-                        raise ValueError("identidade repetida entre páginas; revisar estabilidade da janela")
-                    vistos.add(id_)
-                    lidos += 1
-                    aceito, motivo = _selecionar(r, j, politica)
-                    if aceito: incluidos += 1
-                    else: descartes[motivo] += 1
-                fim = pagina >= esperadas if esperadas is not None else len(registros) < j["params"]["tamanhoPagina"]
-                if not registros and not fim:
-                    raise ValueError("página vazia antes do fim declarado")
-                if esperadas == 0 and registros:
-                    raise ValueError("paginação declara zero páginas com registros")
-                if fim:
-                    if esperado_total is not None and esperado_total != lidos:
-                        raise ValueError("soma das páginas difere do total de registros declarado")
-                    status = "completa"
-                estado["janelas"][j["id"]] = {"status": status, "paginas_em_cache": pagina, "lidos": lidos, "selecionados_RJ_assinatura2025": incluidos, "descartes": dict(descartes), "total_paginas_declarado": esperadas, "total_registros_declarado": esperado_total, "folder": str(folder.relative_to(destino))}
-                salvar()
-                if status == "completa": break
-                pagina += 1
-            else:
-                status = "falhou"; ultimo_erro = {"erro": "teto de páginas atingido; não certificar completude"}
-            salvo = estado["janelas"].setdefault(j["id"], {"folder": str(folder.relative_to(destino))})
-            salvo.update({"status": status, "lidos": lidos, "selecionados_RJ_assinatura2025": incluidos, "descartes": dict(descartes)})
-            if ultimo_erro: salvo["erro"] = ultimo_erro
-            else: salvo.pop("erro", None)
-            salvar()
-        # O artefato principal só recebe páginas de janelas completas. Dados
-        # de janela parcial ficam no cache, sem perder chamadas já realizadas.
-        provisorio = destino / "documents.jsonl.provisorio"
-        exportados = 0
-        with provisorio.open("w", encoding="utf-8", newline="\n") as out:
-            for j in janelas:
-                e = estado["janelas"].get(j["id"], {})
-                if e.get("status") != "completa": continue
-                for n in range(1, e["paginas_em_cache"] + 1):
-                    envelope = json.loads((_pasta(destino, j) / f"{n:06d}.json").read_text(encoding="utf-8"))
-                    _validar_envelope(envelope, j, n)
-                    for r in envelope["payload"]["data"]:
-                        if not _selecionar(r, j, politica)[0]: continue
-                        chunks, _ = chunk_de_registro(RegistroDireto(payload=r, origem=envelope["url"], coletado_em=envelope["coletado_em"]), base)
-                        for c in chunks:
-                            c.setdefault("extras", {}).update({"tipo_instrumento": tipo_instrumento(r), "recorte_policy": asdict(politica)})
-                            out.write(json.dumps(c, ensure_ascii=False, sort_keys=True) + "\n")
-                            exportados += 1
-        provisorio.replace(destino / "documents.jsonl")
-        totais = Counter(e.get("status") for e in estado["janelas"].values())
-        pendencias_qualidade = sum(sum(n for motivo,n in e.get("descartes", {}).items() if motivo in {"identidade_nao_contrato_empenho", "orgao_divergente_da_consulta", "data_ausente_ou_invalida", "publicacao_fora_da_janela_consultada", "territorio_pendente"}) for e in estado["janelas"].values())
-        report = {"gerado_em": agora(), "duracao_segundos": round(time.monotonic()-inicio_execucao, 2), "limite_tempo_http_segundos": max_segundos, "run_id": run_id, "politica": asdict(politica), "janelas_plano": len(janelas), "janelas_por_status": dict(totais), "janelas_nao_iniciadas": len(janelas)-len(estado["janelas"]),
-            "consultas_http_esta_execucao": rede.consultas, "paginas_lidas_do_cache": cache_lido,
-            "registros_lidos_acumulados": sum(e.get("lidos",0) for e in estado["janelas"].values()),
-            "registros_elegiveis_em_cache": sum(e.get("selecionados_RJ_assinatura2025",0) for e in estado["janelas"].values()),
-            "ocorrencias_exportadas_janelas_completas": exportados, "source_sha256": file_sha256(destino / "documents.jsonl"),
-            "aquisicao_plano_completa": totais["completa"] == len(janelas), "registros_com_qualidade_pendente": pendencias_qualidade, "cobertura_institucional_comprovada": False, "promocao_autorizada": False}
+            cache_lido += _adquirir_janela(j, destino, rede, politica, estado, run_id, pode_http, salvar)
+        exportados = _exportar_janelas_completas(destino, janelas, estado, politica, base)
+        report = _relatorio_da_execucao(destino, janelas, estado, politica, rede, inicio_execucao=inicio_execucao,
+                                        max_segundos=max_segundos, run_id=run_id, cache_lido=cache_lido,
+                                        exportados=exportados)
         gravar_json(destino / "relatorio.json", report)
         estado.pop("ultimo_erro", None)
         return report
@@ -256,6 +144,168 @@ def executar(plano: Path, destino: Path, *, rede: ConsultasOrcadas, manifest: Pa
         estado["em_execucao"] = False
         salvar()
         lock.unlink()
+
+
+def _carregar_plano(plano: Path, manifest: Path | None) -> tuple[PoliticaColeta, list[dict], dict, str]:
+    """(política, janelas, base, fingerprint) do plano versionado, conferido contra o manifesto."""
+    plan = json.loads(plano.read_text(encoding="utf-8"))
+    politica = PoliticaColeta(**plan["politica"])
+    if politica.ano != 2025 or politica.uf != "RJ":
+        raise ValueError("esta aquisição só aceita assinatura 2025 e UF RJ")
+    janelas = plan["janelas_a_adquirir"]
+    _validar_janelas(janelas, politica)
+    if manifest:
+        fontes = {str(Path(p["path"]).resolve()): p["sha256"] for p in plan["fontes"]}
+        if fontes.get(str(manifest.resolve())) != file_sha256(manifest):
+            raise ValueError("manifesto difere do plano versionado")
+        base = next(b for b in load_manifest(manifest)["bases"] if b["base_id"] == "contratos_estruturado")
+    else:
+        base = {"base_id": "contratos_estruturado", "natureza": "estruturada", "fonte": "PNCP", "chunking_sugerido": "1 registro = 1 chunk", "sensitivity_default": "publico"}
+    fingerprint = _digest({"plano_sha256": file_sha256(plano), "base": base, "cache_version": CACHE_VERSION})
+    return politica, janelas, base, fingerprint
+
+
+def _preparar_destino(destino: Path, plano: Path, politica: PoliticaColeta, fingerprint: str, retomar: bool) -> Path:
+    """Destino novo, ou a retomada de um destino compatível com o mesmo plano."""
+    if retomar:
+        protegidos = [ROOT / p for p in ["index", "data/normalized", "data/structured", "data/v7_direto", "data/v7_direto_atas"]]
+        if any(destino == p.resolve() or destino.is_relative_to(p.resolve()) or p.resolve().is_relative_to(destino) for p in protegidos):
+            raise ValueError("destino protegido")
+        meta = json.loads((destino / "execucao.json").read_text(encoding="utf-8"))
+        if meta.get("fingerprint") != fingerprint:
+            raise ValueError("retomada incompatível com plano/política/base")
+    else:
+        destino = destino_novo(destino, [plano])
+        gravar_json(destino / "execucao.json", {"gerado_em": agora(), "fingerprint": fingerprint, "plano": str(plano.resolve()), "politica": asdict(politica), "promocao_autorizada": False})
+    return destino
+
+
+def _adquirir_janela(j: dict, destino: Path, rede: ConsultasOrcadas, politica: PoliticaColeta, estado: dict,
+                     run_id: str, pode_http: Callable[[], bool], salvar: Callable[[], None]) -> int:
+    """Lê do cache ou baixa as páginas da janela até o fim declarado; devolve quantas vieram do cache."""
+    cache_lido = 0
+    folder = _pasta(destino, j)
+    if not (folder / "000001.json").exists() and not pode_http():
+        return cache_lido
+    folder.mkdir(parents=True, exist_ok=True)
+    vistos = set(); lidos = incluidos = 0; descartes = Counter(); esperadas = None; esperado_total = None
+    status = "parcial"; pagina = 1; ultimo_erro = None
+    while pagina <= MAX_PAGINAS:
+        path = folder / f"{pagina:06d}.json"
+        if path.exists():
+            envelope = json.loads(path.read_text(encoding="utf-8"))
+            cache_lido += 1
+        else:
+            if not pode_http():
+                break
+            envelope, ultimo_erro = _baixar_pagina(j, pagina, path, destino, rede, run_id, esperadas)
+            if envelope is None:
+                status = "falhou"
+                break
+        _validar_envelope(envelope, j, pagina)
+        payload = envelope["payload"]
+        esperadas, esperado_total = _conferir_totais(payload, esperadas, esperado_total)
+        registros = payload["data"]
+        for r in registros:
+            id_ = r.get("numeroControlePNCP")
+            if id_ in vistos:
+                raise ValueError("identidade repetida entre páginas; revisar estabilidade da janela")
+            vistos.add(id_)
+            lidos += 1
+            aceito, motivo = _selecionar(r, j, politica)
+            if aceito: incluidos += 1
+            else: descartes[motivo] += 1
+        fim = pagina >= esperadas if esperadas is not None else len(registros) < j["params"]["tamanhoPagina"]
+        if not registros and not fim:
+            raise ValueError("página vazia antes do fim declarado")
+        if esperadas == 0 and registros:
+            raise ValueError("paginação declara zero páginas com registros")
+        if fim:
+            if esperado_total is not None and esperado_total != lidos:
+                raise ValueError("soma das páginas difere do total de registros declarado")
+            status = "completa"
+        estado["janelas"][j["id"]] = {"status": status, "paginas_em_cache": pagina, "lidos": lidos, "selecionados_RJ_assinatura2025": incluidos, "descartes": dict(descartes), "total_paginas_declarado": esperadas, "total_registros_declarado": esperado_total, "folder": str(folder.relative_to(destino))}
+        salvar()
+        if status == "completa": break
+        pagina += 1
+    else:
+        status = "falhou"; ultimo_erro = {"erro": "teto de páginas atingido; não certificar completude"}
+    salvo = estado["janelas"].setdefault(j["id"], {"folder": str(folder.relative_to(destino))})
+    salvo.update({"status": status, "lidos": lidos, "selecionados_RJ_assinatura2025": incluidos, "descartes": dict(descartes)})
+    if ultimo_erro: salvo["erro"] = ultimo_erro
+    else: salvo.pop("erro", None)
+    salvar()
+    return cache_lido
+
+
+def _baixar_pagina(j: dict, pagina: int, path: Path, destino: Path, rede: ConsultasOrcadas, run_id: str,
+                   esperadas: int | None) -> tuple[dict | None, dict | None]:
+    """(envelope gravado em ``path``, None) ou, se a página falhou, (None, erro)."""
+    inicio_http = time.perf_counter()
+    resposta = rede.get(_url(j, pagina))
+    evento = {"ts": agora(), "run_id": run_id, "query_id": None, "stage": "coleta", "status": "ok" if resposta.get("http_status") in (200, 204) else "erro", "latencia_ms": round((time.perf_counter()-inicio_http)*1000), "input": _url(j, pagina), "output": f"HTTP {resposta.get('http_status')}", "tokens": {"prompt": 0, "completion": 0, "total": 0}, "modelo": None, "extra": {"janela_id": j["id"], "pagina": pagina, "bytes_lidos": resposta.get("bytes_lidos"), "latencia_inclui_rate_limit": True, "timeout_http_segundos": rede.timeout}}
+    with (destino / "eventos_http.jsonl").open("a", encoding="utf-8") as log:
+        log.write(json.dumps(evento, ensure_ascii=False) + "\n")
+    try:
+        payload = _payload_de_resposta(resposta, _url(j, pagina))
+    except FalhaDeColeta as exc:
+        if pagina > 1 and (esperadas is None or pagina > esperadas) and _e_fim_de_paginacao(exc):
+            payload = {"data": []}
+        else:
+            return None, {"http_status": resposta.get("http_status"), "erro": str(exc)[:300]}
+    envelope = {"url": _url(j, pagina), "coletado_em": agora(), "payload": payload, "payload_sha256": _digest(payload), "hash_derivado": True, "http_status": resposta.get("http_status")}
+    _validar_envelope(envelope, j, pagina)
+    gravar_json(path, envelope)
+    return envelope, None
+
+
+def _conferir_totais(payload: dict, esperadas: int | None, esperado_total: int | None) -> tuple[int | None, int | None]:
+    """Totais declarados de páginas e registros: estáveis entre as páginas e não negativos."""
+    for campo, anterior in [("totalPaginas", esperadas), ("totalRegistros", esperado_total)]:
+        valor = payload.get(campo)
+        if valor is not None and (int(valor) < 0 or (anterior is not None and int(valor) != anterior)):
+            raise ValueError(f"{campo} instável/inválido; páginas preservadas para auditoria")
+    if payload.get("totalPaginas") is not None: esperadas = int(payload["totalPaginas"])
+    if payload.get("totalRegistros") is not None: esperado_total = int(payload["totalRegistros"])
+    return esperadas, esperado_total
+
+
+def _exportar_janelas_completas(destino: Path, janelas: list[dict], estado: dict, politica: PoliticaColeta,
+                                base: dict) -> int:
+    """documents.jsonl só com as janelas completas; devolve quantos chunks foram exportados."""
+    # O artefato principal só recebe páginas de janelas completas. Dados
+    # de janela parcial ficam no cache, sem perder chamadas já realizadas.
+    provisorio = destino / "documents.jsonl.provisorio"
+    exportados = 0
+    with provisorio.open("w", encoding="utf-8", newline="\n") as out:
+        for j in janelas:
+            e = estado["janelas"].get(j["id"], {})
+            if e.get("status") != "completa": continue
+            for n in range(1, e["paginas_em_cache"] + 1):
+                envelope = json.loads((_pasta(destino, j) / f"{n:06d}.json").read_text(encoding="utf-8"))
+                _validar_envelope(envelope, j, n)
+                for r in envelope["payload"]["data"]:
+                    if not _selecionar(r, j, politica)[0]: continue
+                    chunks, _ = chunk_de_registro(RegistroDireto(payload=r, origem=envelope["url"], coletado_em=envelope["coletado_em"]), base)
+                    for c in chunks:
+                        c.setdefault("extras", {}).update({"tipo_instrumento": tipo_instrumento(r), "recorte_policy": asdict(politica)})
+                        out.write(json.dumps(c, ensure_ascii=False, sort_keys=True) + "\n")
+                        exportados += 1
+    provisorio.replace(destino / "documents.jsonl")
+    return exportados
+
+
+def _relatorio_da_execucao(destino: Path, janelas: list[dict], estado: dict, politica: PoliticaColeta,
+                           rede: ConsultasOrcadas, *, inicio_execucao: float, max_segundos: float | None,
+                           run_id: str, cache_lido: int, exportados: int) -> dict:
+    totais = Counter(e.get("status") for e in estado["janelas"].values())
+    pendencias_qualidade = sum(sum(n for motivo,n in e.get("descartes", {}).items() if motivo in {"identidade_nao_contrato_empenho", "orgao_divergente_da_consulta", "data_ausente_ou_invalida", "publicacao_fora_da_janela_consultada", "territorio_pendente"}) for e in estado["janelas"].values())
+    return {"gerado_em": agora(), "duracao_segundos": round(time.monotonic()-inicio_execucao, 2), "limite_tempo_http_segundos": max_segundos, "run_id": run_id, "politica": asdict(politica), "janelas_plano": len(janelas), "janelas_por_status": dict(totais), "janelas_nao_iniciadas": len(janelas)-len(estado["janelas"]),
+        "consultas_http_esta_execucao": rede.consultas, "paginas_lidas_do_cache": cache_lido,
+        "registros_lidos_acumulados": sum(e.get("lidos",0) for e in estado["janelas"].values()),
+        "registros_elegiveis_em_cache": sum(e.get("selecionados_RJ_assinatura2025",0) for e in estado["janelas"].values()),
+        "ocorrencias_exportadas_janelas_completas": exportados, "source_sha256": file_sha256(destino / "documents.jsonl"),
+        "aquisicao_plano_completa": totais["completa"] == len(janelas), "registros_com_qualidade_pendente": pendencias_qualidade, "cobertura_institucional_comprovada": False, "promocao_autorizada": False}
 
 
 def congelar_exportacao(origem: Path, destino: Path) -> dict:

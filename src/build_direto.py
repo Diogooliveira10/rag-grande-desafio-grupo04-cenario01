@@ -195,38 +195,82 @@ def finalizar_direto(
     estatisticas_embed: dict[str, int] = {}
     eventos_fallback: list[dict[str, Any]] = []
     if embed_fn is None:
-        # Padrão do modo direto: ECOA primeiro (endpoint compartilhado, com
-        # pausa entre lotes) e encoder local como reserva. Os dois servem o
-        # modelo base Qwen3-Embedding-0.6B, mas quantizações distintas não
-        # provam identidade: compatibilidade/proveniência são gates de promoção.
-        # A contagem por origem desta execução fica registrada no inventário.
-        from src.create_embeddings import _configured_embed_batch
-
-        endpoint, api_key, modelo_ecoa = config.embedding_endpoint("ecoa")
+        embed_fn, modelo_ecoa = _embed_padrao_do_modo_direto(estatisticas_embed, eventos_fallback)
         modelo = modelo or modelo_ecoa
-        primario = embed_fn_com_pausa(
-            _configured_embed_batch("ecoa", endpoint, api_key, modelo_ecoa),
-            config.PAUSA_ENTRE_LOTES_EMBEDDING,
-        )
-        local_url, local_key, modelo_local = config.embedding_endpoint("ollama")
-        reserva = embed_fn_concorrente(
-            _configured_embed_batch("ollama", local_url, local_key, modelo_local),
-            CONCORRENCIA_PADRAO,
-        )
-
-        def _registrar_fallback(erro: Exception, tamanho: int) -> None:
-            if len(eventos_fallback) < 20:
-                eventos_fallback.append({
-                    "erro": f"{type(erro).__name__}: {erro}"[:200],
-                    "lote": tamanho,
-                })
-
-        embed_fn = embed_fn_com_fallback(
-            primario, reserva,
-            estatisticas=estatisticas_embed, ao_fallback=_registrar_fallback,
-        )
     modelo = modelo or config.EMBEDDING_MODEL
     documents = destino / "documents.jsonl"
+    arquivos, chunks_unicos = _deduplicar_documentos(documents)
+    source_sha256 = index_mod.file_sha256(documents)
+
+    relatorio_indice = index_mod.build_index(
+        input_file=documents,
+        output_dir=destino / "index",
+        embed_fn=embed_fn_concorrente(
+            embed_fn_projetado(embed_fn, projecao), CONCORRENCIA_PADRAO
+        ),
+        model=modelo,
+    )
+    modelo_efetivo = _modelo_efetivo(modelo, estatisticas_embed)
+    _registrar_projecao_nos_manifests(destino / "index", projecao, modelo_efetivo)
+    relatorio_banco = construir_banco(
+        documents_file=documents,
+        banco=Banco(sqlite_path=destino / "base_estruturada.sqlite"),
+    )
+    inventario_path = _gravar_inventario(
+        destino, base, arquivos, manifest_hash=manifest_hash, source_sha256=source_sha256, projecao=projecao,
+        modelo_efetivo=modelo_efetivo, estatisticas_embed=estatisticas_embed, eventos_fallback=eventos_fallback,
+    )
+    return {
+        "destino": str(destino),
+        "documents": str(documents),
+        "source_sha256": source_sha256,
+        "registros": len(arquivos),
+        "chunks": chunks_unicos,
+        "index": relatorio_indice,
+        "banco": relatorio_banco,
+        "inventario": str(inventario_path),
+    }
+
+
+def _embed_padrao_do_modo_direto(estatisticas_embed: dict[str, int],
+                                 eventos_fallback: list[dict[str, Any]]) -> tuple[EmbedFn, str]:
+    """Embedding padrão do modo direto e o nome do modelo do ECOA."""
+    import config
+
+    # Padrão do modo direto: ECOA primeiro (endpoint compartilhado, com
+    # pausa entre lotes) e encoder local como reserva. Os dois servem o
+    # modelo base Qwen3-Embedding-0.6B, mas quantizações distintas não
+    # provam identidade: compatibilidade/proveniência são gates de promoção.
+    # A contagem por origem desta execução fica registrada no inventário.
+    from src.create_embeddings import _configured_embed_batch
+
+    endpoint, api_key, modelo_ecoa = config.embedding_endpoint("ecoa")
+    primario = embed_fn_com_pausa(
+        _configured_embed_batch("ecoa", endpoint, api_key, modelo_ecoa),
+        config.PAUSA_ENTRE_LOTES_EMBEDDING,
+    )
+    local_url, local_key, modelo_local = config.embedding_endpoint("ollama")
+    reserva = embed_fn_concorrente(
+        _configured_embed_batch("ollama", local_url, local_key, modelo_local),
+        CONCORRENCIA_PADRAO,
+    )
+
+    def _registrar_fallback(erro: Exception, tamanho: int) -> None:
+        if len(eventos_fallback) < 20:
+            eventos_fallback.append({
+                "erro": f"{type(erro).__name__}: {erro}"[:200],
+                "lote": tamanho,
+            })
+
+    embed_fn = embed_fn_com_fallback(
+        primario, reserva,
+        estatisticas=estatisticas_embed, ao_fallback=_registrar_fallback,
+    )
+    return embed_fn, modelo_ecoa
+
+
+def _deduplicar_documentos(documents: Path) -> tuple[list[dict[str, Any]], int]:
+    """Tira chunks repetidos do ``documents.jsonl``; devolve os arquivos (um por documento) e os chunks únicos."""
     # Deduplicação em streaming com troca atômica: só os ids ficam na memória e
     # o arquivo original só é substituído depois do temporário completo.
     # (Uma reescrita em memória já derrubou o processo com MemoryError depois
@@ -272,16 +316,13 @@ def finalizar_direto(
         provisorio.replace(documents)
     else:
         provisorio.unlink(missing_ok=True)
-    source_sha256 = index_mod.file_sha256(documents)
+    return arquivos, chunks_unicos
 
-    relatorio_indice = index_mod.build_index(
-        input_file=documents,
-        output_dir=destino / "index",
-        embed_fn=embed_fn_concorrente(
-            embed_fn_projetado(embed_fn, projecao), CONCORRENCIA_PADRAO
-        ),
-        model=modelo,
-    )
+
+def _modelo_efetivo(modelo: str, estatisticas_embed: dict[str, int]) -> str:
+    """Encoder que de fato gerou os vetores, pelas contagens primário/reserva."""
+    import config
+
     # Corrigir modelo no manifest: o nome inicial é do ECOA (primário),
     # mas se todos os vetores vieram do fallback local, o manifest deve
     # refletir o encoder que realmente gerou os vetores.
@@ -293,9 +334,13 @@ def finalizar_direto(
             modelo_efetivo = reserva or modelo
         elif estatisticas_embed.get("primario", 0) > 0 and estatisticas_embed.get("reserva", 0) > 0:
             modelo_efetivo = f"{primario or modelo}+{reserva or modelo}"
+    return modelo_efetivo
+
+
+def _registrar_projecao_nos_manifests(index_dir: Path, projecao: str, modelo_efetivo: str) -> None:
     # A projeção é registrada no manifest de cada base e no inventário: um
     # índice nunca é misturado com projeção diferente em silêncio.
-    for manifest_path in sorted((destino / "index").glob("*/manifest.json")):
+    for manifest_path in sorted(index_dir.glob("*/manifest.json")):
         manifest_indice = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest_indice["projecao_embedding"] = projecao
         manifest_indice["embedding_model"] = modelo_efetivo
@@ -303,11 +348,11 @@ def finalizar_direto(
             json.dumps(manifest_indice, ensure_ascii=False, indent=1) + "\n",
             encoding="utf-8",
         )
-    relatorio_banco = construir_banco(
-        documents_file=documents,
-        banco=Banco(sqlite_path=destino / "base_estruturada.sqlite"),
-    )
 
+
+def _gravar_inventario(destino: Path, base: dict[str, Any], arquivos: list[dict[str, Any]], *, manifest_hash: str,
+                       source_sha256: str, projecao: str, modelo_efetivo: str, estatisticas_embed: dict[str, int],
+                       eventos_fallback: list[dict[str, Any]]) -> Path:
     inventario = {
         "completo": True,  # artefatos finalizados, não prova de censo estadual
         "cobertura_institucional_comprovada": False,
@@ -333,16 +378,7 @@ def finalizar_direto(
     inventario_path.write_text(
         json.dumps(inventario, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
     )
-    return {
-        "destino": str(destino),
-        "documents": str(documents),
-        "source_sha256": source_sha256,
-        "registros": len(arquivos),
-        "chunks": chunks_unicos,
-        "index": relatorio_indice,
-        "banco": relatorio_banco,
-        "inventario": str(inventario_path),
-    }
+    return inventario_path
 
 
 def construir_direto(

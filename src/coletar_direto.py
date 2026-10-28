@@ -260,6 +260,138 @@ def _gravar_estado(caminho: Path, estado: dict[str, Any]) -> None:
     temporario.replace(caminho)
 
 
+def _carregar_estado(estado_path: Path) -> dict[str, Any]:
+    """Checkpoint da coleta (retomável por janela), ou um estado novo."""
+    if not estado_path.exists():
+        return {"gerado_em": _agora(), "janelas": {}}
+    estado = json.loads(estado_path.read_text(encoding="utf-8"))
+    estado.setdefault("janelas", {})
+    return estado
+
+
+@dataclass(frozen=True)
+class _ConfigDaColeta:
+    """O que vale para todas as janelas de uma coleta."""
+
+    base: dict[str, Any]
+    manifest_hash: str
+    request_fn: RequestFn
+    taxa_seg: float
+    espera_429: float
+    chunk_size: int
+    overlap: int
+    politica: PoliticaColeta | None
+
+    def fingerprint(self, janela: Janela) -> str:
+        """Identidade da janela com as regras da coleta: muda se qualquer regra mudar."""
+        dados = {"janela": asdict(janela), "politica": asdict(self.politica) if self.politica else None,
+                 "manifest_hash": self.manifest_hash, "chunk_size": self.chunk_size, "overlap": self.overlap,
+                 "base": self.base, "coletor_version": 2}
+        return hashlib.sha256(json.dumps(dados, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+@dataclass
+class _JanelaColetada:
+    """Andamento de uma janela; preenchido página a página, também quando ela falha."""
+
+    registros: int = 0
+    lidos: int = 0
+    pagina: int = 1
+    descartes: Counter[str] = field(default_factory=Counter)
+    ultima_chamada: float | None = None
+
+
+def _coletar_paginas(janela: Janela, config_coleta: _ConfigDaColeta, linhas: Any,
+                     coletada: _JanelaColetada, ultima_chamada: float) -> float:
+    """Pagina a janela até o fim declarado, gravando os chunks aceitos em ``linhas``.
+
+    Devolve o horário da última chamada (para o intervalo da próxima janela);
+    o mesmo horário fica em ``coletada``, para o caso de a janela falhar no meio.
+    """
+    pagina = 1
+    while pagina <= MAX_PAGINAS_POR_JANELA:
+        if config_coleta.taxa_seg > 0:
+            espera = config_coleta.taxa_seg - (time.monotonic() - ultima_chamada)
+            if espera > 0:
+                time.sleep(espera)
+        url = _build_request_url(janela.endpoint, {**janela.params, "pagina": pagina})
+        ultima_chamada = time.monotonic()
+        coletada.ultima_chamada = ultima_chamada
+        coletada.pagina = pagina
+        payload = _buscar_pagina(url, config_coleta.request_fn, espera_429=config_coleta.espera_429)
+        registros = _payload_records(payload)
+        lidos_pagina = len(registros)
+        coletada.lidos += lidos_pagina
+        for registro in _filtrar_pela_janela(registros, janela.filtro):
+            if not isinstance(registro, dict):
+                continue
+            if not _aceito_pela_politica(registro, janela, config_coleta.politica, coletada.descartes):
+                continue
+            _gravar_chunks_do_registro(registro, url, config_coleta, linhas)
+            coletada.registros += 1
+        if _ultima_pagina(payload, pagina, lidos_pagina, janela.tamanho_pagina):
+            return ultima_chamada
+        pagina += 1
+    raise FalhaDeColeta("teto de páginas atingido; janela incompleta")
+
+
+def _filtrar_pela_janela(registros: list[Any], filtro: dict[str, Any] | None) -> list[Any]:
+    """Com filtro na janela, só os registros (dicts) com os valores pedidos."""
+    if not filtro:
+        return registros
+    return [
+        registro
+        for registro in registros
+        if isinstance(registro, dict)
+        and all(str(registro.get(chave)) == str(valor) for chave, valor in filtro.items())
+    ]
+
+
+def _aceito_pela_politica(registro: dict[str, Any], janela: Janela, politica: PoliticaColeta | None,
+                          descartes: Counter[str]) -> bool:
+    """O registro passa na política de coleta; se não, o motivo entra em ``descartes``."""
+    if not politica:
+        return True
+    if janela.uf_verificada:
+        _, codigo_retornado = chave_unidade(registro)
+        if codigo_retornado != str(janela.params.get("codigoUnidadeAdministrativa") or ""):
+            descartes["unidade_divergente_da_consulta"] += 1
+            return False
+    aceito, motivo = politica.decidir(registro, uf_resolvida=janela.uf_verificada)
+    if not aceito:
+        descartes[motivo] += 1
+        return False
+    return True
+
+
+def _gravar_chunks_do_registro(registro: dict[str, Any], url: str, config_coleta: _ConfigDaColeta,
+                               linhas: Any) -> None:
+    chunks, _entrada = chunk_de_registro(
+        RegistroDireto(payload=registro, origem=url, coletado_em=_agora()),
+        config_coleta.base,
+        manifest_hash=config_coleta.manifest_hash,
+        chunk_size=config_coleta.chunk_size,
+        overlap=config_coleta.overlap,
+    )
+    for chunk in chunks:
+        if config_coleta.politica and "-2-" in str(registro.get("numeroControlePNCP") or ""):
+            chunk.setdefault("extras", {})["tipo_instrumento"] = tipo_instrumento(registro)
+        linhas.write(json.dumps(chunk, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def _ultima_pagina(payload: Any, pagina: int, lidos_pagina: int, tamanho_pagina: int) -> bool:
+    """A janela acabou nesta página? Paginação declarada inconsistente é falha."""
+    total_paginas = payload.get("totalPaginas") if isinstance(payload, dict) else None
+    if total_paginas is not None:
+        total_paginas = int(total_paginas)
+        if total_paginas < 0 or (total_paginas == 0 and lidos_pagina):
+            raise FalhaDeColeta("metadados de paginação inconsistentes")
+        if not lidos_pagina and pagina < total_paginas:
+            raise FalhaDeColeta("página vazia antes do fim declarado")
+        return pagina >= total_paginas
+    return lidos_pagina < tamanho_pagina
+
+
 def coletar_direto(
     janelas: list[Janela],
     base: dict[str, Any],
@@ -284,22 +416,16 @@ def coletar_direto(
     destino.mkdir(parents=True, exist_ok=True)
     documents = destino / "documents.jsonl"
     estado_path = destino / "estado_coleta.json"
-    estado: dict[str, Any] = {"gerado_em": _agora(), "janelas": {}}
-    if estado_path.exists():
-        estado = json.loads(estado_path.read_text(encoding="utf-8"))
-        estado.setdefault("janelas", {})
-
-    def fingerprint(janela: Janela) -> str:
-        dados = {"janela": asdict(janela), "politica": asdict(politica) if politica else None,
-                 "manifest_hash": manifest_hash, "chunk_size": chunk_size, "overlap": overlap,
-                 "base": base, "coletor_version": 2}
-        return hashlib.sha256(json.dumps(dados, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    estado = _carregar_estado(estado_path)
+    config_coleta = _ConfigDaColeta(base=base, manifest_hash=manifest_hash, request_fn=request_fn,
+                                    taxa_seg=taxa_seg, espera_429=espera_429, chunk_size=chunk_size,
+                                    overlap=overlap, politica=politica)
 
     # Validar todas as retomadas antes de qualquer append. Estado legado não
     # certifica a nova regra de seleção; recuperar para destino separado.
     for janela in janelas:
         salvo = estado["janelas"].get(janela.id) or {}
-        if salvo.get("status") == "completa" and salvo.get("fingerprint") != fingerprint(janela):
+        if salvo.get("status") == "completa" and salvo.get("fingerprint") != config_coleta.fingerprint(janela):
             raise ValueError(f"checkpoint incompatível/legado: {janela.id}; use novo destino")
     completas = puladas = falhadas = 0
     registros_totais = 0
@@ -312,76 +438,17 @@ def coletar_direto(
             continue
 
         linhas = tempfile.TemporaryFile(mode="w+t", encoding="utf-8", newline="\n", dir=destino)
-        descartes: Counter[str] = Counter()
-        registros_janela = 0
-        lidos_janela = 0
-        pagina = 1
+        janela_coletada = _JanelaColetada()
         try:
-            while pagina <= MAX_PAGINAS_POR_JANELA:
-                if taxa_seg > 0:
-                    espera = taxa_seg - (time.monotonic() - ultima_chamada)
-                    if espera > 0:
-                        time.sleep(espera)
-                url = _build_request_url(janela.endpoint, {**janela.params, "pagina": pagina})
-                ultima_chamada = time.monotonic()
-                payload = _buscar_pagina(url, request_fn, espera_429=espera_429)
-                registros = _payload_records(payload)
-                lidos_pagina = len(registros)
-                lidos_janela += lidos_pagina
-                if janela.filtro:
-                    registros = [
-                        registro
-                        for registro in registros
-                        if isinstance(registro, dict)
-                        and all(
-                            str(registro.get(chave)) == str(valor)
-                            for chave, valor in janela.filtro.items()
-                        )
-                    ]
-                for registro in registros:
-                    if not isinstance(registro, dict):
-                        continue
-                    if politica:
-                        if janela.uf_verificada:
-                            _, codigo_retornado = chave_unidade(registro)
-                            if codigo_retornado != str(janela.params.get("codigoUnidadeAdministrativa") or ""):
-                                descartes["unidade_divergente_da_consulta"] += 1
-                                continue
-                        aceito, motivo = politica.decidir(registro, uf_resolvida=janela.uf_verificada)
-                        if not aceito:
-                            descartes[motivo] += 1
-                            continue
-                    chunks, _entrada = chunk_de_registro(
-                        RegistroDireto(payload=registro, origem=url, coletado_em=_agora()),
-                        base,
-                        manifest_hash=manifest_hash,
-                        chunk_size=chunk_size,
-                        overlap=overlap,
-                    )
-                    for chunk in chunks:
-                        if politica and "-2-" in str(registro.get("numeroControlePNCP") or ""):
-                            chunk.setdefault("extras", {})["tipo_instrumento"] = tipo_instrumento(registro)
-                        linhas.write(json.dumps(chunk, ensure_ascii=False, sort_keys=True) + "\n")
-                    registros_janela += 1
-                total_paginas = payload.get("totalPaginas") if isinstance(payload, dict) else None
-                if total_paginas is not None:
-                    total_paginas = int(total_paginas)
-                    if total_paginas < 0 or (total_paginas == 0 and lidos_pagina):
-                        raise FalhaDeColeta("metadados de paginação inconsistentes")
-                    if not lidos_pagina and pagina < total_paginas:
-                        raise FalhaDeColeta("página vazia antes do fim declarado")
-                    if pagina >= total_paginas:
-                        break
-                elif lidos_pagina < janela.tamanho_pagina:
-                    break
-                pagina += 1
-            else:
-                raise FalhaDeColeta("teto de páginas atingido; janela incompleta")
+            ultima_chamada = _coletar_paginas(janela, config_coleta, linhas, janela_coletada, ultima_chamada)
         except Exception as exc:  # noqa: BLE001 — falha registrada, não aborta a coleta
             linhas.close()
+            # A chamada que falhou também conta para o intervalo da próxima janela.
+            if janela_coletada.ultima_chamada is not None:
+                ultima_chamada = janela_coletada.ultima_chamada
             estado["janelas"][janela.id] = {
                 "status": "falhada",
-                "fingerprint": fingerprint(janela),
+                "fingerprint": config_coleta.fingerprint(janela),
                 "erro": f"{type(exc).__name__}: {exc}"[:300],
             }
             estado["gerado_em"] = _agora()
@@ -399,16 +466,16 @@ def coletar_direto(
             linhas.close()
         estado["janelas"][janela.id] = {
             "status": "completa",
-            "fingerprint": fingerprint(janela),
-            "descartes": dict(descartes),
-            "paginas": pagina,
-            "registros": registros_janela,
-            "registros_lidos": lidos_janela,
+            "fingerprint": config_coleta.fingerprint(janela),
+            "descartes": dict(janela_coletada.descartes),
+            "paginas": janela_coletada.pagina,
+            "registros": janela_coletada.registros,
+            "registros_lidos": janela_coletada.lidos,
         }
         estado["gerado_em"] = _agora()
         _gravar_estado(estado_path, estado)
         completas += 1
-        registros_totais += registros_janela
+        registros_totais += janela_coletada.registros
 
     return {
         "destino": str(destino),
