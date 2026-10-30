@@ -295,6 +295,42 @@ def test_endpoint_trace_devolve_o_caminho(pipeline_com_indice):
     assert corpo["completo"] is True
 
 
+def test_endpoint_trace_traz_os_hashes_das_etapas_e_a_integridade_do_log(pipeline_com_indice):
+    """O frontend mostra a cadeia de hashes: os hashes de cada etapa e a conferência
+    do log inteiro, feita no backend (2026-10-30). A cadeia é global, então o
+    frontend não a confere só pelas etapas exibidas."""
+    from src import trace as trace_mod
+
+    pipeline.responder("Quais contratos de ambulancias foram publicados?",
+                       cliente=lambda m: _resposta_sdk(), query_id="q_hash")
+    obs.default_logger.flush()
+    trace_mod.integridade_do_log()  # dispara a primeira conferência
+    verificacao = trace_mod._VERIFICACOES[(str(obs.default_logger.logs_dir.resolve()), config.LOG_CHAIN_KEY)]
+    verificacao.atualizar()  # espera a conferência terminar
+
+    corpo = client.get("/api/v1/trace/q_hash").json()
+
+    etapas = corpo["etapas"]
+    assert all(len(etapa["hash"]) == 64 and len(etapa["hash_anterior"]) == 64 for etapa in etapas)
+    registros = {r["hash"]: r for r in _registros() if r.get("query_id") == "q_hash"}
+    assert [registros[etapa["hash"]]["stage"] for etapa in etapas] == [etapa["stage"] for etapa in etapas]
+    integridade = corpo["integridade"]
+    assert integridade["status"] == "valida" and integridade["algoritmo"] == "SHA-256"
+    assert integridade["registros_verificados"] >= len(etapas) and integridade["problemas"] == 0
+
+
+def test_endpoint_trace_com_cadeia_desligada_diz_nao_verificada(pipeline_com_indice, monkeypatch):
+    pipeline.responder("Quais contratos de ambulancias foram publicados?",
+                       cliente=lambda m: _resposta_sdk(), query_id="q_sem_cadeia")
+    monkeypatch.setattr(config, "LOG_CHAIN_ENABLED", False)
+
+    corpo = client.get("/api/v1/trace/q_sem_cadeia").json()
+
+    assert corpo["integridade"] == {"status": "nao_verificada", "algoritmo": None, "registros_verificados": None,
+                                    "registros_legados": None, "problemas": None, "verificado_em": None,
+                                    "motivo": "cadeia_desligada"}
+
+
 def test_endpoint_trace_de_query_id_desconhecido_e_404():
     response = client.get("/api/v1/trace/q_inexistente")
 

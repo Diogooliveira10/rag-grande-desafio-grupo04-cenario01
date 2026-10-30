@@ -169,6 +169,45 @@ reenviando as últimas trocas no campo opcional `historico` de
   inválida, `422`) e `erro`. Só `erro` indica falha. Os detalhes
   incluem `outcome`, origem, sequência, motivo e metadados permitidos. O evento
   terminal da API confirma retorno preparado, não recebimento pelo navegador.
+- **Cadeia de hashes (desde 2026-10-30).** Cada item de `etapas[]` traz `hash`
+  e `hash_anterior`, com 64 caracteres hexadecimais cada. Os dois vêm `null`
+  nas linhas gravadas antes da cadeia. O topo do trace traz `integridade`, a
+  conferência da cadeia do **log inteiro**, feita no backend:
+
+  ```json
+  "integridade": {
+    "status": "parcial",
+    "algoritmo": "HMAC-SHA256",
+    "registros_verificados": 23024,
+    "registros_legados": 14682,
+    "problemas": 0,
+    "verificado_em": "2026-10-30T14:05:12+00:00",
+    "motivo": null
+  }
+  ```
+
+  | `status` | Significado |
+  |---|---|
+  | `valida` | Toda a cadeia conferida, sem quebra |
+  | `parcial` | Sem quebra, mas o log começa com linhas gravadas antes da cadeia (`registros_legados`), que não têm como ser conferidas |
+  | `legado` | Nenhuma linha encadeada |
+  | `invalida` | Alguma linha alterada, apagada, inserida ou fora de ordem (`problemas` diz quantas quebras) |
+  | `nao_verificada` | Conferência ainda não feita. `motivo` traz `verificacao_em_andamento` (a primeira conferência, depois de o backend subir, leva cerca de 1 minuto), `cadeia_desligada` ou `erro_na_verificacao:<tipo>` |
+
+  Com `nao_verificada`, os campos de contagem vêm `null`. O `algoritmo` é
+  `HMAC-SHA256` com a chave do log e `SHA-256` sem ela.
+
+  **Não confira a cadeia comparando só as etapas exibidas.** A cadeia é global:
+  entre duas etapas de uma pergunta pode haver linhas de outras requisições, e
+  o `hash_anterior` de uma etapa nem sempre é o `hash` da etapa anterior. Mostre
+  o `status` global e os hashes abreviados por etapa. A ordem das etapas já vem
+  em `ordem`.
+
+  A conferência não espera: o trace devolve o resultado da última conferência
+  concluída (veja `verificado_em`), e as linhas mais recentes entram na
+  seguinte. Os hashes provam que o log não foi alterado, não que a resposta
+  está correta. A conferência completa, linha a linha, é
+  `python -m src.log_chain verificar`.
 - `GET /api/v1/sessions/{session_id}/trace`: a conversa inteira, com as
   perguntas em ordem (`perguntas[]` com `query_id`, `pergunta`, `resumo` e os
   nomes das etapas) e quantas delas usaram SQL e busca vetorial. O detalhe de

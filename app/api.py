@@ -50,7 +50,7 @@ from src.log_context import current_execution, execution
 from src.obs import registrar as obs_registrar
 from src.reformulation import TurnoAnterior
 from src.schema import RAGResponse
-from src.trace import montar_trace, montar_trace_sessao
+from src.trace import integridade_do_log, montar_trace, montar_trace_sessao
 
 logger = logging.getLogger(__name__)
 
@@ -209,6 +209,25 @@ class TraceEtapa(BaseModel):
     tokens: Optional[dict[str, int]] = None
     modelo: Optional[str] = None
     detalhes: dict[str, Any] = Field(default_factory=dict)
+    # Cadeia de hashes do log (src/log_chain.py); None em linhas de antes dela.
+    # A cadeia é global: o hash_anterior de uma etapa pode ser o de uma linha de
+    # outra requisição, então não se confere a cadeia só pelas etapas exibidas.
+    hash: Optional[str] = None
+    hash_anterior: Optional[str] = None
+
+
+class IntegridadeTrace(BaseModel):
+    """Conferência da cadeia de hashes do log inteiro, não só das etapas desta pergunta.
+
+    Prova que o log não foi alterado, não que a resposta está correta.
+    """
+    status: Literal["valida", "invalida", "parcial", "legado", "nao_verificada"]
+    algoritmo: Optional[str] = None
+    registros_verificados: Optional[int] = None
+    registros_legados: Optional[int] = None
+    problemas: Optional[int] = None
+    verificado_em: Optional[str] = None
+    motivo: Optional[str] = None
 
 
 class TraceResponse(BaseModel):
@@ -227,6 +246,7 @@ class TraceResponse(BaseModel):
     completo: Optional[bool] = None
     latencia_metodo: str = "soma_etapas_legado"
     latencia_pipeline_ms: Optional[int] = None
+    integridade: Optional[IntegridadeTrace] = None
 
 
 class SessaoPergunta(BaseModel):
@@ -272,6 +292,9 @@ async def _ciclo_de_vida(_app: FastAPI):
     # Aquecer em thread evita que a primeira tela de Explorar pague esse custo
     # dentro do timeout de 30 s do navegador. Falha aqui não derruba o servidor.
     threading.Thread(target=catalog.prewarm, name="catalog-preload", daemon=True).start()
+    # A primeira conferência da cadeia de hashes lê o log inteiro (~45 s com
+    # 1,7 GB): começa já, numa thread, para o trace ter a integridade pronta.
+    integridade_do_log()
     yield
 
 
@@ -480,7 +503,7 @@ def obter_trace(
     _autorizar_trace(x_api_key, x_session_id, trace["session_id"] if trace else None)
     if trace is None:
         raise HTTPException(status_code=404, detail="query_id sem registro no log.")
-    return trace
+    return {**trace, "integridade": integridade_do_log()}
 
 
 @app.get("/api/v1/sessions/{session_id}/trace", response_model=SessaoTraceResponse)

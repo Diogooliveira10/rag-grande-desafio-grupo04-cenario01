@@ -19,12 +19,14 @@ import json
 import logging
 import re
 import sqlite3
+import threading
 from collections import Counter
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 import config
+from src import log_chain
 from src.obs import Stage, default_logger
 
 # Qual base cada etapa consulta. BM25 é busca por palavras sobre os mesmos
@@ -169,6 +171,28 @@ def _resumo_derivado(etapas: list[dict[str, Any]]) -> dict[str, Any]:
     return resumo
 
 
+_VERIFICACOES: dict[tuple[str, str], log_chain.VerificacaoContinua] = {}
+_VERIFICACOES_LOCK = threading.Lock()
+
+
+def integridade_do_log(logs_dir: Optional[Path] = None) -> dict[str, Any]:
+    """Integridade da cadeia de hashes do log inteiro, para o campo ``integridade`` do trace.
+
+    Não espera: devolve a última conferência concluída e dispara a próxima
+    (``log_chain.VerificacaoContinua``). Logo depois de o backend subir, a
+    primeira conferência completa ainda está rodando: ``nao_verificada``.
+    """
+    if not config.LOG_CHAIN_ENABLED:
+        return {"status": "nao_verificada", "motivo": "cadeia_desligada"}
+    diretorio = Path(logs_dir or default_logger.logs_dir).resolve()
+    chave = (str(diretorio), config.LOG_CHAIN_KEY)
+    with _VERIFICACOES_LOCK:
+        verificacao = _VERIFICACOES.get(chave)
+        if verificacao is None:
+            verificacao = _VERIFICACOES[chave] = log_chain.VerificacaoContinua(diretorio, config.LOG_CHAIN_KEY)
+    return verificacao.estado()
+
+
 def montar_trace(query_id: str, logs_dir: Optional[Path] = None) -> Optional[dict[str, Any]]:
     """Caminho da pergunta ``query_id``, ou ``None`` se ela não está no log."""
     registros = _registros("query_id", query_id, Path(logs_dir or default_logger.logs_dir))
@@ -227,6 +251,12 @@ def _trace_dos_registros(query_id: str, registros: list[dict[str, Any]]) -> dict
             "tokens": registro.get("tokens"),
             "modelo": registro.get("modelo"),
             "detalhes": registro.get("extra") or {},
+            # Cadeia de hashes do log (src/log_chain.py); None em linhas de antes dela.
+            # A cadeia é global: entre duas etapas desta pergunta pode haver linhas
+            # de outras requisições, então o hash_anterior de uma etapa nem sempre é
+            # o hash da etapa anterior. A conferência é a de ``integridade_do_log``.
+            "hash": registro.get("hash"),
+            "hash_anterior": registro.get("hash_anterior"),
         }
         for ordem, registro in enumerate(registros, start=1)
     ]

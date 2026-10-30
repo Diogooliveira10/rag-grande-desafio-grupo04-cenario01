@@ -205,3 +205,103 @@ def test_reescrever_o_trecho_sem_chave_quebra_na_primeira_linha_com_chave(tmp_pa
     antigo.write_text("\n".join(refeitas) + "\n", encoding="utf-8")
     relatorio = _verificar(tmp_path)
     assert relatorio.problemas[0].startswith("pipeline-2026-10-26.jsonl:1: hash_anterior não bate")
+
+
+# --------------------------------------------------------------------------
+# Verificação contínua: a integridade do trace sem reler o log inteiro (2026-10-30)
+# --------------------------------------------------------------------------
+
+
+def _relatorio(relatorio):
+    from dataclasses import asdict
+    return asdict(relatorio)
+
+
+@pytest.fixture
+def conferencias(monkeypatch):
+    """Conta quantas vezes a conferência recomeçou do zero."""
+    criadas = []
+    original = log_chain._Conferencia
+
+    class Contada(original):
+        def __init__(self, chave):
+            criadas.append(chave)
+            super().__init__(chave)
+
+    monkeypatch.setattr(log_chain, "_Conferencia", Contada)
+    return criadas
+
+
+def test_continua_confere_so_as_linhas_novas(tmp_path, conferencias):
+    _gravar(tmp_path, "pipeline-2026-10-29.jsonl", 50)
+    continua = log_chain.VerificacaoContinua(tmp_path, "chave-de-teste")
+    assert _relatorio(continua.atualizar()) == _relatorio(_verificar(tmp_path))
+
+    _gravar(tmp_path, "pipeline-2026-10-29.jsonl", 30, inicio=50)
+    _gravar(tmp_path, "pipeline-2026-10-30.jsonl", 20, inicio=80)  # virou o dia
+    assert _relatorio(continua.atualizar()) == _relatorio(_verificar(tmp_path))
+    assert len(conferencias) == 3  # uma da contínua e uma de cada verificar do teste: ela não recomeçou
+    assert continua.atualizar().encadeadas == 100
+
+
+def test_continua_acusa_alteracao_num_dia_anterior(tmp_path):
+    antigo = _gravar(tmp_path, "pipeline-2026-10-29.jsonl", 10)
+    _gravar(tmp_path, "pipeline-2026-10-30.jsonl", 5, inicio=10)
+    continua = log_chain.VerificacaoContinua(tmp_path, "chave-de-teste")
+    assert continua.atualizar().integra
+    texto = antigo.read_text(encoding="utf-8")
+    antigo.write_text(texto.replace('"linha 3"', '"linha 8"'), encoding="utf-8")  # mesmo tamanho
+
+    relatorio = continua.atualizar()
+    assert not relatorio.integra
+    assert relatorio.problemas[0].startswith("pipeline-2026-10-29.jsonl:4: conteúdo alterado")
+    assert log_chain.situacao(relatorio) == "invalida"
+
+
+def test_continua_acusa_alteracao_da_ultima_linha_conferida(tmp_path):
+    caminho = _gravar(tmp_path, "pipeline-2026-10-30.jsonl", 10)
+    continua = log_chain.VerificacaoContinua(tmp_path, "chave-de-teste")
+    continua.atualizar()
+    texto = caminho.read_text(encoding="utf-8")
+    caminho.write_text(texto.replace('"linha 9"', '"linha 0"'), encoding="utf-8")
+    _gravar(tmp_path, "pipeline-2026-10-30.jsonl", 3, inicio=10)  # e o log seguiu crescendo
+
+    relatorio = continua.atualizar()
+    assert not relatorio.integra
+    assert any(p.startswith("pipeline-2026-10-30.jsonl:10:") for p in relatorio.problemas)
+
+
+def test_continua_deixa_a_linha_incompleta_para_depois(tmp_path):
+    caminho = _gravar(tmp_path, "pipeline-2026-10-30.jsonl", 5)
+    linha_seguinte, _ = log_chain.encadear(json.dumps({"query_id": "q5", "stage": "teste"}),
+                                           log_chain.ultimo_hash(caminho), "chave-de-teste")
+    with caminho.open("ab") as arquivo:
+        arquivo.write(linha_seguinte[:20].encode("utf-8"))  # ainda sendo gravada
+    continua = log_chain.VerificacaoContinua(tmp_path, "chave-de-teste")
+    assert continua.atualizar().encadeadas == 5
+
+    with caminho.open("ab") as arquivo:
+        arquivo.write((linha_seguinte[20:] + "\n").encode("utf-8"))
+    relatorio = continua.atualizar()
+    assert relatorio.integra and relatorio.encadeadas == 6
+    assert _relatorio(relatorio) == _relatorio(_verificar(tmp_path))
+
+
+def test_estado_nao_espera_a_conferencia(tmp_path):
+    _gravar(tmp_path, "pipeline-2026-10-30.jsonl", 5)
+    continua = log_chain.VerificacaoContinua(tmp_path, "chave-de-teste")
+    with continua._rodando:  # outra conferência em andamento
+        assert continua.estado() == {"status": "nao_verificada", "algoritmo": "HMAC-SHA256",
+                                     "motivo": "verificacao_em_andamento"}
+    continua.atualizar()
+    estado = continua.estado()
+    assert estado.pop("verificado_em")
+    assert estado == {"status": "valida", "algoritmo": "HMAC-SHA256", "registros_verificados": 5,
+                      "registros_legados": 0, "problemas": 0}
+
+
+def test_situacao_legado_parcial_valida_e_invalida():
+    assert log_chain.situacao(log_chain.Relatorio(linhas=3, antigas=3)) == "legado"
+    assert log_chain.situacao(log_chain.Relatorio(linhas=5, antigas=3, encadeadas=2)) == "parcial"
+    assert log_chain.situacao(log_chain.Relatorio(linhas=2, encadeadas=2)) == "valida"
+    assert log_chain.situacao(log_chain.Relatorio(encadeadas=2, problemas=["x"])) == "invalida"

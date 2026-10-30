@@ -767,6 +767,23 @@ reconstruível a partir do JSONL. Escolhemos a cadeia de hashes, e não uma
 blockchain: com um operador e um servidor, não há partes que precisem chegar a
 consenso, e a cadeia dá a mesma prova de adulteração sem nós nem custo.
 
+**A cadeia no trace (desde 2026-10-30).** O `GET /api/v1/trace/{query_id}`
+mostra a cadeia de duas formas:
+- cada etapa traz o seu `hash` e o seu `hash_anterior`;
+- o topo traz `integridade`, a conferência do log inteiro, com um destes
+  `status`: `valida`, `parcial` (quando há linhas de antes da cadeia),
+  `legado`, `invalida` ou `nao_verificada`.
+
+Conferir 1,7 GB de log leva cerca de 45 s. Por isso o backend
+(`log_chain.VerificacaoContinua`) confere o log inteiro uma vez, numa thread,
+ao subir, e depois só as linhas novas. Ele recomeça do zero se um dia anterior
+ou a última linha conferida mudar. O trace nunca espera essa conferência: devolve
+a última concluída. Uma edição no meio do arquivo do dia, seguida de novas
+linhas, só aparece na conferência completa do comando acima.
+
+A cadeia é global, então o frontend não a confere só pelas etapas exibidas.
+Contrato em [docs/FRONTEND_API_CONTRACT.md](docs/FRONTEND_API_CONTRACT.md).
+
 No projeto do frontend, configure `VITE_API_BASE_URL` com a URL pública HTTPS
 deste backend, sem `/api/v1/query` no final (na demo, o domínio do túnel ngrok;
 ver 9.1):
