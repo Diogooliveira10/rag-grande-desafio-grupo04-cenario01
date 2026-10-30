@@ -312,6 +312,14 @@ def _validar_catalogo(catalog_path: Path, database_path: Path) -> None:
 # nenhum arquivo lido mudar de tamanho ou data, o critério do cache de hashes.
 _VALIDACAO_EM_ANDAMENTO = threading.Lock()
 _BUNDLES_VALIDOS: dict[tuple[tuple[str, int, int], ...], dict[str, Any]] = {}
+# Marca a primeira validação bem-sucedida, para o que é pesado e pode esperar
+# (a conferência da cadeia do log) não disputar a subida com ela (2026-10-30).
+_PRONTO = threading.Event()
+
+
+def aguardar_pronto(timeout: float) -> bool:
+    """Espera, sem validar nada, até alguma chamada ao /ready dar certo; False se o tempo acabar."""
+    return _PRONTO.wait(timeout)
 
 
 def _assinatura_do_bundle(manifest_path: Path | str) -> tuple[tuple[str, int, int], ...] | None:
@@ -355,6 +363,7 @@ def readiness(manifest_path: Path | str | None = None) -> dict[str, Any]:
                 if len(_BUNDLES_VALIDOS) >= 8:
                     _BUNDLES_VALIDOS.clear()
                 _BUNDLES_VALIDOS[assinatura] = resultado
+        _PRONTO.set()
         return {**resultado, "capabilities": list(resultado["capabilities"])}
     finally:
         _VALIDACAO_EM_ANDAMENTO.release()

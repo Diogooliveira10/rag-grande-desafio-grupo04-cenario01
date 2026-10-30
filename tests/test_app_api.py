@@ -655,3 +655,19 @@ def test_api_sem_pre_carregamento_nao_le_os_indices(monkeypatch):
     with TestClient(app) as cliente:
         assert cliente.get("/health").status_code == 200
     assert chamadas == []
+
+
+def test_api_so_confere_a_cadeia_do_log_depois_do_ready(monkeypatch):
+    """A conferência do log (1,7 GB) começava junto com a pré-carga e atrasou a
+    subida em 2026-10-30; agora espera a primeira validação do /ready."""
+    import threading
+    liberar, conferiu = threading.Event(), threading.Event()
+    monkeypatch.setattr(api_module.config, "RERANK_PRELOAD", False)
+    monkeypatch.setattr(api_module.config, "INDEX_PRELOAD", False)
+    monkeypatch.setattr(api_module.snapshot, "aguardar_pronto", lambda timeout: liberar.wait(timeout))
+    monkeypatch.setattr(api_module, "integridade_do_log", lambda logs_dir=None: conferiu.set())
+
+    with TestClient(app):
+        assert not conferiu.wait(timeout=0.5)
+        liberar.set()
+        assert conferiu.wait(timeout=5)

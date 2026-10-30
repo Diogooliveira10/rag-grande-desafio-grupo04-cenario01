@@ -287,3 +287,18 @@ def test_readiness_nao_abre_segunda_validacao_simultanea(tmp_path, monkeypatch):
         assert snapshot.readiness(path) == {"ready": False, "reason": "validacao_em_andamento"}
     assert chamadas == []
     assert snapshot.readiness(path)["ready"] is True
+
+
+def test_aguardar_pronto_so_libera_depois_de_uma_validacao_que_deu_certo(tmp_path, monkeypatch):
+    """O que pode esperar (a conferência da cadeia do log) não disputa a subida com
+    a validação do /ready (2026-10-30)."""
+    import threading
+    path, _ = _manifest(tmp_path)
+    monkeypatch.setattr(snapshot, "_PRONTO", threading.Event())
+    monkeypatch.setattr(snapshot, "_BUNDLES_VALIDOS", {})
+
+    assert snapshot.aguardar_pronto(0) is False
+    assert snapshot.readiness(tmp_path / "nao_existe.json")["ready"] is False
+    assert snapshot.aguardar_pronto(0) is False
+    assert snapshot.readiness(path)["ready"] is True
+    assert snapshot.aguardar_pronto(0) is True

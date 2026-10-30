@@ -29,7 +29,7 @@ import os
 import secrets
 import threading
 from contextlib import asynccontextmanager
-from pathlib import PurePosixPath
+from pathlib import Path as FsPath, PurePosixPath
 from typing import Any, Literal, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Request
@@ -292,10 +292,22 @@ async def _ciclo_de_vida(_app: FastAPI):
     # Aquecer em thread evita que a primeira tela de Explorar pague esse custo
     # dentro do timeout de 30 s do navegador. Falha aqui não derruba o servidor.
     threading.Thread(target=catalog.prewarm, name="catalog-preload", daemon=True).start()
-    # A primeira conferência da cadeia de hashes lê o log inteiro (~45 s com
-    # 1,7 GB): começa já, numa thread, para o trace ter a integridade pronta.
-    integridade_do_log()
+    threading.Thread(target=_conferir_log_depois_do_ready, args=(FsPath(default_logger.logs_dir),),
+                     name="log-chain-depois-do-ready", daemon=True).start()
     yield
+
+
+# A primeira conferência da cadeia de hashes lê o log inteiro (1,7 GB, ~45 s de
+# CPU). Começando junto com a pré-carga e a validação do /ready, ela atrasou a
+# subida em 2026-10-30 (pronta em ~14 min); medida isolada, atrasa a validação
+# de 80 s para 118 s. Ela espera o /ready dar certo, ou no máximo 10 minutos.
+# Um trace aberto antes disso dispara a conferência na hora.
+_ESPERA_PELO_READY_SEGUNDOS = 600
+
+
+def _conferir_log_depois_do_ready(logs_dir: FsPath) -> None:
+    snapshot.aguardar_pronto(_ESPERA_PELO_READY_SEGUNDOS)
+    integridade_do_log(logs_dir)
 
 
 limite_de_consultas = LimiteDeRequisicoes(config.RATE_LIMIT_QUERY_PER_MINUTE)
