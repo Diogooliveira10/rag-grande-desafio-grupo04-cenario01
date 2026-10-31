@@ -134,11 +134,11 @@ _SCHEMA_TEMPLATE_SQL = {
 }
 
 
-def _cliente_padrao(schema: Optional[dict] = None, temperatura: Optional[float] = None) -> ClienteLLM:
+def _cliente_padrao(schema: Optional[dict] = None, llm: Optional[ConfiguracaoLlm] = None) -> ClienteLLM:
     """Wrapper fino sobre o cliente OpenAI compartilhado de ``llm_ecoa.py``.
 
     Devolve a resposta completa do SDK para que ``usage`` chegue ao log. Sem
-    ``temperatura``, usa a da configuração atual, lida a cada chamada.
+    ``llm``, usa a configuração atual, lida a cada chamada.
     """
     import llm_ecoa
 
@@ -146,8 +146,8 @@ def _cliente_padrao(schema: Optional[dict] = None, temperatura: Optional[float] 
 
     def _chamar(mensagens: list[dict]) -> Any:
         return llm_ecoa.completar_chat(
-            mensagens, diagnosticos=diagnosticos,
-            temperature=temperatura if temperatura is not None else config.atual().llm.temperature,
+            mensagens, diagnosticos=diagnosticos, configuracao=llm,
+            temperature=(llm or config.atual().llm).temperature,
             response_format=({"type": "json_schema", "json_schema": {"name": "query_plan", "schema": schema}}
                              if schema is not None else {"type": "json_object"}),
         )
@@ -284,7 +284,7 @@ def _montar_prompt(query: str, chunks: list[Chunk]) -> list[dict]:
 def _gerar_com_template_sql(
     query: str, chunks: list[Chunk], resposta_sql: RAGResponse, *, cliente: Optional[ClienteLLM],
     run_id: str, query_id: str, inicio: float, sensibilidade: dict[str, Any],
-    temperatura: Optional[float] = None,
+    llm: Optional[ConfiguracaoLlm] = None,
 ) -> RAGResponse:
     """Uma chamada de apresentação; números/fontes/confiança nunca vêm do modelo.
 
@@ -310,7 +310,7 @@ def _gerar_com_template_sql(
     tokens, fallback, erro_parsing = None, None, None
     template = _MARCADOR_SQL
     try:
-        cliente = cliente or _cliente_padrao(_SCHEMA_TEMPLATE_SQL, temperatura)
+        cliente = cliente or _cliente_padrao(_SCHEMA_TEMPLATE_SQL, llm)
         sensibilidade["llm_called"] = True
         bruto, tokens = _texto_e_tokens(cliente(mensagens), extra=sensibilidade)
     except Exception as exc:
@@ -391,7 +391,7 @@ def gerar_resposta(
     resposta_sql = _resposta_sql_deterministica(query, chunks, bases_consultadas)
     if resposta_sql is not None and llm.sql_apresentacao_llm:
         return _gerar_com_template_sql(
-            query, chunks, resposta_sql, cliente=cliente, temperatura=llm.temperature, run_id=run_id,
+            query, chunks, resposta_sql, cliente=cliente, llm=configuracao, run_id=run_id,
             query_id=query_id, inicio=inicio, sensibilidade=sensibilidade,
         )
     if resposta_sql is not None:
@@ -403,7 +403,7 @@ def gerar_resposta(
 
     chunks, mensagens = _preparar_prompt(query, chunks, bases_consultadas, sensibilidade, llm)
     cliente = cliente or _cliente_padrao(_schema_resposta([f"E{i}" for i in range(1, len(chunks) + 1)]),
-                                         llm.temperature)
+                                         configuracao)
 
     sensibilidade["llm_called"] = True
     sensibilidade["uso_tokens"] = {"status": "indisponivel", "fonte": "response.usage"}

@@ -1181,7 +1181,7 @@ def test_cache_fallback_invalido_e_temporario(monkeypatch):
     def fake(messages):
         calls.append(messages)
         return '{"intencoes": [{"pergunta": "contratos", "bases": ["inexistente"]}]}'
-    monkeypatch.setattr(generate, '_cliente_padrao', lambda schema=None: fake)
+    monkeypatch.setattr(generate, '_cliente_padrao', lambda schema=None, llm=None: fake)
     now = qa.time.time()
     monkeypatch.setattr(qa.time, 'time', lambda: now)
     first = qa.analisar_query('contratos de 2025', modo='llm')
@@ -1223,7 +1223,7 @@ def test_cache_analise_e_invalidacao_prompt(monkeypatch):
     def fake(mensagens):
         chamadas.append(mensagens)
         return json.dumps({'intencoes': [{'pergunta': 'maiores contratos', 'bases': ['estruturada'], 'operacao': 'ranking'}]})
-    monkeypatch.setattr(generate, '_cliente_padrao', lambda schema=None: fake)
+    monkeypatch.setattr(generate, '_cliente_padrao', lambda schema=None, llm=None: fake)
     qa.analisar_query('maiores contratos', modo='llm')
     qa.analisar_query('maiores contratos', modo='llm')
     assert len(chamadas) == 1
@@ -1463,3 +1463,25 @@ def test_cedae_continua_como_orgao_e_nao_fornecedor():
 def test_quanto_pede_valor_e_quantos_pede_contagem(pergunta, metrica):
     assert qa._analisar(pergunta).metrica == metrica
 
+
+def test_configuracao_injetada_chega_ao_cliente_e_a_chave_do_cache(monkeypatch):
+    """Configuração injetada (2026-10-30): modelo do span, cliente e chave do cache."""
+    from dataclasses import replace
+    from types import SimpleNamespace
+    import config
+    from src import generate
+
+    llm = replace(config.CONFIGURACAO.llm, generation_model="modelo-injetado")
+    recebidas = []
+    def cliente_padrao(schema=None, llm=None):
+        recebidas.append(llm)
+        raise RuntimeError("sem rede")
+    monkeypatch.setattr(generate, "_cliente_padrao", cliente_padrao)
+    span = SimpleNamespace(extra={}, modelo=None, tokens=None)
+
+    with pytest.raises(RuntimeError):
+        qa._chamar_llm_de_analise("Contratos de 2025?", None, span, llm)
+
+    assert recebidas == [llm] and span.modelo == "modelo-injetado"
+    assert qa._analysis_key("q", llm) != qa._analysis_key("q")
+    assert qa._analysis_key("q", config.atual().llm) == qa._analysis_key("q")

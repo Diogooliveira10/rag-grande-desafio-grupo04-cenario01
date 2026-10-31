@@ -100,7 +100,7 @@ def test_client_initialization_failure_also_uses_fallback(monkeypatch):
 
 def test_default_client_schema_avoids_provider_string_bounds_but_keeps_local_validation(monkeypatch):
     schemas = []
-    def factory(schema, temperatura=None):
+    def factory(schema, llm=None):
         schemas.append(schema)
         return template_model()
     monkeypatch.setattr(generate, "_cliente_padrao", factory)

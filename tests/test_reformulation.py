@@ -139,7 +139,7 @@ def test_timeout_da_reformulacao_faz_fallback(monkeypatch):
         time.sleep(0.1)
         return json.dumps({"pergunta": "reformulada"})
 
-    monkeypatch.setattr(reformulation, "_cliente_padrao", lambda diagnostics: cliente_lento)
+    monkeypatch.setattr(reformulation, "_cliente_padrao", lambda diagnostics, configuracao=None: cliente_lento)
 
     resultado = reformular_pergunta(P43, HISTORICO, cliente=None)
 
@@ -337,7 +337,7 @@ def test_prazo_estourado_volta_sem_esperar_o_llm(monkeypatch):
         liberar.wait(5)
         return json.dumps({"pergunta": "reformulada"})
 
-    monkeypatch.setattr(reformulation, "_cliente_padrao", lambda diagnosticos: cliente_lento)
+    monkeypatch.setattr(reformulation, "_cliente_padrao", lambda diagnosticos, configuracao=None: cliente_lento)
     inicio = time.perf_counter()
     try:
         resultado = reformular_pergunta(P43, HISTORICO, cliente=None)
@@ -362,7 +362,7 @@ def test_prazo_injetado_vale_sem_mexer_no_config_global(monkeypatch):
         liberar.wait(5)
         return json.dumps({"pergunta": "reformulada"})
 
-    monkeypatch.setattr(reformulation, "_cliente_padrao", lambda diagnosticos: cliente_lento)
+    monkeypatch.setattr(reformulation, "_cliente_padrao", lambda diagnosticos, configuracao=None: cliente_lento)
     llm = replace(config.CONFIGURACAO.llm, reformulacao_timeout=0.05)
     try:
         resultado = reformular_pergunta(P43, HISTORICO, cliente=None, configuracao=llm)

@@ -207,13 +207,13 @@ def _mensagens(query: str, turnos: list[tuple[str, str]]) -> list[dict[str, str]
 ClienteReformulacao = Callable[[list[dict[str, str]]], Any]
 
 
-def _cliente_padrao(diagnosticos: dict) -> ClienteReformulacao:
+def _cliente_padrao(diagnosticos: dict, configuracao: Optional[ConfiguracaoLlm] = None) -> ClienteReformulacao:
     from llm_ecoa import completar_chat
 
     def _chamar(mensagens: list[dict[str, str]]) -> Any:
         return completar_chat(
             mensagens, response_format={"type": "json_object"}, max_tokens=MAX_TOKENS_REFORMULACAO,
-            temperature=0, diagnosticos=diagnosticos,
+            temperature=0, diagnosticos=diagnosticos, configuracao=configuracao,
         )
 
     return _chamar
@@ -354,7 +354,8 @@ def reformular_pergunta(
     """Pergunta a consultar: a reescrita, se houve, ou a original.
 
     Nunca levanta exceção por causa do modelo; o motivo vai para o log. O prazo
-    da reescrita vem de ``configuracao``; sem ela, de ``REFORMULACAO_TIMEOUT``.
+    da reescrita e o provedor vêm de ``configuracao``; sem ela, o prazo é
+    ``REFORMULACAO_TIMEOUT`` e o provedor, o da configuração atual.
     """
     prazo = configuracao.reformulacao_timeout if configuracao is not None else REFORMULACAO_TIMEOUT
     turnos = _turnos_do_prompt(historico or [])
@@ -384,7 +385,7 @@ def reformular_pergunta(
     ) as span:
         try:
             def _chamada_llm():
-                return (cliente or _cliente_padrao(diagnosticos))(_mensagens(query, turnos))
+                return (cliente or _cliente_padrao(diagnosticos, configuracao))(_mensagens(query, turnos))
 
             saida = _com_prazo(_chamada_llm, prazo) if cliente is None else _chamada_llm()
             span.tokens = token_usage_from_response(saida, extra=span.extra)

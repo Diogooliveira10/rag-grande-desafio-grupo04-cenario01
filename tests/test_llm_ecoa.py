@@ -303,3 +303,36 @@ def test_resposta_vazia_com_erro_do_provedor_passa_para_a_reserva(monkeypatch, p
     assert llm_ecoa.completar_chat([], diagnosticos=info) is boa
     assert chamadas == ["modelo-principal", "modelo-reserva"]
     assert info["fallback_error_type"] == "resposta_vazia_do_provedor"
+
+
+def test_configuracao_injetada_escolhe_provedor_e_modelo_sem_mexer_no_config(monkeypatch, providers):
+    """Configuração injetada (2026-10-30): o config global continua em modo auto."""
+    from dataclasses import replace
+
+    calls, response = providers
+    monkeypatch.setattr(llm_ecoa, "client", client_for(lambda **_: pytest.fail("ECOA must not be called")))
+    llm = replace(config.CONFIGURACAO.llm, provider_mode="openrouter", openrouter_api_key="chave-injetada",
+                  openrouter_model="modelo/injetado", openrouter_model_fallback="modelo/injetado",
+                  openrouter_max_tokens=77)
+    info = {}
+
+    assert llm_ecoa.completar_chat([], diagnosticos=info, configuracao=llm, max_tokens=500) is response
+    assert [c["model"] for c in calls] == ["modelo/injetado"] and calls[0]["max_tokens"] == 77
+    assert info["mode"] == "openrouter" and "configuracao" not in calls[0]
+
+
+def test_configuracao_com_outro_servidor_ecoa_usa_outro_cliente(monkeypatch, providers):
+    from dataclasses import replace
+
+    _, response = providers
+    monkeypatch.setattr(llm_ecoa, "client", client_for(lambda **_: pytest.fail("cliente do módulo")))
+    criados = []
+    def client_for_url(base_url, api_key):
+        criados.append(base_url)
+        return client_for(lambda **arguments: criados.append(arguments["model"]) or response)
+    monkeypatch.setattr(llm_ecoa, "_client_for", client_for_url)
+    llm = replace(config.CONFIGURACAO.llm, provider_mode="auto", ollama_url="http://outro-ecoa:1/v1/",
+                  generation_model="modelo-ecoa-injetado")
+
+    assert llm_ecoa.completar_chat([], diagnosticos={}, configuracao=llm) is response
+    assert criados == ["http://outro-ecoa:1/v1/", "modelo-ecoa-injetado"]

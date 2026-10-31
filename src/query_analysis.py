@@ -43,6 +43,7 @@ from typing import Any, Optional, Sequence
 
 import config
 from src.obs import Stage, default_logger
+from src.settings import ConfiguracaoLlm
 from src.schema import QueryAnalysisResult, QueryFilters, QueryIntent
 from src.analysis.entities import (  # noqa: F401  (reexportados)
     ORGAOS_CORPUS_PATH,
@@ -219,21 +220,23 @@ Não filtre esfera ao comparar estadual com municipal. Não transforme contagem 
 em valor monetário. Campos ausentes ficam ausentes. Não acrescente campos fora deste contrato."""
 
 
-def _analysis_key(query: str) -> str:
+def _analysis_key(query: str, configuracao: Optional[ConfiguracaoLlm] = None) -> str:
+    llm = configuracao or config.atual().llm
     inventory = config.ROOT_DIR / "data" / "inventory" / "v6.json"
     version = hashlib.sha256(inventory.read_bytes()).hexdigest() if inventory.exists() else "sem-inventario"
     catalogo = _catalogo_de_orgaos()
     assinatura_catalogo = catalogo.assinatura if catalogo else "sem-catalogo"
-    return hashlib.sha256(json.dumps([query, config.GENERATION_MODEL, PROMPT_VERSION, _PROMPT, version,
+    return hashlib.sha256(json.dumps([query, llm.generation_model, PROMPT_VERSION, _PROMPT, version,
         assinatura_catalogo,
-        date.today().isoformat(), config.OPENROUTER_MODEL_FALLBACK, bool(config.OPENROUTER_API_KEY),
-        config.LLM_PROVIDER_MODE, config.OLLAMA_URL, config.OPENROUTER_BASE_URL,
-        config.OPENROUTER_MAX_TOKENS], ensure_ascii=False).encode()).hexdigest()
+        date.today().isoformat(), llm.openrouter_model_fallback, bool(llm.openrouter_api_key),
+        llm.provider_mode, llm.ollama_url, llm.openrouter_base_url,
+        llm.openrouter_max_tokens], ensure_ascii=False).encode()).hexdigest()
 
 
-def _gravar_cache(query: str, result: QueryAnalysisResult, llm: dict, fallback: Optional[str] = None) -> None:
+def _gravar_cache(query: str, result: QueryAnalysisResult, llm: dict, fallback: Optional[str] = None,
+                  configuracao: Optional[ConfiguracaoLlm] = None) -> None:
     from src.sensitivity import mascarar
-    entry = {"key": _analysis_key(query), "analysis": result.model_dump(mode="json"), "llm": llm}
+    entry = {"key": _analysis_key(query, configuracao), "analysis": result.model_dump(mode="json"), "llm": llm}
     if fallback is not None:
         entry.update({"fallback": fallback, "expires_at": time.time() + 300})
     masked, _ = mascarar(json.dumps(entry, ensure_ascii=False))
@@ -242,15 +245,16 @@ def _gravar_cache(query: str, result: QueryAnalysisResult, llm: dict, fallback: 
         handle.write(masked + "\n")
 
 
-def _analisar_llm(query: str, cliente: Any, span: Any) -> QueryAnalysisResult:
+def _analisar_llm(query: str, cliente: Any, span: Any,
+                  configuracao: Optional[ConfiguracaoLlm] = None) -> QueryAnalysisResult:
     span.extra["prompt_version"] = PROMPT_VERSION
     # Clientes injetados não consultam cache de produção.
     cacheable = cliente is None
     if cacheable:
-        do_cache = _analise_do_cache(query, span)
+        do_cache = _analise_do_cache(query, span, configuracao)
         if do_cache is not None:
             return do_cache
-    data = _chamar_llm_de_analise(query, cliente, span)
+    data = _chamar_llm_de_analise(query, cliente, span, configuracao)
     normalized: list[str] = []
     intents = [_intencao_validada(original, query, normalized) for original in data["intencoes"]]
     span.extra["campos_normalizados"] = normalized
@@ -258,15 +262,17 @@ def _analisar_llm(query: str, cliente: Any, span: Any) -> QueryAnalysisResult:
         raise ValueError("Análise deve produzir entre uma e quatro intenções")
     result = QueryAnalysisResult(query_original=query, filtros=intents[0].filtros, intencoes=intents, metodo="llm")
     if cacheable:
-        _gravar_cache(query, result, span.extra["llm"])
+        _gravar_cache(query, result, span.extra["llm"], configuracao=configuracao)
     return result
 
 
-def _analise_do_cache(query: str, span: Any) -> Optional[QueryAnalysisResult]:
+def _analise_do_cache(query: str, span: Any,
+                      configuracao: Optional[ConfiguracaoLlm] = None) -> Optional[QueryAnalysisResult]:
     """Última análise guardada para a pergunta, se ainda vale; anota o acerto no span."""
     if not ANALYSIS_CACHE.exists():
         return None
-    key = _analysis_key(query)
+    modelo = (configuracao or config.atual().llm).generation_model
+    key = _analysis_key(query, configuracao)
     for line in reversed(ANALYSIS_CACHE.read_text(encoding="utf8").splitlines()):
         try:
             cached = json.loads(line)
@@ -279,7 +285,7 @@ def _analise_do_cache(query: str, span: Any) -> Optional[QueryAnalysisResult]:
                                      "chamadas_modelo": [], "uso_tokens": {"status": "cache"}}
                 span.extra["llm_called"] = False
                 span.extra["uso_tokens"] = {"status": "cache"}
-                span.modelo = cached.get("llm", {}).get("model", config.GENERATION_MODEL)
+                span.modelo = cached.get("llm", {}).get("model", modelo)
                 if cached.get("fallback"):
                     span.status = "degradado"
                     span.extra["fallback"] = cached["fallback"]
@@ -289,12 +295,14 @@ def _analise_do_cache(query: str, span: Any) -> Optional[QueryAnalysisResult]:
     return None
 
 
-def _chamar_llm_de_analise(query: str, cliente: Any, span: Any) -> dict[str, Any]:
+def _chamar_llm_de_analise(query: str, cliente: Any, span: Any,
+                           configuracao: Optional[ConfiguracaoLlm] = None) -> dict[str, Any]:
     """Chama o LLM com o prompt de análise e devolve o JSON dele (ainda sem validar)."""
     from src.generate import _cliente_padrao, _texto_e_tokens
-    span.modelo = config.GENERATION_MODEL
+    modelo = (configuracao or config.atual().llm).generation_model
+    span.modelo = modelo
     span.extra["cache_hit"] = False
-    chamada = cliente or _cliente_padrao(_schema_analise())
+    chamada = cliente or _cliente_padrao(_schema_analise(), configuracao)
     span.extra["llm_called"] = True
     span.extra["uso_tokens"] = {"status": "indisponivel", "fonte": "response.usage"}
     try:
@@ -304,7 +312,7 @@ def _chamar_llm_de_analise(query: str, cliente: Any, span: Any) -> dict[str, Any
         ]), extra=span.extra)
     finally:
         span.extra["llm"] = dict(getattr(chamada, "diagnosticos", {}))
-        span.modelo = span.extra["llm"].get("model", config.GENERATION_MODEL)
+        span.modelo = span.extra["llm"].get("model", modelo)
     span.tokens = usage
     return json.loads(raw)
 
@@ -822,18 +830,20 @@ def analisar_query(
     query_id: str = "sem-query-id",
     cliente: Any = None,
     modo: Optional[str] = None,
+    configuracao: Optional[ConfiguracaoLlm] = None,
 ) -> QueryAnalysisResult:
     """Etapa query_analysis: extrai ano/valor/órgão mencionados na pergunta.
 
     Não filtra nada sozinha — devolve QueryAnalysisResult para quem orquestra
     (pipeline.py) decidir o que fazer com os filtros (ver `filtros_para_retrieve`).
+    ``configuracao`` vale para o modo LLM (provedor e chave do cache); sem ela, a atual.
     """
     with default_logger.span(
         run_id=run_id, query_id=query_id, stage=Stage.QUERY_ANALYSIS, input=query
     ) as span:
         if (modo or ANALYSIS_MODE) == "llm" and isinstance(query, str) and query.strip():
             try:
-                result = _resolver_referencias_analise(_analisar_llm(query, cliente, span))
+                result = _resolver_referencias_analise(_analisar_llm(query, cliente, span, configuracao))
                 span.set_result(_para_o_log(result.model_dump(mode="json")))
                 return result
             except Exception as error:
@@ -844,7 +854,8 @@ def analisar_query(
                 if cliente is None and isinstance(error, (ValueError, KeyError)):
                     result = _resolver_referencias_analise(
                         QueryAnalysisResult(query_original=query, filtros=_analisar(query)))
-                    _gravar_cache(query, result, span.extra.get("llm", {}), span.extra["fallback"])
+                    _gravar_cache(query, result, span.extra.get("llm", {}), span.extra["fallback"],
+                                  configuracao)
         result = _resolver_referencias_analise(
             QueryAnalysisResult(query_original=query, filtros=_analisar(query)))
         span.set_result(_para_o_log(result.filtros.model_dump(exclude_none=True)))

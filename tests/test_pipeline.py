@@ -338,3 +338,18 @@ def test_dependencias_padrao_ligam_geracao_e_reformulacao_a_configuracao_passada
     for dependencia in (deps.gerar, deps.reformular):
         assert isinstance(dependencia, partial) and dependencia.keywords == {"configuracao": injetada.llm}
     assert not isinstance(pipeline.dependencias_padrao().gerar, partial)
+
+
+def test_dependencias_padrao_ligam_analise_e_conversa_a_configuracao_passada():
+    from dataclasses import replace
+    from functools import partial
+    import config as config_global
+
+    base = config_global.CONFIGURACAO
+    injetada = replace(base, llm=replace(base.llm, generation_model="modelo-injetado"))
+    deps = pipeline.dependencias_padrao(injetada)
+
+    for dependencia in (deps.analisar, deps.conversa):
+        assert isinstance(dependencia, partial) and dependencia.keywords == {"configuracao": injetada.llm}
+    assert deps.buscar.keywords == {"configuracao": injetada}
+    assert deps.reranker_padrao.keywords == {"configuracao": injetada.busca}

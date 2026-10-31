@@ -18,6 +18,7 @@ from src.obs import Stage, default_logger, token_usage_from_response
 from src.router import _rotear, inferir_motivo_recusa
 from src.schema import ConfidenceLevel, RAGResponse, RefusalReason, RouteDecision
 from src.sensitivity import mascarar
+from src.settings import ConfiguracaoLlm
 
 CONVERSATION_MODE = os.getenv("CONVERSATION_MODE", "llm").strip()
 
@@ -45,7 +46,8 @@ Se houver dúvida ou pedido misto com fatos do acervo, escolha consulta.
 """
 
 
-def _interpret_interaction(query: str, *, run_id: str, query_id: str) -> InteractionDecision | None:
+def _interpret_interaction(query: str, *, run_id: str, query_id: str,
+                           configuracao: ConfiguracaoLlm | None = None) -> InteractionDecision | None:
     from llm_ecoa import completar_chat
 
     diagnostics: dict = {}
@@ -56,6 +58,7 @@ def _interpret_interaction(query: str, *, run_id: str, query_id: str) -> Interac
             response = completar_chat(
                 [{"role": "system", "content": _INTERACTION_PROMPT}, {"role": "user", "content": masked}],
                 response_format={"type": "json_object"}, max_tokens=1200, diagnosticos=diagnostics,
+                configuracao=configuracao,
             )
             span.tokens = token_usage_from_response(response, extra=span.extra)
             span.extra.update(diagnostics)
@@ -239,9 +242,12 @@ def _conversa(query: str, answer: str) -> RAGResponse:
                        confidence_level=ConfidenceLevel.BAIXA, is_refusal=False, refusal_reason=None)
 
 
-def resposta_conversacional(query: str, *, run_id: str = "sem-run-id",
-                           query_id: str = "sem-query-id") -> RAGResponse | None:
-    """Resposta de conversa (cumprimento, ajuda, injeção...) ou ``None`` = é consulta."""
+def resposta_conversacional(query: str, *, run_id: str = "sem-run-id", query_id: str = "sem-query-id",
+                            configuracao: ConfiguracaoLlm | None = None) -> RAGResponse | None:
+    """Resposta de conversa (cumprimento, ajuda, injeção...) ou ``None`` = é consulta.
+
+    ``configuracao`` chega ao modelo quando ele é consultado (sem ela, a atual).
+    """
     if not isinstance(query, str):
         return None
     normalized = _normalizar(query)
@@ -262,7 +268,7 @@ def resposta_conversacional(query: str, *, run_id: str = "sem-run-id",
         return None
     if not _precisa_do_modelo(query, normalized, route):
         return None
-    decision = _interpret_interaction(query, run_id=run_id, query_id=query_id)
+    decision = _interpret_interaction(query, run_id=run_id, query_id=query_id, configuracao=configuracao)
     if decision is None or decision.tipo != "conversa":
         return None
     return _conversa(query, mascarar(decision.answer)[0])

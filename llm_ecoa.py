@@ -4,6 +4,7 @@ from concurrent.futures import TimeoutError as _PrazoDaThread
 from openai import APIConnectionError, APIStatusError, OpenAI
 
 import config
+from src.settings import ConfiguracaoLlm
 
 from config import (
     EMBEDDING_MODEL,
@@ -54,34 +55,41 @@ def _com_prazo(chamada, segundos: float):
 
 
 def completar_chat(mensagens: list[dict], *, response_format: dict | None = None,
-                   diagnosticos: dict | None = None, **parametros):
-    """Modo auto: ECOA com fallback Free; modo openrouter: sem chamadas ao LLM ECOA."""
+                   diagnosticos: dict | None = None, configuracao: ConfiguracaoLlm | None = None,
+                   **parametros):
+    """Modo auto: ECOA com fallback Free; modo openrouter: sem chamadas ao LLM ECOA.
+
+    Provedor, prazos e modelos vêm de ``configuracao``; sem ela, da configuração
+    atual do ``config``, com o modelo e o cliente ECOA deste módulo.
+    """
     from src.obs import aguardar_modelo
     from src.model_observation import observar_chamada
 
+    llm = configuracao or config.atual().llm
+    modelo_ecoa = configuracao.generation_model if configuracao is not None else GENERATION_MODEL
     info = diagnosticos if diagnosticos is not None else {}
-    info.update({"provider": "ecoa", "model_requested": GENERATION_MODEL,
-                 "model": GENERATION_MODEL, "fallback_used": False,
+    info.update({"provider": "ecoa", "model_requested": modelo_ecoa,
+                 "model": modelo_ecoa, "fallback_used": False,
                  "llm_called": False, "chamadas_modelo": [],
                  "uso_tokens": {"status": "nao_aplicavel"}})
     arguments = {"messages": mensagens, "temperature": 0.2, **parametros}
     if response_format is not None:
         arguments["response_format"] = response_format
-    info["mode"] = config.LLM_PROVIDER_MODE
+    info["mode"] = llm.provider_mode
 
     def _openrouter():
-        if not config.OPENROUTER_API_KEY:
+        if not llm.openrouter_api_key:
             raise ValueError("OPENROUTER_API_KEY não configurada")
-        fallback = OpenAI(base_url=config.OPENROUTER_BASE_URL, api_key=config.OPENROUTER_API_KEY,
-                          timeout=config.OPENROUTER_TIMEOUT, max_retries=0)
-        fallback_arguments = {**arguments, "max_tokens": min(arguments.get("max_tokens", config.OPENROUTER_MAX_TOKENS), config.OPENROUTER_MAX_TOKENS),
+        fallback = OpenAI(base_url=llm.openrouter_base_url, api_key=str(llm.openrouter_api_key),
+                          timeout=llm.openrouter_timeout, max_retries=0)
+        fallback_arguments = {**arguments, "max_tokens": min(arguments.get("max_tokens", llm.openrouter_max_tokens), llm.openrouter_max_tokens),
                               "extra_body": {"provider": {"require_parameters": True}}}
         # Modelo preferido e, só se ele estiver indisponível, a reserva. Quando
         # forem o mesmo, uma única chamada; a ordem e o modelo efetivo ficam em
         # chamadas_modelo, para a proveniência não depender do nome pedido.
-        modelos = [config.OPENROUTER_MODEL]
-        if config.OPENROUTER_MODEL_FALLBACK != config.OPENROUTER_MODEL:
-            modelos.append(config.OPENROUTER_MODEL_FALLBACK)
+        modelos = [llm.openrouter_model]
+        if llm.openrouter_model_fallback != llm.openrouter_model:
+            modelos.append(llm.openrouter_model_fallback)
         ultimo_erro: Exception | None = None
         for indice, modelo in enumerate(modelos):
             info.update({"provider": "openrouter", "model_requested": modelo, "model": modelo})
@@ -92,7 +100,7 @@ def completar_chat(mensagens: list[dict], *, response_format: dict | None = None
                 resposta = observar_chamada(
                     lambda modelo=modelo: _com_prazo(
                         lambda: fallback.chat.completions.create(model=modelo, **fallback_arguments),
-                        config.OPENROUTER_TIMEOUT),
+                        llm.openrouter_timeout),
                     provider="openrouter", model=modelo,
                     sdk_max_retries=0, diagnosticos=info)
                 # HTTP 200 sem texto e com finish_reason "error": o provedor
@@ -110,25 +118,26 @@ def completar_chat(mensagens: list[dict], *, response_format: dict | None = None
                 if not erro_de_disponibilidade(fallback_error) or indice == len(modelos) - 1:
                     raise
         raise ultimo_erro  # inalcançável: o laço sempre retorna ou relança
-    if config.LLM_PROVIDER_MODE == "openrouter":
+    if llm.provider_mode == "openrouter":
         response = _openrouter()
-    elif config.LLM_PROVIDER_MODE == "auto":
+    elif llm.provider_mode == "auto":
         aguardar_modelo()
-        primary = client.with_options(
-            timeout=config.GENERATION_TIMEOUT, max_retries=config.GENERATION_MAX_RETRIES
-        ) if hasattr(client, "with_options") else client
+        ecoa = _cliente_ecoa(configuracao)
+        primary = ecoa.with_options(
+            timeout=llm.generation_timeout, max_retries=llm.generation_max_retries
+        ) if hasattr(ecoa, "with_options") else ecoa
         argumentos_ecoa = dict(arguments)
-        if config.GENERATION_REASONING_EFFORT:
+        if llm.reasoning_effort:
             argumentos_ecoa["extra_body"] = {**argumentos_ecoa.get("extra_body", {}),
-                                             "reasoning_effort": config.GENERATION_REASONING_EFFORT}
-            info["reasoning_effort"] = config.GENERATION_REASONING_EFFORT
+                                             "reasoning_effort": llm.reasoning_effort}
+            info["reasoning_effort"] = llm.reasoning_effort
         try:
             response = observar_chamada(
-                lambda: primary.chat.completions.create(model=GENERATION_MODEL, **argumentos_ecoa),
-                provider="ecoa", model=GENERATION_MODEL,
-                sdk_max_retries=config.GENERATION_MAX_RETRIES, diagnosticos=info)
+                lambda: primary.chat.completions.create(model=modelo_ecoa, **argumentos_ecoa),
+                provider="ecoa", model=modelo_ecoa,
+                sdk_max_retries=llm.generation_max_retries, diagnosticos=info)
         except Exception as error:
-            if not erro_de_disponibilidade(error) or not config.OPENROUTER_API_KEY:
+            if not erro_de_disponibilidade(error) or not llm.openrouter_api_key:
                 raise
             info.update({"fallback_used": True, "primary_error_type": type(error).__name__,
                          "primary_status_code": getattr(error, "status_code", None)})
@@ -147,6 +156,13 @@ def completar_chat(mensagens: list[dict], *, response_format: dict | None = None
 
 def _normalizar_base_url(base_url: str) -> str:
     return base_url.rstrip("/")
+
+
+def _cliente_ecoa(configuracao: ConfiguracaoLlm | None) -> OpenAI:
+    """O cliente do módulo, ou um novo se a configuração aponta para outro servidor."""
+    if configuracao is None or _normalizar_base_url(configuracao.ollama_url) == _normalizar_base_url(OLLAMA_URL):
+        return client
+    return _client_for(configuracao.ollama_url, str(configuracao.ollama_api_key))
 
 
 def gerar_resposta(prompt: str) -> str:
