@@ -13,6 +13,7 @@ portas de ``src/ports.py``, reunidas em ``Dependencias``.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any, Callable, Optional, Sequence
 
 from src import structured_query
@@ -29,6 +30,7 @@ from src.rerank import reranker_padrao
 from src.retrieve import DEFAULT_TOP_K, RerankFn, RetrievalResult, filtro_opcional, retrieve
 from src.router import inferir_motivo_recusa, rotear_pergunta
 from src.schema import Chunk, ChunkMetadata
+from src.settings import Configuracao
 from src.structured_query import consultar_estruturado, pode_consultar_sql_direto
 
 # Só as bases de escopo "oficial" no manifesto respondem perguntas; fixtures de
@@ -57,16 +59,20 @@ class Dependencias:
     tentativa_de_injecao: Callable[[str], bool]
 
 
-def dependencias_padrao() -> Dependencias:
+def dependencias_padrao(configuracao: Optional[Configuracao] = None) -> Dependencias:
     """As implementações do projeto: ECOA/OpenRouter, FAISS + BM25, SQLite/Neon.
 
     Montadas a cada pergunta a partir dos nomes deste módulo, para um
     ``monkeypatch`` em ``pipeline.retrieve`` (como os testes fazem) continuar valendo.
+    Com ``configuracao``, as peças que já a recebem ficam ligadas a ela (por
+    enquanto, a busca e o rerank); sem ela, cada peça usa a configuração atual do ``config``.
     """
     return Dependencias(
-        analisar=analisar_query, rotear=rotear_pergunta, buscar=retrieve,
+        analisar=analisar_query, rotear=rotear_pergunta,
+        buscar=retrieve if configuracao is None else partial(retrieve, configuracao=configuracao),
         consultar_sql=consultar_estruturado, gerar=gerar_resposta, conversa=resposta_conversacional,
-        reformular=reformular_pergunta, reranker_padrao=reranker_padrao,
+        reformular=reformular_pergunta,
+        reranker_padrao=reranker_padrao if configuracao is None else partial(reranker_padrao, configuracao.busca),
         pode_consultar_sql_direto=pode_consultar_sql_direto, pode_responder_sql=pode_responder_sql,
         tentativa_de_injecao=tentativa_de_injecao,
     )
@@ -138,11 +144,15 @@ def responder(
     session_id: Optional[str] = None,
     historico: Optional[Sequence[Any]] = None,
     dependencias: Optional[Dependencias] = None,
+    configuracao: Optional[Configuracao] = None,
 ) -> dict[str, Any]:
     """Roda query_analysis + roteamento + recuperação híbrida + geração para uma pergunta.
 
     ``escopos=None`` consulta também as bases experimentais (ex.:
     ``exemplos_teste``), útil para desenvolver com um índice parcial.
+
+    ``configuracao`` (``src/settings.py``) é repassada às peças que já a recebem;
+    sem ela, cada peça usa a configuração atual do ``config``.
 
     Quando o roteador não seleciona nenhuma base (recusa, fora de escopo ou
     "não identificado"), a recuperação é pulada; o motivo da recusa é inferido
@@ -185,7 +195,7 @@ def responder(
     ``dependencias`` troca as peças de infraestrutura (src/ports.py); sem ela,
     valem as do projeto (``dependencias_padrao``).
     """
-    deps = dependencias or dependencias_padrao()
+    deps = dependencias or dependencias_padrao(configuracao)
     run_id = run_id or new_run_id()
     query_id = query_id or new_query_id()
     with sessao(session_id), execution(run_id, query_id):

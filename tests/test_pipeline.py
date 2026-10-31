@@ -307,3 +307,20 @@ def test_injecao_no_meio_da_conversa_nao_e_reformulada(monkeypatch):
 
     assert resposta["answer"].startswith("Não posso mostrar nem alterar as minhas instruções internas.")
     assert "pergunta_reformulada" not in resposta
+
+
+def test_dependencias_padrao_ligam_o_rerank_a_configuracao_passada():
+    """Configuração injetada pelo pipeline (2026-10-30), sem monkeypatch no config global."""
+    from dataclasses import replace
+    import config as config_global
+    from src.rerank import CrossEncoderReranker
+
+    base = config_global.CONFIGURACAO
+    desligado = replace(base, busca=replace(base.busca, rerank_enabled=False))
+    ligado = replace(base, busca=replace(base.busca, rerank_enabled=True, rerank_provider="local",
+                                         rerank_model="modelo-injetado", rerank_max_length=99))
+
+    assert pipeline.dependencias_padrao(desligado).reranker_padrao() is None
+    reranker = pipeline.dependencias_padrao(ligado).reranker_padrao()
+    assert isinstance(reranker, CrossEncoderReranker)
+    assert (reranker.modelo, reranker.max_length) == ("modelo-injetado", 99)

@@ -86,13 +86,15 @@ def _chave_da_compra(item: RetrievalResult) -> str | None:
     return f"arquivo:{origem}" if origem else None
 
 
-def _variar_por_compra(query: str, resultados: list[RetrievalResult]) -> tuple[list[RetrievalResult], int]:
-    """No máximo ``RETRIEVAL_MAX_PER_PURCHASE`` trechos por compra à frente do corte.
+def _variar_por_compra(query: str, resultados: list[RetrievalResult],
+                       maximo: int | None = None) -> tuple[list[RetrievalResult], int]:
+    """No máximo ``maximo`` trechos por compra à frente do corte (sem ele, o da configuração atual).
 
     Não vale quando a pergunta cita um número do PNCP ou de contrato: aí o
     usuário quer justamente os trechos daquele registro.
     """
-    maximo = config.RETRIEVAL_MAX_PER_PURCHASE
+    if maximo is None:
+        maximo = config.atual().busca.max_per_purchase
     if maximo <= 0 or _identificadores_pncp(query) or _referencias_contrato(query):
         return resultados, 0
     return fusion.limitar_repeticoes(resultados, _chave_da_compra, maximo)

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import config
+from src.settings import Configuracao, ConfiguracaoEmbeddings
 from src.obs import Stage, TokenUsage, default_logger, registrar, token_usage_from_response
 from src.schema import Natureza
 
@@ -233,15 +234,18 @@ def _default_embed(query: str) -> list[float]:
 
 
 def _embed_fn_com_uso(uso: list[TokenUsage], estatisticas: dict[str, int] | None = None,
-                       observacoes: list[dict] | None = None) -> EmbedFn:
+                       observacoes: list[dict] | None = None,
+                       embeddings: ConfiguracaoEmbeddings | None = None) -> EmbedFn:
     """Embedding padrão (servidor da turma) que anota o ``usage`` de cada chamada.
 
     Usado por ``retrieve`` para preencher ``tokens`` do stage
     ``retrieval_denso``; quem passa ``embed_fn`` próprio fica sem contagem.
+    Sem ``embeddings``, usa a configuração atual do ``config`` em cada chamada.
     """
     def embed(texts: list[str]) -> list[list[float]]:
+        e = embeddings or config.atual().embeddings
         encoded = [embedding_query_text(text) for text in texts]
-        endpoint, chave_api, modelo = config.embedding_endpoint()
+        endpoint, chave_api, modelo = e.endpoint()
         chave = {"endpoint": endpoint, "model": modelo, "texts": encoded}
         for record in _read_jsonl(QUERY_CACHE_PATH):
             if record.get("key") == chave:
@@ -266,8 +270,7 @@ def _embed_fn_com_uso(uso: list[TokenUsage], estatisticas: dict[str, int] | None
 
         aguardar_modelo()
         client = OpenAI(base_url=endpoint, api_key=chave_api,
-                        timeout=httpx.Timeout(config.QUERY_EMBEDDING_TIMEOUT,
-                                              connect=min(3.0, config.QUERY_EMBEDDING_TIMEOUT)),
+                        timeout=httpx.Timeout(e.query_timeout, connect=min(3.0, e.query_timeout)),
                         max_retries=0)
         from src.model_observation import observar_chamada
         diagnostics: dict = {}
@@ -275,11 +278,11 @@ def _embed_fn_com_uso(uso: list[TokenUsage], estatisticas: dict[str, int] | None
             estatisticas["calls"] += 1
         try:
             response = observar_chamada(lambda: client.embeddings.create(model=modelo, input=encoded),
-                provider=config.EMBEDDING_PROVIDER, model=modelo, sdk_max_retries=0, diagnosticos=diagnostics)
+                provider=e.provider, model=modelo, sdk_max_retries=0, diagnosticos=diagnostics)
         except Exception as error:
             from llm_ecoa import erro_de_disponibilidade
             if erro_de_disponibilidade(error):
-                _EMBEDDING_FAILURES[endpoint_key] = time.monotonic() + config.QUERY_EMBEDDING_COOLDOWN
+                _EMBEDDING_FAILURES[endpoint_key] = time.monotonic() + e.query_cooldown
             raise
         else:
             _EMBEDDING_FAILURES.pop(endpoint_key, None)
@@ -291,7 +294,7 @@ def _embed_fn_com_uso(uso: list[TokenUsage], estatisticas: dict[str, int] | None
         if len(vectors) != len(texts) or not all(
             vector and all(math.isfinite(v) for v in vector) and any(vector) for vector in vectors
         ):
-            raise ValueError(f"{config.EMBEDDING_PROVIDER} retornou embeddings de query inválidos")
+            raise ValueError(f"{e.provider} retornou embeddings de query inválidos")
         QUERY_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
         with QUERY_CACHE_PATH.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps({"key": chave, "vectors": vectors}, ensure_ascii=False) + "\n")
@@ -612,8 +615,8 @@ def retrieve(
     query: str,
     route: Any = None,
     *,
-    index_dir: Path = config.INDEX_DIR,
-    documents_file: Path = config.NORMALIZED_DATA_DIR / "documents.jsonl",
+    index_dir: Path | None = None,
+    documents_file: Path | None = None,
     top_k: int = DEFAULT_TOP_K,
     filters: Mapping[str, Any] | None = None,
     embed_fn: EmbedFn | None = None,
@@ -623,11 +626,12 @@ def retrieve(
     rerank_k: int | None = None,
     run_id: str = "sem-run-id",
     query_id: str = "sem-query-id",
+    configuracao: Configuracao | None = None,
 ) -> list[RetrievalResult]:
     """Executa dense + BM25 + RRF e aplica reranker somente se fornecido.
 
     Com ``reranker``, o RRF entrega ``rerank_k`` candidatos (padrão
-    ``max(top_k, config.RERANK_CANDIDATES)``) e o reranker escolhe os ``top_k``
+    ``max(top_k, rerank_candidates)`` da configuração) e o reranker escolhe os ``top_k``
     finais entre eles — assim ele pode trazer para cima um chunk que o RRF
     deixou abaixo do corte. Se o reranker falhar (ex.: modelo indisponível), o
     stage ``rerank`` é registrado com ``status: "erro"`` e o resultado volta a
@@ -649,7 +653,13 @@ def retrieve(
 
     Cada etapa registra seu stage (``retrieval_denso``, ``retrieval_bm25``,
     ``fusao_rrf``, ``rerank``) em ``logs/pipeline/pipeline-AAAA-MM-DD.jsonl``.
+
+    ``configuracao`` (``src/settings.py``) dá a busca, os embeddings e os
+    caminhos; sem ela, vale a configuração atual do ``config``.
     """
+    cfg = configuracao or config.atual()
+    index_dir = index_dir if index_dir is not None else cfg.caminhos.index_dir
+    documents_file = documents_file if documents_file is not None else cfg.caminhos.normalized_data_dir / "documents.jsonl"
     bases, route_filters = _bases_e_filtros_da_rota(query, route, filters)
     fetch_k = fetch_k if fetch_k is not None else max(5 * top_k, DEFAULT_FETCH_K)
     dense_records, sparse_records, filtros_ignorados = _registros_elegiveis(
@@ -666,13 +676,13 @@ def retrieve(
     r = _Recuperacao(query=query, index_dir=index_dir, documents_file=documents_file, bases=bases,
                      escopos=escopos, route_filters=route_filters, top_k=top_k, fetch_k=fetch_k,
                      run_id=run_id, query_id=query_id, extra=extra,
-                     dense_records=dense_records, sparse_records=sparse_records)
+                     dense_records=dense_records, sparse_records=sparse_records, configuracao=cfg)
 
     dense, recuperacao_degradada = _busca_densa(r, embed_fn)
     sparse, candidatos_norma = _busca_bm25(r)
     identificadores_exatos = _identificadores_exatos(r)
     if reranker is not None:
-        rerank_k = max(top_k, rerank_k if rerank_k is not None else config.RERANK_CANDIDATES)
+        rerank_k = max(top_k, rerank_k if rerank_k is not None else cfg.busca.rerank_candidates)
     corte = rerank_k if reranker is not None else top_k
     fused = _fundir(r, dense, sparse, candidatos_norma, identificadores_exatos, corte,
                     recuperacao_degradada=recuperacao_degradada, filtros_ignorados=filtros_ignorados)
@@ -700,6 +710,7 @@ class _Recuperacao:
     extra: dict[str, Any]
     dense_records: list[dict[str, Any]] | None
     sparse_records: list[dict[str, Any]] | None
+    configuracao: Configuracao
 
     def span(self, stage: Stage, **mais: Any):
         return default_logger.span(run_id=self.run_id, query_id=self.query_id, stage=stage,
@@ -766,7 +777,9 @@ def _busca_densa(r: _Recuperacao, embed_fn: EmbedFn | None) -> tuple[list[Retrie
     uso_embedding: list[TokenUsage] = []
     estatisticas_embedding = {"calls": 0, "cache_hits": 0}
     observacoes_embedding: list[dict] = []
-    embed_original = embed_fn or _embed_fn_com_uso(uso_embedding, estatisticas_embedding, observacoes_embedding)
+    embeddings = r.configuracao.embeddings
+    embed_original = embed_fn or _embed_fn_com_uso(uso_embedding, estatisticas_embedding, observacoes_embedding,
+                                                    embeddings)
 
     def embed_da_consulta(texts):
         if embed_fn is not None:
@@ -776,7 +789,7 @@ def _busca_densa(r: _Recuperacao, embed_fn: EmbedFn | None) -> tuple[list[Retrie
     recuperacao_degradada = False
     with r.span(Stage.RETRIEVAL_DENSO) as span:
         try:
-            if not config.DENSE_RETRIEVAL_ENABLED:
+            if not embeddings.dense_retrieval_enabled:
                 raise EmbeddingUnavailable("Busca densa desabilitada por configuração; usando BM25")
             dense = dense_retrieve(
                 r.query,
@@ -801,7 +814,7 @@ def _busca_densa(r: _Recuperacao, embed_fn: EmbedFn | None) -> tuple[list[Retrie
             span.extra.update({"degraded": True, "fallback": "bm25", "error_type": type(error).__name__,
                                "status_code": getattr(error, "status_code", None),
                                "embedding_cooldown": isinstance(error, EmbeddingUnavailable),
-                               "dense_enabled": config.DENSE_RETRIEVAL_ENABLED})
+                               "dense_enabled": embeddings.dense_retrieval_enabled})
         span.set_result(_resumo(dense))
         _registrar_evidencias(span, dense)
         span.extra["diagnostico_identificadores"] = _diagnostico_identificadores(r.query, dense)
@@ -816,7 +829,7 @@ def _busca_densa(r: _Recuperacao, embed_fn: EmbedFn | None) -> tuple[list[Retrie
         elif embed_fn is not None and estatisticas_embedding["calls"]:
             span.extra["uso_tokens"] = {"status": "indisponivel", "fonte": "funcao_injetada_sem_usage"}
         if uso_embedding:
-            span.modelo = span.modelo or config.EMBEDDING_MODEL
+            span.modelo = span.modelo or embeddings.model
             span.tokens = TokenUsage(
                 prompt=sum(u.prompt for u in uso_embedding),
                 completion=sum(u.completion for u in uso_embedding),
@@ -894,9 +907,10 @@ def _fundir(r: _Recuperacao, dense: list[RetrievalResult], sparse: list[Retrieva
     """Stage ``fusao_rrf``: RRF, variedade por compra, norma pedida e identificadores exatos à frente."""
     with r.span(Stage.FUSAO_RRF, rrf_k=DEFAULT_RRF_K) as span:
         fused = reciprocal_rank_fusion([dense, sparse])
-        fused, rebaixados = _variar_por_compra(r.query, fused)
+        maximo_por_compra = r.configuracao.busca.max_per_purchase
+        fused, rebaixados = _variar_por_compra(r.query, fused, maximo_por_compra)
         fused = fused[:corte]
-        span.extra["variedade"] = {"max_por_compra": config.RETRIEVAL_MAX_PER_PURCHASE,
+        span.extra["variedade"] = {"max_por_compra": maximo_por_compra,
                                    "rebaixados": rebaixados}
         fused = _priorizar_norma_solicitada(r.query, fused, candidatos_norma, corte)
         fused = _promover_identificadores_exatos(fused, identificadores_exatos, corte)

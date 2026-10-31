@@ -171,3 +171,19 @@ def test_artigo_explicito_prevalece_sobre_visao_geral():
         ("artigo1", "Art. 1º Normas gerais."), ("artigo17", "Art. 17. Fases do processo."),
     ]]
     assert ret._ordenar_candidatos_norma("O que diz o artigo 17 da Lei 14.133/2021?", items)[0].chunk_id == "artigo17"
+
+
+def test_configuracao_injetada_desliga_o_denso_sem_mexer_no_config_global(tmp_path):
+    """Configuração injetada na busca (2026-10-30): o config global continua com o denso ligado."""
+    from dataclasses import replace
+
+    docs = tmp_path / "documents.jsonl"
+    docs.write_text(json.dumps(record("lei", "licitação eletrônica")) + "\n", encoding="utf-8")
+    base = config.CONFIGURACAO
+    sem_denso = replace(base, embeddings=replace(base.embeddings, dense_retrieval_enabled=False))
+
+    resultados = ret.retrieve("licitação", index_dir=tmp_path / "index", documents_file=docs,
+                              embed_fn=lambda _: pytest.fail("Não deve chamar encoder"), configuracao=sem_denso)
+
+    assert resultados and resultados[0].chunk_id == "lei"
+    assert config.DENSE_RETRIEVAL_ENABLED is base.embeddings.dense_retrieval_enabled
