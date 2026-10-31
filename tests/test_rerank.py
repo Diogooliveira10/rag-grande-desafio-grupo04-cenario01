@@ -322,3 +322,26 @@ def test_pre_carregar_que_falha_nao_derruba_a_api(monkeypatch):
     monkeypatch.setattr(rerank, "_carregar_cross_encoder", falha)
 
     assert rerank.pre_carregar() is False
+
+
+def test_reranker_padrao_recebe_a_configuracao_por_injecao():
+    """Configuração injetada (2026-10-30): sem monkeypatch no config global."""
+    from dataclasses import replace
+    import config as config_global
+    from src import rerank
+
+    base = config_global.CONFIGURACAO.busca
+    desligado = replace(base, rerank_enabled=False)
+    local = replace(base, rerank_enabled=True, rerank_provider="local", rerank_model="modelo-x", rerank_max_length=128)
+    ecoa = replace(base, rerank_enabled=True, rerank_provider="ecoa", rerank_url="http://ecoa/api/rerank",
+                   rerank_timeout=7.0, rerank_model="modelo-y", rerank_max_length=64)
+
+    assert rerank.reranker_padrao(desligado) is None
+    assert rerank.pre_carregar(desligado) is False
+    escolhido = rerank.reranker_padrao(local)
+    assert type(escolhido) is CrossEncoderReranker
+    assert (escolhido.modelo, escolhido.max_length) == ("modelo-x", 128)
+    remoto = rerank.reranker_padrao(ecoa)
+    assert isinstance(remoto, EcoaReranker)
+    assert (remoto.url, remoto.timeout) == ("http://ecoa/api/rerank", 7.0)
+    assert (remoto.fallback.modelo, remoto.fallback.max_length) == ("modelo-y", 64)

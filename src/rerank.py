@@ -32,6 +32,7 @@ from typing import Any, Callable, Optional, Sequence
 
 import config
 from src.retrieve import RetrievalResult
+from src.settings import ConfiguracaoBusca
 
 logger = logging.getLogger(__name__)
 
@@ -135,8 +136,9 @@ class CrossEncoderReranker:
         batch_size: int = 16,
         score_fn: Optional[ScoreFn] = None,
     ) -> None:
-        self.modelo = model_name or config.RERANK_MODEL
-        self.max_length = max_length or config.RERANK_MAX_LENGTH
+        busca = config.atual().busca if not (model_name and max_length) else None
+        self.modelo = model_name or busca.rerank_model
+        self.max_length = max_length or busca.rerank_max_length
         self.batch_size = batch_size
         self._score_fn = score_fn
 
@@ -190,8 +192,9 @@ class EcoaReranker(CrossEncoderReranker):
         post_fn: Optional[PostFn] = None,
     ) -> None:
         super().__init__()
-        self.url = url or config.RERANK_URL
-        self.timeout = timeout if timeout is not None else config.RERANK_TIMEOUT
+        busca = config.atual().busca if url is None or timeout is None else None
+        self.url = url or busca.rerank_url
+        self.timeout = timeout if timeout is not None else busca.rerank_timeout
         self.fallback = fallback
         self._post = post_fn or _post_json
         self.modelo = f"ecoa:{self.url.rsplit('/api/', 1)[-1]}"
@@ -230,30 +233,33 @@ class EcoaReranker(CrossEncoderReranker):
         return notas
 
 
-def pre_carregar() -> bool:
+def pre_carregar(configuracao: Optional[ConfiguracaoBusca] = None) -> bool:
     """Carrega o cross-encoder local antes da primeira pergunta.
 
     Vale para os dois provedores: no ``ecoa`` o modelo local é o fallback.
     Devolve se carregou; falha só vira aviso, porque a primeira pergunta
-    tenta de novo pelo caminho normal.
+    tenta de novo pelo caminho normal. Sem ``configuracao``, usa a atual.
     """
-    if not config.RERANK_ENABLED:
+    busca = configuracao or config.atual().busca
+    if not busca.rerank_enabled:
         return False
     try:
-        _carregar_cross_encoder(config.RERANK_MODEL, config.RERANK_MAX_LENGTH)
+        _carregar_cross_encoder(busca.rerank_model, busca.rerank_max_length)
     except Exception as erro:  # sem sentence-transformers, sem rede para baixar etc.
         logger.warning("Pré-carregamento do rerank falhou (%s); carrega na primeira pergunta", type(erro).__name__)
         return False
     return True
 
 
-def reranker_padrao() -> Optional[CrossEncoderReranker]:
-    """Reranker usado pelo pipeline, ou ``None`` com ``RERANK_ENABLED=false``."""
-    if not config.RERANK_ENABLED:
+def reranker_padrao(configuracao: Optional[ConfiguracaoBusca] = None) -> Optional[CrossEncoderReranker]:
+    """Reranker usado pelo pipeline, ou ``None`` com o rerank desligado. Sem ``configuracao``, usa a atual."""
+    busca = configuracao or config.atual().busca
+    if not busca.rerank_enabled:
         return None
-    if config.RERANK_PROVIDER == "local":
-        return CrossEncoderReranker()
-    return EcoaReranker(fallback=CrossEncoderReranker())
+    local = CrossEncoderReranker(busca.rerank_model, max_length=busca.rerank_max_length)
+    if busca.rerank_provider == "local":
+        return local
+    return EcoaReranker(busca.rerank_url, timeout=busca.rerank_timeout, fallback=local)
 
 
 __all__ = ["CrossEncoderReranker", "EcoaReranker", "pre_carregar", "reranker_padrao"]
