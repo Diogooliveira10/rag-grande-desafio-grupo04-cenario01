@@ -1194,3 +1194,13 @@ def test_evidencia_insuficiente_nao_e_recusa_no_prompt_e_no_pedido_de_citacao():
     assert "reconhecê-la é a resposta, não uma recusa" in gen._SYSTEM_PROMPT
     assert "não é uma recusa" in gen._PEDIDO_DE_CITACAO
     assert "is_refusal=false" in gen._PEDIDO_DE_CITACAO
+
+
+def test_orcamento_injetado_vale_sem_mexer_no_config_global():
+    """Configuração injetada (2026-10-30): o orçamento vem de ``llm``, não do ``config``."""
+    from dataclasses import replace
+
+    llm = replace(gen.config.CONFIGURACAO.llm, generation_context_chars=10)
+
+    assert gen._chunks_no_orcamento([_chunk(conteudo="y" * 300)], llm=llm) == []
+    assert gen._chunks_no_orcamento([_chunk(conteudo="y" * 300)]) != []

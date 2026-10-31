@@ -5,6 +5,7 @@ import uuid
 from typing import Any, Optional, Protocol
 
 import config
+from src.settings import ConfiguracaoLlm
 from src.log_evidence import auditar_geracao, auditoria_completa
 from src.obs import TokenUsage, token_usage_from_response
 from src.schema import Chunk, ConfidenceLevel, Natureza, RAGResponse, RefusalReason
@@ -124,10 +125,20 @@ def _schema_resposta(chunk_ids: Optional[list[str]] = None) -> dict:
             }}
 
 
-def _cliente_padrao(schema: Optional[dict] = None) -> ClienteLLM:
+# Alguns decodificadores do provedor removem o marcador quando a string usa
+# minLength/maxLength. O limite é validado localmente; enviar só o tipo
+# preserva {{sql}} na saída do modelo real.
+_SCHEMA_TEMPLATE_SQL = {
+    "type": "object", "additionalProperties": False, "required": ["answer"],
+    "properties": {"answer": {"type": "string"}},
+}
+
+
+def _cliente_padrao(schema: Optional[dict] = None, temperatura: Optional[float] = None) -> ClienteLLM:
     """Wrapper fino sobre o cliente OpenAI compartilhado de ``llm_ecoa.py``.
 
-    Devolve a resposta completa do SDK para que ``usage`` chegue ao log.
+    Devolve a resposta completa do SDK para que ``usage`` chegue ao log. Sem
+    ``temperatura``, usa a da configuração atual, lida a cada chamada.
     """
     import llm_ecoa
 
@@ -135,7 +146,8 @@ def _cliente_padrao(schema: Optional[dict] = None) -> ClienteLLM:
 
     def _chamar(mensagens: list[dict]) -> Any:
         return llm_ecoa.completar_chat(
-            mensagens, diagnosticos=diagnosticos, temperature=config.LLM_TEMPERATURE,
+            mensagens, diagnosticos=diagnosticos,
+            temperature=temperatura if temperatura is not None else config.atual().llm.temperature,
             response_format=({"type": "json_schema", "json_schema": {"name": "query_plan", "schema": schema}}
                              if schema is not None else {"type": "json_object"}),
         )
@@ -272,6 +284,7 @@ def _montar_prompt(query: str, chunks: list[Chunk]) -> list[dict]:
 def _gerar_com_template_sql(
     query: str, chunks: list[Chunk], resposta_sql: RAGResponse, *, cliente: Optional[ClienteLLM],
     run_id: str, query_id: str, inicio: float, sensibilidade: dict[str, Any],
+    temperatura: Optional[float] = None,
 ) -> RAGResponse:
     """Uma chamada de apresentação; números/fontes/confiança nunca vêm do modelo.
 
@@ -297,13 +310,7 @@ def _gerar_com_template_sql(
     tokens, fallback, erro_parsing = None, None, None
     template = _MARCADOR_SQL
     try:
-        cliente = cliente or _cliente_padrao({
-            "type": "object", "additionalProperties": False, "required": ["answer"],
-            # Alguns decodificadores do provedor removem o marcador quando a
-            # string usa minLength/maxLength. O limite é validado localmente;
-            # enviar só o tipo preserva {{sql}} na saída do modelo real.
-            "properties": {"answer": {"type": "string"}},
-        })
+        cliente = cliente or _cliente_padrao(_SCHEMA_TEMPLATE_SQL, temperatura)
         sensibilidade["llm_called"] = True
         bruto, tokens = _texto_e_tokens(cliente(mensagens), extra=sensibilidade)
     except Exception as exc:
@@ -347,10 +354,13 @@ def gerar_resposta(
     run_id: str = "sem-run-id",
     query_id: Optional[str] = None,
     refusal_reason_hint: Optional[RefusalReason] = None,
+    configuracao: Optional[ConfiguracaoLlm] = None,
 ) -> RAGResponse:
     """
     Estágio "geracao": recebe a pergunta e os chunks já recuperados/rerankeados,
     devolve sempre uma RAGResponse válida (nunca uma exception do LLM/parsing).
+
+    ``configuracao``: orçamento do prompt, temperatura e SQL pelo LLM (sem ela, a atual).
 
     ``refusal_reason_hint`` é usado só quando ``chunks`` vem vazio (nenhuma base
     foi consultada) — permite a quem chama (ex.: src/pipeline.py, a partir da
@@ -359,6 +369,7 @@ def gerar_resposta(
     """
     query_id = query_id or str(uuid.uuid4())
     inicio = time.monotonic()
+    llm = configuracao or config.atual().llm
 
     motivo_previo = _checar_guardrail_previo(query)
     if motivo_previo is not None:
@@ -378,9 +389,9 @@ def gerar_resposta(
         return resposta
 
     resposta_sql = _resposta_sql_deterministica(query, chunks, bases_consultadas)
-    if resposta_sql is not None and config.SQL_APRESENTACAO_LLM:
+    if resposta_sql is not None and llm.sql_apresentacao_llm:
         return _gerar_com_template_sql(
-            query, chunks, resposta_sql, cliente=cliente, run_id=run_id,
+            query, chunks, resposta_sql, cliente=cliente, temperatura=llm.temperature, run_id=run_id,
             query_id=query_id, inicio=inicio, sensibilidade=sensibilidade,
         )
     if resposta_sql is not None:
@@ -390,8 +401,9 @@ def gerar_resposta(
         return _responder_pelo_sql(resposta_sql, chunks, run_id=run_id, query_id=query_id,
                                    inicio=inicio, sensibilidade=sensibilidade)
 
-    chunks, mensagens = _preparar_prompt(query, chunks, bases_consultadas, sensibilidade)
-    cliente = cliente or _cliente_padrao(_schema_resposta([f"E{i}" for i in range(1, len(chunks) + 1)]))
+    chunks, mensagens = _preparar_prompt(query, chunks, bases_consultadas, sensibilidade, llm)
+    cliente = cliente or _cliente_padrao(_schema_resposta([f"E{i}" for i in range(1, len(chunks) + 1)]),
+                                         llm.temperature)
 
     sensibilidade["llm_called"] = True
     sensibilidade["uso_tokens"] = {"status": "indisponivel", "fonte": "response.usage"}
@@ -503,12 +515,13 @@ def _responder_pelo_sql(resposta_sql: RAGResponse, chunks: list[Chunk], *, run_i
 
 
 def _preparar_prompt(query: str, chunks: list[Chunk], bases_consultadas: list[Natureza],
-                     sensibilidade: dict[str, Any]) -> tuple[list[Chunk], list[dict[str, Any]]]:
+                     sensibilidade: dict[str, Any],
+                     llm: Optional[ConfiguracaoLlm] = None) -> tuple[list[Chunk], list[dict[str, Any]]]:
     """Evidências que cabem no orçamento e as mensagens do prompt.
 
     Anota em ``sensibilidade`` (o extra do log) o que entrou e o que ficou de fora.
     """
-    chunks_prompt = _chunks_no_orcamento(chunks, bases_requeridas=bases_consultadas)
+    chunks_prompt = _chunks_no_orcamento(chunks, bases_requeridas=bases_consultadas, llm=llm)
     sensibilidade["chunks_no_prompt"] = len(chunks_prompt)
     sensibilidade["chunks_fora_do_orcamento"] = len(chunks) - len(chunks_prompt)
     sensibilidade["evidencias_no_prompt"] = [chunk.metadata.chunk_id for chunk in chunks_prompt]

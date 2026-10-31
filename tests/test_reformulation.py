@@ -347,3 +347,30 @@ def test_prazo_estourado_volta_sem_esperar_o_llm(monkeypatch):
     assert time.perf_counter() - inicio < 2
     assert resultado.motivo == "llm_falhou"
     assert "continuação da pergunta anterior" in resultado.pergunta
+
+
+def test_prazo_injetado_vale_sem_mexer_no_config_global(monkeypatch):
+    """Configuração injetada (2026-10-30): o prazo vem de ``configuracao``, não da constante."""
+    import threading
+    from dataclasses import replace
+
+    import config
+
+    liberar = threading.Event()
+
+    def cliente_lento(_mensagens):
+        liberar.wait(5)
+        return json.dumps({"pergunta": "reformulada"})
+
+    monkeypatch.setattr(reformulation, "_cliente_padrao", lambda diagnosticos: cliente_lento)
+    llm = replace(config.CONFIGURACAO.llm, reformulacao_timeout=0.05)
+    try:
+        resultado = reformular_pergunta(P43, HISTORICO, cliente=None, configuracao=llm)
+    finally:
+        liberar.set()
+
+    assert resultado.motivo == "llm_falhou"
+    arquivo = next(obs.default_logger.logs_dir.glob("pipeline-*.jsonl"))
+    registros = [json.loads(linha) for linha in arquivo.read_text(encoding="utf-8").splitlines()]
+    registro = next(r for r in registros if r["stage"] == "reformulacao")
+    assert registro["extra"]["timeout_seconds"] == 0.05

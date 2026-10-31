@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional, Sequence
 
 import config
+from src.settings import ConfiguracaoLlm
 
 from pydantic import BaseModel, Field
 
@@ -348,11 +349,14 @@ def reformular_pergunta(
     run_id: str = "sem-run-id",
     query_id: str = "sem-query-id",
     cliente: Optional[ClienteReformulacao] = None,
+    configuracao: Optional[ConfiguracaoLlm] = None,
 ) -> Reformulacao:
     """Pergunta a consultar: a reescrita, se houve, ou a original.
 
-    Nunca levanta exceção por causa do modelo; o motivo vai para o log.
+    Nunca levanta exceção por causa do modelo; o motivo vai para o log. O prazo
+    da reescrita vem de ``configuracao``; sem ela, de ``REFORMULACAO_TIMEOUT``.
     """
+    prazo = configuracao.reformulacao_timeout if configuracao is not None else REFORMULACAO_TIMEOUT
     turnos = _turnos_do_prompt(historico or [])
     from src.obs import registrar_pulo
     motivo = ("sem_historico" if not turnos else "modo_desligado" if REFORMULACAO_MODE != "llm"
@@ -382,7 +386,7 @@ def reformular_pergunta(
             def _chamada_llm():
                 return (cliente or _cliente_padrao(diagnosticos))(_mensagens(query, turnos))
 
-            saida = _com_prazo(_chamada_llm, REFORMULACAO_TIMEOUT) if cliente is None else _chamada_llm()
+            saida = _com_prazo(_chamada_llm, prazo) if cliente is None else _chamada_llm()
             span.tokens = token_usage_from_response(saida, extra=span.extra)
             span.extra.update(diagnosticos)
             span.modelo = diagnosticos.get("model") or getattr(saida, "model", None)
@@ -399,7 +403,7 @@ def reformular_pergunta(
         except FutureTimeoutError as erro:
             span.extra.update(diagnosticos)
             span.modelo = diagnosticos.get("model")
-            span.extra.update({"fallback": "contexto_anexado", "error_type": type(erro).__name__, "timeout_seconds": REFORMULACAO_TIMEOUT})
+            span.extra.update({"fallback": "contexto_anexado", "error_type": type(erro).__name__, "timeout_seconds": prazo})
             span.status = "degradado"
             pergunta = _com_contexto(query, turnos)
             span.set_result({"pergunta": mascarar(pergunta)[0], "reescrita": True, "motivo": "llm_falhou"})

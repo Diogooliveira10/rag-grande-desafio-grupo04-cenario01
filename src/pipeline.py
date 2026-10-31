@@ -65,13 +65,16 @@ def dependencias_padrao(configuracao: Optional[Configuracao] = None) -> Dependen
     Montadas a cada pergunta a partir dos nomes deste módulo, para um
     ``monkeypatch`` em ``pipeline.retrieve`` (como os testes fazem) continuar valendo.
     Com ``configuracao``, as peças que já a recebem ficam ligadas a ela (por
-    enquanto, a busca e o rerank); sem ela, cada peça usa a configuração atual do ``config``.
+    enquanto, a busca, o rerank, a geração e a reformulação); sem ela, cada peça usa a
+    configuração atual do ``config``.
     """
     return Dependencias(
         analisar=analisar_query, rotear=rotear_pergunta,
         buscar=retrieve if configuracao is None else partial(retrieve, configuracao=configuracao),
-        consultar_sql=consultar_estruturado, gerar=gerar_resposta, conversa=resposta_conversacional,
-        reformular=reformular_pergunta,
+        consultar_sql=consultar_estruturado, conversa=resposta_conversacional,
+        gerar=gerar_resposta if configuracao is None else partial(gerar_resposta, configuracao=configuracao.llm),
+        reformular=(reformular_pergunta if configuracao is None
+                    else partial(reformular_pergunta, configuracao=configuracao.llm)),
         reranker_padrao=reranker_padrao if configuracao is None else partial(reranker_padrao, configuracao.busca),
         pode_consultar_sql_direto=pode_consultar_sql_direto, pode_responder_sql=pode_responder_sql,
         tentativa_de_injecao=tentativa_de_injecao,

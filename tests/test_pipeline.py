@@ -324,3 +324,17 @@ def test_dependencias_padrao_ligam_o_rerank_a_configuracao_passada():
     reranker = pipeline.dependencias_padrao(ligado).reranker_padrao()
     assert isinstance(reranker, CrossEncoderReranker)
     assert (reranker.modelo, reranker.max_length) == ("modelo-injetado", 99)
+
+
+def test_dependencias_padrao_ligam_geracao_e_reformulacao_a_configuracao_passada():
+    from dataclasses import replace
+    from functools import partial
+    import config as config_global
+
+    base = config_global.CONFIGURACAO
+    injetada = replace(base, llm=replace(base.llm, reformulacao_timeout=1.5, temperature=0.3))
+    deps = pipeline.dependencias_padrao(injetada)
+
+    for dependencia in (deps.gerar, deps.reformular):
+        assert isinstance(dependencia, partial) and dependencia.keywords == {"configuracao": injetada.llm}
+    assert not isinstance(pipeline.dependencias_padrao().gerar, partial)

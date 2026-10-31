@@ -11,6 +11,7 @@ import re
 from typing import Any, Optional
 
 import config
+from src.settings import ConfiguracaoLlm
 from src.schema import Chunk, ChunkMetadata, Natureza
 
 
@@ -206,16 +207,22 @@ def _representar_conversa(conteudo: str, limite: int) -> str | None:
 
 def _chunks_no_orcamento(
     chunks: list[Chunk], bases_requeridas: list[Natureza] | None = None,
+    llm: ConfiguracaoLlm | None = None,
 ) -> list[Chunk]:
-    """Limita contexto preservando candidatos por intenção, base e natureza."""
+    """Limita contexto preservando candidatos por intenção, base e natureza.
+
+    O orçamento (por trecho e total) vem de ``llm``; sem ela, da configuração atual.
+    """
+    llm = llm or config.atual().llm
+    limite_por_trecho = llm.generation_chunk_chars
     preparados = []
     for chunk in chunks:
-        conteudo = (_representar_conversa(chunk.content, config.GENERATION_CHUNK_CHARS)
+        conteudo = (_representar_conversa(chunk.content, limite_por_trecho)
                     if chunk.metadata.extras.get("sintetico") else None)
         if conteudo is None:
             conteudo = _representar_registro(_compactar(chunk.content), _modalidade_vinculada(chunk.metadata))
-        if len(conteudo) > config.GENERATION_CHUNK_CHARS:
-            conteudo = conteudo[:config.GENERATION_CHUNK_CHARS].rstrip() + " [...]"
+        if len(conteudo) > limite_por_trecho:
+            conteudo = conteudo[:limite_por_trecho].rstrip() + " [...]"
         preparados.append(chunk.model_copy(update={"content": conteudo}))
     primeiros, restantes, grupos = [], [], set()
     for chunk in preparados:
@@ -250,7 +257,7 @@ def _chunks_no_orcamento(
     for i in indices:
         chunk = ordem[i]
         tamanho = len(_cabecalho(chunk.metadata, f"E{len(escolhidos)+1}")) + len(chunk.content)
-        if tamanho > config.GENERATION_CONTEXT_CHARS - usados:
+        if tamanho > llm.generation_context_chars - usados:
             continue
         escolhidos.append(i)
         usados += tamanho
