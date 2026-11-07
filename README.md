@@ -183,7 +183,8 @@ SQLite compatível, cobertura vetorial, validação e rollback.
 │   └── rate_limit.py            ← limite de requisições por cliente (IP real atrás do túnel), 429 com Retry-After
 ├── src/
 │   ├── fetch_corpus.py          ← coleta determinística e versionada do corpus
-│   ├── providers/               ← provedores declarativos de fontes (pncp.py: contratações, atas + PDFs, PCA)
+│   ├── providers/               ← provedores declarativos de fontes (pncp.py: contratações, atas + PDFs, PCA; fachada
+│   │                               de pncp_discovery, pncp_artifacts e pncp_units, com a base comum em pncp_common)
 │   ├── pncp_client.py           ← cliente HTTP do PNCP com tentativas e timeout
 │   ├── artifact_downloader.py   ← download de arquivos (PDF/HTML/CSV) com detecção de formato e deduplicação por SHA-256
 │   ├── retry.py                 ← espera entre tentativas HTTP (Retry-After do servidor ou backoff exponencial)
