@@ -195,7 +195,9 @@ SQLite compatível, cobertura vetorial, validação e rollback.
 │   ├── source_lookup.py         ← busca remota nas fontes suportadas
 │   ├── corpus_search.py         ← busca local no inventário
 │   ├── ingest.py                ← fachada compatível; delega a extração para prepare_documents.py
-│   ├── prepare_documents.py     ← extração por formato (PDF/HTML/CSV/JSON/JSONL), chunking e metadados canônicos
+│   ├── prepare_documents.py     ← extração por formato (PDF/HTML/CSV/JSON/JSONL), chunking e metadados canônicos:
+│   │                               orquestração e CLI; as peças ficam em preparation/
+│   ├── preparation/             ← readers, extraction, provenance, chunking, state (cache incremental) e common
 │   ├── pca_indicators.py        ← indicadores agregados do PCA (1 indicador = 1 chunk) para a base agregada
 │   ├── ocr.py                   ← OCR (Tesseract) das páginas de PDF escaneadas, usado por prepare_documents.py
 │   ├── corpus_quality.py        ← controle de qualidade do normalizado: texto ilegível, vigência das normas, contrato↔compra, valor simbólico
