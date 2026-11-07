@@ -49,57 +49,9 @@ def validate_bundle(manifest_path: Path | str) -> dict[str, Any]:
     preparação ou no readiness; não muda os caminhos já carregados pelo runtime.
     """
     path = Path(manifest_path).resolve()
-    if not path.is_file():
-        raise SnapshotValidationError("manifesto_ausente")
-    try:
-        manifest = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        raise SnapshotValidationError("manifesto_invalido") from None
-    if not isinstance(manifest, Mapping) or manifest.get("format") != BUNDLE_FORMAT:
-        raise SnapshotValidationError("formato_incompativel")
-    snapshot_id = manifest.get("snapshot_id")
-    files = manifest.get("files")
-    if not isinstance(snapshot_id, str) or not snapshot_id.strip() or not isinstance(files, Mapping):
-        raise SnapshotValidationError("manifesto_incompleto")
-    if not _FILE_ROLES.issubset(files):
-        raise SnapshotValidationError("artefatos_obrigatorios_ausentes")
-
-    checked: dict[str, Path] = {}
-    for role in sorted(_FILE_ROLES):
-        item = files.get(role)
-        if not isinstance(item, Mapping):
-            raise SnapshotValidationError("manifesto_incompleto")
-        relative = item.get("path")
-        expected = item.get("sha256")
-        if not isinstance(relative, str) or not isinstance(expected, str) or len(expected) != 64:
-            raise SnapshotValidationError("manifesto_incompleto")
-        artifact = (path.parent / relative).resolve()
-        try:
-            artifact.relative_to(path.parent)
-        except ValueError:
-            raise SnapshotValidationError("caminho_fora_do_bundle") from None
-        if not artifact.is_file():
-            raise SnapshotValidationError("artefato_ausente")
-        if _sha256(artifact) != expected.lower():
-            raise SnapshotValidationError("hash_divergente")
-        checked[role] = artifact
-
-    schema_version = manifest.get("sql_schema_version")
-    if not isinstance(schema_version, str) or not schema_version:
-        raise SnapshotValidationError("schema_declarado_invalido")
-    from src.structured_db import Banco, SCHEMA_VERSION, validar_banco
-    if schema_version != SCHEMA_VERSION:
-        raise SnapshotValidationError("schema_incompativel")
-    try:
-        validar_banco(checked["documents"], Banco(sqlite_path=checked["database"]))
-    except FileNotFoundError:
-        raise SnapshotValidationError("sql_ausente") from None
-    except Exception as error:
-        message = str(error).casefold()
-        code = "schema_incompativel" if "schema" in message else (
-            "snapshot_divergente" if "snapshot" in message else "sql_invalido"
-        )
-        raise SnapshotValidationError(code) from None
+    manifest, snapshot_id, files = _ler_manifesto(path)
+    checked = _conferir_artefatos(path, files)
+    schema_version = _conferir_sql(manifest, checked)
 
     try:
         index_manifest = json.loads(checked["index_manifest"].read_text(encoding="utf-8"))
@@ -128,6 +80,70 @@ def validate_bundle(manifest_path: Path | str) -> dict[str, Any]:
         "schema_version": schema_version,
         "capabilities": sorted(set(capabilities)),
     }
+
+
+def _ler_manifesto(path: Path) -> tuple[Mapping[str, Any], str, Mapping[str, Any]]:
+    """Manifesto do bundle com formato, ``snapshot_id`` e os papéis obrigatórios em ``files``."""
+    if not path.is_file():
+        raise SnapshotValidationError("manifesto_ausente")
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        raise SnapshotValidationError("manifesto_invalido") from None
+    if not isinstance(manifest, Mapping) or manifest.get("format") != BUNDLE_FORMAT:
+        raise SnapshotValidationError("formato_incompativel")
+    snapshot_id = manifest.get("snapshot_id")
+    files = manifest.get("files")
+    if not isinstance(snapshot_id, str) or not snapshot_id.strip() or not isinstance(files, Mapping):
+        raise SnapshotValidationError("manifesto_incompleto")
+    if not _FILE_ROLES.issubset(files):
+        raise SnapshotValidationError("artefatos_obrigatorios_ausentes")
+    return manifest, snapshot_id, files
+
+
+def _conferir_artefatos(path: Path, files: Mapping[str, Any]) -> dict[str, Path]:
+    """Cada artefato obrigatório dentro do bundle e com o hash declarado; devolve os caminhos por papel."""
+    checked: dict[str, Path] = {}
+    for role in sorted(_FILE_ROLES):
+        item = files.get(role)
+        if not isinstance(item, Mapping):
+            raise SnapshotValidationError("manifesto_incompleto")
+        relative = item.get("path")
+        expected = item.get("sha256")
+        if not isinstance(relative, str) or not isinstance(expected, str) or len(expected) != 64:
+            raise SnapshotValidationError("manifesto_incompleto")
+        artifact = (path.parent / relative).resolve()
+        try:
+            artifact.relative_to(path.parent)
+        except ValueError:
+            raise SnapshotValidationError("caminho_fora_do_bundle") from None
+        if not artifact.is_file():
+            raise SnapshotValidationError("artefato_ausente")
+        if _sha256(artifact) != expected.lower():
+            raise SnapshotValidationError("hash_divergente")
+        checked[role] = artifact
+    return checked
+
+
+def _conferir_sql(manifest: Mapping[str, Any], checked: Mapping[str, Path]) -> str:
+    """Versão do esquema SQL declarada e banco do bundle válido para os documentos; devolve a versão."""
+    schema_version = manifest.get("sql_schema_version")
+    if not isinstance(schema_version, str) or not schema_version:
+        raise SnapshotValidationError("schema_declarado_invalido")
+    from src.structured_db import Banco, SCHEMA_VERSION, validar_banco
+    if schema_version != SCHEMA_VERSION:
+        raise SnapshotValidationError("schema_incompativel")
+    try:
+        validar_banco(checked["documents"], Banco(sqlite_path=checked["database"]))
+    except FileNotFoundError:
+        raise SnapshotValidationError("sql_ausente") from None
+    except Exception as error:
+        message = str(error).casefold()
+        code = "schema_incompativel" if "schema" in message else (
+            "snapshot_divergente" if "snapshot" in message else "sql_invalido"
+        )
+        raise SnapshotValidationError(code) from None
+    return schema_version
 
 
 def _jsonl_ids(path: Path) -> list[str]:
@@ -192,6 +208,19 @@ def _validar_indice(index_manifest: Mapping[str, Any], global_path: Path,
     bases = index_manifest.get("bases")
     if not isinstance(bases, list) or not bases:
         raise SnapshotValidationError("bases_indice_ausentes")
+    declared = _artefatos_declarados(artifacts)
+    index_root = global_path.parent.resolve()
+    seen_bases: set[str] = set()
+    expected_files: set[str] = set()
+    for entry in bases:
+        _validar_base_do_indice(entry, index_manifest, global_path, index_root, declared,
+                                seen_bases, expected_files, operator_acceptance=operator_acceptance)
+    if set(declared) != expected_files:
+        raise SnapshotValidationError("artefatos_indice_nao_declarados")
+
+
+def _artefatos_declarados(artifacts: Any) -> dict[str, str]:
+    """Caminho -> sha256 dos artefatos do índice declarados no manifesto do bundle."""
     if not isinstance(artifacts, list):
         raise SnapshotValidationError("artefatos_indice_nao_declarados")
     declared: dict[str, str] = {}
@@ -199,67 +228,71 @@ def _validar_indice(index_manifest: Mapping[str, Any], global_path: Path,
         if not isinstance(item, Mapping) or not isinstance(item.get("path"), str) or not isinstance(item.get("sha256"), str):
             raise SnapshotValidationError("manifesto_incompleto")
         declared[item["path"]] = item["sha256"].lower()
-    index_root = global_path.parent.resolve()
-    seen_bases: set[str] = set()
-    expected_files: set[str] = set()
-    for entry in bases:
-        base_id = entry.get("base_id") if isinstance(entry, Mapping) else entry
-        if not isinstance(base_id, str) or not base_id or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for c in base_id):
-            raise SnapshotValidationError("base_indice_invalida")
-        if base_id in seen_bases:
-            raise SnapshotValidationError("base_indice_duplicada")
-        seen_bases.add(base_id)
-        directory = (index_root / base_id).resolve()
-        try:
-            directory.relative_to(index_root)
-        except ValueError:
-            raise SnapshotValidationError("caminho_fora_do_bundle") from None
-        paths = {name: directory / name for name in (
-            "manifest.json", "documents.jsonl", "vectors.jsonl", "vectors.faiss")}
-        bundle_root = global_path.parent.parent.resolve()
-        for name, artifact in paths.items():
-            relative = artifact.relative_to(bundle_root).as_posix()
-            expected_files.add(relative)
-            if relative not in declared:
-                raise SnapshotValidationError("artefatos_indice_nao_declarados")
-            resolved = artifact.resolve()
-            if not resolved.is_file() or _sha256(resolved) != declared[relative]:
-                raise SnapshotValidationError("hash_divergente")
-        try:
-            submanifest = json.loads(paths["manifest.json"].read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError):
-            raise SnapshotValidationError("manifesto_indice_invalido") from None
-        if not isinstance(submanifest, Mapping) or submanifest.get("base_id") != base_id:
-            raise SnapshotValidationError("manifesto_indice_invalido")
-        base_documents_hash = _sha256(paths["documents.jsonl"])
-        if submanifest.get("source_sha256") != base_documents_hash:
-            raise SnapshotValidationError("snapshot_divergente")
-        count = submanifest.get("total_chunks")
-        vector_count = submanifest.get("total_vectors")
-        if not isinstance(count, int) or not isinstance(vector_count, int) or count != vector_count:
-            raise SnapshotValidationError("vetores_ausentes")
-        if operator_acceptance and submanifest.get("embedding_model") != index_manifest.get("embedding_model"):
-            raise SnapshotValidationError("modelo_indice_divergente")
-        if not operator_acceptance and any(submanifest.get(field) is not True for field in (
-            "homogeneidade_modelo_comprovada", "homogeneidade_configuracao_comprovada",
-            "proveniencia_encoding_completa",
-        )):
-            raise SnapshotValidationError("proveniencia_incompleta")
-        document_ids = _jsonl_ids(paths["documents.jsonl"])
-        vector_ids = _jsonl_ids(paths["vectors.jsonl"])
-        if len(document_ids) != count or len(set(document_ids)) != count:
-            raise SnapshotValidationError("documentos_indice_incoerentes")
-        if len(vector_ids) != vector_count or len(set(vector_ids)) != vector_count or set(document_ids) != set(vector_ids):
-            raise SnapshotValidationError("vetores_ausentes")
-        try:
-            import faiss
-            faiss_index = faiss.read_index(str(paths["vectors.faiss"]))
-        except Exception:
-            raise SnapshotValidationError("indice_faiss_invalido") from None
-        if int(faiss_index.ntotal) != vector_count:
-            raise SnapshotValidationError("vetores_ausentes")
-    if set(declared) != expected_files:
-        raise SnapshotValidationError("artefatos_indice_nao_declarados")
+    return declared
+
+
+def _validar_base_do_indice(entry: Any, index_manifest: Mapping[str, Any], global_path: Path, index_root: Path,
+                            declared: Mapping[str, str], seen_bases: set[str], expected_files: set[str],
+                            *, operator_acceptance: bool) -> None:
+    """Uma base do índice: arquivos declarados com o hash certo, submanifesto coerente, ids e FAISS completos.
+
+    Acrescenta a base a ``seen_bases`` e os arquivos dela a ``expected_files``.
+    """
+    base_id = entry.get("base_id") if isinstance(entry, Mapping) else entry
+    if not isinstance(base_id, str) or not base_id or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for c in base_id):
+        raise SnapshotValidationError("base_indice_invalida")
+    if base_id in seen_bases:
+        raise SnapshotValidationError("base_indice_duplicada")
+    seen_bases.add(base_id)
+    directory = (index_root / base_id).resolve()
+    try:
+        directory.relative_to(index_root)
+    except ValueError:
+        raise SnapshotValidationError("caminho_fora_do_bundle") from None
+    paths = {name: directory / name for name in (
+        "manifest.json", "documents.jsonl", "vectors.jsonl", "vectors.faiss")}
+    bundle_root = global_path.parent.parent.resolve()
+    for name, artifact in paths.items():
+        relative = artifact.relative_to(bundle_root).as_posix()
+        expected_files.add(relative)
+        if relative not in declared:
+            raise SnapshotValidationError("artefatos_indice_nao_declarados")
+        resolved = artifact.resolve()
+        if not resolved.is_file() or _sha256(resolved) != declared[relative]:
+            raise SnapshotValidationError("hash_divergente")
+    try:
+        submanifest = json.loads(paths["manifest.json"].read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        raise SnapshotValidationError("manifesto_indice_invalido") from None
+    if not isinstance(submanifest, Mapping) or submanifest.get("base_id") != base_id:
+        raise SnapshotValidationError("manifesto_indice_invalido")
+    base_documents_hash = _sha256(paths["documents.jsonl"])
+    if submanifest.get("source_sha256") != base_documents_hash:
+        raise SnapshotValidationError("snapshot_divergente")
+    count = submanifest.get("total_chunks")
+    vector_count = submanifest.get("total_vectors")
+    if not isinstance(count, int) or not isinstance(vector_count, int) or count != vector_count:
+        raise SnapshotValidationError("vetores_ausentes")
+    if operator_acceptance and submanifest.get("embedding_model") != index_manifest.get("embedding_model"):
+        raise SnapshotValidationError("modelo_indice_divergente")
+    if not operator_acceptance and any(submanifest.get(field) is not True for field in (
+        "homogeneidade_modelo_comprovada", "homogeneidade_configuracao_comprovada",
+        "proveniencia_encoding_completa",
+    )):
+        raise SnapshotValidationError("proveniencia_incompleta")
+    document_ids = _jsonl_ids(paths["documents.jsonl"])
+    vector_ids = _jsonl_ids(paths["vectors.jsonl"])
+    if len(document_ids) != count or len(set(document_ids)) != count:
+        raise SnapshotValidationError("documentos_indice_incoerentes")
+    if len(vector_ids) != vector_count or len(set(vector_ids)) != vector_count or set(document_ids) != set(vector_ids):
+        raise SnapshotValidationError("vetores_ausentes")
+    try:
+        import faiss
+        faiss_index = faiss.read_index(str(paths["vectors.faiss"]))
+    except Exception:
+        raise SnapshotValidationError("indice_faiss_invalido") from None
+    if int(faiss_index.ntotal) != vector_count:
+        raise SnapshotValidationError("vetores_ausentes")
 
 
 def _validar_catalogo(catalog_path: Path, database_path: Path) -> None:

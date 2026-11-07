@@ -7,6 +7,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -139,64 +140,14 @@ class ArtifactDownloader:
         for attempt in range(1, max(1, attempts) + 1):
             try:
                 with urlopen(request, timeout=timeout, context=criar_contexto_ssl()) as response:
-                    body = response.read(self.download_limit + 1)
-                    content_type = response.headers.get("Content-Type", "")
-                    if len(body) > self.download_limit:
-                        return {
-                            "status": "erro_download",
-                            "http_status": response.status,
-                            "tentativas": attempt,
-                            "content_type": content_type,
-                            "url": url,
-                            "url_final": response.geturl(),
-                            "observacao": "arquivo excede o limite de 30 MiB e não foi salvo",
-                        }
-
-                    saved = self.save_bytes(
-                        body,
-                        destination_dir,
-                        filename_prefix,
-                        _extension(
-                            response.geturl(),
-                            content_type,
-                            body,
-                            response.headers.get("Content-Disposition", ""),
-                        ),
-                        deduplicate=deduplicate,
-                    )
-                    return {
-                        **saved,
-                        "http_status": response.status,
-                        "tentativas": attempt,
-                        "content_type": content_type,
-                        "url": url,
-                        "url_final": response.geturl(),
-                        "etag": response.headers.get("ETag"),
-                        "last_modified": response.headers.get("Last-Modified"),
-                    }
+                    return self._resultado_do_download(response, url, attempt, destination_dir,
+                                                       filename_prefix, deduplicate=deduplicate)
             except HTTPError as error:
                 last_error = str(error.reason)
-                if error.code == 304:
-                    return {
-                        "status": "nao_modificado",
-                        "http_status": 304,
-                        "tentativas": attempt,
-                        "content_type": error.headers.get("Content-Type", "") if error.headers else "",
-                        "url": url,
-                        "etag": error.headers.get("ETag") if error.headers else None,
-                        "last_modified": error.headers.get("Last-Modified") if error.headers else None,
-                    }
-                if error.code in self.retryable_http and attempt < max(1, attempts):
+                if error.code != 304 and error.code in self.retryable_http and attempt < max(1, attempts):
                     time.sleep(retry_delay(attempt, error.headers.get("Retry-After")))
                     continue
-                return {
-                    "status": "erro_download",
-                    "http_status": error.code,
-                    "tentativas": attempt,
-                    "content_type": error.headers.get("Content-Type", "") if error.headers else "",
-                    "url": url,
-                    "erro": last_error,
-                }
+                return _resultado_de_erro_http(error, url, attempt, last_error)
             except (TimeoutError, URLError, OSError) as error:
                 last_error = str(getattr(error, "reason", error))
                 if attempt < max(1, attempts):
@@ -211,3 +162,64 @@ class ArtifactDownloader:
                     "erro": last_error,
                 }
         return {"status": "erro_download", "url": url, "erro": last_error}
+
+    def _resultado_do_download(self, response: Any, url: str, attempt: int, destination_dir: Path,
+                               filename_prefix: str, *, deduplicate: bool) -> dict[str, object]:
+        """Lê a resposta e salva o arquivo; acima do limite de 30 MiB, não salva."""
+        body = response.read(self.download_limit + 1)
+        content_type = response.headers.get("Content-Type", "")
+        if len(body) > self.download_limit:
+            return {
+                "status": "erro_download",
+                "http_status": response.status,
+                "tentativas": attempt,
+                "content_type": content_type,
+                "url": url,
+                "url_final": response.geturl(),
+                "observacao": "arquivo excede o limite de 30 MiB e não foi salvo",
+            }
+
+        saved = self.save_bytes(
+            body,
+            destination_dir,
+            filename_prefix,
+            _extension(
+                response.geturl(),
+                content_type,
+                body,
+                response.headers.get("Content-Disposition", ""),
+            ),
+            deduplicate=deduplicate,
+        )
+        return {
+            **saved,
+            "http_status": response.status,
+            "tentativas": attempt,
+            "content_type": content_type,
+            "url": url,
+            "url_final": response.geturl(),
+            "etag": response.headers.get("ETag"),
+            "last_modified": response.headers.get("Last-Modified"),
+        }
+
+
+def _resultado_de_erro_http(error: HTTPError, url: str, attempt: int, last_error: str) -> dict[str, object]:
+    """304 vira ``nao_modificado`` com o ETag e a data; o resto, ``erro_download``."""
+    if error.code == 304:
+        return {
+            "status": "nao_modificado",
+            "http_status": 304,
+            "tentativas": attempt,
+            "content_type": error.headers.get("Content-Type", "") if error.headers else "",
+            "url": url,
+            "etag": error.headers.get("ETag") if error.headers else None,
+            "last_modified": error.headers.get("Last-Modified") if error.headers else None,
+        }
+    return {
+        "status": "erro_download",
+        "http_status": error.code,
+        "tentativas": attempt,
+        "content_type": error.headers.get("Content-Type", "") if error.headers else "",
+        "url": url,
+        "erro": last_error,
+    }

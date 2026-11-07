@@ -217,34 +217,11 @@ def prepare_documents(
     units_cache, units_cache_invalid = _load_units_state(units_state_path)
     chunks_cache, chunks_cache_invalid = _load_chunk_state(output_path)
     preparacao = _Preparacao(chunks_cache, chunk_size, overlap)
-    state_units: list[SourceUnit] = []
-    failures: list[dict[str, str]] = []
-    extraction_cache_hits = 0
-    extraction_cache_misses = 0
-
-    for path in paths:
-        digest = sha256_file(path)
-        source_file = _relative_path(path)
-        extraction_fingerprint = _extraction_fingerprint(base)
-        try:
-            units, from_cache = _unidades_extraidas(
-                path, digest, source_file, base, extraction_fingerprint, units_cache,
-                summary_manifest_hash, fallback_collected_at, inventory_provenance,
-            )
-            if from_cache:
-                extraction_cache_hits += 1
-            else:
-                extraction_cache_misses += 1
-            state_units.extend(units)
-            units = _com_relacoes(
-                units,
-                inventory_provenance.get((str(base["base_id"]), digest), {}).get("relacoes") or [],
-                related_context.get(digest),
-            )
-        except Exception as error:
-            failures.append({"source_file": source_file, "erro": f"{type(error).__name__}: {error}"})
-            continue
-        preparacao.adicionar_todas(units)
+    state_units, failures, extraction_cache_hits, extraction_cache_misses = _extrair_arquivos(
+        paths, base, units_cache, preparacao, summary_manifest_hash=summary_manifest_hash,
+        fallback_collected_at=fallback_collected_at, inventory_provenance=inventory_provenance,
+        related_context=related_context,
+    )
 
     derived_result_indicators = 0
     if base.get("base_id") == "pca_agregado" and inventory_path is not None:
@@ -279,6 +256,46 @@ def prepare_documents(
             base, summary, preparacao, state_units, failures,
         )
     return summary
+
+
+def _extrair_arquivos(
+    paths: list[Path], base: dict[str, Any], units_cache: dict[str, Any], preparacao: _Preparacao, *,
+    summary_manifest_hash: str, fallback_collected_at: str, inventory_provenance: dict[Any, Any],
+    related_context: dict[str, Any],
+) -> tuple[list[SourceUnit], list[dict[str, str]], int, int]:
+    """Extrai cada arquivo (do cache quando possível), liga as relações e entrega as unidades à ``preparacao``.
+
+    Devolve as unidades para o estado incremental, as falhas por arquivo e os
+    acertos e erros do cache de extração. Um arquivo que falha não interrompe os demais.
+    """
+    state_units: list[SourceUnit] = []
+    failures: list[dict[str, str]] = []
+    extraction_cache_hits = 0
+    extraction_cache_misses = 0
+    for path in paths:
+        digest = sha256_file(path)
+        source_file = _relative_path(path)
+        extraction_fingerprint = _extraction_fingerprint(base)
+        try:
+            units, from_cache = _unidades_extraidas(
+                path, digest, source_file, base, extraction_fingerprint, units_cache,
+                summary_manifest_hash, fallback_collected_at, inventory_provenance,
+            )
+            if from_cache:
+                extraction_cache_hits += 1
+            else:
+                extraction_cache_misses += 1
+            state_units.extend(units)
+            units = _com_relacoes(
+                units,
+                inventory_provenance.get((str(base["base_id"]), digest), {}).get("relacoes") or [],
+                related_context.get(digest),
+            )
+        except Exception as error:
+            failures.append({"source_file": source_file, "erro": f"{type(error).__name__}: {error}"})
+            continue
+        preparacao.adicionar_todas(units)
+    return state_units, failures, extraction_cache_hits, extraction_cache_misses
 
 
 def _com_relacoes(

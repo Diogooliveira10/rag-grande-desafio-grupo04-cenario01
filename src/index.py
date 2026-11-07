@@ -334,22 +334,11 @@ def _write_base_vectors(
 ) -> tuple[int | None, int]:
     """vectors.jsonl e vectors.faiss de uma base, retomando vetores já gravados; devolve (dimensão, reaproveitados)."""
     vectors_path = base_dir / "vectors.jsonl"
-    base_manifest = base_dir / "manifest.json"
-    if vectors_path.exists() and base_manifest.exists():
-        anterior = json.loads(base_manifest.read_text(encoding="utf-8"))
-        if anterior.get("embedding_model") != model or anterior.get("encoding_config") != getattr(embed_fn, "encoding_config", None):
-            raise ValueError("retomada exige o mesmo modelo e configuração; não relabelar vetores")
     vectors_temporario = base_dir / "vectors.jsonl.provisorio"
     dimension: int | None = None
     embedding_rows: list[list[float]] = []
-    existentes = _vetores_existentes(vectors_path)
-    retomada_path = base_dir / "retomada.json"
-    configuracao_retomada = {"model": model, "encoding_config": getattr(embed_fn, "encoding_config", None), "source_sha256": source_hash}
-    if vectors_temporario.exists():
-        if not retomada_path.exists() or json.loads(retomada_path.read_text(encoding="utf-8")) != configuracao_retomada:
-            raise ValueError("checkpoint provisório incompatível; preserve-o e use outro staging")
-        existentes.update(_vetores_existentes(vectors_temporario))
-    retomada_path.write_text(json.dumps(configuracao_retomada, sort_keys=True) + "\n", encoding="utf-8")
+    existentes = _vetores_para_retomar(base_dir, vectors_path, vectors_temporario, embed_fn,
+                                       model=model, source_hash=source_hash)
     reaproveitados = 0
     # Nunca truncar o único checkpoint ao retomar. Em erro, o antigo fica.
     with vectors_temporario.open("w", encoding="utf-8", newline="\n") as handle:
@@ -377,16 +366,7 @@ def _write_base_vectors(
                         f"dimensão inconsistente no chunk {chunk.chunk_id}: "
                         f"esperado {dimension}, recebido {len(embedding)}"
                     )
-                record = {
-                    "chunk_id": chunk.chunk_id,
-                    "document_id": chunk.document_id,
-                    "base_id": chunk.base_id,
-                    "embedding": embedding,
-                    "source_file": chunk.source_file,
-                    "sha256": chunk.sha256,
-                    "metadata": chunk.metadata,
-                }
-                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+                handle.write(json.dumps(_registro_do_vetor(chunk, embedding), ensure_ascii=False) + "\n")
                 embedding_rows.append(embedding)
 
     faiss_temporario = base_dir / "vectors.faiss.provisorio"
@@ -394,6 +374,42 @@ def _write_base_vectors(
     vectors_temporario.replace(vectors_path)
     faiss_temporario.replace(base_dir / "vectors.faiss")
     return dimension, reaproveitados
+
+
+def _vetores_para_retomar(base_dir: Path, vectors_path: Path, vectors_temporario: Path, embed_fn: EmbedFn, *,
+                          model: str, source_hash: str) -> dict[str, list[float]]:
+    """Vetores já calculados (do índice e do checkpoint provisório), se a retomada é compatível.
+
+    Retomar exige o mesmo modelo e a mesma configuração de encoding; o
+    checkpoint provisório, também a mesma fonte. Grava o ``retomada.json`` desta execução.
+    """
+    base_manifest = base_dir / "manifest.json"
+    if vectors_path.exists() and base_manifest.exists():
+        anterior = json.loads(base_manifest.read_text(encoding="utf-8"))
+        if anterior.get("embedding_model") != model or anterior.get("encoding_config") != getattr(embed_fn, "encoding_config", None):
+            raise ValueError("retomada exige o mesmo modelo e configuração; não relabelar vetores")
+    existentes = _vetores_existentes(vectors_path)
+    retomada_path = base_dir / "retomada.json"
+    configuracao_retomada = {"model": model, "encoding_config": getattr(embed_fn, "encoding_config", None), "source_sha256": source_hash}
+    if vectors_temporario.exists():
+        if not retomada_path.exists() or json.loads(retomada_path.read_text(encoding="utf-8")) != configuracao_retomada:
+            raise ValueError("checkpoint provisório incompatível; preserve-o e use outro staging")
+        existentes.update(_vetores_existentes(vectors_temporario))
+    retomada_path.write_text(json.dumps(configuracao_retomada, sort_keys=True) + "\n", encoding="utf-8")
+    return existentes
+
+
+def _registro_do_vetor(chunk: NormalizedChunk, embedding: list[float]) -> dict[str, Any]:
+    """Linha do ``vectors.jsonl``: o vetor com a identificação e os metadados do chunk."""
+    return {
+        "chunk_id": chunk.chunk_id,
+        "document_id": chunk.document_id,
+        "base_id": chunk.base_id,
+        "embedding": embedding,
+        "source_file": chunk.source_file,
+        "sha256": chunk.sha256,
+        "metadata": chunk.metadata,
+    }
 
 
 @observar_offline(Stage.INDEXACAO)

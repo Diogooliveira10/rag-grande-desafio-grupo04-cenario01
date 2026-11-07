@@ -79,6 +79,20 @@ def _document_rows(payload: Any) -> list[dict[str, Any]]:
     return rows
 
 
+def _filtros_da_consulta(*, year: int, uf: str, modality: int | None, page_size: int,
+                         data_initial: str | None, data_final: str | None) -> dict[str, Any]:
+    """Filtros de ``/v1/contratacoes/publicacao``: o ano inteiro, salvo período informado."""
+    filters = {
+        "dataInicial": data_initial or f"{year}-01-01",
+        "dataFinal": data_final or f"{year}-12-31",
+        "uf": uf.strip().upper(),
+        "tamanhoPagina": page_size,
+    }
+    if modality is not None:
+        filters["codigoModalidadeContratacao"] = modality
+    return filters
+
+
 def lookup_pncp(
     *,
     query: str,
@@ -109,16 +123,8 @@ def lookup_pncp(
     page_size = max(1, min(int(page_size), 100))
     max_pages = max(1, int(max_pages))
     max_results = max(1, int(max_results))
-    start = data_initial or f"{year}-01-01"
-    end = data_final or f"{year}-12-31"
-    filters = {
-        "dataInicial": start,
-        "dataFinal": end,
-        "uf": uf.strip().upper(),
-        "tamanhoPagina": page_size,
-    }
-    if modality is not None:
-        filters["codigoModalidadeContratacao"] = modality
+    filters = _filtros_da_consulta(year=year, uf=uf, modality=modality, page_size=page_size,
+                                   data_initial=data_initial, data_final=data_final)
 
     matches: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []

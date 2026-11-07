@@ -50,68 +50,89 @@ def validate_manifest_contract(manifest: dict[str, Any], *, official: bool = Tru
         return ValidationResult(tuple(errors))
 
     if official:
-        actual = set(bases)
-        supplements = set(bases) & set(OFFICIAL_SUPPLEMENT_TARGETS)
-        expected = set(OFFICIAL_BASE_TARGETS) | supplements
-        for base_id in sorted(supplements):
-            base = bases[base_id]
-            if (base.get("dados_sinteticos") is not True
-                    or base.get("natureza") != "conversacional"
-                    or (base.get("acesso") or {}).get("tipo") != "arquivo_local"
-                    or base.get("volume_alvo") != OFFICIAL_SUPPLEMENT_TARGETS[base_id]):
-                errors.append(f"{base_id}: suplemento sintético local inválido")
-        if actual != expected:
-            errors.append(
-                f"bases oficiais divergentes: esperadas={sorted(expected)} obtidas={sorted(actual)}"
-            )
-        curation_v7 = manifest.get("curadoria_v7")
-        curation = manifest.get("curadoria_v6")
-        if curation_v7 is not None:
-            # Censo v7: volumes podem ser ausentes e o limite por órgão é nulo.
-            # O contrato v6 (volumes fixos + soma) segue valendo para
-            # manifestos sem curadoria_v7.
-            if not isinstance(curation_v7, dict):
-                errors.append("curadoria_v7 deve ser um objeto")
-            else:
-                if not curation_v7.get("selecao"):
-                    errors.append("curadoria_v7: selecao ausente")
-                limit = curation_v7.get("limite_por_orgao_por_base")
-                if limit is not None and (type(limit) is not int or limit < 1):
-                    errors.append(
-                        "curadoria_v7: limite_por_orgao_por_base deve ser inteiro positivo ou null"
-                    )
-                target = curation_v7.get("alvo_arquivos_total")
-                if target is not None and (type(target) is not int or target < 1):
-                    errors.append(
-                        "curadoria_v7: alvo_arquivos_total deve ser inteiro positivo ou null"
-                    )
-        elif curation is None:
-            for base_id, target in OFFICIAL_BASE_TARGETS.items():
-                base = bases.get(base_id)
-                if base is None:
-                    continue
-                if base.get("volume_alvo") != target:
-                    errors.append(
-                        f"{base_id}: volume_alvo esperado={target} obtido={base.get('volume_alvo')}"
-                    )
-        elif not isinstance(curation, dict):
-            errors.append("curadoria_v6 deve ser um objeto")
-        else:
-            target = curation.get("alvo_arquivos_total")
-            limit = curation.get("limite_por_orgao_por_base")
-            if type(target) is not int or target < 1:
-                errors.append("curadoria_v6: alvo_arquivos_total deve ser inteiro positivo")
-            else:
-                try:
-                    obtained = sum(int(base.get("volume_alvo")) for base_id, base in bases.items()
-                                   if base_id in OFFICIAL_BASE_TARGETS)
-                    if obtained != target:
-                        errors.append(f"curadoria_v6: soma dos volumes esperada={target} obtida={obtained}")
-                except (TypeError, ValueError):
-                    errors.append("curadoria_v6: volumes inválidos")
-            if type(limit) is not int or limit < 1:
-                errors.append("curadoria_v6: limite_por_orgao_por_base deve ser inteiro positivo")
+        errors.extend(_erros_das_bases_oficiais(bases))
+        errors.extend(_erros_da_curadoria(manifest, bases))
+    errors.extend(_erros_de_cada_base(bases))
 
+    return ValidationResult(tuple(errors))
+
+
+def _erros_das_bases_oficiais(bases: dict[str, dict[str, Any]]) -> list[str]:
+    """Suplementos sintéticos locais válidos e o conjunto de bases oficiais esperado."""
+    errors: list[str] = []
+    actual = set(bases)
+    supplements = set(bases) & set(OFFICIAL_SUPPLEMENT_TARGETS)
+    expected = set(OFFICIAL_BASE_TARGETS) | supplements
+    for base_id in sorted(supplements):
+        base = bases[base_id]
+        if (base.get("dados_sinteticos") is not True
+                or base.get("natureza") != "conversacional"
+                or (base.get("acesso") or {}).get("tipo") != "arquivo_local"
+                or base.get("volume_alvo") != OFFICIAL_SUPPLEMENT_TARGETS[base_id]):
+            errors.append(f"{base_id}: suplemento sintético local inválido")
+    if actual != expected:
+        errors.append(
+            f"bases oficiais divergentes: esperadas={sorted(expected)} obtidas={sorted(actual)}"
+        )
+    return errors
+
+
+def _erros_da_curadoria(manifest: dict[str, Any], bases: dict[str, dict[str, Any]]) -> list[str]:
+    """Curadoria v7 (censo), v6 (volumes que somam o alvo) ou, sem curadoria, os volumes fixos."""
+    errors: list[str] = []
+    curation_v7 = manifest.get("curadoria_v7")
+    curation = manifest.get("curadoria_v6")
+    if curation_v7 is not None:
+        # Censo v7: volumes podem ser ausentes e o limite por órgão é nulo.
+        # O contrato v6 (volumes fixos + soma) segue valendo para
+        # manifestos sem curadoria_v7.
+        if not isinstance(curation_v7, dict):
+            errors.append("curadoria_v7 deve ser um objeto")
+        else:
+            if not curation_v7.get("selecao"):
+                errors.append("curadoria_v7: selecao ausente")
+            limit = curation_v7.get("limite_por_orgao_por_base")
+            if limit is not None and (type(limit) is not int or limit < 1):
+                errors.append(
+                    "curadoria_v7: limite_por_orgao_por_base deve ser inteiro positivo ou null"
+                )
+            target = curation_v7.get("alvo_arquivos_total")
+            if target is not None and (type(target) is not int or target < 1):
+                errors.append(
+                    "curadoria_v7: alvo_arquivos_total deve ser inteiro positivo ou null"
+                )
+    elif curation is None:
+        for base_id, target in OFFICIAL_BASE_TARGETS.items():
+            base = bases.get(base_id)
+            if base is None:
+                continue
+            if base.get("volume_alvo") != target:
+                errors.append(
+                    f"{base_id}: volume_alvo esperado={target} obtido={base.get('volume_alvo')}"
+                )
+    elif not isinstance(curation, dict):
+        errors.append("curadoria_v6 deve ser um objeto")
+    else:
+        target = curation.get("alvo_arquivos_total")
+        limit = curation.get("limite_por_orgao_por_base")
+        if type(target) is not int or target < 1:
+            errors.append("curadoria_v6: alvo_arquivos_total deve ser inteiro positivo")
+        else:
+            try:
+                obtained = sum(int(base.get("volume_alvo")) for base_id, base in bases.items()
+                               if base_id in OFFICIAL_BASE_TARGETS)
+                if obtained != target:
+                    errors.append(f"curadoria_v6: soma dos volumes esperada={target} obtida={obtained}")
+            except (TypeError, ValueError):
+                errors.append("curadoria_v6: volumes inválidos")
+        if type(limit) is not int or limit < 1:
+            errors.append("curadoria_v6: limite_por_orgao_por_base deve ser inteiro positivo")
+    return errors
+
+
+def _erros_de_cada_base(bases: dict[str, dict[str, Any]]) -> list[str]:
+    """Seleção determinística, natureza e volume de cada base."""
+    errors: list[str] = []
     for base_id, base in bases.items():
         if base.get("selecao_deterministica") is not True:
             errors.append(f"{base_id}: selecao_deterministica não está habilitada")
@@ -125,8 +146,7 @@ def validate_manifest_contract(manifest: dict[str, Any], *, official: bool = Tru
                 errors.append(f"{base_id}: volume_alvo inválido")
         if base.get("volume_regra", "exato") not in {"exato", "minimo"}:
             errors.append(f"{base_id}: volume_regra deve ser 'exato' ou 'minimo'")
-
-    return ValidationResult(tuple(errors))
+    return errors
 
 
 def validate_inventory_contract(
