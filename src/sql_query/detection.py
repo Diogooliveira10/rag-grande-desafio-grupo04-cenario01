@@ -400,27 +400,15 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
     if tipo is None:
         return None
 
-    minimo_por_grupo = _minimo_por_grupo(texto) if tabela == "contratacoes" else None
-    if minimo_por_grupo is not None:
-        tipo = "agrupamento"
-
-    limite = _limite_da_pergunta(texto, tipo)
-    agrupar_por = _agrupamento_da_pergunta(texto_agrupamento, tabela, orgaos_e_total)
-    metrica = "soma" if orgaos_e_total else filtros.metrica or "contagem"
-    if tabela == "contratacoes" and re.search(r"\bfornecedo(?:r|res)\b", texto) and "valor total" in texto:
-        tipo, agrupar_por, metrica = "agrupamento", "fornecedor", "soma"
-    if minimo_por_grupo is not None:
-        agrupar_por = "fornecedor"
+    tipo, limite, agrupar_por, metrica, minimo_por_grupo = _forma_do_resultado(
+        texto, texto_agrupamento, tabela, tipo, filtros.metrica, orgaos_e_total)
 
     r = _recorte_da_pergunta(query, texto, filtros, tabela, tipo,
                              valor_unitario_indisponivel=valor_unitario_indisponivel,
                              minimo_por_grupo=minimo_por_grupo)
     so_menor = re.search(r"\bmenor(?:es)?\b", texto) and not re.search(r"\bmaior(?:es)?\b", texto)
     primeiro_ano, ultimo_ano = filtros.intervalo_de_anos()
-    # O CNPJ citado também delimita o pedido ("contratos do fornecedor de CNPJ X").
-    if (tipo == "listagem" and not r.termos_objeto and not r.modalidade_termos and not r.orgao_termos
-            and not r.analiticos and primeiro_ano is None and ultimo_ano is None
-            and filtros.valor_min is None and filtros.valor_max is None):
+    if _listagem_sem_assunto(tipo, r, filtros, primeiro_ano, ultimo_ano):
         return None  # "Quais contratos existem?" sem assunto: a busca normal responde
     return Consulta(
         tabela=tabela,
@@ -458,6 +446,39 @@ def detectar_consulta(query: str, filtros: QueryFilters, bases: Iterable[Naturez
         incluir_total_geral=orgaos_e_total,
         **situacoes,
     )
+
+
+def _forma_do_resultado(texto: str, texto_agrupamento: str, tabela: str, tipo: str,
+                        metrica_pedida: Optional[str], orgaos_e_total: bool
+                        ) -> tuple[str, int, str, str, Optional[int]]:
+    """Tipo final, limite, agrupamento, métrica e mínimo por grupo, nessa ordem de decisão.
+
+    "Fornecedores com pelo menos N contratos" vira agrupamento por fornecedor;
+    "valor total por fornecedor" também, somando o valor.
+    """
+    minimo_por_grupo = _minimo_por_grupo(texto) if tabela == "contratacoes" else None
+    if minimo_por_grupo is not None:
+        tipo = "agrupamento"
+
+    limite = _limite_da_pergunta(texto, tipo)
+    agrupar_por = _agrupamento_da_pergunta(texto_agrupamento, tabela, orgaos_e_total)
+    metrica = "soma" if orgaos_e_total else metrica_pedida or "contagem"
+    if tabela == "contratacoes" and re.search(r"\bfornecedo(?:r|res)\b", texto) and "valor total" in texto:
+        tipo, agrupar_por, metrica = "agrupamento", "fornecedor", "soma"
+    if minimo_por_grupo is not None:
+        agrupar_por = "fornecedor"
+    return tipo, limite, agrupar_por, metrica, minimo_por_grupo
+
+
+def _listagem_sem_assunto(tipo: str, r: Any, filtros: QueryFilters,
+                          primeiro_ano: Optional[int], ultimo_ano: Optional[int]) -> bool:
+    """Listagem sem objeto, modalidade, órgão, filtro analítico, período nem valor.
+
+    O CNPJ citado também delimita o pedido ("contratos do fornecedor de CNPJ X").
+    """
+    return (tipo == "listagem" and not r.termos_objeto and not r.modalidade_termos and not r.orgao_termos
+            and not r.analiticos and primeiro_ano is None and ultimo_ano is None
+            and filtros.valor_min is None and filtros.valor_max is None)
 
 
 @dataclass(frozen=True)

@@ -171,6 +171,15 @@ def compilar_consulta_postgres(consulta: Consulta) -> tuple[str, tuple[Any, ...]
     Versão é obrigatória em fatos agregados. Datas nunca são intercambiáveis:
     uma seleção de ano exige a referência PCA, assinatura, resultado ou publicação.
     """
+    spec = _DATASETS_SQL.get(consulta.dataset)
+    campo = _validar_consulta_postgres(consulta)
+    condicoes, parametros = _condicoes_postgres(consulta, spec, campo)
+    return _sql_postgres(consulta, spec, campo, condicoes, parametros)
+
+
+def _validar_consulta_postgres(consulta: Consulta) -> str:
+    """Dataset, versão, métrica, campo, agrupamentos, ordem, limite e referência temporal permitidos;
+    devolve o campo da métrica."""
     dataset = consulta.dataset
     if dataset not in _DATASETS_SQL:
         raise ValueError("dataset não permitido")
@@ -189,6 +198,11 @@ def compilar_consulta_postgres(consulta: Consulta) -> tuple[str, tuple[Any, ...]
         raise ValueError("ordem ou limite não permitido")
     if consulta.referencia_temporal is not None and consulta.referencia_temporal not in spec["datas"]:
         raise ValueError("referência temporal não permitida")
+    return campo
+
+
+def _condicoes_postgres(consulta: Consulta, spec: dict[str, Any], campo: str) -> tuple[list[str], list[Any]]:
+    """Condições do WHERE e seus parâmetros: versão, período, faixa de valor, filtros, esfera e objeto."""
     condicoes: list[str] = []
     parametros: list[Any] = []
     if consulta.versao:
@@ -233,6 +247,13 @@ def compilar_consulta_postgres(consulta: Consulta) -> tuple[str, tuple[Any, ...]
     for termo in consulta.termos_objeto:
         condicoes.append("objeto_normalizado LIKE %s")
         parametros.append(f"%{termo}%")
+    return condicoes, parametros
+
+
+def _sql_postgres(consulta: Consulta, spec: dict[str, Any], campo: str, condicoes: list[str],
+                  parametros: list[Any]) -> tuple[str, tuple[Any, ...]]:
+    """SELECT com agregado, GROUP BY, HAVING, ORDER BY e LIMIT."""
+    grupos = consulta.agrupamentos
     agregado = _METRICAS_SQL[consulta.metrica].format(campo=campo)
     expressoes_grupo = tuple(spec.get("expressoes_grupo", {}).get(grupo, grupo) for grupo in grupos)
     selecao = ", ".join((*(f"{expressao} AS {grupo}" if expressao != grupo else grupo
@@ -253,6 +274,7 @@ def compilar_consulta_postgres(consulta: Consulta) -> tuple[str, tuple[Any, ...]
     sql += " LIMIT %s"
     parametros.append(consulta.limite)
     return sql, tuple(parametros)
+
 
 
 # --------------------------------------------------------------------------
@@ -440,34 +462,14 @@ def executar_consulta(consulta: Consulta, banco: Banco, recorte: Optional[dict] 
                 f"SELECT COUNT(*) AS n FROM {consulta.tabela}{where}", parametros)[0]["n"]
         return contagens[(termos, juncao)]
 
-    tentativas = [(consulta.termos_objeto, "AND")]
-    if len(consulta.termos_objeto) > 1:
-        uteis = tuple(termo for termo in consulta.termos_objeto if contagem((termo,)))
-        if uteis and uteis != consulta.termos_objeto:
-            tentativas.append((uteis, "AND"))
-        if len(uteis) > 1:
-            tentativas.append((uteis, "OR"))
+    tentativas = _tentativas_de_termos(consulta.termos_objeto, contagem)
     for indice, (termos, juncao) in enumerate(tentativas):
         if not termos or contagem(termos, juncao):
             tabelas: list[str] = []
             sql, linhas = _executar(banco, consulta, termos, juncao, markdown=tabelas if markdown is not None else None)
-            # Contagem que também mostra o total (mostrar_total) recebe o alerta,
-            # porque o total exibido depende do valor fora do padrão; a comparação
-            # entre esferas também, pois a tabela dela traz total, média e máximo.
-            if (consulta.tipo in {"ranking", "estatistica", "agrupamento", "evolucao"}
-                    and (consulta.metrica != "contagem" or consulta.mostrar_total
-                         or consulta.comparacao_esferas)):
-                where, params = _where(consulta, termos, juncao)
-                coluna = _coluna_valor(consulta)
-                extremo = banco.consultar(
-                    f"SELECT MAX({coluna}) AS maior FROM {consulta.tabela}{where}", params,
-                )[0]["maior"]
-                if extremo is not None and float(extremo) >= limiar_de_conferencia:
-                    linhas.append(
-                        f"Alerta de qualidade: o recorte contém valor registrado de {_brl(extremo)}, "
-                        "igual ou acima do limiar de conferência. Confirme na fonte PNCP antes de interpretar "
-                        "totais ou rankings; os valores foram preservados, sem correção ou exclusão."
-                    )
+            alerta = _alerta_de_conferencia(banco, consulta, termos, juncao, limiar_de_conferencia)
+            if alerta:
+                linhas.append(alerta)
             if recorte is not None:
                 _preencher_recorte(recorte, consulta, banco, total, contagem(termos, juncao),
                                    termos, juncao, relaxados=_relaxamentos(indice, consulta, termos, juncao))
@@ -486,6 +488,44 @@ def executar_consulta(consulta: Consulta, banco: Banco, recorte: Optional[dict] 
         _cabecalho(consulta, total, consulta.termos_objeto, "OR"),
         [f"Nenhum registro encontrado com os filtros aplicados e os termos de objeto: {', '.join(consulta.termos_objeto)}."],
     )
+
+
+def _tentativas_de_termos(termos_objeto: tuple[str, ...],
+                          contagem: Any) -> list[tuple[tuple[str, ...], str]]:
+    """Combinações de termos a tentar, na ordem: todos com E; só os que casam
+    com algum registro, com E; esses mesmos, com OU (``contagem(termos)`` diz
+    quantos registros casam)."""
+    tentativas = [(termos_objeto, "AND")]
+    if len(termos_objeto) > 1:
+        uteis = tuple(termo for termo in termos_objeto if contagem((termo,)))
+        if uteis and uteis != termos_objeto:
+            tentativas.append((uteis, "AND"))
+        if len(uteis) > 1:
+            tentativas.append((uteis, "OR"))
+    return tentativas
+
+
+def _alerta_de_conferencia(banco: Banco, consulta: Consulta, termos: tuple[str, ...], juncao: str,
+                           limiar: float) -> Optional[str]:
+    """Alerta quando o recorte tem valor igual ou acima do limiar de conferência.
+
+    Contagem que também mostra o total (mostrar_total) recebe o alerta, porque
+    o total exibido depende do valor fora do padrão; a comparação entre esferas
+    também, pois a tabela dela traz total, média e máximo.
+    """
+    if not (consulta.tipo in {"ranking", "estatistica", "agrupamento", "evolucao"}
+            and (consulta.metrica != "contagem" or consulta.mostrar_total or consulta.comparacao_esferas)):
+        return None
+    where, params = _where(consulta, termos, juncao)
+    coluna = _coluna_valor(consulta)
+    extremo = banco.consultar(
+        f"SELECT MAX({coluna}) AS maior FROM {consulta.tabela}{where}", params,
+    )[0]["maior"]
+    if extremo is None or float(extremo) < limiar:
+        return None
+    return (f"Alerta de qualidade: o recorte contém valor registrado de {_brl(extremo)}, "
+            "igual ou acima do limiar de conferência. Confirme na fonte PNCP antes de interpretar "
+            "totais ou rankings; os valores foram preservados, sem correção ou exclusão.")
 
 
 # Campos numéricos: ausente é NULL. Nos de texto, string vazia também é ausente.
@@ -754,46 +794,55 @@ def consultar_estruturado(
                     tabelas: list[str] = []
                     sql, cabecalho, linhas = executar_consulta(consulta, banco, recorte, markdown=tabelas,
                                                                limiar_de_conferencia=limiar)
-                valor_unitario_indisponivel = filtros.tipo_valor == "unitario" or (
-                    intencao is not None and intencao.filtros.tipo_valor == "unitario"
-                )
-                if valor_unitario_indisponivel:
-                    recorte.update({
-                        "calculo_disponivel": False,
-                        "tipo_resultado": "calculo_indisponivel",
-                        "valor_unitario_indisponivel": True,
-                        "calculo_motivo": (
-                            "o preço por unidade não está disponível nos dados; "
-                            "o valor total do contrato não pode substituí-lo"
-                        ),
-                    })
+                _marcar_valor_unitario_indisponivel(recorte, filtros, intencao)
             markdown = "\n\n".join(tabelas)
             chunks = _chunks(consulta, sql, cabecalho, linhas, banco, recorte, markdown=markdown,
                              chunk_chars=chunk_chars)
-            span.extra.update({
-                "sql": sql, "linhas": len(linhas), "chunks": len(chunks),
-                # O que a consulta devolveu, para acompanhar o dado até a resposta.
-                "cabecalho": cabecalho,
-                "resultado": linhas[:_LINHAS_NO_LOG],
-                # Markdown completo, além do resumo textual legado. Nenhuma
-                # linha da tabela é removida pelo limite _LINHAS_NO_LOG.
-                "resultado_markdown": mascarar(markdown)[0],
-                "linhas_fora_do_log": max(0, len(linhas) - _LINHAS_NO_LOG),
-                "chunk_ids": [chunk.metadata.chunk_id for chunk in chunks],
-                # Confiabilidade no recorte, completude e cobertura separadas:
-                # não se deduz isso lendo o texto da resposta.
-                "recorte": recorte,
-            })
-            from src.log_evidence import auditoria_completa
-            if auditoria_completa():
-                span.extra["auditoria_evidencias"] = {
-                    "modo": "completo", "cabecalho": cabecalho,
-                    "resultado_completo": linhas, "chunk_ids": [c.metadata.chunk_id for c in chunks],
-                }
-            span.set_result(f"{len(linhas)} linha(s) em {len(chunks)} chunk(s)")
+            _registrar_no_log(span, sql, cabecalho, linhas, markdown, chunks, recorte)
             return chunks
     except Exception:
         return []
+
+
+def _marcar_valor_unitario_indisponivel(recorte: dict[str, Any], filtros: QueryFilters,
+                                        intencao: Optional[QueryIntent]) -> None:
+    """Pedido de preço por unidade: o dado não existe e o valor total não o substitui."""
+    if filtros.tipo_valor == "unitario" or (intencao is not None and intencao.filtros.tipo_valor == "unitario"):
+        recorte.update({
+            "calculo_disponivel": False,
+            "tipo_resultado": "calculo_indisponivel",
+            "valor_unitario_indisponivel": True,
+            "calculo_motivo": (
+                "o preço por unidade não está disponível nos dados; "
+                "o valor total do contrato não pode substituí-lo"
+            ),
+        })
+
+
+def _registrar_no_log(span: Any, sql: str, cabecalho: str, linhas: list[str], markdown: str,
+                      chunks: list[Chunk], recorte: dict[str, Any]) -> None:
+    """O que a etapa ``consulta_sql`` deixa no log para acompanhar o dado até a resposta."""
+    span.extra.update({
+        "sql": sql, "linhas": len(linhas), "chunks": len(chunks),
+        # O que a consulta devolveu, para acompanhar o dado até a resposta.
+        "cabecalho": cabecalho,
+        "resultado": linhas[:_LINHAS_NO_LOG],
+        # Markdown completo, além do resumo textual legado. Nenhuma
+        # linha da tabela é removida pelo limite _LINHAS_NO_LOG.
+        "resultado_markdown": mascarar(markdown)[0],
+        "linhas_fora_do_log": max(0, len(linhas) - _LINHAS_NO_LOG),
+        "chunk_ids": [chunk.metadata.chunk_id for chunk in chunks],
+        # Confiabilidade no recorte, completude e cobertura separadas:
+        # não se deduz isso lendo o texto da resposta.
+        "recorte": recorte,
+    })
+    from src.log_evidence import auditoria_completa
+    if auditoria_completa():
+        span.extra["auditoria_evidencias"] = {
+            "modo": "completo", "cabecalho": cabecalho,
+            "resultado_completo": linhas, "chunk_ids": [c.metadata.chunk_id for c in chunks],
+        }
+    span.set_result(f"{len(linhas)} linha(s) em {len(chunks)} chunk(s)")
 
 
 __all__ = ["Consulta", "consultar_estruturado", "detectar_consulta", "executar_consulta"]

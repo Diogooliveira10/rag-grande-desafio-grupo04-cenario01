@@ -151,18 +151,7 @@ def _resposta_sql_deterministica(
         if chunk.metadata.chunk_id.rsplit(":", 1)[0] in consultas_markdown and not markdown:
             continue  # a primeira evidência contém a tabela completa, sem cortes
         if chunk.metadata.extras.get("parte") == 1:
-            cabecalho = re.sub(r"^Consulta SQL na tabela [a-z_]+:", "Acervo consultado:", resultado["cabecalho"])
-            cabecalho = cabecalho.replace("tipo_registro=contrato_assinado", "somente contratos assinados")
-            cabecalho = cabecalho.replace("campo_valor=valor_contratado", "valor contratado")
-            cabecalho = cabecalho.replace("campo_valor=valor_estimado", "valor estimado")
-            cabecalho = cabecalho.replace("campo_valor=valor_homologado", "valor homologado")
-            partes.append(cabecalho)
-            if chunk.metadata.extras.get("tipo") == "ranking":
-                partes.append("Ranking considera valores registrados >= R$ 1,00, não pagamentos. Escopo: amostra do PNCP/RJ, não um censo do Estado.")
-            elif resultado.get("metrica") in {"contagem", "soma"} and not resultado.get("comparacao_esferas"):
-                partes.append("Valores registrados não são pagamentos. Escopo: amostra do PNCP/RJ, não um censo do Estado.")
-            elif resultado.get("politica"):
-                partes.append(resultado["politica"])
+            partes.extend(_cabecalho_publico(resultado, chunk.metadata.extras.get("tipo")))
         if markdown and not chunk.metadata.extras.get("sem_registros"):
             numero = len(fontes) + 1
             partes.append(f"{markdown}\n\nFonte: [{numero}]")
@@ -195,33 +184,60 @@ def _resposta_sql_deterministica(
     recorte = next((c.metadata.extras["resultado_sql"].get("recorte")
                     for c in sql if c.metadata.extras.get("resultado_sql", {}).get("recorte")), {})
     if any(c.metadata.extras.get("valor_unitario_indisponivel") for c in sql):
-        correspondentes = int(recorte.get("registros_correspondentes") or 0)
-        linhas = [linha for chunk in sql for linha in _linhas_sql_reais(chunk)]
-        if correspondentes < 1 or not linhas:
+        ressalvas = _ressalvas_de_valor_unitario(recorte, sql)
+        if ressalvas is None:
             return None
-        primeiro = "um registro correspondente" if correspondentes == 1 else (
-            f"{correspondentes} registros correspondentes"
-        )
-        partes.insert(0, f"A consulta encontrou {primeiro}. [1]")
-        if re.search(r"\bR\$\s*0,00\b", " ".join(linhas)):
-            explicacao_valor = (
-                "O R$ 0,00 exibido é o valor total/global registrado, não o preço por veículo."
-            )
-        else:
-            explicacao_valor = (
-                "O valor monetário registrado, quando exibido, é global/total e não representa "
-                "o preço por veículo."
-            )
-        partes.append(
-            explicacao_valor + " O preço por veículo não está informado nos dados disponíveis; "
-            "por isso, não é possível calcular a mediana solicitada. [1]"
-        )
+        partes.insert(0, ressalvas[0])
+        partes.append(ressalvas[1])
     # Todos os recortes contam (João); o preço unitário ausente (Diogo) já
     # marca o recorte como cálculo indisponível.
     confianca, avisos = _confianca_dos_recortes(sql)
     return RAGResponse(query=query, answer="\n\n".join(partes), bases_consultadas=bases,
                        sources_used=fontes, confidence_level=confianca,
                        is_refusal=False, refusal_reason=None, avisos=avisos)
+
+
+def _cabecalho_publico(resultado: dict, tipo: Optional[str]) -> list[str]:
+    """Cabeçalho da consulta para quem lê, seguido da ressalva de escopo do tipo de resultado."""
+    cabecalho = re.sub(r"^Consulta SQL na tabela [a-z_]+:", "Acervo consultado:", resultado["cabecalho"])
+    cabecalho = cabecalho.replace("tipo_registro=contrato_assinado", "somente contratos assinados")
+    cabecalho = cabecalho.replace("campo_valor=valor_contratado", "valor contratado")
+    cabecalho = cabecalho.replace("campo_valor=valor_estimado", "valor estimado")
+    cabecalho = cabecalho.replace("campo_valor=valor_homologado", "valor homologado")
+    partes = [cabecalho]
+    if tipo == "ranking":
+        partes.append("Ranking considera valores registrados >= R$ 1,00, não pagamentos. Escopo: amostra do PNCP/RJ, não um censo do Estado.")
+    elif resultado.get("metrica") in {"contagem", "soma"} and not resultado.get("comparacao_esferas"):
+        partes.append("Valores registrados não são pagamentos. Escopo: amostra do PNCP/RJ, não um censo do Estado.")
+    elif resultado.get("politica"):
+        partes.append(resultado["politica"])
+    return partes
+
+
+def _ressalvas_de_valor_unitario(recorte: dict, sql: list[Chunk]) -> Optional[tuple[str, str]]:
+    """Abertura e fecho da resposta a um pedido de preço por unidade, que os dados não têm.
+
+    ``None`` quando nenhum registro corresponde: aí não há resposta determinística.
+    """
+    correspondentes = int(recorte.get("registros_correspondentes") or 0)
+    linhas = [linha for chunk in sql for linha in _linhas_sql_reais(chunk)]
+    if correspondentes < 1 or not linhas:
+        return None
+    primeiro = "um registro correspondente" if correspondentes == 1 else (
+        f"{correspondentes} registros correspondentes"
+    )
+    if re.search(r"\bR\$\s*0,00\b", " ".join(linhas)):
+        explicacao_valor = (
+            "O R$ 0,00 exibido é o valor total/global registrado, não o preço por veículo."
+        )
+    else:
+        explicacao_valor = (
+            "O valor monetário registrado, quando exibido, é global/total e não representa "
+            "o preço por veículo."
+        )
+    return (f"A consulta encontrou {primeiro}. [1]",
+            explicacao_valor + " O preço por veículo não está informado nos dados disponíveis; "
+            "por isso, não é possível calcular a mediana solicitada. [1]")
 
 
 _MARCADOR_SQL = "{{sql}}"

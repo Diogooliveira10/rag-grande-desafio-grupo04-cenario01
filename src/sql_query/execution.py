@@ -448,51 +448,8 @@ def _executar_agrupamento(e: _Execucao) -> tuple[str, list[str]]:
         where_nulo = where + (" AND " if where else " WHERE ") + f"({nulos})"
         sem_campo = banco.consultar(f"SELECT COUNT(*) AS n FROM {consulta.tabela}{where_nulo}", parametros)[0]["n"]
         where += (" AND " if where else " WHERE ") + " AND ".join(f"{c} IS NOT NULL" for c in obrigatorios)
-    registros_tabela = []
-    if consulta.metrica == "mediana":
-        sql = f"SELECT {coluna}, {coluna_valor} AS valor FROM {consulta.tabela}{where}"
-        valores_por_grupo: dict[tuple, list[float]] = {}
-        contagens: dict[tuple, int] = {}
-        for row in banco.consultar(sql, parametros):
-            key = tuple(row[c] for c in campos)
-            contagens[key] = contagens.get(key, 0) + 1
-            if row["valor"] is not None:
-                valores_por_grupo.setdefault(key, []).append(float(row["valor"]))
-        items = [(k, v) for k, v in valores_por_grupo.items()
-                 if contagens[k] >= (consulta.minimo_por_grupo or 1) and any(_tem_valor(n) for n in v)]
-        items.sort(key=lambda kv: statistics.median([n for n in kv[1] if _tem_valor(n)]),
-                   reverse=consulta.ordem == "DESC")
-        grupos = [f"{' / '.join(str(k or 'não informado') for k in key)}: {_estatisticas(values)}"
-                  for key, values in items[:consulta.limite]]
-        registros_tabela = [{"rotulo": " / ".join(str(k or 'não informado') for k in key),
-                             **_metricas_tabela(values, n=contagens[key])}
-                            for key, values in items[:consulta.limite]]
-    else:
-        valor_informado = f"CASE WHEN {coluna_valor} >= {_VALOR_MINIMO_INFORMADO} THEN {coluna_valor} END"
-        funcao = {"soma": "SUM", "media": "AVG", "minimo": "MIN", "maximo": "MAX"}.get(consulta.metrica)
-        expressao_ordem = coluna_valor if consulta.metrica == "soma" else valor_informado
-        ordem = (f"{funcao}({expressao_ordem}) {consulta.ordem}, n DESC"
-                 if funcao else f"n DESC, COALESCE(SUM({coluna_valor}), 0) DESC")
-        sql = (
-            f"SELECT {coluna}, COUNT(*) AS n, SUM({coluna_valor}) AS total, "
-            f"AVG({valor_informado}) AS media, MIN({valor_informado}) AS minimo, MAX({valor_informado}) AS maximo "
-            f"FROM {consulta.tabela}{where} GROUP BY {coluna}"
-        )
-        if consulta.minimo_por_grupo is not None:
-            sql += " HAVING COUNT(*) >= ?"
-            parametros.append(consulta.minimo_por_grupo)
-        sql += f" ORDER BY {ordem}"
-        if consulta.plano_tipado or consulta.metrica != "contagem":
-            sql += f" LIMIT {consulta.limite}"
-        registros = banco.consultar(sql, parametros)
-        registros_tabela = [{**l, "rotulo": " / ".join(str(l[c] or 'não informado') for c in campos)}
-                            for l in registros]
-        grupos = [
-            f"{'Fornecedor ' if coluna == 'fornecedor' else ''}{' / '.join(str(l[c] or 'não informado') for c in campos)}: "
-            f"{l['n']} registros, total {_brl(l['total'])}, média {_brl(l['media'])}, "
-            f"mínimo {_brl(l['minimo'])}, máximo {_brl(l['maximo'])}"
-            for l in registros
-        ]
+    agrupar = _grupos_por_mediana if consulta.metrica == "mediana" else _grupos_agregados
+    sql, grupos, registros_tabela = agrupar(banco, consulta, campos, where, parametros, coluna_valor)
     if markdown is not None and registros_tabela:
         rotulos = {"orgao_nome": "Órgão", "fornecedor": "Fornecedor", "modalidade": "Modalidade",
                    "esfera": "Esfera", "municipio": "Município", "unidade_nome": "Unidade"}
@@ -521,6 +478,66 @@ def _executar_agrupamento(e: _Execucao) -> tuple[str, list[str]]:
         markdown[:0] = [texto_markdown(n) for n in notas if n.startswith("Total geral:")]
         markdown.extend(texto_markdown(n) for n in notas if not n.startswith("Total geral:"))
     return sql, grupos
+
+
+def _grupos_por_mediana(banco: Banco, consulta: Consulta, campos: tuple[str, ...], where: str,
+                        parametros: list[Any], coluna_valor: str) -> tuple[str, list[str], list[dict]]:
+    """Mediana por grupo: lê os valores de cada grupo e calcula aqui (o SQLite não tem mediana)."""
+    coluna = ", ".join(campos)
+    sql = f"SELECT {coluna}, {coluna_valor} AS valor FROM {consulta.tabela}{where}"
+    valores_por_grupo: dict[tuple, list[float]] = {}
+    contagens: dict[tuple, int] = {}
+    for row in banco.consultar(sql, parametros):
+        key = tuple(row[c] for c in campos)
+        contagens[key] = contagens.get(key, 0) + 1
+        if row["valor"] is not None:
+            valores_por_grupo.setdefault(key, []).append(float(row["valor"]))
+    items = [(k, v) for k, v in valores_por_grupo.items()
+             if contagens[k] >= (consulta.minimo_por_grupo or 1) and any(_tem_valor(n) for n in v)]
+    items.sort(key=lambda kv: statistics.median([n for n in kv[1] if _tem_valor(n)]),
+               reverse=consulta.ordem == "DESC")
+    grupos = [f"{' / '.join(str(k or 'não informado') for k in key)}: {_estatisticas(values)}"
+              for key, values in items[:consulta.limite]]
+    registros_tabela = [{"rotulo": " / ".join(str(k or 'não informado') for k in key),
+                         **_metricas_tabela(values, n=contagens[key])}
+                        for key, values in items[:consulta.limite]]
+    return sql, grupos, registros_tabela
+
+
+def _grupos_agregados(banco: Banco, consulta: Consulta, campos: tuple[str, ...], where: str,
+                      parametros: list[Any], coluna_valor: str) -> tuple[str, list[str], list[dict]]:
+    """Contagem, total, média, mínimo e máximo por grupo, ordenados pela métrica pedida.
+
+    Com mínimo por grupo, acrescenta o parâmetro do HAVING a ``parametros`` (a
+    mesma lista de quem chamou).
+    """
+    coluna = ", ".join(campos)
+    valor_informado = f"CASE WHEN {coluna_valor} >= {_VALOR_MINIMO_INFORMADO} THEN {coluna_valor} END"
+    funcao = {"soma": "SUM", "media": "AVG", "minimo": "MIN", "maximo": "MAX"}.get(consulta.metrica)
+    expressao_ordem = coluna_valor if consulta.metrica == "soma" else valor_informado
+    ordem = (f"{funcao}({expressao_ordem}) {consulta.ordem}, n DESC"
+             if funcao else f"n DESC, COALESCE(SUM({coluna_valor}), 0) DESC")
+    sql = (
+        f"SELECT {coluna}, COUNT(*) AS n, SUM({coluna_valor}) AS total, "
+        f"AVG({valor_informado}) AS media, MIN({valor_informado}) AS minimo, MAX({valor_informado}) AS maximo "
+        f"FROM {consulta.tabela}{where} GROUP BY {coluna}"
+    )
+    if consulta.minimo_por_grupo is not None:
+        sql += " HAVING COUNT(*) >= ?"
+        parametros.append(consulta.minimo_por_grupo)
+    sql += f" ORDER BY {ordem}"
+    if consulta.plano_tipado or consulta.metrica != "contagem":
+        sql += f" LIMIT {consulta.limite}"
+    registros = banco.consultar(sql, parametros)
+    registros_tabela = [{**l, "rotulo": " / ".join(str(l[c] or 'não informado') for c in campos)}
+                        for l in registros]
+    grupos = [
+        f"{'Fornecedor ' if coluna == 'fornecedor' else ''}{' / '.join(str(l[c] or 'não informado') for c in campos)}: "
+        f"{l['n']} registros, total {_brl(l['total'])}, média {_brl(l['media'])}, "
+        f"mínimo {_brl(l['minimo'])}, máximo {_brl(l['maximo'])}"
+        for l in registros
+    ]
+    return sql, grupos, registros_tabela
 
 
 def _executar_evolucao(e: _Execucao) -> tuple[str, list[str]]:
