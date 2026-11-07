@@ -401,6 +401,18 @@ def gerar_resposta(
         return _responder_pelo_sql(resposta_sql, chunks, run_id=run_id, query_id=query_id,
                                    inicio=inicio, sensibilidade=sensibilidade)
 
+    return _responder_pelo_llm(query, chunks, bases_consultadas, cliente=cliente, llm=llm,
+                               configuracao=configuracao, run_id=run_id, query_id=query_id,
+                               inicio=inicio, sensibilidade=sensibilidade)
+
+
+def _responder_pelo_llm(
+    query: str, chunks: list[Chunk], bases_consultadas: list[Natureza], *,
+    cliente: Optional[ClienteLLM], llm: ConfiguracaoLlm, configuracao: Optional[ConfiguracaoLlm],
+    run_id: str, query_id: str, inicio: float, sensibilidade: dict[str, Any],
+) -> RAGResponse:
+    """Caminho do LLM: prompt no orçamento, chamada, leitura do JSON, pedido de
+    citação quando falta, validação e os eventos ``geracao`` e ``validacao``."""
     chunks, mensagens = _preparar_prompt(query, chunks, bases_consultadas, sensibilidade, llm)
     cliente = cliente or _cliente_padrao(_schema_resposta([f"E{i}" for i in range(1, len(chunks) + 1)]),
                                          configuracao)

@@ -65,10 +65,6 @@ def _parsear_resposta_llm(
     """Devolve a resposta, o motivo se a saída do LLM for inválida, as chaves
     fora do contrato que foram aceitas como alias e os chunk_ids citados pelo
     LLM que não estavam entre os chunks recuperados (descartados)."""
-    chunks_por_id = {c.metadata.chunk_id: c for c in chunks}
-    chunks_por_evidence_id = {
-        f"E{index}": chunk for index, chunk in enumerate(chunks, start=1)
-    }
     alternativas_usadas: list[str] = []
     citacoes_descartadas: list[str] = []
     try:
@@ -79,28 +75,12 @@ def _parsear_resposta_llm(
         sem_registros_sql = _sql_sem_registros(chunks)
         confidence_level = _nivel_de_confianca(_campo(dados, "confidence_level", alternativas_usadas))
 
-        sources_used: list[SourceRef] = []
-        fontes_adicionadas: set[str] = set()
-        for referencia in _campo(dados, "sources_used", alternativas_usadas) or []:
-            referencia = referencia if isinstance(referencia, str) else str(referencia)
-            chunk = chunks_por_evidence_id.get(referencia) or chunks_por_id.get(referencia)
-            if chunk is None:
-                citacoes_descartadas.append(referencia)
-                continue
-            if chunk.metadata.chunk_id in fontes_adicionadas:
-                continue
-            fontes_adicionadas.add(chunk.metadata.chunk_id)
-            sources_used.append(_fonte_do_chunk(chunk))
+        sources_used = _fontes_citadas(_campo(dados, "sources_used", alternativas_usadas) or [],
+                                       chunks, citacoes_descartadas)
 
         refusal_reason: Optional[RefusalReason] = None
         if is_refusal:
-            try:
-                refusal_reason = RefusalReason(dados.get("refusal_reason"))
-            except ValueError:
-                refusal_reason = RefusalReason.SEM_EVIDENCIA
-            if refusal_reason is RefusalReason.ERRO_PROVEDOR:
-                # Só o código marca falha de infraestrutura; o LLM não decide isso.
-                refusal_reason = RefusalReason.SEM_EVIDENCIA
+            refusal_reason = _motivo_da_recusa(dados.get("refusal_reason"))
             sources_used = []
             confidence_level = ConfidenceLevel.RECUSADO
             if not answer:
@@ -134,3 +114,39 @@ def _parsear_resposta_llm(
             alternativas_usadas,
             citacoes_descartadas,
         )
+
+
+def _fontes_citadas(referencias: Any, chunks: list[Chunk], citacoes_descartadas: list[str]) -> list[SourceRef]:
+    """Fontes das referências que o LLM citou (``E1``... ou o ``chunk_id``), sem repetir.
+
+    Referência que não é de nenhum trecho recuperado vai para ``citacoes_descartadas``.
+    """
+    chunks_por_id = {c.metadata.chunk_id: c for c in chunks}
+    chunks_por_evidence_id = {
+        f"E{index}": chunk for index, chunk in enumerate(chunks, start=1)
+    }
+    sources_used: list[SourceRef] = []
+    fontes_adicionadas: set[str] = set()
+    for referencia in referencias:
+        referencia = referencia if isinstance(referencia, str) else str(referencia)
+        chunk = chunks_por_evidence_id.get(referencia) or chunks_por_id.get(referencia)
+        if chunk is None:
+            citacoes_descartadas.append(referencia)
+            continue
+        if chunk.metadata.chunk_id in fontes_adicionadas:
+            continue
+        fontes_adicionadas.add(chunk.metadata.chunk_id)
+        sources_used.append(_fonte_do_chunk(chunk))
+    return sources_used
+
+
+def _motivo_da_recusa(declarado: Any) -> RefusalReason:
+    """Motivo declarado pelo LLM; inválido ou de infraestrutura vira ``SEM_EVIDENCIA``."""
+    try:
+        motivo = RefusalReason(declarado)
+    except ValueError:
+        motivo = RefusalReason.SEM_EVIDENCIA
+    if motivo is RefusalReason.ERRO_PROVEDOR:
+        # Só o código marca falha de infraestrutura; o LLM não decide isso.
+        motivo = RefusalReason.SEM_EVIDENCIA
+    return motivo

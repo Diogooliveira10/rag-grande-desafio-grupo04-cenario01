@@ -453,16 +453,9 @@ def _extrair_fornecedor(texto: str, bloqueados: Sequence[Span] = (), *,
     Município de Maricá" acharia um fornecedor que também é município.
     """
     catalogo = _catalogo_de_orgaos()
-    if texto:
-        for achado in re.finditer(r"\w+", texto):
-            chave = _normalize(achado.group())
-            apelido = _APELIDOS_DE_FORNECEDOR.get(chave)
-            exige_maiuscula = _APELIDOS_SO_COM_MAIUSCULA.get(chave)
-            if apelido and exige_maiuscula and original is not None and not exige_maiuscula.search(original):
-                continue
-            if apelido and not any(comeca < achado.end() and achado.start() < termina
-                                   for comeca, termina in bloqueados):
-                return apelido, achado.span()
+    por_apelido = _fornecedor_por_apelido(texto, bloqueados, original)
+    if por_apelido is not None:
+        return por_apelido
     if not catalogo or not texto:
         return None, None
 
@@ -495,19 +488,8 @@ def _extrair_fornecedor(texto: str, bloqueados: Sequence[Span] = (), *,
                 break
             citados.append(palavra)
             span = (span[0], pos_fim)
-        if not tem_gatilho:
-            palavras_objetos = _palavras_dos_objetos() or {}
-            frequencias = [palavras_objetos.get(p, (0, 0)) for p in citados
-                           if p not in _PALAVRAS_FUNCIONAIS]
-            # Uma primeira palavra comum não basta para descartar um nome composto,
-            # e um nome escrito como nome próprio também não: "casa" e "moeda" são
-            # assunto de contrato, mas "Contratos da Casa da Moeda" cita a empresa;
-            # "contratos de merenda escolar" continua sendo assunto.
-            if (frequencias and all(total and proprio / total < _PARCELA_MINIMA_DO_PROPRIO_FORNECEDOR
-                                    for total, proprio in frequencias)
-                    and not (len(citados) >= 2 and _escrito_como_nome_proprio(citados, original)
-                             and not _parte_de_orgao_citado(citados, catalogo, todas))):
-                continue
+        if not tem_gatilho and _parece_assunto_de_contrato(citados, original, catalogo, todas):
+            continue
         if len(citados) < 2 and not tem_gatilho and not _nome_curto_de_fornecedor(primeira, todas, comeca):
             continue
         valor = _valor(citados)
@@ -516,6 +498,41 @@ def _extrair_fornecedor(texto: str, bloqueados: Sequence[Span] = (), *,
         if valor is not None:
             return valor, span
     return None, None
+
+
+def _fornecedor_por_apelido(texto: str, bloqueados: Sequence[Span],
+                            original: Optional[str]) -> Optional[tuple[str, Span]]:
+    """Apelido conhecido de fornecedor fora dos trechos bloqueados; alguns só valem com maiúscula."""
+    if not texto:
+        return None
+    for achado in re.finditer(r"\w+", texto):
+        chave = _normalize(achado.group())
+        apelido = _APELIDOS_DE_FORNECEDOR.get(chave)
+        exige_maiuscula = _APELIDOS_SO_COM_MAIUSCULA.get(chave)
+        if apelido and exige_maiuscula and original is not None and not exige_maiuscula.search(original):
+            continue
+        if apelido and not any(comeca < achado.end() and achado.start() < termina
+                               for comeca, termina in bloqueados):
+            return apelido, achado.span()
+    return None
+
+
+def _parece_assunto_de_contrato(citados: list[str], original: Optional[str], catalogo: Any,
+                                todas: list[tuple[str, int, int]]) -> bool:
+    """As palavras citadas são assunto comum de contrato, não o nome do fornecedor.
+
+    Uma primeira palavra comum não basta para descartar um nome composto, e um
+    nome escrito como nome próprio também não: "casa" e "moeda" são assunto de
+    contrato, mas "Contratos da Casa da Moeda" cita a empresa; "contratos de
+    merenda escolar" continua sendo assunto.
+    """
+    palavras_objetos = _palavras_dos_objetos() or {}
+    frequencias = [palavras_objetos.get(p, (0, 0)) for p in citados
+                   if p not in _PALAVRAS_FUNCIONAIS]
+    return bool(frequencias and all(total and proprio / total < _PARCELA_MINIMA_DO_PROPRIO_FORNECEDOR
+                                    for total, proprio in frequencias)
+                and not (len(citados) >= 2 and _escrito_como_nome_proprio(citados, original)
+                         and not _parte_de_orgao_citado(citados, catalogo, todas)))
 
 
 def gerar_catalogo_de_orgaos(destino: Path = ORGAOS_CORPUS_PATH, *, banco: Any = None) -> dict[str, Any]:

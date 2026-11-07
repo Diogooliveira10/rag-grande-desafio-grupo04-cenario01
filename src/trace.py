@@ -243,38 +243,36 @@ def _saida_da_etapa(registro: dict[str, Any]) -> Any:
     return None
 
 
-def _trace_dos_registros(query_id: str, registros: list[dict[str, Any]]) -> dict[str, Any]:
+def _etapa_do_trace(ordem: int, registro: dict[str, Any]) -> dict[str, Any]:
+    """Uma etapa do trace a partir do registro do log."""
+    return {
+        "ordem": ordem,
+        "stage": registro.get("stage"),
+        "base": _BASE_DA_ETAPA.get(registro.get("stage")),
+        "status": registro.get("status"),
+        "ts": registro.get("ts"),
+        # Logs de antes de 25/09 gravavam a latência com casas decimais.
+        "latencia_ms": round(registro.get("latencia_ms") or 0),
+        "input": registro.get("input"),
+        "output": _saida_da_etapa(registro),
+        "tokens": registro.get("tokens"),
+        "modelo": registro.get("modelo"),
+        "detalhes": registro.get("extra") or {},
+        # Cadeia de hashes do log (src/log_chain.py); None em linhas de antes dela.
+        # A cadeia é global: entre duas etapas desta pergunta pode haver linhas
+        # de outras requisições, então o hash_anterior de uma etapa nem sempre é
+        # o hash da etapa anterior. A conferência é a de ``integridade_do_log``.
+        "hash": registro.get("hash"),
+        "hash_anterior": registro.get("hash_anterior"),
+    }
 
-    etapas = [
-        {
-            "ordem": ordem,
-            "stage": registro.get("stage"),
-            "base": _BASE_DA_ETAPA.get(registro.get("stage")),
-            "status": registro.get("status"),
-            "ts": registro.get("ts"),
-            # Logs de antes de 25/09 gravavam a latência com casas decimais.
-            "latencia_ms": round(registro.get("latencia_ms") or 0),
-            "input": registro.get("input"),
-            "output": _saida_da_etapa(registro),
-            "tokens": registro.get("tokens"),
-            "modelo": registro.get("modelo"),
-            "detalhes": registro.get("extra") or {},
-            # Cadeia de hashes do log (src/log_chain.py); None em linhas de antes dela.
-            # A cadeia é global: entre duas etapas desta pergunta pode haver linhas
-            # de outras requisições, então o hash_anterior de uma etapa nem sempre é
-            # o hash da etapa anterior. A conferência é a de ``integridade_do_log``.
-            "hash": registro.get("hash"),
-            "hash_anterior": registro.get("hash_anterior"),
-        }
-        for ordem, registro in enumerate(registros, start=1)
-    ]
-    resumo = dict(next(
-        (registro["output"] for registro in reversed(registros)
-         if registro.get("stage") == Stage.RESUMO_CONSULTA.value and isinstance(registro.get("output"), dict)),
-        None,
-    ) or _resumo_derivado(etapas))
-    # Feedback can arrive days later; it is not part of query latency/completion.
-    core = [r for r in registros if r.get("stage") != Stage.FEEDBACK.value] or registros
+
+def _tempo_e_situacao(core: list[dict[str, Any]]) -> tuple[Optional[dict], Optional[dict], int, str, Any, Optional[bool]]:
+    """Evento terminal, fim do pipeline, latência total, método da medida, status e se está completa.
+
+    O tempo vem do envelope monotônico da requisição (ou do pipeline); início sem
+    fim é ``parcial``/``incompleto``; logs antigos sem envelope somam as etapas.
+    """
     starts = [r for r in core if r.get("stage") == Stage.REQUISICAO_INICIO.value]
     pipeline_starts = [r for r in core if r.get("stage") == Stage.PIPELINE_INICIO.value]
     request_end = next((r for r in reversed(core) if r.get("stage") == Stage.REQUISICAO_FIM.value), None)
@@ -291,6 +289,19 @@ def _trace_dos_registros(query_id: str, registros: list[dict[str, Any]]) -> dict
     else:
         latency = sum(int(r.get("latencia_ms") or 0) for r in core)
         method, status, complete = "soma_etapas_legado", None, None
+    return terminal, pipeline_end, latency, method, status, complete
+
+
+def _trace_dos_registros(query_id: str, registros: list[dict[str, Any]]) -> dict[str, Any]:
+    etapas = [_etapa_do_trace(ordem, registro) for ordem, registro in enumerate(registros, start=1)]
+    resumo = dict(next(
+        (registro["output"] for registro in reversed(registros)
+         if registro.get("stage") == Stage.RESUMO_CONSULTA.value and isinstance(registro.get("output"), dict)),
+        None,
+    ) or _resumo_derivado(etapas))
+    # Feedback can arrive days later; it is not part of query latency/completion.
+    core = [r for r in registros if r.get("stage") != Stage.FEEDBACK.value] or registros
+    terminal, pipeline_end, latency, method, status, complete = _tempo_e_situacao(core)
     if terminal:
         details = terminal.get("extra") or {}
         for key in ("history_saved", "http_status", "logging_errors", "tokens_reportados", "cobertura_tokens"):

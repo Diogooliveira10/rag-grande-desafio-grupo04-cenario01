@@ -367,16 +367,9 @@ def reformular_pergunta(
                        query=query, motivo=motivo)
         return Reformulacao(query, False, motivo)
 
-    for nome_regra, regra in REGRA_REFORMULACAO:
-        reconheceu, pergunta = regra(query, turnos)
-        if reconheceu:
-            with default_logger.span(
-                run_id=run_id, query_id=query_id, stage=Stage.REFORMULACAO, input=query,
-                extra={"turnos_no_prompt": len(turnos), "metodo": "regras", "llm_called": False,
-                       "regra": nome_regra},
-            ) as span:
-                span.set_result({"pergunta": mascarar(pergunta)[0], "reescrita": True, "motivo": nome_regra})
-            return Reformulacao(pergunta, True, nome_regra)
+    por_regra = _por_regra(query, turnos, run_id=run_id, query_id=query_id)
+    if por_regra is not None:
+        return por_regra
 
     diagnosticos: dict = {}
     with default_logger.span(
@@ -394,35 +387,47 @@ def reformular_pergunta(
             reescrita = _extrair_pergunta(_texto(saida))
         except (ValueError, KeyError, TypeError, AttributeError, IndexError) as erro:
             # Saída fora do formato: segue com a pergunta anterior anexada.
-            span.extra.update(diagnosticos)
-            span.modelo = diagnosticos.get("model")
-            span.extra.update({"fallback": "contexto_anexado", "error_type": type(erro).__name__})
-            span.status = "degradado"
-            pergunta = _com_contexto(query, turnos)
-            span.set_result({"pergunta": mascarar(pergunta)[0], "reescrita": True, "motivo": "saida_invalida"})
-            return Reformulacao(pergunta, True, "saida_invalida")
+            return _plano_b(span, diagnosticos, query, turnos, erro, "saida_invalida")
         except FutureTimeoutError as erro:
-            span.extra.update(diagnosticos)
-            span.modelo = diagnosticos.get("model")
-            span.extra.update({"fallback": "contexto_anexado", "error_type": type(erro).__name__, "timeout_seconds": prazo})
-            span.status = "degradado"
-            pergunta = _com_contexto(query, turnos)
-            span.set_result({"pergunta": mascarar(pergunta)[0], "reescrita": True, "motivo": "llm_falhou"})
-            return Reformulacao(pergunta, True, "llm_falhou")
+            return _plano_b(span, diagnosticos, query, turnos, erro, "llm_falhou", prazo=prazo)
         except Exception as erro:  # noqa: BLE001 - provedor fora do ar não derruba a consulta
-            span.extra.update(diagnosticos)
-            span.modelo = diagnosticos.get("model")
-            span.extra.update({"fallback": "contexto_anexado", "error_type": type(erro).__name__})
-            span.status = "degradado"
-            pergunta = _com_contexto(query, turnos)
-            span.set_result({"pergunta": mascarar(pergunta)[0], "reescrita": True, "motivo": "llm_falhou"})
-            return Reformulacao(pergunta, True, "llm_falhou")
+            return _plano_b(span, diagnosticos, query, turnos, erro, "llm_falhou")
 
         if _sem_acento(reescrita) == _sem_acento(" ".join(query.split())):
             span.set_result({"pergunta": query, "reescrita": False, "motivo": "autossuficiente"})
             return Reformulacao(query, False, "autossuficiente")
         span.set_result({"pergunta": mascarar(reescrita)[0], "reescrita": True, "motivo": "reescrita"})
         return Reformulacao(reescrita, True, "reescrita")
+
+
+def _por_regra(query: str, turnos: list, *, run_id: str, query_id: str) -> Optional[Reformulacao]:
+    """Troca de ano, lugar ou esfera resolvida pelas regras, sem chamar o LLM."""
+    for nome_regra, regra in REGRA_REFORMULACAO:
+        reconheceu, pergunta = regra(query, turnos)
+        if reconheceu:
+            with default_logger.span(
+                run_id=run_id, query_id=query_id, stage=Stage.REFORMULACAO, input=query,
+                extra={"turnos_no_prompt": len(turnos), "metodo": "regras", "llm_called": False,
+                       "regra": nome_regra},
+            ) as span:
+                span.set_result({"pergunta": mascarar(pergunta)[0], "reescrita": True, "motivo": nome_regra})
+            return Reformulacao(pergunta, True, nome_regra)
+    return None
+
+
+def _plano_b(span: Any, diagnosticos: dict, query: str, turnos: list, erro: BaseException, motivo: str,
+             *, prazo: Optional[float] = None) -> Reformulacao:
+    """Sem reescrita do LLM: a pergunta segue com a anterior anexada, e a etapa fica degradada."""
+    span.extra.update(diagnosticos)
+    span.modelo = diagnosticos.get("model")
+    falha = {"fallback": "contexto_anexado", "error_type": type(erro).__name__}
+    if prazo is not None:
+        falha["timeout_seconds"] = prazo
+    span.extra.update(falha)
+    span.status = "degradado"
+    pergunta = _com_contexto(query, turnos)
+    span.set_result({"pergunta": mascarar(pergunta)[0], "reescrita": True, "motivo": motivo})
+    return Reformulacao(pergunta, True, motivo)
 
 
 __all__ = ["Reformulacao", "TurnoAnterior", "parece_continuacao", "reformular_pergunta"]
