@@ -1,4 +1,5 @@
 """Alinhamento ao §2.4: contrato offline, modelo e uso conhecido/desconhecido."""
+import dataclasses
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -147,7 +148,7 @@ def test_injected_vector_function_has_explicitly_unknown_usage(tmp_path):
 
 def test_collection_preserves_legacy_file_and_emits_standard_events(tmp_path, monkeypatch):
     from src import fetch_corpus
-    monkeypatch.setattr(fetch_corpus, "RUNS_ROOT", tmp_path / "runs")
+    monkeypatch.setattr(fetch_corpus, "CAMINHOS", dataclasses.replace(fetch_corpus.CAMINHOS, runs_root=tmp_path / "runs"))
     @observar_offline(obs.Stage.COLETA)
     def collect():
         logger = fetch_corpus._RunLogger("fetch")

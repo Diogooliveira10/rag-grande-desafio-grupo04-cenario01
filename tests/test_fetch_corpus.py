@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 import hashlib
+import dataclasses
 import json
 from pathlib import Path
 
@@ -194,7 +195,7 @@ def test_resource_set_collects_declared_json_and_binary_resources(monkeypatch):
 
 
 def test_diff_uses_logical_id_and_reports_four_categories(monkeypatch, tmp_path):
-    monkeypatch.setattr(fetch_corpus, "INVENTORY_ROOT", tmp_path)
+    monkeypatch.setattr(fetch_corpus, "CAMINHOS", dataclasses.replace(fetch_corpus.CAMINHOS, inventory_root=tmp_path))
     previous = {
         "version": "v1",
         "arquivos": [
@@ -304,8 +305,8 @@ def test_fetch_resumes_matching_staging_checkpoint(monkeypatch, tmp_path):
         json.dumps({"manifest_hash": "sha256:target", "state": "staging"}),
         encoding="utf-8",
     )
-    monkeypatch.setattr(fetch_corpus, "INVENTORY_ROOT", inventory_root)
-    monkeypatch.setattr(fetch_corpus, "RAW_ROOT", raw_root)
+    monkeypatch.setattr(fetch_corpus, "CAMINHOS", dataclasses.replace(fetch_corpus.CAMINHOS, inventory_root=inventory_root))
+    monkeypatch.setattr(fetch_corpus, "CAMINHOS", dataclasses.replace(fetch_corpus.CAMINHOS, raw_root=raw_root))
 
     assert fetch_corpus._find_resumable_version("sha256:target") == 9
 
@@ -323,8 +324,8 @@ def test_versions_come_from_inventory_json_without_raw_folder(monkeypatch, tmp_p
     (inventory_root / "v1.json").write_text("{}", encoding="utf-8")
     (inventory_root / "v2.json").write_text("{}", encoding="utf-8")
     (inventory_root / "checkpoints" / "v7.json").write_text("{}", encoding="utf-8")
-    monkeypatch.setattr(fetch_corpus, "INVENTORY_ROOT", inventory_root)
-    monkeypatch.setattr(fetch_corpus, "RAW_ROOT", tmp_path / "raw")
+    monkeypatch.setattr(fetch_corpus, "CAMINHOS", dataclasses.replace(fetch_corpus.CAMINHOS, inventory_root=inventory_root))
+    monkeypatch.setattr(fetch_corpus, "CAMINHOS", dataclasses.replace(fetch_corpus.CAMINHOS, raw_root=tmp_path / "raw"))
 
     assert fetch_corpus._available_versions() == [1, 2]
     assert fetch_corpus._latest_version() == 2
@@ -332,7 +333,7 @@ def test_versions_come_from_inventory_json_without_raw_folder(monkeypatch, tmp_p
 
 
 def test_version_lock_allows_only_one_writer(monkeypatch, tmp_path):
-    monkeypatch.setattr(fetch_corpus, "RAW_ROOT", tmp_path / "raw")
+    monkeypatch.setattr(fetch_corpus, "CAMINHOS", dataclasses.replace(fetch_corpus.CAMINHOS, raw_root=tmp_path / "raw"))
 
     first = fetch_corpus._VersionLock(4)
     second = fetch_corpus._VersionLock(4)
@@ -501,22 +502,17 @@ def test_checkpoint_allows_more_contracts_than_minimum_target():
 
 
 def test_data_root_isolates_raw_inventory_logs_and_report(monkeypatch, tmp_path):
-    original = {
-        name: getattr(fetch_corpus, name)
-        for name in ("DATA_ROOT", "RAW_ROOT", "OBJECTS_ROOT", "INVENTORY_ROOT", "RUNS_ROOT", "CORPUS_INVENTORY_PATH")
-    }
+    monkeypatch.setattr(fetch_corpus, "CAMINHOS", fetch_corpus.CAMINHOS)  # volta ao fim do teste
     isolated = tmp_path / "attempts" / "v-test"
     fetch_corpus._configure_data_root(isolated)
 
-    assert fetch_corpus.DATA_ROOT == isolated
-    assert fetch_corpus.RAW_ROOT == isolated / "raw"
-    assert fetch_corpus.OBJECTS_ROOT == isolated / "raw" / ".objects" / "sha256"
-    assert fetch_corpus.INVENTORY_ROOT == isolated / "inventory"
-    assert fetch_corpus.RUNS_ROOT == isolated / "runs"
-    assert fetch_corpus.CORPUS_INVENTORY_PATH == isolated / "CORPUS_INVENTORY.md"
+    assert fetch_corpus.CAMINHOS.data_root == isolated
+    assert fetch_corpus.CAMINHOS.raw_root == isolated / "raw"
+    assert fetch_corpus.CAMINHOS.objects_root == isolated / "raw" / ".objects" / "sha256"
+    assert fetch_corpus.CAMINHOS.inventory_root == isolated / "inventory"
+    assert fetch_corpus.CAMINHOS.runs_root == isolated / "runs"
+    assert fetch_corpus.CAMINHOS.corpus_inventory_path == isolated / "CORPUS_INVENTORY.md"
 
-    for name, value in original.items():
-        monkeypatch.setattr(fetch_corpus, name, value)
 
 
 def test_cli_requires_explicit_official_or_experimental_root():
@@ -659,7 +655,7 @@ def test_api_request_normalizes_manifest_iso_dates():
 
 
 def test_run_logger_writes_run_id_stage_status_and_timestamp(monkeypatch, tmp_path):
-    monkeypatch.setattr(fetch_corpus, "RUNS_ROOT", tmp_path)
+    monkeypatch.setattr(fetch_corpus, "CAMINHOS", dataclasses.replace(fetch_corpus.CAMINHOS, runs_root=tmp_path))
     logger = fetch_corpus._RunLogger("test")
     logger.event("inventory", "completed", files=20)
 
@@ -810,7 +806,7 @@ def test_promotion_moves_staging_paths_to_immutable_version(monkeypatch, tmp_pat
         hash_index={digest: "data/raw/.staging/v7/contratos_estruturado/contrato.json"},
     )
     monkeypatch.setattr(fetch_corpus, "PROJECT_ROOT", project_root)
-    monkeypatch.setattr(fetch_corpus, "RAW_ROOT", project_root / "data" / "raw")
+    monkeypatch.setattr(fetch_corpus, "CAMINHOS", dataclasses.replace(fetch_corpus.CAMINHOS, raw_root=project_root / "data" / "raw"))
 
     fetch_corpus._promote_version(context)
 
@@ -846,12 +842,10 @@ def test_official_run_excludes_experimental_bases(monkeypatch, tmp_path):
         encoding="utf-8",
     )
     data_root = tmp_path / "data"
-    monkeypatch.setattr(fetch_corpus, "DATA_ROOT", data_root)
-    monkeypatch.setattr(fetch_corpus, "RAW_ROOT", data_root / "raw")
-    monkeypatch.setattr(fetch_corpus, "OBJECTS_ROOT", data_root / "raw" / ".objects" / "sha256")
-    monkeypatch.setattr(fetch_corpus, "INVENTORY_ROOT", data_root / "inventory")
-    monkeypatch.setattr(fetch_corpus, "RUNS_ROOT", data_root / "runs")
-    monkeypatch.setattr(fetch_corpus, "CORPUS_INVENTORY_PATH", data_root / "CORPUS_INVENTORY.md")
+    monkeypatch.setattr(fetch_corpus, "CAMINHOS", fetch_corpus.CaminhosDaColeta(
+        data_root=data_root, raw_root=data_root / "raw", objects_root=data_root / "raw" / ".objects" / "sha256",
+        inventory_root=data_root / "inventory", runs_root=data_root / "runs",
+        corpus_inventory_path=data_root / "CORPUS_INVENTORY.md"))
 
     assert fetch_corpus._run_manifest_command("fetch", manifest, official=True) == 2
 
@@ -879,11 +873,10 @@ def project(tmp_path, monkeypatch):
     trocamos PROJECT_ROOT (não só DATA_ROOT) para o mesmo tmp_path.
     """
     monkeypatch.setattr(fc, "PROJECT_ROOT", tmp_path)
-    # _configure_data_root altera globais do módulo; registrá-las no monkeypatch
+    # _configure_data_root troca os caminhos do módulo; registrá-los no monkeypatch
     # garante que voltem ao valor original no fim do teste e não vazem para os
     # testes seguintes.
-    for nome in ("DATA_ROOT", "RAW_ROOT", "OBJECTS_ROOT", "INVENTORY_ROOT", "RUNS_ROOT", "CORPUS_INVENTORY_PATH"):
-        monkeypatch.setattr(fc, nome, getattr(fc, nome))
+    monkeypatch.setattr(fc, "CAMINHOS", fc.CAMINHOS)
     fc._configure_data_root(tmp_path / "data")
     return tmp_path
 
@@ -1018,8 +1011,8 @@ def test_promote_version_nunca_sobrescreve_versao_existente(project):
         manifest=context.manifest,
         version=1,
         manifest_hash="sha256:fake",
-        staging_path=fc.RAW_ROOT / ".staging" / "v1_outro",
-        checkpoint_path=fc.INVENTORY_ROOT / "checkpoints" / "v1.json",
+        staging_path=fc.CAMINHOS.raw_root / ".staging" / "v1_outro",
+        checkpoint_path=fc.CAMINHOS.inventory_root / "checkpoints" / "v1.json",
         collected_at="2026-01-01T00:00:00+00:00",
         items={},
         hash_index={},
@@ -1062,7 +1055,7 @@ def test_load_version_context_rejeita_manifest_diferente_no_mesmo_checkpoint(pro
 
 
 def test_load_version_context_recusa_staging_sem_checkpoint(project):
-    staging = fc.RAW_ROOT / ".staging" / "v1"
+    staging = fc.CAMINHOS.raw_root / ".staging" / "v1"
     staging.mkdir(parents=True)
     (staging / "arquivo_orfao.json").write_text("{}", encoding="utf-8")
 
@@ -1243,3 +1236,16 @@ def test_collect_rest_endpoint_com_placeholder_falha_sem_chamar_rede(project, mo
     assert registros[0]["status"] == "falhou"
     assert "placeholders" in registros[0]["erro"]
     assert chamou["n"] == 0
+
+
+def test_caminhos_da_coleta_derivam_da_raiz_e_sao_imutaveis(tmp_path):
+    """Objeto de caminhos (2026-11-07): uma regra só para a árvore oficial e as isoladas."""
+    oficial = fc.CaminhosDaColeta.da_raiz(fc.PROJECT_ROOT / "data")
+    isolada = fc.CaminhosDaColeta.da_raiz(tmp_path / "data")
+
+    assert oficial.corpus_inventory_path == fc.PROJECT_ROOT / "CORPUS_INVENTORY.md"
+    assert isolada.corpus_inventory_path == tmp_path / "data" / "CORPUS_INVENTORY.md"
+    assert isolada.objects_root == tmp_path / "data" / "raw" / ".objects" / "sha256"
+    assert fc.CAMINHOS == oficial  # padrão do módulo: a árvore oficial
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        isolada.raw_root = tmp_path  # type: ignore[misc]

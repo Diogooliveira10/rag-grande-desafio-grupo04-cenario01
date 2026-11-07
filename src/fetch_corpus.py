@@ -64,7 +64,7 @@ class _RunLogger:
     def __init__(self, command: str) -> None:
         timestamp = datetime.now(timezone.utc)
         self.run_id = f"{command}-{timestamp.strftime('%Y%m%dT%H%M%SZ')}-{time.time_ns() % 1_000_000:06d}"
-        self.path = RUNS_ROOT / f"{self.run_id}.jsonl"
+        self.path = CAMINHOS.runs_root / f"{self.run_id}.jsonl"
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.query_id = new_query_id()
         self._stage_starts: dict[str, float] = {}
@@ -97,7 +97,7 @@ class _VersionLock:
     """Lock exclusivo para impedir dois writers na mesma versão."""
 
     def __init__(self, version: int) -> None:
-        self.path = RAW_ROOT / ".staging" / f"v{version}.lock"
+        self.path = CAMINHOS.raw_root / ".staging" / f"v{version}.lock"
         self._owned = False
 
     @staticmethod
@@ -521,28 +521,44 @@ def _run_checks_for_types(
 
 
 MANIFEST_DEFAULT = PROJECT_ROOT / "corpus_manifest.yaml"
-DATA_ROOT = PROJECT_ROOT / "data"
-RAW_ROOT = DATA_ROOT / "raw"
-OBJECTS_ROOT = RAW_ROOT / ".objects" / "sha256"
-INVENTORY_ROOT = DATA_ROOT / "inventory"
-RUNS_ROOT = DATA_ROOT / "runs"
-CORPUS_INVENTORY_PATH = PROJECT_ROOT / "CORPUS_INVENTORY.md"
+@dataclass(frozen=True)
+class CaminhosDaColeta:
+    """Onde uma execução da coleta lê e grava: a árvore oficial (``data/``) ou uma isolada.
+
+    Imutável: uma execução troca o objeto inteiro (``_configure_data_root``), em
+    vez de reescrever cada caminho como variável global.
+    """
+
+    data_root: Path
+    raw_root: Path
+    objects_root: Path
+    inventory_root: Path
+    runs_root: Path
+    corpus_inventory_path: Path
+
+    @classmethod
+    def da_raiz(cls, data_root: Path) -> CaminhosDaColeta:
+        """Caminhos derivados de ``data_root``. O ``CORPUS_INVENTORY.md`` da árvore
+        oficial fica na raiz do projeto; o de uma árvore isolada, dentro dela."""
+        raw_root = data_root / "raw"
+        oficial = data_root.resolve() == (PROJECT_ROOT / "data").resolve()
+        return cls(
+            data_root=data_root,
+            raw_root=raw_root,
+            objects_root=raw_root / ".objects" / "sha256",
+            inventory_root=data_root / "inventory",
+            runs_root=data_root / "runs",
+            corpus_inventory_path=(PROJECT_ROOT if oficial else data_root) / "CORPUS_INVENTORY.md",
+        )
+
+
+CAMINHOS = CaminhosDaColeta.da_raiz(PROJECT_ROOT / "data")
 
 
 def _configure_data_root(data_root: Path) -> None:
     """Direciona uma execução para uma árvore de dados isolada."""
-    global DATA_ROOT, RAW_ROOT, OBJECTS_ROOT, INVENTORY_ROOT, RUNS_ROOT, CORPUS_INVENTORY_PATH
-    DATA_ROOT = data_root
-    RAW_ROOT = DATA_ROOT / "raw"
-    OBJECTS_ROOT = RAW_ROOT / ".objects" / "sha256"
-    INVENTORY_ROOT = DATA_ROOT / "inventory"
-    RUNS_ROOT = DATA_ROOT / "runs"
-    official_data_root = (PROJECT_ROOT / "data").resolve()
-    CORPUS_INVENTORY_PATH = (
-        PROJECT_ROOT / "CORPUS_INVENTORY.md"
-        if DATA_ROOT.resolve() == official_data_root
-        else DATA_ROOT / "CORPUS_INVENTORY.md"
-    )
+    global CAMINHOS
+    CAMINHOS = CaminhosDaColeta.da_raiz(data_root)
 
 
 def _strip_yaml_comment(value: str) -> str:
@@ -776,14 +792,14 @@ def _available_versions() -> list[int]:
     só clonou o repositório a versão aparece apenas pelo ``vN.json``.
     """
     values: set[int] = set()
-    if RAW_ROOT.exists():
+    if CAMINHOS.raw_root.exists():
         values.update(
-            number for child in RAW_ROOT.iterdir() if child.is_dir() and (number := _version_number(child.name)) is not None
+            number for child in CAMINHOS.raw_root.iterdir() if child.is_dir() and (number := _version_number(child.name)) is not None
         )
-    if INVENTORY_ROOT.exists():
+    if CAMINHOS.inventory_root.exists():
         values.update(
             number
-            for child in INVENTORY_ROOT.iterdir()
+            for child in CAMINHOS.inventory_root.iterdir()
             if child.is_file() and child.suffix == ".json" and (number := _version_number(child.stem)) is not None
         )
     return sorted(values)
@@ -799,11 +815,11 @@ def _latest_version() -> int | None:
 
 
 def _version_path(version: int) -> Path:
-    return RAW_ROOT / f"v{version}"
+    return CAMINHOS.raw_root / f"v{version}"
 
 
 def _inventory_path(version: int) -> Path:
-    return INVENTORY_ROOT / f"v{version}.json"
+    return CAMINHOS.inventory_root / f"v{version}.json"
 
 
 def _estimate_base_requests(base: dict[str, Any]) -> int:
@@ -1577,8 +1593,8 @@ def _load_version_context(
     allow_isolated_pca_manifest_drift: bool = False,
     external_inputs: dict[str, str] | None = None,
 ) -> _VersionContext:
-    staging_path = RAW_ROOT / ".staging" / f"v{version}"
-    checkpoint_path = INVENTORY_ROOT / "checkpoints" / f"v{version}.json"
+    staging_path = CAMINHOS.raw_root / ".staging" / f"v{version}"
+    checkpoint_path = CAMINHOS.inventory_root / "checkpoints" / f"v{version}.json"
     items: dict[str, dict[str, Any]] = {}
     if staging_path.exists() and not checkpoint_path.exists():
         raise RuntimeError(f"staging sem checkpoint; recuse sobrescrever: {staging_path}")
@@ -1642,10 +1658,10 @@ def _wait_rate_limit(context: _VersionContext, base: dict[str, Any]) -> None:
 
 def _effective_objects_root() -> Path:
     try:
-        OBJECTS_ROOT.resolve().relative_to(PROJECT_ROOT.resolve())
+        CAMINHOS.objects_root.resolve().relative_to(PROJECT_ROOT.resolve())
     except ValueError:
         return PROJECT_ROOT / "data" / "raw" / ".objects" / "sha256"
-    return OBJECTS_ROOT
+    return CAMINHOS.objects_root
 
 
 def _object_path(digest: str) -> Path:
@@ -3392,8 +3408,8 @@ def _build_inventory(
 
 
 def _write_inventory(inventory: dict[str, Any]) -> Path:
-    INVENTORY_ROOT.mkdir(parents=True, exist_ok=True)
-    path = INVENTORY_ROOT / f"{inventory['version']}.json"
+    CAMINHOS.inventory_root.mkdir(parents=True, exist_ok=True)
+    path = CAMINHOS.inventory_root / f"{inventory['version']}.json"
     path.write_text(json.dumps(inventory, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return path
 
@@ -3414,8 +3430,8 @@ def _render_corpus_inventory(inventory: dict[str, Any]) -> None:
     lines.extend(["", "## Falhas", ""])
     failures = inventory.get("falhas", [])
     lines.extend((f"- `{failure.get('origem')}`: {failure.get('erro')}" for failure in failures) if failures else ["Nenhuma falha registrada."])
-    CORPUS_INVENTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CORPUS_INVENTORY_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    CAMINHOS.corpus_inventory_path.parent.mkdir(parents=True, exist_ok=True)
+    CAMINHOS.corpus_inventory_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _load_inventory(version: int) -> dict[str, Any] | None:
@@ -3469,8 +3485,8 @@ def _diff_inventories(previous: dict[str, Any], current: dict[str, Any]) -> Path
     removed = sorted(set(old) - set(new))
     changed = sorted(key for key in set(old) & set(new) if old[key].get("sha256") != new[key].get("sha256"))
     identical = sorted(key for key in set(old) & set(new) if old[key].get("sha256") == new[key].get("sha256"))
-    INVENTORY_ROOT.mkdir(parents=True, exist_ok=True)
-    path = INVENTORY_ROOT / f"DIFF_{previous['version']}_{current['version']}.md"
+    CAMINHOS.inventory_root.mkdir(parents=True, exist_ok=True)
+    path = CAMINHOS.inventory_root / f"DIFF_{previous['version']}_{current['version']}.md"
     lines = [f"# Diff {previous['version']} → {current['version']}", "", f"- Adicionados: **{len(added)}**", f"- Removidos: **{len(removed)}**", f"- Alterados: **{len(changed)}**", f"- Idênticos: **{len(identical)}**"]
     for title, values in (("Adicionados", added), ("Removidos", removed), ("Alterados", changed), ("Idênticos", identical)):
         lines.extend(["", f"## {title}", ""])
@@ -3520,7 +3536,7 @@ def _find_resumable_version(
     allow_isolated_pca_manifest_drift: bool = False,
     expected_external_inputs: dict[str, str] | None = None,
 ) -> int | None:
-    checkpoint_root = INVENTORY_ROOT / "checkpoints"
+    checkpoint_root = CAMINHOS.inventory_root / "checkpoints"
     if not checkpoint_root.exists():
         return None
     checkpoints = sorted(
@@ -3537,7 +3553,7 @@ def _find_resumable_version(
             checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        staging_path = RAW_ROOT / ".staging" / f"v{version}"
+        staging_path = CAMINHOS.raw_root / ".staging" / f"v{version}"
         manifest_matches = checkpoint.get("manifest_hash") == manifest_hash
         external_inputs_match = checkpoint.get("external_inputs", {}) == (
             expected_external_inputs or {}
@@ -4305,7 +4321,7 @@ def _discovery_report(
     version = _version_number(checkpoint_version)
     if version is None:
         raise ValueError("--checkpoint-version deve usar o formato vN")
-    checkpoint_path = INVENTORY_ROOT / "checkpoints" / f"v{version}.json"
+    checkpoint_path = CAMINHOS.inventory_root / "checkpoints" / f"v{version}.json"
     if not checkpoint_path.is_file():
         raise FileNotFoundError(f"checkpoint de descoberta não encontrado: {checkpoint_path}")
 
