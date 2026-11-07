@@ -352,4 +352,5 @@ def test_dependencias_padrao_ligam_analise_e_conversa_a_configuracao_passada():
     for dependencia in (deps.analisar, deps.conversa):
         assert isinstance(dependencia, partial) and dependencia.keywords == {"configuracao": injetada.llm}
     assert deps.buscar.keywords == {"configuracao": injetada}
+    assert deps.consultar_sql.keywords == {"configuracao": injetada}
     assert deps.reranker_padrao.keywords == {"configuracao": injetada.busca}

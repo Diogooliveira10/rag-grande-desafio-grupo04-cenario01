@@ -13,6 +13,9 @@ Dois destinos, escolhidos por ``DATABASE_URL`` no ``.env``:
 - **SQLite** local em ``data/structured/`` (fora do Git) quando está vazio —
   é o que os testes e quem não tem acesso ao Neon usam.
 
+O que muda entre os dois fica em ``src/sql_dialects.py`` (a porta ``Dialeto`` e
+uma implementação para cada banco); o ``Banco`` daqui só delega.
+
 O banco é derivado e preparado explicitamente por ``build``. O atendimento
 usa ``validar_banco`` e nunca o reconstrói durante uma pergunta.
 ``garantir_banco`` permanece disponível para ferramentas administrativas legadas.
@@ -29,7 +32,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import sqlite3
 from contextlib import closing, contextmanager
 from contextvars import ContextVar
 import time
@@ -41,6 +43,7 @@ from typing import Any, Iterator, Mapping, Optional, Sequence
 
 import config
 from src.domain import text as texto_dominio
+from src.sql_dialects import FILTRO_DE_OBJETO, POSTGRES, SQLITE, Dialeto  # noqa: F401  (FILTRO_DE_OBJETO reexportado)
 
 SQLITE_PATH = config.ROOT_DIR / "data" / "structured" / "base_estruturada.sqlite"
 DOCUMENTS_FILE = config.NORMALIZED_DATA_DIR / "documents.jsonl"
@@ -130,65 +133,6 @@ _INDICES = (
     "CREATE INDEX idx_pca_ano ON pca_planos (ano_pca)",
 )
 
-# Filtro do objeto contratado, escrito uma vez por quem monta o WHERE. Sem
-# índice, ``LIKE '%termo%'`` lê as ~107 mil linhas a cada consulta (~140 ms; uma
-# pergunta faz umas 10). No SQLite com o índice FTS5 de trigramas, o mesmo LIKE
-# vai ao índice e devolve as mesmas linhas: o trigram aceita LIKE com a mesma
-# semântica (sem caixa, só ASCII, e o texto já vem normalizado). Postgres e
-# SQLite sem o índice seguem com o LIKE.
-FILTRO_DE_OBJETO = "objeto_normalizado LIKE ?"
-_INDICE_DE_OBJETO = "contratacoes_objeto_fts"
-_FILTRO_DE_OBJETO_INDEXADO = (
-    f"rowid IN (SELECT rowid FROM {_INDICE_DE_OBJETO} WHERE {_INDICE_DE_OBJETO}.objeto_normalizado LIKE ?)"
-)
-
-
-def _criar_indice_de_objeto(cursor: Any) -> bool:
-    """(Re)cria o índice FTS5 do objeto a partir de ``contratacoes``.
-
-    Só acelera: se o SQLite não tem FTS5/trigram (anterior a 3.34), devolve
-    False e as consultas continuam no LIKE.
-    """
-    try:
-        cursor.execute(f"DROP TABLE IF EXISTS {_INDICE_DE_OBJETO}")
-        cursor.execute(
-            f"CREATE VIRTUAL TABLE {_INDICE_DE_OBJETO} USING fts5(objeto_normalizado, "
-            "content='contratacoes', content_rowid='rowid', tokenize='trigram')"
-        )
-        cursor.execute(f"INSERT INTO {_INDICE_DE_OBJETO}({_INDICE_DE_OBJETO}) VALUES ('rebuild')")
-    except sqlite3.OperationalError:
-        return False
-    return True
-
-
-def _assinatura_do_arquivo(path: Path) -> Optional[tuple[str, int, int, int]]:
-    """Muda quando o arquivo muda (build, ``fts``); None se ele não existe.
-
-    Data e tamanho não bastam: apagar e recriar o índice na mesma fração de
-    segundo reaproveita as páginas e deixa os dois iguais. O contador de
-    alterações do cabeçalho do SQLite (bytes 24-27) sobe a cada escrita.
-    """
-    try:
-        stat = path.stat()
-        with path.open("rb") as arquivo:
-            cabecalho = arquivo.read(28)
-    except OSError:
-        return None
-    contador = int.from_bytes(cabecalho[24:28], "big") if len(cabecalho) == 28 else 0
-    return str(path.resolve()), stat.st_mtime_ns, stat.st_size, contador
-
-
-@lru_cache(maxsize=8)
-def _tem_indice_de_objeto(assinatura: tuple[str, int, int, int]) -> bool:
-    try:
-        with closing(sqlite3.connect(f"file:{assinatura[0]}?mode=ro", uri=True)) as conexao:
-            return conexao.execute(
-                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", [_INDICE_DE_OBJETO]
-            ).fetchone() is not None
-    except sqlite3.Error:
-        return False
-
-
 # Valores distintos (nomes de órgão, unidade, modalidade) por versão do arquivo
 # SQLite: eram relidos a cada pergunta, ~11% do tempo do SQL.
 _DISTINTOS: dict[tuple[tuple[str, int, int, int], str], frozenset] = {}
@@ -218,7 +162,8 @@ class Banco:
     """Onde a base estruturada mora: Postgres (``url``) ou SQLite (``sqlite_path``).
 
     As consultas são escritas uma vez, com ``?`` como marcador de parâmetro;
-    ``consultar`` troca por ``%s`` no Postgres.
+    ``consultar`` troca por ``%s`` no Postgres. O que muda entre os bancos fica
+    no dialeto (``src/sql_dialects.py``), escolhido pela ``url``.
     """
 
     url: str = ""
@@ -226,18 +171,17 @@ class Banco:
     _sessao: "_Sessao" = field(default_factory=lambda: _Sessao(), compare=False, repr=False)
 
     @property
+    def implementacao(self) -> Dialeto:
+        """Postgres quando há ``url``; senão, o SQLite em ``sqlite_path``."""
+        return POSTGRES if self.url else SQLITE
+
+    @property
     def dialeto(self) -> str:
-        return "postgres" if self.url else "sqlite"
+        return self.implementacao.nome
 
     def descricao(self) -> str:
         """Identificação sem credenciais, para log e mensagens."""
-        if self.dialeto == "sqlite":
-            try:
-                return Path(self.sqlite_path).resolve().relative_to(config.ROOT_DIR).as_posix()
-            except ValueError:
-                return str(self.sqlite_path)
-        host = self.url.split("@", 1)[-1].split("/", 1)[0].split("?", 1)[0]
-        return f"postgres://{host}"
+        return self.implementacao.descricao(self)
 
     def rotulo_publico(self) -> str:
         """Identificação que pode sair para o usuário (fonte da resposta, log, trace).
@@ -245,16 +189,10 @@ class Banco:
         Sem o host: ``descricao()`` diz qual servidor Postgres foi usado, o que
         serve a quem opera a carga, mas não a quem lê uma resposta.
         """
-        return "postgres" if self.dialeto == "postgres" else self.descricao()
+        return self.implementacao.rotulo_publico(self)
 
     def _sql(self, sql: str) -> str:
-        if self.dialeto == "postgres":
-            return sql.replace("?", "%s")
-        if FILTRO_DE_OBJETO in sql:
-            assinatura = _assinatura_do_arquivo(Path(self.sqlite_path))
-            if assinatura and _tem_indice_de_objeto(assinatura):
-                return sql.replace(FILTRO_DE_OBJETO, _FILTRO_DE_OBJETO_INDEXADO)
-        return sql
+        return self.implementacao.sql(self, sql)
 
     def distintos(self, tabela: str, coluna: str) -> frozenset:
         """Valores distintos não nulos de ``coluna``; no SQLite, lidos uma vez por versão do arquivo.
@@ -262,7 +200,7 @@ class Banco:
         ``tabela`` e ``coluna`` vêm do código, nunca do usuário.
         """
         sql = f"SELECT DISTINCT {coluna} AS v FROM {tabela} WHERE {coluna} IS NOT NULL"
-        assinatura = None if self.dialeto == "postgres" else _assinatura_do_arquivo(Path(self.sqlite_path))
+        assinatura = self.implementacao.assinatura_do_cache(self)
         if assinatura is None:
             return frozenset(linha["v"] for linha in self.consultar(sql))
         chave = (assinatura, sql)
@@ -271,18 +209,7 @@ class Banco:
         return _DISTINTOS[chave]
 
     def conectar(self, *, somente_leitura: bool = True) -> Any:
-        if self.dialeto == "postgres":
-            import psycopg
-
-            conexao = psycopg.connect(self.url, connect_timeout=15)
-            conexao.read_only = somente_leitura
-            # Escrita em autocommit + conexao.transaction(): o bloco inteiro
-            # vira uma transação só, com commit explícito no fim.
-            conexao.autocommit = not somente_leitura
-            return conexao
-        if somente_leitura:
-            return sqlite3.connect(f"file:{Path(self.sqlite_path)}?mode=ro", uri=True)
-        return sqlite3.connect(Path(self.sqlite_path))
+        return self.implementacao.conectar(self, somente_leitura=somente_leitura)
 
     def consultar(self, sql: str, parametros: Sequence[Any] = ()) -> list[dict[str, Any]]:
         """Roda uma consulta somente leitura e devolve as linhas como dicts.
@@ -320,8 +247,7 @@ class Banco:
         try:
             cursor.execute(self._sql(sql), list(parametros))
         except Exception:
-            if self.dialeto == "postgres":
-                conexao.rollback()  # senão a conexão fica inutilizável para a próxima consulta
+            self.implementacao.depois_de_falhar(conexao)
             raise
         colunas = [coluna[0] for coluna in cursor.description or []]
         return [dict(zip(colunas, linha)) for linha in cursor.fetchall()]
@@ -340,7 +266,7 @@ class Banco:
                 self._sessao.conexao = None
 
     def existe(self) -> bool:
-        return self.dialeto == "postgres" or Path(self.sqlite_path).exists()
+        return self.implementacao.existe(self)
 
 
 def banco_padrao() -> Banco:
@@ -562,7 +488,7 @@ def validar_banco(documents_file: Path = DOCUMENTS_FILE, banco: Optional[Banco] 
 
 def _gravar(banco: Banco, conexao: Any, tabelas: dict[str, list[dict[str, Any]]]) -> None:
     """Recria as tabelas e insere as linhas, na conexão (e transação) recebida."""
-    tipo_real = "DOUBLE PRECISION" if banco.dialeto == "postgres" else "REAL"
+    tipo_real = banco.implementacao.tipo_real
     cursor = conexao.cursor()
     for tabela in _TABELAS:
         cursor.execute(f"DROP TABLE IF EXISTS {tabela}")
@@ -579,8 +505,7 @@ def _gravar(banco: Banco, conexao: Any, tabelas: dict[str, list[dict[str, Any]]]
             banco._sql(f"INSERT INTO {tabela} ({', '.join(colunas)}) VALUES ({', '.join('?' for _ in colunas)})"),
             [[linha.get(coluna) for coluna in colunas] for linha in linhas],
         )
-    if banco.dialeto == "sqlite":
-        _criar_indice_de_objeto(cursor)
+    banco.implementacao.depois_de_criar_tabelas(cursor)
 
 
 def indexar_objeto(banco: Optional[Banco] = None) -> bool:
@@ -590,10 +515,7 @@ def indexar_objeto(banco: Optional[Banco] = None) -> bool:
     False no Postgres e no SQLite sem FTS5. Não roda durante uma pergunta.
     """
     banco = banco or banco_padrao()
-    if banco.dialeto != "sqlite" or not banco.existe():
-        return False
-    with closing(sqlite3.connect(Path(banco.sqlite_path))) as conexao, conexao:
-        return _criar_indice_de_objeto(conexao.cursor())
+    return banco.implementacao.indexar_objeto(banco)
 
 
 def construir_banco(documents_file: Path = DOCUMENTS_FILE, banco: Optional[Banco] = None) -> dict[str, Any]:
@@ -645,20 +567,7 @@ def construir_banco(documents_file: Path = DOCUMENTS_FILE, banco: Optional[Banco
         "meta": [{"chave": chave, "valor": str(valor)} for chave, valor in resumo.items()],
     }
 
-    if banco.dialeto == "postgres":
-        with closing(banco.conectar(somente_leitura=False)) as conexao, conexao.transaction():
-            _gravar(banco, conexao, tabelas)
-        return resumo
-
-    destino = Path(banco.sqlite_path)
-    destino.parent.mkdir(parents=True, exist_ok=True)
-    temporario = destino.with_name(destino.name + ".tmp")
-    temporario.unlink(missing_ok=True)
-    # closing(): o "with" do sqlite3 só faz commit; no Windows, conexão aberta
-    # trava o arquivo e impede o replace.
-    with closing(sqlite3.connect(temporario)) as conexao, conexao:
-        _gravar(Banco(sqlite_path=temporario), conexao, tabelas)
-    temporario.replace(destino)
+    banco.implementacao.gravar_base(banco, lambda destino, conexao: _gravar(destino, conexao, tabelas))
     return resumo
 
 

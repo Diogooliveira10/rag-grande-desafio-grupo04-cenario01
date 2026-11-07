@@ -36,6 +36,7 @@ from src.schema import Chunk, ChunkMetadata, Natureza, QueryFilters, QueryIntent
 from src.structured_db import Banco
 from src.sql_markdown import tabela_markdown, texto_markdown
 from src.sensitivity import mascarar
+from src.settings import Configuracao
 from src.sql_query.detection import (  # noqa: F401  (reexportados)
     Consulta,
     LIMITE_RANKING,
@@ -403,7 +404,8 @@ def _resolver_valores(consulta: Consulta, banco: Banco) -> Consulta:
 
 
 def executar_consulta(consulta: Consulta, banco: Banco, recorte: Optional[dict] = None,
-                     *, markdown: Optional[list[str]] = None) -> tuple[str, str, list[str]]:
+                     *, markdown: Optional[list[str]] = None,
+                     limiar_de_conferencia: Optional[float] = None) -> tuple[str, str, list[str]]:
     """Roda a consulta e devolve (sql, cabeçalho, linhas de resultado).
 
     Com ``recorte`` (dict vazio), preenche as condições da evidência —
@@ -418,7 +420,12 @@ def executar_consulta(consulta: Consulta, banco: Banco, recorte: Optional[dict] 
     OU, para uma palavra solta da pergunta não trazer registros de outro
     assunto. Se nenhum termo casa, o resultado diz que nenhuma contratação do
     corpus tem esse objeto, em vez de calcular sobre contratações de outro assunto.
+
+    ``limiar_de_conferencia``: valor a partir do qual o resultado ganha o alerta
+    de conferência na fonte; sem ele, o ``VALUE_REVIEW_THRESHOLD`` atual.
     """
+    if limiar_de_conferencia is None:
+        limiar_de_conferencia = config.atual().busca.value_review_threshold
     total = banco.consultar(f"SELECT COUNT(*) AS n FROM {consulta.tabela}")[0]["n"]
     consulta = _resolver_valores(consulta, banco)
 
@@ -455,7 +462,7 @@ def executar_consulta(consulta: Consulta, banco: Banco, recorte: Optional[dict] 
                 extremo = banco.consultar(
                     f"SELECT MAX({coluna}) AS maior FROM {consulta.tabela}{where}", params,
                 )[0]["maior"]
-                if extremo is not None and float(extremo) >= config.VALUE_REVIEW_THRESHOLD:
+                if extremo is not None and float(extremo) >= limiar_de_conferencia:
                     linhas.append(
                         f"Alerta de qualidade: o recorte contém valor registrado de {_brl(extremo)}, "
                         "igual ou acima do limiar de conferência. Confirme na fonte PNCP antes de interpretar "
@@ -613,10 +620,14 @@ _POLITICA_LISTAGEM = ("Campo sem valor aparece como \"não informado\"; valor de
 
 
 def _chunks(consulta: Consulta, sql: str, cabecalho: str, linhas: list[str], banco: Banco,
-            recorte: Optional[dict[str, Any]] = None, *, markdown: str = "") -> list[Chunk]:
-    """Resultado em um ou mais chunks que cabem em ``GENERATION_CHUNK_CHARS``
-    (a geração corta o que passar disso); o cabeçalho se repete em cada parte."""
-    limite = max(300, config.GENERATION_CHUNK_CHARS - 40)
+            recorte: Optional[dict[str, Any]] = None, *, markdown: str = "",
+            chunk_chars: Optional[int] = None) -> list[Chunk]:
+    """Resultado em um ou mais chunks que cabem em ``chunk_chars`` (sem ele, o
+    ``GENERATION_CHUNK_CHARS`` atual; a geração corta o que passar disso); o
+    cabeçalho se repete em cada parte."""
+    if chunk_chars is None:
+        chunk_chars = config.atual().llm.generation_chunk_chars
+    limite = max(300, chunk_chars - 40)
     partes: list[list[str]] = [[]]
     for linha in linhas or ["(nenhum registro)"]:
         cabeca = len(cabecalho) if len(partes) == 1 else 70
@@ -707,13 +718,18 @@ def consultar_estruturado(
     banco: Optional[Banco] = None,
     documents_file: Optional[Path] = None,
     intencao: Optional[QueryIntent] = None,
+    configuracao: Optional[Configuracao] = None,
 ) -> list[Chunk]:
     """Etapa ``consulta_sql``: devolve chunks com o resultado, ou ``[]``.
 
     Sem pergunta de conta, ou sem ``documents.jsonl`` na máquina, não roda nem
     registra nada. Erro na consulta (ex.: Neon fora do ar) é registrado no log
     e não derruba o pipeline: a resposta segue só com a busca normal.
+    ``configuracao`` dá o limiar de conferência de valor e o tamanho dos
+    trechos; sem ela, valem os atuais.
     """
+    limiar = configuracao.busca.value_review_threshold if configuracao is not None else None
+    chunk_chars = configuracao.llm.generation_chunk_chars if configuracao is not None else None
     consulta = consulta_da_intencao(intencao) if intencao is not None else detectar_consulta(query, filtros, bases)
     documents_file = Path(documents_file or DOCUMENTS_FILE)
     if consulta is None or not documents_file.exists():
@@ -736,7 +752,8 @@ def consultar_estruturado(
                 recorte: dict[str, Any] = {}
                 with banco.sessao():
                     tabelas: list[str] = []
-                    sql, cabecalho, linhas = executar_consulta(consulta, banco, recorte, markdown=tabelas)
+                    sql, cabecalho, linhas = executar_consulta(consulta, banco, recorte, markdown=tabelas,
+                                                               limiar_de_conferencia=limiar)
                 valor_unitario_indisponivel = filtros.tipo_valor == "unitario" or (
                     intencao is not None and intencao.filtros.tipo_valor == "unitario"
                 )
@@ -751,7 +768,8 @@ def consultar_estruturado(
                         ),
                     })
             markdown = "\n\n".join(tabelas)
-            chunks = _chunks(consulta, sql, cabecalho, linhas, banco, recorte, markdown=markdown)
+            chunks = _chunks(consulta, sql, cabecalho, linhas, banco, recorte, markdown=markdown,
+                             chunk_chars=chunk_chars)
             span.extra.update({
                 "sql": sql, "linhas": len(linhas), "chunks": len(chunks),
                 # O que a consulta devolveu, para acompanhar o dado até a resposta.

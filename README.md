@@ -208,6 +208,7 @@ SQLite compatível, cobertura vetorial, validação e rollback.
 │   ├── conversation.py          ← etapa interacao: conversa, pedido de ajuda, injeção e role-play com resposta fixa, sem LLM
 │   ├── reformulation.py         ← etapa reformulacao: continuações ("E em 2025?") por regras ou pelo LLM, com prazo próprio
 │   ├── structured_db.py         ← base estruturada em SQL (Postgres/Neon ou SQLite): tabelas contratacoes e pca_planos
+│   ├── sql_dialects.py          ← porta Dialeto e as duas implementações (SQLite com índice FTS5, Postgres)
 │   ├── structured_query.py      ← consultas SQL fixas (ranking, estatística, evolução, agrupamento) como evidência (entrada)
 │   ├── sql_query/               ← detection.py (que conta a pergunta pede) e execution.py (WHERE e um executor por tipo)
 │   ├── router.py                ← roteamento determinístico (Adaptive RAG)

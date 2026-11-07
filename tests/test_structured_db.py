@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from src import structured_db
+from src import sql_dialects, structured_db
 from src.structured_db import Banco
 
 
@@ -335,7 +335,7 @@ _CONTAGEM_POR_OBJETO = f"SELECT COUNT(*) AS n FROM contratacoes WHERE {structure
 
 def _sem_indice_de_objeto(banco):
     with closing(sqlite3.connect(banco.sqlite_path)) as conexao, conexao:
-        conexao.execute(f"DROP TABLE {structured_db._INDICE_DE_OBJETO}")
+        conexao.execute(f"DROP TABLE {sql_dialects._INDICE_DE_OBJETO}")
 
 
 @pytest.mark.parametrize("termo,esperado", [

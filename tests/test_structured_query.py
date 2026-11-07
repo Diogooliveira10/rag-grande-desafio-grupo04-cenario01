@@ -1919,3 +1919,32 @@ def test_tipo_desconhecido_da_erro_claro(base):
     consulta = sq.Consulta(tabela="contratacoes", tipo="inexistente")
     with pytest.raises(ValueError, match="Tipo de consulta SQL desconhecido"):
         sq._executar(base["banco"], consulta, (), "AND")
+
+
+def test_configuracao_injetada_da_o_tamanho_dos_trechos_e_o_limiar_de_conferencia(tmp_path):
+    """Configuração injetada (2026-11-07): sem mexer no config global."""
+    from dataclasses import replace
+
+    import config
+
+    documents = escrever_documents(
+        tmp_path / "documents.jsonl",
+        contratacoes=[_contratacao(f"C-{i}", valor_estimado=float(i) * 1000, objeto="x" * 80) for i in range(1, 16)],
+    )
+    banco = Banco(sqlite_path=tmp_path / "base.sqlite")
+    structured_db.construir_banco(documents, banco)
+    cfg = config.atual()
+    injetada = replace(cfg, busca=replace(cfg.busca, value_review_threshold=10_000.0),
+                       llm=replace(cfg.llm, generation_chunk_chars=400))
+
+    def consultar(pergunta, **kw):
+        return sq.consultar_estruturado(pergunta, QueryFilters(), ESTRUTURADA, banco=banco,
+                                        documents_file=documents, **kw)
+
+    ranking = "Quais as quinze maiores contratações?"
+    padrao, curtos = consultar(ranking), consultar(ranking, configuracao=injetada)
+    assert len(curtos) > len(padrao) and all(len(c.content) <= 400 for c in curtos)
+
+    total = "Qual o valor total das contratações?"
+    assert not any("Alerta de qualidade" in c.content for c in consultar(total))
+    assert any("Alerta de qualidade" in c.content for c in consultar(total, configuracao=injetada))
