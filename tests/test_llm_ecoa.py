@@ -336,3 +336,26 @@ def test_configuracao_com_outro_servidor_ecoa_usa_outro_cliente(monkeypatch, pro
 
     assert llm_ecoa.completar_chat([], diagnosticos={}, configuracao=llm) is response
     assert criados == ["http://outro-ecoa:1/v1/", "modelo-ecoa-injetado"]
+
+
+def test_provedor_novo_entra_pelo_registro_sem_mudar_completar_chat(monkeypatch):
+    """Adaptadores (2026-11-07): cada modo de LLM_PROVIDER_MODE monta seu provedor em _PROVEDORES."""
+    from dataclasses import replace
+
+    resposta = SimpleNamespace(model="modelo-local", choices=[])
+    recebidos = []
+
+    class Local:
+        def completar(self, argumentos, info):
+            recebidos.append(argumentos)
+            info["provider"] = "local"
+            return resposta
+
+    monkeypatch.setitem(llm_ecoa._PROVEDORES, "local", lambda llm, configuracao, modelo: Local())
+    llm = replace(config.CONFIGURACAO.llm, provider_mode="local")
+    info = {}
+
+    assert llm_ecoa.completar_chat([{"role": "user", "content": "oi"}], diagnosticos=info, configuracao=llm) is resposta
+    assert recebidos[0]["messages"] == [{"role": "user", "content": "oi"}]
+    assert info["provider"] == "local" and info["mode"] == "local" and info["model"] == "modelo-local"
+    assert set(llm_ecoa._PROVEDORES) >= {"auto", "openrouter"}

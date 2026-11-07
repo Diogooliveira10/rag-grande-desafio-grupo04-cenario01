@@ -1,5 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as _PrazoDaThread
+from dataclasses import dataclass
+from typing import Any, Callable, Protocol
 
 from openai import APIConnectionError, APIStatusError, OpenAI
 
@@ -54,35 +56,58 @@ def _com_prazo(chamada, segundos: float):
         executor.shutdown(wait=False)
 
 
-def completar_chat(mensagens: list[dict], *, response_format: dict | None = None,
-                   diagnosticos: dict | None = None, configuracao: ConfiguracaoLlm | None = None,
-                   **parametros):
-    """Modo auto: ECOA com fallback Free; modo openrouter: sem chamadas ao LLM ECOA.
+class ProvedorLlm(Protocol):
+    """Um provedor de chat: recebe os argumentos do SDK e anota em ``info`` o que fez."""
 
-    Provedor, prazos e modelos vêm de ``configuracao``; sem ela, da configuração
-    atual do ``config``, com o modelo e o cliente ECOA deste módulo.
-    """
-    from src.obs import aguardar_modelo
-    from src.model_observation import observar_chamada
+    def completar(self, argumentos: dict, info: dict) -> Any: ...
 
-    llm = configuracao or config.atual().llm
-    modelo_ecoa = configuracao.generation_model if configuracao is not None else GENERATION_MODEL
-    info = diagnosticos if diagnosticos is not None else {}
-    info.update({"provider": "ecoa", "model_requested": modelo_ecoa,
-                 "model": modelo_ecoa, "fallback_used": False,
-                 "llm_called": False, "chamadas_modelo": [],
-                 "uso_tokens": {"status": "nao_aplicavel"}})
-    arguments = {"messages": mensagens, "temperature": 0.2, **parametros}
-    if response_format is not None:
-        arguments["response_format"] = response_format
-    info["mode"] = llm.provider_mode
 
-    def _openrouter():
-        if not llm.openrouter_api_key:
+@dataclass(frozen=True)
+class _Ecoa:
+    """Servidor ECOA: uma chamada, com as retentativas do próprio SDK."""
+    llm: ConfiguracaoLlm
+    configuracao: ConfiguracaoLlm | None
+    modelo: str
+
+    def completar(self, argumentos: dict, info: dict) -> Any:
+        from src.obs import aguardar_modelo
+        from src.model_observation import observar_chamada
+
+        aguardar_modelo()
+        ecoa = _cliente_ecoa(self.configuracao)
+        primary = ecoa.with_options(
+            timeout=self.llm.generation_timeout, max_retries=self.llm.generation_max_retries
+        ) if hasattr(ecoa, "with_options") else ecoa
+        argumentos_ecoa = dict(argumentos)
+        if self.llm.reasoning_effort:
+            argumentos_ecoa["extra_body"] = {**argumentos_ecoa.get("extra_body", {}),
+                                             "reasoning_effort": self.llm.reasoning_effort}
+            info["reasoning_effort"] = self.llm.reasoning_effort
+        return observar_chamada(
+            lambda: primary.chat.completions.create(model=self.modelo, **argumentos_ecoa),
+            provider="ecoa", model=self.modelo,
+            sdk_max_retries=self.llm.generation_max_retries, diagnosticos=info)
+
+
+@dataclass(frozen=True)
+class _OpenRouter:
+    """OpenRouter: o modelo preferido e, só se ele estiver indisponível, o de reserva."""
+    llm: ConfiguracaoLlm
+
+    @property
+    def disponivel(self) -> bool:
+        return bool(self.llm.openrouter_api_key)
+
+    def completar(self, argumentos: dict, info: dict) -> Any:
+        from src.obs import aguardar_modelo
+        from src.model_observation import observar_chamada
+
+        llm = self.llm
+        if not self.disponivel:
             raise ValueError("OPENROUTER_API_KEY não configurada")
         fallback = OpenAI(base_url=llm.openrouter_base_url, api_key=str(llm.openrouter_api_key),
                           timeout=llm.openrouter_timeout, max_retries=0)
-        fallback_arguments = {**arguments, "max_tokens": min(arguments.get("max_tokens", llm.openrouter_max_tokens), llm.openrouter_max_tokens),
+        fallback_arguments = {**argumentos, "max_tokens": min(argumentos.get("max_tokens", llm.openrouter_max_tokens), llm.openrouter_max_tokens),
                               "extra_body": {"provider": {"require_parameters": True}}}
         # Modelo preferido e, só se ele estiver indisponível, a reserva. Quando
         # forem o mesmo, uma única chamada; a ordem e o modelo efetivo ficam em
@@ -118,32 +143,58 @@ def completar_chat(mensagens: list[dict], *, response_format: dict | None = None
                 if not erro_de_disponibilidade(fallback_error) or indice == len(modelos) - 1:
                     raise
         raise ultimo_erro  # inalcançável: o laço sempre retorna ou relança
-    if llm.provider_mode == "openrouter":
-        response = _openrouter()
-    elif llm.provider_mode == "auto":
-        aguardar_modelo()
-        ecoa = _cliente_ecoa(configuracao)
-        primary = ecoa.with_options(
-            timeout=llm.generation_timeout, max_retries=llm.generation_max_retries
-        ) if hasattr(ecoa, "with_options") else ecoa
-        argumentos_ecoa = dict(arguments)
-        if llm.reasoning_effort:
-            argumentos_ecoa["extra_body"] = {**argumentos_ecoa.get("extra_body", {}),
-                                             "reasoning_effort": llm.reasoning_effort}
-            info["reasoning_effort"] = llm.reasoning_effort
+
+
+@dataclass(frozen=True)
+class _ComReserva:
+    """O principal e, só se ele estiver indisponível e houver chave, a reserva."""
+    principal: ProvedorLlm
+    reserva: _OpenRouter
+
+    def completar(self, argumentos: dict, info: dict) -> Any:
         try:
-            response = observar_chamada(
-                lambda: primary.chat.completions.create(model=modelo_ecoa, **argumentos_ecoa),
-                provider="ecoa", model=modelo_ecoa,
-                sdk_max_retries=llm.generation_max_retries, diagnosticos=info)
+            return self.principal.completar(argumentos, info)
         except Exception as error:
-            if not erro_de_disponibilidade(error) or not llm.openrouter_api_key:
+            if not erro_de_disponibilidade(error) or not self.reserva.disponivel:
                 raise
             info.update({"fallback_used": True, "primary_error_type": type(error).__name__,
                          "primary_status_code": getattr(error, "status_code", None)})
-            response = _openrouter()
-    else:
+            return self.reserva.completar(argumentos, info)
+
+
+# Cada modo de LLM_PROVIDER_MODE e o provedor que ele monta a partir de
+# (llm, configuração injetada, modelo ECOA). Um provedor novo entra aqui, sem
+# mexer em completar_chat.
+_PROVEDORES: dict[str, Callable[[ConfiguracaoLlm, ConfiguracaoLlm | None, str], ProvedorLlm]] = {
+    "auto": lambda llm, configuracao, modelo: _ComReserva(_Ecoa(llm, configuracao, modelo), _OpenRouter(llm)),
+    "openrouter": lambda llm, _configuracao, _modelo: _OpenRouter(llm),
+}
+
+
+def completar_chat(mensagens: list[dict], *, response_format: dict | None = None,
+                   diagnosticos: dict | None = None, configuracao: ConfiguracaoLlm | None = None,
+                   **parametros):
+    """Modo auto: ECOA com fallback Free; modo openrouter: sem chamadas ao LLM ECOA.
+
+    Provedor, prazos e modelos vêm de ``configuracao``; sem ela, da configuração
+    atual do ``config``, com o modelo e o cliente ECOA deste módulo. Quem chama
+    não sabe qual provedor respondeu: isso fica em ``diagnosticos``.
+    """
+    llm = configuracao or config.atual().llm
+    modelo_ecoa = configuracao.generation_model if configuracao is not None else GENERATION_MODEL
+    info = diagnosticos if diagnosticos is not None else {}
+    info.update({"provider": "ecoa", "model_requested": modelo_ecoa,
+                 "model": modelo_ecoa, "fallback_used": False,
+                 "llm_called": False, "chamadas_modelo": [],
+                 "uso_tokens": {"status": "nao_aplicavel"}})
+    arguments = {"messages": mensagens, "temperature": 0.2, **parametros}
+    if response_format is not None:
+        arguments["response_format"] = response_format
+    info["mode"] = llm.provider_mode
+    montar = _PROVEDORES.get(llm.provider_mode)
+    if montar is None:
         raise ValueError("LLM_PROVIDER_MODE deve ser auto ou openrouter")
+    response = montar(llm, configuracao, modelo_ecoa).completar(arguments, info)
     info["model"] = getattr(response, "model", None) or info["model_requested"]
     choices = getattr(response, "choices", [])
     if choices:
