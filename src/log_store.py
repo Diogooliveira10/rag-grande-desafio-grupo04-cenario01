@@ -23,17 +23,18 @@ import weakref
 
 import config
 from src import log_chain
+from src.settings import ConfiguracaoLog
 
 INDEX_FILENAME = "pipeline-index.sqlite"
 
 
-def _encadear(path: Path, payloads: list[str]) -> list[str]:
+def _encadear(path: Path, payloads: list[str], chave: str) -> list[str]:
     """Acrescenta ``hash_anterior`` e ``hash`` a cada linha (src/log_chain.py)."""
     anterior = log_chain.ultimo_hash(path)
     encadeadas = []
     for payload in payloads:
         try:
-            linha, anterior = log_chain.encadear(payload, anterior, config.LOG_CHAIN_KEY)
+            linha, anterior = log_chain.encadear(payload, anterior, chave)
         except (ValueError, TypeError, AttributeError):
             # Payload que não é um objeto JSON segue como veio; o verificador o aponta.
             linha = payload
@@ -60,9 +61,11 @@ CREATE INDEX IF NOT EXISTS idx_event_sources_hash ON event_sources(event_hash);
 
 
 class EventStore:
-    def __init__(self, directory: Path | str):
+    def __init__(self, directory: Path | str, log: ConfiguracaoLog | None = None):
+        """``log``: cadeia de hashes ligada e chave; sem ele, a configuração atual a cada gravação."""
         self.directory = Path(directory).resolve()
         self.index_path = self.directory / INDEX_FILENAME
+        self.log = log
 
     def connect(self) -> sqlite3.Connection:
         self.directory.mkdir(parents=True, exist_ok=True)
@@ -161,16 +164,17 @@ class EventStore:
         with closing(self.connect()) as conn:
             conn.execute("BEGIN IMMEDIATE")
             try:
+                log = self.log or config.atual().log
                 grouped: dict[Path, list[str]] = {}
                 for path, payload in events:
                     grouped.setdefault(path.resolve(), []).append(payload)
                 for path, payloads in grouped.items():
                     path.parent.mkdir(parents=True, exist_ok=True)
                     self._sync_file(conn, path)
-                    if config.LOG_CHAIN_ENABLED:
+                    if log.chain_enabled:
                         # Dentro da transação: outro processo não grava entre a
                         # leitura do último hash e o acréscimo destas linhas.
-                        payloads = _encadear(path, payloads)
+                        payloads = _encadear(path, payloads, str(log.chain_key))
                     prefix = b""
                     if path.exists() and path.stat().st_size:
                         with path.open("rb") as source:

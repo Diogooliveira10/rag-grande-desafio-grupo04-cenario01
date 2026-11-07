@@ -212,3 +212,24 @@ def test_queue_reports_persistence_failure_and_keeps_consuming(tmp_path, monkeyp
         assert [r["output"] for r in writer.store.records("query_id", "q_index")] == ["2"]
     finally:
         writer.close()
+
+
+def test_configuracao_de_log_injetada_vale_sem_mexer_no_config(tmp_path):
+    """Configuração injetada (2026-11-07): cadeia e chave vêm do ConfiguracaoLog passado."""
+    import json
+    from dataclasses import replace
+
+    import config
+    from src import trace
+
+    assert config.LOG_CHAIN_ENABLED  # o conftest liga a cadeia em todos os testes
+    desligada = replace(config.CONFIGURACAO.log, chain_enabled=False)
+    arquivo = tmp_path / "pipeline-2026-11-07.jsonl"
+
+    EventStore(tmp_path, log=desligada).append_batch([(arquivo, json.dumps({"query_id": "q1"}))])
+    EventStore(tmp_path).append_batch([(arquivo, json.dumps({"query_id": "q2"}))])
+
+    sem_hash, com_hash = (json.loads(linha) for linha in arquivo.read_text(encoding="utf-8").splitlines())
+    assert "hash" not in sem_hash and "hash" in com_hash
+    assert trace.integridade_do_log(tmp_path, log=desligada) == {
+        "status": "nao_verificada", "motivo": "cadeia_desligada"}

@@ -28,6 +28,7 @@ from typing import Any, Optional
 import config
 from src import log_chain
 from src.obs import Stage, default_logger
+from src.settings import Caminhos, ConfiguracaoLog
 
 # Qual base cada etapa consulta. BM25 é busca por palavras sobre os mesmos
 # trechos indexados da base vetorial; as demais etapas não consultam base.
@@ -56,28 +57,32 @@ def _sem_endereco_de_banco(valor: Any) -> Any:
     return valor
 
 
-def _registros(campo: str, valor: str, logs_dir: Path) -> list[dict[str, Any]]:
+def _registros(campo: str, valor: str, logs_dir: Path,
+               caminhos: Optional[Caminhos] = None) -> list[dict[str, Any]]:
     """Indexed lookup; only changed/new JSONL bytes require import."""
     from src.log_store import EventStore
+    caminhos = caminhos or config.atual().caminhos
     if logs_dir.resolve() == Path(default_logger.logs_dir).resolve():
         default_logger.flush()
-    legacy = [config.LOGS_DIR] if logs_dir == config.PIPELINE_LOGS_DIR else []
+    legacy = [caminhos.logs_dir] if logs_dir == caminhos.pipeline_logs_dir else []
     try:
         registros = EventStore(logs_dir).records(campo, valor, legacy)
         return sorted(registros, key=_timestamp_key)
     except (OSError, sqlite3.Error):
         logging.getLogger(__name__).warning("Índice de trace indisponível; leitura JSONL de compatibilidade")
-        return _registros_jsonl(campo, valor, logs_dir)
+        return _registros_jsonl(campo, valor, logs_dir, caminhos)
 
 
-def _registros_jsonl(campo: str, valor: str, logs_dir: Path) -> list[dict[str, Any]]:
+def _registros_jsonl(campo: str, valor: str, logs_dir: Path,
+                     caminhos: Optional[Caminhos] = None) -> list[dict[str, Any]]:
     """Fallback/legacy reader when the derived index cannot be used."""
+    caminhos = caminhos or config.atual().caminhos
     registros: list[dict[str, Any]] = []
     # Transitional reader: only the actual configured directory may also read
     # legacy root files. Isolated test/custom directories never read real logs.
     diretorios = [logs_dir]
-    if logs_dir == config.PIPELINE_LOGS_DIR:
-        diretorios.append(config.LOGS_DIR)
+    if logs_dir == caminhos.pipeline_logs_dir:
+        diretorios.append(caminhos.logs_dir)
     vistos: set[str] = set()
     for diretorio in diretorios:
         for arquivo in sorted(diretorio.glob("pipeline-*.jsonl")):
@@ -175,27 +180,30 @@ _VERIFICACOES: dict[tuple[str, str], log_chain.VerificacaoContinua] = {}
 _VERIFICACOES_LOCK = threading.Lock()
 
 
-def integridade_do_log(logs_dir: Optional[Path] = None) -> dict[str, Any]:
+def integridade_do_log(logs_dir: Optional[Path] = None, log: Optional[ConfiguracaoLog] = None) -> dict[str, Any]:
     """Integridade da cadeia de hashes do log inteiro, para o campo ``integridade`` do trace.
 
     Não espera: devolve a última conferência concluída e dispara a próxima
     (``log_chain.VerificacaoContinua``). Logo depois de o backend subir, a
     primeira conferência completa ainda está rodando: ``nao_verificada``.
+    Cadeia ligada e chave vêm de ``log``; sem ele, da configuração atual.
     """
-    if not config.LOG_CHAIN_ENABLED:
+    log = log or config.atual().log
+    if not log.chain_enabled:
         return {"status": "nao_verificada", "motivo": "cadeia_desligada"}
     diretorio = Path(logs_dir or default_logger.logs_dir).resolve()
-    chave = (str(diretorio), config.LOG_CHAIN_KEY)
+    chave = (str(diretorio), str(log.chain_key))
     with _VERIFICACOES_LOCK:
         verificacao = _VERIFICACOES.get(chave)
         if verificacao is None:
-            verificacao = _VERIFICACOES[chave] = log_chain.VerificacaoContinua(diretorio, config.LOG_CHAIN_KEY)
+            verificacao = _VERIFICACOES[chave] = log_chain.VerificacaoContinua(diretorio, str(log.chain_key))
     return verificacao.estado()
 
 
-def montar_trace(query_id: str, logs_dir: Optional[Path] = None) -> Optional[dict[str, Any]]:
+def montar_trace(query_id: str, logs_dir: Optional[Path] = None,
+                 caminhos: Optional[Caminhos] = None) -> Optional[dict[str, Any]]:
     """Caminho da pergunta ``query_id``, ou ``None`` se ela não está no log."""
-    registros = _registros("query_id", query_id, Path(logs_dir or default_logger.logs_dir))
+    registros = _registros("query_id", query_id, Path(logs_dir or default_logger.logs_dir), caminhos)
     if not registros:
         return None
     return _sem_endereco_de_banco(_trace_dos_registros(query_id, registros))
@@ -310,7 +318,8 @@ def _trace_dos_registros(query_id: str, registros: list[dict[str, Any]]) -> dict
     }
 
 
-def montar_trace_sessao(session_id: str, logs_dir: Optional[Path] = None) -> Optional[dict[str, Any]]:
+def montar_trace_sessao(session_id: str, logs_dir: Optional[Path] = None,
+                        caminhos: Optional[Caminhos] = None) -> Optional[dict[str, Any]]:
     """Perguntas da sessão em ordem, com o resumo de cada uma, ou ``None``.
 
     Os detalhes de cada etapa ficam no trace da pergunta (``montar_trace``);
@@ -318,7 +327,7 @@ def montar_trace_sessao(session_id: str, logs_dir: Optional[Path] = None) -> Opt
     se cada pergunta consultou a base SQL e a vetorial. O feedback dado
     depois da resposta (outro ``run``) fica junto da pergunta a que se refere.
     """
-    registros = _registros("session_id", session_id, Path(logs_dir or default_logger.logs_dir))
+    registros = _registros("session_id", session_id, Path(logs_dir or default_logger.logs_dir), caminhos)
     if not registros:
         return None
     por_pergunta: dict[str, list[dict[str, Any]]] = {}

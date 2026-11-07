@@ -50,6 +50,7 @@ from src.log_context import current_execution, execution
 from src.obs import registrar as obs_registrar
 from src.reformulation import TurnoAnterior
 from src.schema import RAGResponse
+from src.settings import Configuracao
 from src.trace import integridade_do_log, montar_trace, montar_trace_sessao
 
 logger = logging.getLogger(__name__)
@@ -62,8 +63,17 @@ _ID_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
 _SESSION_PATTERN = r"^[A-Za-z0-9_-]{16,64}$"
 
 
+def _configuracao() -> Configuracao:
+    """A configuração que esta API injeta no pipeline e usa nas próprias decisões.
+
+    Lida do ``config`` a cada uso (``config.atual()``): em produção é sempre a
+    do ``.env``; nos testes, valem os valores trocados por ``monkeypatch``.
+    """
+    return config.atual()
+
+
 def _chave_valida(x_api_key: Optional[str]) -> bool:
-    chave = config.RAG_API_KEY
+    chave = _configuracao().api.rag_api_key
     return bool(chave and x_api_key) and secrets.compare_digest(x_api_key.encode(), chave.encode())
 
 
@@ -98,7 +108,7 @@ def _sessao_do_historico(
     escopo vem do header. Sem nenhuma das duas credenciais, 401 sem revelar o
     que existe no histórico.
     """
-    if config.HISTORY_PUBLIC or _chave_valida(x_api_key):
+    if _configuracao().api.history_public or _chave_valida(x_api_key):
         return session_id
     if x_session_id:
         return x_session_id
@@ -279,9 +289,10 @@ class SessaoTraceResponse(BaseModel):
 async def _ciclo_de_vida(_app: FastAPI):
     # O cross-encoder leva ~15 s para carregar: numa thread, para o servidor
     # já aceitar requisições, e antes da primeira pergunta de verdade.
-    if config.RERANK_ENABLED and config.RERANK_PRELOAD:
+    busca = _configuracao().busca
+    if busca.rerank_enabled and busca.rerank_preload:
         threading.Thread(target=rerank.pre_carregar, name="rerank-preload", daemon=True).start()
-    if config.INDEX_PRELOAD:
+    if busca.index_preload:
         threading.Thread(target=retrieve.pre_carregar_indices, name="index-preload", daemon=True).start()
         # Estatística das palavras dos objetos, usada para reconhecer fornecedor
         # por um nome curto ("da Medshore"): ~4 s na primeira pergunta sem isso.
@@ -310,8 +321,10 @@ def _conferir_log_depois_do_ready(logs_dir: FsPath) -> None:
     integridade_do_log(logs_dir)
 
 
-limite_de_consultas = LimiteDeRequisicoes(config.RATE_LIMIT_QUERY_PER_MINUTE)
-limite_de_leitura = LimiteDeRequisicoes(config.RATE_LIMIT_READ_PER_MINUTE)
+# Limites e páginas de documentação são decididos uma vez, na subida.
+_API_NA_SUBIDA = _configuracao().api
+limite_de_consultas = LimiteDeRequisicoes(_API_NA_SUBIDA.rate_limit_query_per_minute)
+limite_de_leitura = LimiteDeRequisicoes(_API_NA_SUBIDA.rate_limit_read_per_minute)
 _ROTAS_DE_CONSULTA = {"/api/v1/query", "/api/v1/feedback"}
 
 
@@ -340,9 +353,9 @@ def _limitar_requisicoes(request: Request) -> None:
 
 app = FastAPI(title="Adaptive RAG API", version="1.0.0", lifespan=_ciclo_de_vida,
               dependencies=[Depends(_limitar_requisicoes)],
-              docs_url="/docs" if config.API_DOCS else None,
-              redoc_url="/redoc" if config.API_DOCS else None,
-              openapi_url="/openapi.json" if config.API_DOCS else None)
+              docs_url="/docs" if _API_NA_SUBIDA.api_docs else None,
+              redoc_url="/redoc" if _API_NA_SUBIDA.api_docs else None,
+              openapi_url="/openapi.json" if _API_NA_SUBIDA.api_docs else None)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
@@ -420,7 +433,7 @@ def query_rag(request: QueryRequest) -> QueryResponse:
             try:
                 result = pipeline.responder(
                     request.query, top_k=request.top_k, run_id=run_id, query_id=query_id,
-                    session_id=session_id, **extras,
+                    session_id=session_id, configuracao=_configuracao(), **extras,
                 )
             except Exception as exc:
                 flow.extra["pipeline_error_type"] = type(exc).__name__

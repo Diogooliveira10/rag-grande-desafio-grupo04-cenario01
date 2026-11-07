@@ -35,7 +35,7 @@ def _response(query: str) -> dict:
     }
 
 
-def _fake_responder(query: str, *, top_k: int, run_id=None, query_id=None, session_id=None):
+def _fake_responder(query: str, *, top_k: int, run_id=None, query_id=None, session_id=None, configuracao=None):
     return _response(query)
 
 
@@ -103,7 +103,7 @@ def test_readiness_ready_devolve_apenas_capacidades_publicas(monkeypatch) -> Non
 def test_query_delega_ao_pipeline(monkeypatch) -> None:
     calls = []
 
-    def fake_responder(query: str, *, top_k: int, run_id=None, query_id=None, session_id=None):
+    def fake_responder(query: str, *, top_k: int, run_id=None, query_id=None, session_id=None, configuracao=None):
         calls.append((query, top_k, session_id))
         return _response(query)
 
@@ -569,7 +569,8 @@ def test_cors_libera_o_header_do_tunel_ngrok():
 def test_query_repassa_o_historico_ao_pipeline_e_devolve_a_pergunta_reformulada(monkeypatch) -> None:
     chamadas = []
 
-    def fake_responder(query, *, top_k, run_id=None, query_id=None, session_id=None, historico=None):
+    def fake_responder(query, *, top_k, run_id=None, query_id=None, session_id=None, historico=None,
+                       configuracao=None):
         chamadas.append((query, [(t.pergunta, t.resposta) for t in historico]))
         return {**_response(query), "pergunta_reformulada": "Quais regras valem para os contratos de TI de 2025?"}
 
@@ -671,3 +672,22 @@ def test_api_so_confere_a_cadeia_do_log_depois_do_ready(monkeypatch):
         assert not conferiu.wait(timeout=0.5)
         liberar.set()
         assert conferiu.wait(timeout=5)
+
+
+def test_query_injeta_no_pipeline_a_configuracao_da_api(monkeypatch) -> None:
+    """Configuração injetada (2026-11-07): a API passa ao pipeline a configuração que ela mesma usa."""
+    import config
+    from src.settings import Configuracao
+
+    recebidas = []
+
+    def fake_responder(query, *, configuracao=None, **_):
+        recebidas.append(configuracao)
+        return _response(query)
+
+    monkeypatch.setattr(api_module.pipeline, "responder", fake_responder)
+    monkeypatch.setattr(config, "RERANK_CANDIDATES", 7)
+
+    assert client.post("/api/v1/query", json={"query": "Quais contratos?"}).status_code == 200
+    assert isinstance(recebidas[0], Configuracao)
+    assert recebidas[0] == config.atual() and recebidas[0].busca.rerank_candidates == 7

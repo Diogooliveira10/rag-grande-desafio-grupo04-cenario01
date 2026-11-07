@@ -405,7 +405,7 @@ def test_dense_unavailable_is_degraded_and_bm25_still_answers(local_pipeline, mo
 def test_rerank_failure_records_fallback_and_retains_rrf_evidence(local_pipeline, monkeypatch):
     def fail(query, items):
         raise RuntimeError('reranker unavailable')
-    monkeypatch.setattr(pipeline, 'reranker_padrao', lambda: fail)
+    monkeypatch.setattr(pipeline, 'reranker_padrao', lambda configuracao=None: fail)
     response = local_pipeline.post('/api/v1/query', json={'query': 'Quais contratos de ambulâncias?'})
     assert response.status_code == 200
     rerank = event('rerank')

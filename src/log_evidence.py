@@ -12,8 +12,9 @@ from src.schema import Chunk
 from src.sensitivity import mascarar, mascarar_valores
 
 
-def auditoria_completa() -> bool:
-    return config.LOG_EVIDENCE_DETAIL == "completo"
+def auditoria_completa(detalhe: str | None = None) -> bool:
+    """Se o log guarda a auditoria completa das evidências; sem ``detalhe``, vale a configuração atual."""
+    return (detalhe if detalhe is not None else config.atual().log.evidence_detail) == "completo"
 
 
 def _conteudo(text: str, sensitivity: Any) -> str:

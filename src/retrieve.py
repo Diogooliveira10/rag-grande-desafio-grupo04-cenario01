@@ -303,14 +303,22 @@ def _embed_fn_com_uso(uso: list[TokenUsage], estatisticas: dict[str, int] | None
     return embed
 
 
+def _caminhos_ou_padrao(index_dir: Path | None, documents_file: Path | None) -> tuple[Path, Path]:
+    """Os caminhos pedidos ou, na falta deles, os da configuração atual (lidos na chamada)."""
+    caminhos = config.atual().caminhos
+    return (index_dir if index_dir is not None else caminhos.index_dir,
+            documents_file if documents_file is not None else caminhos.normalized_data_dir / "documents.jsonl")
+
+
 def pre_carregar_indices(
-    index_dir: Path = config.INDEX_DIR,
-    documents_file: Path = config.NORMALIZED_DATA_DIR / "documents.jsonl",
+    index_dir: Path | None = None,
+    documents_file: Path | None = None,
 ) -> int:
     """Lê os índices antes da primeira pergunta; devolve quantos arquivos leu.
 
     Falha só vira aviso: a primeira pergunta lê pelo caminho normal.
     """
+    index_dir, documents_file = _caminhos_ou_padrao(index_dir, documents_file)
     lidos = 0
     try:
         # Documentos antes do índice: o índice reaproveita os metadados deles.
@@ -411,8 +419,8 @@ def _faiss_scores(
 def dense_retrieve(
     query: str,
     *,
-    index_dir: Path = config.INDEX_DIR,
-    documents_file: Path = config.NORMALIZED_DATA_DIR / "documents.jsonl",
+    index_dir: Path | None = None,
+    documents_file: Path | None = None,
     top_k: int = DEFAULT_TOP_K,
     bases: Iterable[Any] | None = None,
     filters: Mapping[str, Any] | None = None,
@@ -425,6 +433,7 @@ def dense_retrieve(
     """Recupera chunks próximos pelo FAISS e aplica filtros de metadados."""
     if top_k <= 0 or not query.strip():
         return []
+    index_dir, documents_file = _caminhos_ou_padrao(index_dir, documents_file)
     candidates = (_selecionar(index_dir, bases, escopos) if not filters and records is None
                   else _records_for(index_dir, bases, filters, records, escopos))
     if not candidates:
@@ -581,8 +590,8 @@ def _avisar_vetores_descartados(query: str, incompativeis: list[dict[str, Any]],
 def bm25_retrieve(
     query: str,
     *,
-    index_dir: Path = config.INDEX_DIR,
-    documents_file: Path = config.NORMALIZED_DATA_DIR / "documents.jsonl",
+    index_dir: Path | None = None,
+    documents_file: Path | None = None,
     top_k: int = DEFAULT_TOP_K,
     bases: Iterable[Any] | None = None,
     filters: Mapping[str, Any] | None = None,
@@ -592,6 +601,7 @@ def bm25_retrieve(
     """Recupera chunks lexicalmente com BM25, sem dependências adicionais."""
     if top_k <= 0 or not query.strip():
         return []
+    index_dir, documents_file = _caminhos_ou_padrao(index_dir, documents_file)
     candidates = (
         _records_for(index_dir, bases, filters, records, escopos)
         if records is not None
