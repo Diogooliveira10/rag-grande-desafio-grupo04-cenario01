@@ -451,8 +451,8 @@ def test_fetch_provider_access_uses_provider_artifacts(monkeypatch):
         def list_artifacts(self, resolved):
             return resolved.artifacts
 
-    monkeypatch.setattr(fetch_corpus, "get_provider", lambda name: FakeProvider())
-    monkeypatch.setattr(fetch_corpus, "_checkpoint_write", lambda context: None)
+    monkeypatch.setattr("src.collection.collect.get_provider", lambda name: FakeProvider())
+    monkeypatch.setattr("src.collection.collect._checkpoint_write", lambda context: None)
     calls = []
 
     def fake_json(context, base, endpoint_name, endpoint):
@@ -463,8 +463,8 @@ def test_fetch_provider_access_uses_provider_artifacts(monkeypatch):
         calls.append(("binary", url, kwargs["expected_type"]))
         return {"logical_id": logical_id, "status": "ok", "path": url}
 
-    monkeypatch.setattr(fetch_corpus, "_collect_rest_endpoint", fake_json)
-    monkeypatch.setattr(fetch_corpus, "_collect_http_item", fake_binary)
+    monkeypatch.setattr("src.collection.collect._collect_rest_endpoint", fake_json)
+    monkeypatch.setattr("src.collection.collect._collect_http_item", fake_binary)
     context = SimpleNamespace(items={})
     base = {
         "base_id": "base_provider",

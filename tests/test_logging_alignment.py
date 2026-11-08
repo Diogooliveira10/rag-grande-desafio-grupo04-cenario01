@@ -12,6 +12,7 @@ from src import obs
 from src.model_observation import observar_chamada, resumir_uso
 from src.offline_observation import observar_offline
 from src.trace import montar_trace
+from src.collection import paths as coleta
 
 REQUIRED = {"ts", "run_id", "query_id", "stage", "status", "latencia_ms", "input", "output", "tokens", "modelo", "extra"}
 
@@ -148,7 +149,7 @@ def test_injected_vector_function_has_explicitly_unknown_usage(tmp_path):
 
 def test_collection_preserves_legacy_file_and_emits_standard_events(tmp_path, monkeypatch):
     from src import fetch_corpus
-    monkeypatch.setattr(fetch_corpus, "CAMINHOS", dataclasses.replace(fetch_corpus.CAMINHOS, runs_root=tmp_path / "runs"))
+    monkeypatch.setattr(coleta, "CAMINHOS", dataclasses.replace(coleta.CAMINHOS, runs_root=tmp_path / "runs"))
     @observar_offline(obs.Stage.COLETA)
     def collect():
         logger = fetch_corpus._RunLogger("fetch")
@@ -169,8 +170,8 @@ def test_collection_preserves_legacy_file_and_emits_standard_events(tmp_path, mo
 def test_inventory_operation_uses_common_contract(monkeypatch):
     from src import fetch_corpus
     original = {"inventory_type": "manifest", "version": "v1", "totais": {"arquivos": 2}}
-    monkeypatch.setattr(fetch_corpus, "_load_inventory", lambda version: original)
-    monkeypatch.setattr(fetch_corpus, "_render_corpus_inventory", lambda inventory: None)
+    monkeypatch.setattr("src.collection.inventory._load_inventory", lambda version: original)
+    monkeypatch.setattr("src.collection.inventory._render_corpus_inventory", lambda inventory: None)
     assert fetch_corpus._inventory_for_version(1) is original
     assert next(e for e in records() if e["stage"] == "inventario")["output"]["totais"] == {"arquivos": 2}
 
