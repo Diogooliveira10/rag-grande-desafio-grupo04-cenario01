@@ -95,8 +95,14 @@ def _collect_selected_rest_endpoint(
 ) -> list[dict[str, Any]]:
     """Coleta páginas completas e persiste somente a seleção canônica."""
     endpoint = _clean_url(endpoint)
-    access = base.get("acesso", {})
-    params = dict(access.get("params") or {})
+    all_records, last_payload, falha = _ler_paginas_da_selecao(context, base, endpoint_name, endpoint)
+    if falha is not None:
+        return [falha]
+    return _gravar_selecao(context, base, endpoint_name, endpoint, limit, all_records, last_payload)
+
+
+def _paginacao_da_selecao(access: dict[str, Any], params: dict[str, Any]) -> tuple[str, int]:
+    """Campo e tamanho da página declarados no acesso (padrão: ``pagina``, 50)."""
     pagination = access.get("paginacao") or {
         "campo": "pagina",
         "tamanho": params.get("tamanhoPagina", 50),
@@ -111,6 +117,20 @@ def _collect_selected_rest_endpoint(
             or 50
         ),
     )
+    return page_field, page_size
+
+
+def _ler_paginas_da_selecao(
+    context: _VersionContext, base: dict[str, Any], endpoint_name: str, endpoint: str,
+) -> tuple[list[Any], Any, dict[str, Any] | None]:
+    """Lê as páginas até a última incompleta, repetida ou ``max_paginas``.
+
+    Devolve os registros lidos, o último payload e, se uma página veio sem
+    JSON, o registro da falha (aí a seleção não é gravada).
+    """
+    access = base.get("acesso", {})
+    params = dict(access.get("params") or {})
+    page_field, page_size = _paginacao_da_selecao(access, params)
     max_pages = max(1, int((base.get("selecao") or {}).get("max_paginas") or 100))
     all_records: list[Any] = []
     seen_pages: set[str] = set()
@@ -122,16 +142,14 @@ def _collect_selected_rest_endpoint(
         response = source_check.request_url(url, "json", attempts=3, timeout=30.0)
         payload = response.get("json")
         if payload is None:
-            return [
-                _failed_record(
-                    context,
-                    base,
-                    f"{base['base_id']}:{endpoint_name}:selecao",
-                    url,
-                    str(response.get("erro") or response.get("status") or "resposta JSON ausente"),
-                    "json",
-                )
-            ]
+            return all_records, last_payload, _failed_record(
+                context,
+                base,
+                f"{base['base_id']}:{endpoint_name}:selecao",
+                url,
+                str(response.get("erro") or response.get("status") or "resposta JSON ausente"),
+                "json",
+            )
         body = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
         if digest in seen_pages:
@@ -142,7 +160,14 @@ def _collect_selected_rest_endpoint(
         all_records.extend(records)
         if not records or len(records) < page_size:
             break
+    return all_records, last_payload, None
 
+
+def _gravar_selecao(
+    context: _VersionContext, base: dict[str, Any], endpoint_name: str, endpoint: str, limit: int,
+    all_records: list[Any], last_payload: Any,
+) -> list[dict[str, Any]]:
+    """Grava os ``limit`` primeiros registros pela chave canônica; avisa se o alvo não foi atingido."""
     unique = {_selection_key(record, base): record for record in all_records}
     selected = [unique[key] for key in sorted(unique)[:limit]]
     selected_payload = _payload_with_records(last_payload, selected)
@@ -280,11 +305,7 @@ def _collect_rest_endpoint(
                 if response.get("status") == "disponivel" and response.get("http_status") == 204:
                     payload = []
                 else:
-                    reason = (
-                        response.get("erro")
-                        or response.get("observacao")
-                        or f"resposta JSON ausente (status={response.get('status')}, HTTP={response.get('http_status')})"
-                    )
+                    reason = _motivo_sem_json(response)
                     if (
                         page_field
                         and size_field
@@ -296,25 +317,13 @@ def _collect_rest_endpoint(
                         continue
                     output.append(_rest_page_failure(context, base, logical_id, url, str(reason), fallback_attempted, fallback_trigger))
                     break
-            body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
-            page_digest = hashlib.sha256(body).hexdigest()
-            if page_digest in seen_pages:
-                output.append(
-                    _failed_record(
-                        context,
-                        base,
-                        f"{base['base_id']}:{endpoint_name}:pagina={page}:duplicada",
-                        url,
-                        "página repetida durante paginação; enumeração interrompida",
-                        "json",
-                    )
-                )
-                break
-            seen_pages.add(page_digest)
-            saved = _save_version_bytes(context, body, str(base["base_id"]), f"{endpoint_name}_pagina_{page}", ".json")
-            _annotate_saved_page(context, saved, previous, response, fallback_used, fallback_trigger)
-            records = _payload_records(payload)
-            output.append(_base_record(context, base, logical_id, url, saved, tipo="json", registros=len(records)))
+            record, records = _salvar_pagina(
+                context, base, endpoint_name, page, logical_id, url, payload, seen_pages,
+                previous, response, fallback_used, fallback_trigger,
+            )
+            output.append(record)
+            if records is None:
+                break  # página repetida: a enumeração para aqui
             if fallback_used or not page_field or not records or len(records) < page_size:
                 break
             page += 1
@@ -322,6 +331,43 @@ def _collect_rest_endpoint(
             output.append(_failed_record(context, base, logical_id, url, f"{type(exc).__name__}: {exc}", "json"))
             break
     return output
+
+
+def _motivo_sem_json(response: dict[str, Any]) -> str:
+    """Por que a página não trouxe JSON: o erro, a observação ou o status e o HTTP."""
+    return (
+        response.get("erro")
+        or response.get("observacao")
+        or f"resposta JSON ausente (status={response.get('status')}, HTTP={response.get('http_status')})"
+    )
+
+
+def _salvar_pagina(
+    context: _VersionContext, base: dict[str, Any], endpoint_name: str, page: int, logical_id: str, url: str,
+    payload: Any, seen_pages: set[str], previous: dict[str, Any] | None, response: dict[str, Any],
+    fallback_used: bool, fallback_trigger: Any,
+) -> tuple[dict[str, Any], list[Any] | None]:
+    """Grava a página e devolve o registro e os registros lidos dela.
+
+    Página idêntica a uma já vista (mesmo SHA-256) não é gravada: volta o
+    registro de falha e ``None``, e quem pagina para a enumeração.
+    """
+    body = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
+    page_digest = hashlib.sha256(body).hexdigest()
+    if page_digest in seen_pages:
+        return _failed_record(
+            context,
+            base,
+            f"{base['base_id']}:{endpoint_name}:pagina={page}:duplicada",
+            url,
+            "página repetida durante paginação; enumeração interrompida",
+            "json",
+        ), None
+    seen_pages.add(page_digest)
+    saved = _save_version_bytes(context, body, str(base["base_id"]), f"{endpoint_name}_pagina_{page}", ".json")
+    _annotate_saved_page(context, saved, previous, response, fallback_used, fallback_trigger)
+    records = _payload_records(payload)
+    return _base_record(context, base, logical_id, url, saved, tipo="json", registros=len(records)), records
 
 
 def _collect_local_base(context: _VersionContext, base: dict[str, Any]) -> list[dict[str, Any]]:
@@ -366,20 +412,7 @@ def _collect_pncp_documents(context: _VersionContext, base: dict[str, Any]) -> l
     infinita. Cada URL é baixada no mesmo contexto de checkpoint da versão.
     """
     params = (base.get("acesso") or {}).get("params") or {}
-    try:
-        year = int(params.get("ano", 2025))
-        page_size = max(1, int(params.get("tamanhoPagina", 10)))
-        target = max(1, int(base.get("volume_alvo", 1)))
-    except (TypeError, ValueError):
-        year, page_size, target = 2025, 10, 1
-
-    try:
-        max_pages = max(
-            1,
-            int(params.get("maxPaginas", (target + page_size - 1) // page_size + 2)),
-        )
-    except (TypeError, ValueError):
-        max_pages = (target + page_size - 1) // page_size + 2
+    year, page_size, target, max_pages = _limites_da_descoberta_pncp(params, base)
 
     output: list[dict[str, Any]] = []
     seen_urls: set[str] = set()
@@ -415,16 +448,13 @@ def _collect_pncp_documents(context: _VersionContext, base: dict[str, Any]) -> l
                     candidate.filename_prefix,
                 )
             )
-            pdf_successes = sum(
-                1 for record in output if record.get("status") == "ok" and record.get("tipo") == "pdf"
-            )
-            if pdf_successes >= target:
+            if _pdfs_baixados(output) >= target:
                 return output
         if not new_candidates:
             break
         page += 1
 
-    pdf_successes = sum(1 for record in output if record.get("status") == "ok" and record.get("tipo") == "pdf")
+    pdf_successes = _pdfs_baixados(output)
     if not output:
         return [_failed_record(context, base, f"{base['base_id']}:discovery", "PNCP", "nenhum arquivo PNCP foi descoberto")]
     if pdf_successes < target:
@@ -439,6 +469,29 @@ def _collect_pncp_documents(context: _VersionContext, base: dict[str, Any]) -> l
             )
         )
     return output
+
+
+def _limites_da_descoberta_pncp(params: dict[str, Any], base: dict[str, Any]) -> tuple[int, int, int, int]:
+    """Ano, tamanho da página, alvo de PDFs e máximo de páginas; valor inválido no manifesto volta ao padrão."""
+    try:
+        year = int(params.get("ano", 2025))
+        page_size = max(1, int(params.get("tamanhoPagina", 10)))
+        target = max(1, int(base.get("volume_alvo", 1)))
+    except (TypeError, ValueError):
+        year, page_size, target = 2025, 10, 1
+
+    try:
+        max_pages = max(
+            1,
+            int(params.get("maxPaginas", (target + page_size - 1) // page_size + 2)),
+        )
+    except (TypeError, ValueError):
+        max_pages = (target + page_size - 1) // page_size + 2
+    return year, page_size, target, max_pages
+
+
+def _pdfs_baixados(output: list[dict[str, Any]]) -> int:
+    return sum(1 for record in output if record.get("status") == "ok" and record.get("tipo") == "pdf")
 
 
 def _collect_resource_set(context: _VersionContext, base: dict[str, Any]) -> list[dict[str, Any]]:
@@ -637,9 +690,7 @@ def _collect_provider_base(
         return [_failed_record(context, base, f"{base['base_id']}:provider", "provider", "provider não declarado")]
 
     provider = get_provider(provider_name)
-    for logical_id, item in list(context.items.items()):
-        if item.get("base_id") == base.get("base_id") and item.get("status") != "ok":
-            context.items.pop(logical_id, None)
+    _descartar_itens_com_falha(context, base)
     target = int(base.get("volume_alvo") or 1)
     populations = _provider_populations(access, target)
     censo_mode = any(bool(population.get("censo")) for population in populations)
@@ -684,6 +735,23 @@ def _collect_provider_base(
             return cached_records
 
     collector = _ProviderSourceCollector(context, base, access, provider, provider_name, candidates)
+    return _coletar_fontes(context, base, collector, sources, provider_name,
+                           acusar_alvo=discovered and not censo_mode, target=target)
+
+
+def _descartar_itens_com_falha(context: _VersionContext, base: dict[str, Any]) -> None:
+    """Itens desta base que não terminaram ``ok`` saem do contexto, para serem tentados de novo."""
+    for logical_id, item in list(context.items.items()):
+        if item.get("base_id") == base.get("base_id") and item.get("status") != "ok":
+            context.items.pop(logical_id, None)
+
+
+def _coletar_fontes(context: _VersionContext, base: dict[str, Any], collector: Any, sources: list[Any],
+                    provider_name: str, *, acusar_alvo: bool, target: int) -> list[dict[str, Any]]:
+    """Coleta cada fonte; a falha de uma vira registro e não interrompe as demais.
+
+    Com ``acusar_alvo``, registra também quando as fontes não chegam ao alvo.
+    """
     for index, source_value in enumerate(sources, start=1):
         try:
             collector.collect(index, source_value)
@@ -697,7 +765,7 @@ def _collect_provider_base(
                     f"{type(exc).__name__}: {exc}",
                 )
             )
-    if discovered and not censo_mode and len(sources) < target:
+    if acusar_alvo and len(sources) < target:
         collector.output.append(
             _failed_record(
                 context,

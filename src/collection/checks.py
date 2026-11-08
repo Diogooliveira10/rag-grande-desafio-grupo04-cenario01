@@ -50,6 +50,13 @@ def _file_urls(result: dict[str, Any] | None) -> Iterator[tuple[int, str]]:
 def iter_candidates(results: list[dict[str, Any]]) -> Iterator[FetchCandidate]:
     """Gera candidatos estáveis, incluindo todos os arquivos PNCP descobertos."""
     seen_urls: set[str] = set()
+    yield from _candidatos_da_api(results, seen_urls)
+    yield from _candidatos_web(results, seen_urls)
+    yield from _candidatos_de_arquivos_pncp(results, seen_urls)
+
+
+def _candidatos_da_api(results: list[dict[str, Any]], seen_urls: set[str]) -> Iterator[FetchCandidate]:
+    """O JSON de cada consulta disponível da API e, quando há registros, o JSONL deles."""
     web_ids = {source_id for source_id, _, _, _ in source_check.WEB_SOURCES}
 
     for result in results:
@@ -83,6 +90,9 @@ def iter_candidates(results: list[dict[str, Any]]) -> Iterator[FetchCandidate]:
                 payload=records,
             )
 
+
+def _candidatos_web(results: list[dict[str, Any]], seen_urls: set[str]) -> Iterator[FetchCandidate]:
+    """As fontes web fixas cuja checagem deu disponível."""
     for source_id, name, url, kind in source_check.WEB_SOURCES:
         result = source_check.find_result(results, source_id)
         if not _available(result) or url in seen_urls:
@@ -99,6 +109,9 @@ def iter_candidates(results: list[dict[str, Any]]) -> Iterator[FetchCandidate]:
             file_type=file_type,
         )
 
+
+def _candidatos_de_arquivos_pncp(results: list[dict[str, Any]], seen_urls: set[str]) -> Iterator[FetchCandidate]:
+    """Cada arquivo de edital ou de ata descoberto no PNCP."""
     for result in results:
         result_id = str(result.get("id") or "")
         if not (

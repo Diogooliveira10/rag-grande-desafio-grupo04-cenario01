@@ -462,6 +462,20 @@ def _load_adopt_attempt(
 
 
 @observar_offline(Stage.COLETA)
+def _divergencias_permitidas(command: str, *, official: bool, base_ids: list[str] | None,
+                             source_inventory_path: Path | None) -> tuple[bool, bool]:
+    """Quando o checkpoint pode divergir do manifesto atual: na descoberta, e na coleta
+    experimental só do PCA a partir de um inventário de fontes."""
+    allow_discovery_manifest_drift = command == "discover"
+    allow_isolated_pca_manifest_drift = (
+        command == "fetch"
+        and not official
+        and base_ids == ["pca_agregado"]
+        and source_inventory_path is not None
+    )
+    return allow_discovery_manifest_drift, allow_isolated_pca_manifest_drift
+
+
 def _run_manifest_command(
     command: str,
     manifest_path: Path,
@@ -489,13 +503,8 @@ def _run_manifest_command(
     )
     if command == "fetch" and not base_ids and _reuse_complete_version(manifest_hash, logger):
         return 0
-    allow_discovery_manifest_drift = command == "discover"
-    allow_isolated_pca_manifest_drift = (
-        command == "fetch"
-        and not official
-        and base_ids == ["pca_agregado"]
-        and source_inventory_path is not None
-    )
+    allow_discovery_manifest_drift, allow_isolated_pca_manifest_drift = _divergencias_permitidas(
+        command, official=official, base_ids=base_ids, source_inventory_path=source_inventory_path)
     resumable_version = _find_resumable_version(
         manifest_hash,
         manifest,
@@ -694,15 +703,10 @@ def _seed_carried_selection(
             )
 
 
-def _run_rj_discovery(
-    context: _VersionContext,
+def _populacoes_da_descoberta_rj(
     manifest: dict[str, Any],
-    version: int,
-    logger: _RunLogger,
-    *,
-    max_pages: int | None,
-) -> int:
-    """discover: publicações do RJ (órgãos e unidades) e, com as unidades verificadas, contratos assinados."""
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Base de contratos, o acesso dela e as populações de publicações e de contratos assinados."""
     contract_base = next(
         (base for base in manifest["bases"] if base.get("base_id") == "contratos_estruturado"),
         None,
@@ -728,9 +732,16 @@ def _run_rj_discovery(
     )
     if publication_population is None or contract_population is None:
         raise RuntimeError("manifesto precisa declarar contratações publicadas e contratos assinados")
+    return contract_base, access, publication_population, contract_population
 
-    # A população de publicações encontra órgãos e unidades antes da consulta contratual.
-    # O intervalo começa na adoção do PNCP e termina no corte já usado pelo levantamento.
+
+def _base_de_publicacoes_rj(contract_base: dict[str, Any], access: dict[str, Any],
+                            publication_population: dict[str, Any]) -> dict[str, Any]:
+    """A base da primeira fase: censo das publicações do RJ, com checkpoint e verificação das unidades.
+
+    A população de publicações encontra órgãos e unidades antes da consulta contratual.
+    O intervalo começa na adoção do PNCP e termina no corte já usado pelo levantamento.
+    """
     publication_params = {
         **(access.get("params") or {}),
         **(publication_population.get("params") or {}),
@@ -747,10 +758,23 @@ def _run_rj_discovery(
         "discovery_key": "contratacao_publicacao_rj",
         "verify_discovered_units": True,
     }
-    publication_base = {
+    return {
         **contract_base,
         "acesso": {**access, "populations": [publication_discovery]},
     }
+
+
+def _run_rj_discovery(
+    context: _VersionContext,
+    manifest: dict[str, Any],
+    version: int,
+    logger: _RunLogger,
+    *,
+    max_pages: int | None,
+) -> int:
+    """discover: publicações do RJ (órgãos e unidades) e, com as unidades verificadas, contratos assinados."""
+    contract_base, access, publication_population, contract_population = _populacoes_da_descoberta_rj(manifest)
+    publication_base = _base_de_publicacoes_rj(contract_base, access, publication_population)
     started = time.perf_counter()
     _collect_provider_base(
         context,
@@ -1079,9 +1103,8 @@ def _validate_adopt_attempt_coverage(
     _validate_pca_attempt(inventory, selected)
 
 
-def _validate_atas_attempt(inventory: dict[str, Any], selected: list[Any]) -> None:
-    """Cada compra selecionada com consulta de atas, cada ata com a listagem e todos os PDFs listados baixados."""
-    base_id = "atas_conversacional"
+def _compras_selecionadas(selected: list[Any]) -> set[str]:
+    """Números de controle das compras PNCP que a seleção da tentativa lista em atas_conversacional."""
     expected_purchases: set[str] = set()
     for entry in selected:
         source_value = entry.get("source_ref") if isinstance(entry, dict) else None
@@ -1095,6 +1118,29 @@ def _validate_atas_attempt(inventory: dict[str, Any], selected: list[Any]) -> No
         raise ValueError(
             "checkpoint da tentativa não lista compras PNCP selecionadas em atas_conversacional"
         )
+    return expected_purchases
+
+
+def _documentos_listados(records: list[dict[str, Any]]) -> int:
+    """Quantos documentos as listagens das atas declaram; cada listagem precisa estar gravada e ser uma lista."""
+    listed_documents = 0
+    for record in records:
+        if record.get("resource_kind") != "documentos_ata":
+            continue
+        source_path = _path_from_record(record)
+        if source_path is None or not source_path.is_file():
+            raise ValueError("listagem de documentos da tentativa sem arquivo materializado")
+        payload = json.loads(source_path.read_text(encoding="utf-8"))
+        if not isinstance(payload, list):
+            raise ValueError("listagem de documentos da ata não contém uma lista")
+        listed_documents += len(payload)
+    return listed_documents
+
+
+def _validate_atas_attempt(inventory: dict[str, Any], selected: list[Any]) -> None:
+    """Cada compra selecionada com consulta de atas, cada ata com a listagem e todos os PDFs listados baixados."""
+    base_id = "atas_conversacional"
+    expected_purchases = _compras_selecionadas(selected)
 
     records = [
         record
@@ -1138,17 +1184,7 @@ def _validate_atas_attempt(inventory: dict[str, Any], selected: list[Any]) -> No
             "tentativa incompleta: metadados das atas e listagens de documentos não correspondem"
         )
 
-    listed_documents = 0
-    for record in records:
-        if record.get("resource_kind") != "documentos_ata":
-            continue
-        source_path = _path_from_record(record)
-        if source_path is None or not source_path.is_file():
-            raise ValueError("listagem de documentos da tentativa sem arquivo materializado")
-        payload = json.loads(source_path.read_text(encoding="utf-8"))
-        if not isinstance(payload, list):
-            raise ValueError("listagem de documentos da ata não contém uma lista")
-        listed_documents += len(payload)
+    listed_documents = _documentos_listados(records)
 
     downloaded_pdfs = sum(
         1
