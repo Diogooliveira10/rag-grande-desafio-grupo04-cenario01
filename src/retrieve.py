@@ -1,15 +1,25 @@
+"""Busca híbrida: densa + BM25 + RRF, com rerank opcional (fachada de src/retrieval/).
+
+As partes moram em src/retrieval/ e todos os nomes continuam importáveis
+daqui (``from src.retrieve import ...``). Aqui ficam a orquestração
+(``retrieve`` e suas etapas) e ``pre_carregar_indices``.
+
+Ao trocar um nome num teste, troque-o no módulo onde mora a função que o usa:
+``dense_retrieve``/``bm25_retrieve`` aqui (a orquestração os chama daqui);
+``_records_for``/``_selecionar`` em ``src.retrieval.selection``;
+``QUERY_CACHE_PATH`` em ``src.retrieval.query_embedding``; ``registrar`` do
+aviso de vetor descartado em ``src.retrieval.dense``.
+"""
+
 from __future__ import annotations
 
-import json
-import math
-import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import config
-from src.settings import Configuracao, ConfiguracaoEmbeddings
-from src.obs import Stage, TokenUsage, default_logger, registrar, token_usage_from_response
+from src.settings import Configuracao
+from src.obs import Stage, TokenUsage, default_logger
 from src.schema import Natureza
 
 # As partes da busca moram em src/retrieval/ desde 2026-10-27; todos os nomes
@@ -105,209 +115,43 @@ from src.retrieval.ranking import (  # noqa: F401
     reciprocal_rank_fusion,
 )
 
-
-DEFAULT_TOP_K = 10
+from src.retrieval import query_embedding, selection as selecao
+from src.retrieval.query_embedding import (  # noqa: F401
+    EmbedFn,
+    QUERY_INSTRUCTION,
+    _EMBEDDING_FAILURES,
+    _default_embed,
+    _embed_fn_com_uso,
+    embedding_query_text,
+)
+from src.retrieval.selection import (  # noqa: F401
+    DEFAULT_TOP_K,
+    _SELECAO_CACHE,
+    _assinatura_da_origem,
+    _caminhos_ou_padrao,
+    _records_for,
+    _selecionar,
+)
+from src.retrieval.dense import (  # noqa: F401
+    _EXEMPLOS_DE_DESCARTE,
+    _FAISS_CACHE,
+    _avisar_vetores_descartados,
+    _base_do,
+    _candidatos_com_vetor,
+    _cosine,
+    _faiss_scores,
+    _indices_das_bases,
+    _ler_indice_faiss,
+    _por_base,
+    dense_retrieve,
+)
+from src.retrieval.sparse import bm25_retrieve  # noqa: F401
 
 
 DEFAULT_FETCH_K = 50
 
 
-EmbedFn = Callable[[list[str]], list[list[float]]]
-
-
 RerankFn = Callable[[str, list["RetrievalResult"]], Sequence[Any]]
-
-
-QUERY_INSTRUCTION = "Given a public procurement question, retrieve relevant passages that answer the query"
-
-
-QUERY_CACHE_PATH = config.ROOT_DIR / "data" / "embeddings" / "query_cache.jsonl"
-
-
-_EMBEDDING_FAILURES: dict[tuple[str, str], float] = {}
-
-
-def embedding_query_text(query: str) -> str:
-    """Instrução Qwen exclusiva da busca densa; BM25/roteamento recebem o original."""
-    return f"Instruct: {QUERY_INSTRUCTION}\nQuery:{query}"
-
-
-def _records_for(
-    index_dir: Path,
-    bases: Iterable[Any] | None,
-    filters: Mapping[str, Any] | None,
-    records: Iterable[Mapping[str, Any]] | None = None,
-    escopos: Iterable[str] | None = None,
-) -> list[dict[str, Any]]:
-    selection = _split_selection(bases)
-    allowed_scopes = set(escopos) if escopos is not None else None
-    if records is None:
-        paths = sorted(index_dir.glob("*/vectors.jsonl"))
-        declarations = _manifest_bases()
-        paths = [path for path in paths if not declarations.get(path.parent.name) or (
-            (selection is None or path.parent.name in selection[1]
-             or declarations[path.parent.name].get("natureza") in selection[0])
-            and (allowed_scopes is None
-                 or declarations[path.parent.name].get("escopo", "oficial") in allowed_scopes)
-        )]
-        raw = [record for path in paths for record in _registros_do_indice(path)]
-    else:
-        raw = records
-    filtered: list[dict[str, Any]] = []
-    seen_ids: set[str] = set()
-    for record in raw:
-        metadata = _metadata_of(record)
-        chunk_id = str(record.get("chunk_id") or metadata.get("chunk_id") or "")
-        if not chunk_id or chunk_id in seen_ids or not _matches_filters(metadata, filters, content=str(record.get("text", ""))):
-            continue
-        # Texto ilegível (src/corpus_quality.py) não é evidência: já fica fora
-        # do índice denso, e o BM25 lê o documents.jsonl, onde ele continua.
-        if _metadata_value(metadata, "status_extracao") == "texto_ilegivel":
-            continue
-        if selection is not None:
-            naturezas, base_ids = selection
-            if (
-                _record_natureza(record, metadata) not in naturezas
-                and _record_base_id(record, metadata) not in base_ids
-            ):
-                continue
-        if allowed_scopes is not None and _record_escopo(record, metadata) not in allowed_scopes:
-            continue
-        seen_ids.add(chunk_id)
-        filtered.append(record)
-    return filtered
-
-
-# Seleção sem filtro (bases e escopos) por versão dos arquivos lidos. Uma pergunta
-# percorria os ~144 mil registros 3 ou 4 vezes (busca densa, BM25, identificadores,
-# base dos filtros), ~0,2 s cada, para chegar sempre à mesma lista.
-_SELECAO_CACHE: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
-
-
-def _assinatura_da_origem(index_dir: Path, documents_file: Path | None) -> tuple[Any, ...] | None:
-    """Muda quando muda o arquivo de onde a seleção sai; ``None`` se ele não existe."""
-    try:
-        if documents_file is not None:
-            stat = Path(documents_file).stat()
-            return ("documents", str(documents_file), stat.st_mtime_ns, stat.st_size)
-        vetores = sorted(Path(index_dir).glob("*/vectors.jsonl"))
-        return ("indice", str(index_dir), tuple(
-            (str(v), v.stat().st_mtime_ns, v.stat().st_size, (v.parent / "vectors.faiss").exists()) for v in vetores))
-    except OSError:
-        return None
-
-
-def _selecionar(index_dir: Path, bases: Iterable[Any] | None, escopos: Iterable[str] | None,
-                *, documents_file: Path | None = None) -> list[dict[str, Any]]:
-    """``_records_for`` sem filtros, do índice ou do ``documents.jsonl``, calculado
-    uma vez por versão dos arquivos. Devolve cópia da lista; os registros são os
-    mesmos dicts compartilhados de sempre (ninguém os altera)."""
-    origem = _assinatura_da_origem(index_dir, documents_file)
-    fonte = _read_jsonl(documents_file) if documents_file is not None else None
-    if origem is None:
-        return _records_for(index_dir, bases, None, fonte, escopos)
-    selecao = _split_selection(bases)
-    chave = (origem,
-             None if selecao is None else (tuple(sorted(selecao[0])), tuple(sorted(selecao[1]))),
-             None if escopos is None else tuple(sorted(set(escopos))))
-    guardado = _SELECAO_CACHE.get(chave)
-    if guardado is None:
-        # Versão anterior do mesmo arquivo não fica presa na memória.
-        for antiga in [c for c in _SELECAO_CACHE if c[0][:2] == origem[:2] and c[0] != origem]:
-            del _SELECAO_CACHE[antiga]
-        guardado = _records_for(index_dir, bases, None, fonte, escopos)
-        _SELECAO_CACHE[chave] = guardado
-    return list(guardado)
-
-
-def _cosine(left: Sequence[float], right: Sequence[float]) -> float:
-    if len(left) != len(right) or not left or not right:
-        return 0.0
-    denominator = math.sqrt(sum(value * value for value in left)) * math.sqrt(
-        sum(value * value for value in right)
-    )
-    return sum(a * b for a, b in zip(left, right)) / denominator if denominator else 0.0
-
-
-def _default_embed(query: str) -> list[float]:
-    return _embed_fn_com_uso([])([query])[0]
-
-
-def _embed_fn_com_uso(uso: list[TokenUsage], estatisticas: dict[str, int] | None = None,
-                       observacoes: list[dict] | None = None,
-                       embeddings: ConfiguracaoEmbeddings | None = None) -> EmbedFn:
-    """Embedding padrão (servidor da turma) que anota o ``usage`` de cada chamada.
-
-    Usado por ``retrieve`` para preencher ``tokens`` do stage
-    ``retrieval_denso``; quem passa ``embed_fn`` próprio fica sem contagem.
-    Sem ``embeddings``, usa a configuração atual do ``config`` em cada chamada.
-    """
-    def embed(texts: list[str]) -> list[list[float]]:
-        e = embeddings or config.atual().embeddings
-        encoded = [embedding_query_text(text) for text in texts]
-        endpoint, chave_api, modelo = e.endpoint()
-        chave = {"endpoint": endpoint, "model": modelo, "texts": encoded}
-        for record in _read_jsonl(QUERY_CACHE_PATH):
-            if record.get("key") == chave:
-                vectors = record["vectors"]
-                if len(vectors) == len(texts) and all(
-                    vector and all(math.isfinite(v) for v in vector) and any(vector)
-                    for vector in vectors
-                ):
-                    uso.append(TokenUsage())
-                    if estatisticas is not None:
-                        estatisticas["cache_hits"] += 1
-                    return vectors
-        # O cache continua disponível durante a indisponibilidade. Nunca usar
-        # outro encoder automaticamente: mesma dimensão não garante compatibilidade.
-        endpoint_key = (endpoint, modelo)
-        if time.monotonic() < _EMBEDDING_FAILURES.get(endpoint_key, 0):
-            raise EmbeddingUnavailable("Embedding em cooldown após falha de disponibilidade")
-        # Cliente criado só na chamada: sem candidatos, dense_retrieve nem embeda.
-        from openai import OpenAI
-        import httpx
-        from src.obs import aguardar_modelo
-
-        aguardar_modelo()
-        client = OpenAI(base_url=endpoint, api_key=chave_api,
-                        timeout=httpx.Timeout(e.query_timeout, connect=min(3.0, e.query_timeout)),
-                        max_retries=0)
-        from src.model_observation import observar_chamada
-        diagnostics: dict = {}
-        if estatisticas is not None:
-            estatisticas["calls"] += 1
-        try:
-            response = observar_chamada(lambda: client.embeddings.create(model=modelo, input=encoded),
-                provider=e.provider, model=modelo, sdk_max_retries=0, diagnosticos=diagnostics)
-        except Exception as error:
-            from llm_ecoa import erro_de_disponibilidade
-            if erro_de_disponibilidade(error):
-                _EMBEDDING_FAILURES[endpoint_key] = time.monotonic() + e.query_cooldown
-            raise
-        else:
-            _EMBEDDING_FAILURES.pop(endpoint_key, None)
-        finally:
-            if observacoes is not None:
-                observacoes.extend(diagnostics.get("chamadas_modelo", []))
-        uso.append(token_usage_from_response(response))
-        vectors = [item.embedding for item in sorted(response.data, key=lambda item: getattr(item, "index", 0))]
-        if len(vectors) != len(texts) or not all(
-            vector and all(math.isfinite(v) for v in vector) and any(vector) for vector in vectors
-        ):
-            raise ValueError(f"{e.provider} retornou embeddings de query inválidos")
-        QUERY_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with QUERY_CACHE_PATH.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps({"key": chave, "vectors": vectors}, ensure_ascii=False) + "\n")
-        return vectors
-
-    return embed
-
-
-def _caminhos_ou_padrao(index_dir: Path | None, documents_file: Path | None) -> tuple[Path, Path]:
-    """Os caminhos pedidos ou, na falta deles, os da configuração atual (lidos na chamada)."""
-    caminhos = config.atual().caminhos
-    return (index_dir if index_dir is not None else caminhos.index_dir,
-            documents_file if documents_file is not None else caminhos.normalized_data_dir / "documents.jsonl")
 
 
 def pre_carregar_indices(
@@ -322,7 +166,7 @@ def pre_carregar_indices(
     lidos = 0
     try:
         # Documentos antes do índice: o índice reaproveita os metadados deles.
-        for path in (documents_file, QUERY_CACHE_PATH):
+        for path in (documents_file, query_embedding.QUERY_CACHE_PATH):
             if path.exists():
                 _read_jsonl(path)
                 lidos += 1
@@ -341,284 +185,6 @@ def pre_carregar_indices(
         logging.getLogger(__name__).warning(
             "Pré-carregamento dos índices falhou (%s); a primeira pergunta lê do disco", type(erro).__name__)
     return lidos
-
-
-_FAISS_CACHE: dict[str, tuple[int, int, Any]] = {}
-
-
-def _ler_indice_faiss(index_path: Path) -> Any:
-    """Índice persistido, lido do disco só quando o arquivo muda."""
-    import faiss
-
-    stat = index_path.stat()
-    chave = str(index_path)
-    guardado = _FAISS_CACHE.get(chave)
-    if guardado and guardado[0] == stat.st_mtime_ns and guardado[1] == stat.st_size:
-        return guardado[2]
-    index = faiss.read_index(chave)
-    _FAISS_CACHE[chave] = (stat.st_mtime_ns, stat.st_size, index)
-    return index
-
-
-def _faiss_scores(
-    query_vector: Sequence[float],
-    candidates: list[dict[str, Any]],
-    indexed_records: list[dict[str, Any]],
-    *,
-    index_path: Path | None,
-    top_k: int,
-) -> dict[str, float]:
-    """Busca candidatos no índice persistido ou monta um índice FAISS em memória."""
-    import faiss
-    import numpy as np
-
-    dimension = len(query_vector)
-    if not dimension:
-        return {str(record.get("chunk_id", "")): 0.0 for record in candidates}
-
-    candidate_ids = {str(record.get("chunk_id", "")) for record in candidates}
-    if index_path is not None and index_path.exists():
-        index = _ler_indice_faiss(index_path)
-        if index.ntotal != len(indexed_records):
-            raise RuntimeError(
-                f"índice FAISS desatualizado em {index_path}; regenere com src.index"
-            )
-        if index.d != dimension:
-            return {chunk_id: 0.0 for chunk_id in candidate_ids}
-    else:
-        vectors = np.zeros((len(indexed_records), dimension), dtype=np.float32)
-        for row, record in enumerate(indexed_records):
-            embedding = record.get("embedding", [])
-            if isinstance(embedding, list) and len(embedding) == dimension:
-                vectors[row] = embedding
-        vectors = np.ascontiguousarray(vectors)
-        faiss.normalize_L2(vectors)
-        index = faiss.IndexFlatIP(dimension)
-        index.add(vectors)
-
-    query = np.ascontiguousarray([query_vector], dtype=np.float32)
-    faiss.normalize_L2(query)
-    target = min(top_k, len(candidate_ids))
-    search_k = min(index.ntotal, max(1, target))
-    scores_by_id: dict[str, float] = {}
-    while index.ntotal:
-        scores, positions = index.search(query, search_k)
-        scores_by_id = {}
-        for score, position in zip(scores[0], positions[0]):
-            if position < 0:
-                continue
-            chunk_id = str(indexed_records[int(position)].get("chunk_id", ""))
-            if chunk_id in candidate_ids:
-                scores_by_id[chunk_id] = float(score)
-        if len(scores_by_id) >= target or search_k >= index.ntotal:
-            break
-        search_k = min(index.ntotal, max(search_k + 1, search_k * 2))
-    return scores_by_id
-
-
-def dense_retrieve(
-    query: str,
-    *,
-    index_dir: Path | None = None,
-    documents_file: Path | None = None,
-    top_k: int = DEFAULT_TOP_K,
-    bases: Iterable[Any] | None = None,
-    filters: Mapping[str, Any] | None = None,
-    embed_fn: EmbedFn | None = None,
-    records: Iterable[Mapping[str, Any]] | None = None,
-    escopos: Iterable[str] | None = None,
-    run_id: str = "sem-run-id",
-    query_id: str = "sem-query-id",
-) -> list[RetrievalResult]:
-    """Recupera chunks próximos pelo FAISS e aplica filtros de metadados."""
-    if top_k <= 0 or not query.strip():
-        return []
-    index_dir, documents_file = _caminhos_ou_padrao(index_dir, documents_file)
-    candidates = (_selecionar(index_dir, bases, escopos) if not filters and records is None
-                  else _records_for(index_dir, bases, filters, records, escopos))
-    if not candidates:
-        return []
-
-    query_vector = (embed_fn or (lambda texts: [_default_embed(texts[0])]))([query])[0]
-    indexed_by_base, index_paths = _indices_das_bases(index_dir, _por_base(candidates), records)
-    bases_com_faiss = {base_id for base_id, caminho in index_paths.items() if caminho.exists()}
-    normalized_text = {
-        str(item.get("chunk_id")): str(item.get("text", ""))
-        for item in _read_jsonl(documents_file)
-    }
-    compatible_candidates_by_base, incompatible_embeddings, missing_embeddings = _candidatos_com_vetor(
-        candidates, bases_com_faiss, len(query_vector))
-    scored: list[RetrievalResult] = []
-    for base_id, group in compatible_candidates_by_base.items():
-        faiss_path = index_paths.get(base_id)
-        scores = _faiss_scores(
-            query_vector,
-            group,
-            indexed_by_base.get(base_id, group),
-            index_path=faiss_path if faiss_path and faiss_path.exists() else None,
-            top_k=top_k,
-        )
-        for record in group:
-            chunk_id = str(record.get("chunk_id", ""))
-            if chunk_id not in scores:
-                continue
-            content = str(record.get("text", "")) or normalized_text.get(chunk_id, "")
-            scored.append(_result(record, scores[chunk_id], content))
-    _avisar_vetores_descartados(query, incompatible_embeddings, missing_embeddings,
-                                run_id=run_id, query_id=query_id)
-    return sorted(scored, key=lambda item: (-item.score, item.chunk_id))[:top_k]
-
-
-def _base_do(record: Mapping[str, Any]) -> str:
-    metadata = record.get("metadata")
-    return _record_base_id(record, metadata if isinstance(metadata, Mapping) else {})
-
-
-def _por_base(candidates: Iterable[Mapping[str, Any]]) -> dict[str, list[Mapping[str, Any]]]:
-    por_base: dict[str, list[Mapping[str, Any]]] = {}
-    for record in candidates:
-        por_base.setdefault(_base_do(record), []).append(record)
-    return por_base
-
-
-def _indices_das_bases(index_dir: Path, candidates_by_base: dict[str, list[Mapping[str, Any]]],
-                       records: Iterable[Mapping[str, Any]] | None) -> tuple[dict[str, list], dict[str, Path]]:
-    """Registros do índice e caminho do FAISS de cada base com candidatos.
-
-    Com ``records`` dados por quem chama, o próprio grupo de candidatos é o índice.
-    """
-    if records is not None:
-        indexed_by_base_recebidos: dict[str, list] = dict(candidates_by_base)
-        caminhos: dict[str, Path] = {}
-        # Recorte filtrado que veio do índice: os registros foram lidos sem o
-        # vetor, que está no FAISS. Sem o FAISS aqui, todos viravam "dimensão 0"
-        # e a busca densa ficava vazia em qualquer pergunta com filtro (desde
-        # 2026-10-19, quando o índice passou a ser lido sem o vetor).
-        for base_id, grupo in candidates_by_base.items():
-            faiss_path = index_dir / base_id / "vectors.faiss"
-            if faiss_path.exists() and any("embedding" not in registro for registro in grupo):
-                indexed_by_base_recebidos[base_id] = _registros_do_indice(index_dir / base_id / "vectors.jsonl")
-                caminhos[base_id] = faiss_path
-        return indexed_by_base_recebidos, caminhos
-    indexed_by_base: dict[str, list[dict[str, Any]]] = {}
-    index_paths: dict[str, Path] = {}
-    # Só as bases que têm candidatos: com a v7, ler todas custava 3,4 GB
-    # de JSON (2,5 GB só dos contratos) para uma pergunta sobre normas.
-    for vectors_path in sorted(index_dir.glob("*/vectors.jsonl")):
-        base_id = vectors_path.parent.name
-        if base_id not in candidates_by_base:
-            continue
-        indexed_by_base[base_id] = _registros_do_indice(vectors_path)
-        index_paths[base_id] = vectors_path.parent / "vectors.faiss"
-    return indexed_by_base, index_paths
-
-
-def _candidatos_com_vetor(candidates: Iterable[Mapping[str, Any]], bases_com_faiss: set[str],
-                          dimensao: int) -> tuple[dict[str, list], list[dict[str, Any]], list[dict[str, str]]]:
-    """Candidatos que podem ser comparados com o vetor da pergunta, por base.
-
-    Devolve também os descartados: vetor com outra dimensão e vetor ausente.
-    """
-    compativeis: dict[str, list[Mapping[str, Any]]] = {}
-    incompativeis: list[dict[str, Any]] = []
-    ausentes: list[dict[str, str]] = []
-    for record in candidates:
-        embedding = record.get("embedding", [])
-        metadata = record.get("metadata")
-        chunk_id = str(record.get("chunk_id") or (
-            metadata.get("chunk_id", "") if isinstance(metadata, Mapping) else ""
-        ))
-        base_do_registro = _base_do(record)
-        if "embedding" not in record and base_do_registro in bases_com_faiss:
-            # Lido sem o vetor (_registros_do_indice): o FAISS tem o vetor e
-            # confere a dimensão em _faiss_scores.
-            compativeis.setdefault(base_do_registro, []).append(record)
-            continue
-        if embedding is None:
-            ausentes.append({"chunk_id": chunk_id})
-            continue
-        try:
-            embedding_dimension = len(embedding)
-        except TypeError:
-            embedding_dimension = None
-        if embedding_dimension != dimensao:
-            incompativeis.append({
-                "chunk_id": chunk_id,
-                "expected_dimension": dimensao,
-                "actual_dimension": embedding_dimension,
-            })
-            continue
-        compativeis.setdefault(base_do_registro, []).append(record)
-    return compativeis, incompativeis, ausentes
-
-
-# Exemplos de vetor descartado que vão para o log; o resto entra só na contagem.
-# O aviso listava todos: 106 mil contratos por pergunta, 461 MB do log de 26/10.
-_EXEMPLOS_DE_DESCARTE = 20
-
-
-def _avisar_vetores_descartados(query: str, incompativeis: list[dict[str, Any]], ausentes: list[dict[str, str]],
-                                *, run_id: str, query_id: str) -> None:
-    """Aviso no log (stage ``retrieval_denso``) para cada tipo de vetor descartado,
-    com a contagem e até ``_EXEMPLOS_DE_DESCARTE`` exemplos."""
-    if incompativeis:
-        registrar(
-            run_id=run_id,
-            query_id=query_id,
-            stage=Stage.RETRIEVAL_DENSO,
-            status="aviso",
-            latencia_ms=0,
-            input=query,
-            output=f"{len(incompativeis)} embedding(s) incompatível(is) excluído(s)",
-            extra={"embedding_dimension_mismatches": incompativeis[:_EXEMPLOS_DE_DESCARTE],
-                   "total_descartados": len(incompativeis)},
-        )
-    if ausentes:
-        registrar(
-            run_id=run_id,
-            query_id=query_id,
-            stage=Stage.RETRIEVAL_DENSO,
-            status="aviso",
-            latencia_ms=0,
-            input=query,
-            output=f"{len(ausentes)} embedding(s) ausente(s)/nulo(s) ignorado(s)",
-            extra={"missing_embeddings": ausentes[:_EXEMPLOS_DE_DESCARTE],
-                   "total_descartados": len(ausentes)},
-        )
-
-
-def bm25_retrieve(
-    query: str,
-    *,
-    index_dir: Path | None = None,
-    documents_file: Path | None = None,
-    top_k: int = DEFAULT_TOP_K,
-    bases: Iterable[Any] | None = None,
-    filters: Mapping[str, Any] | None = None,
-    records: Iterable[Mapping[str, Any]] | None = None,
-    escopos: Iterable[str] | None = None,
-) -> list[RetrievalResult]:
-    """Recupera chunks lexicalmente com BM25, sem dependências adicionais."""
-    if top_k <= 0 or not query.strip():
-        return []
-    index_dir, documents_file = _caminhos_ou_padrao(index_dir, documents_file)
-    candidates = (
-        _records_for(index_dir, bases, filters, records, escopos)
-        if records is not None
-        else _selecionar(index_dir, bases, escopos, documents_file=documents_file) if not filters
-        else _records_for(index_dir, bases, filters, _read_jsonl(documents_file), escopos)
-    )
-    documents = [(record, str(record.get("text", ""))) for record in candidates]
-    query_terms = _tokens(query)
-    if not query_terms or not documents:
-        return []
-    # Com registros recebidos (recorte já filtrado), usa o índice se ele já
-    # existe; lendo o próprio documents.jsonl, monta-o na primeira vez.
-    indice = _indice_lexico(documents_file, construir=records is None)
-    melhores = _bm25_pelo_indice(indice, query_terms, documents, top_k) if indice is not None else None
-    if melhores is None:
-        melhores = _bm25_por_varredura(query_terms, documents, top_k)
-    return [_result(record, score, text) for score, _, record, text in melhores]
 
 
 def retrieve(
@@ -730,7 +296,7 @@ class _Recuperacao:
         """Registros que a BM25 pode ver; sem filtro, todos os das bases escolhidas."""
         if self.sparse_records is not None:
             return self.sparse_records
-        return _selecionar(self.index_dir, self.bases, self.escopos, documents_file=self.documents_file)
+        return selecao._selecionar(self.index_dir, self.bases, self.escopos, documents_file=self.documents_file)
 
 
 def _bases_e_filtros_da_rota(query: str, route: Any, filters: Mapping[str, Any] | None) -> tuple[Any, Any]:
@@ -768,13 +334,13 @@ def _registros_elegiveis(index_dir: Path, documents_file: Path, bases: Any, esco
     # Seleção de bases e escopos antes, para decidir o filtro só entre as
     # bases que o roteador escolheu.
     sparse_records, ignorados_bm25 = _filtrar_por_base(
-        _selecionar(index_dir, bases, escopos, documents_file=documents_file), route_filters
+        selecao._selecionar(index_dir, bases, escopos, documents_file=documents_file), route_filters
     )
     # O payload vetorial não repete o texto JSON com o CNPJ do fornecedor.
     # Os IDs dos documentos filtrados delimitam também os candidatos densos.
     dense_filters = {key: value for key, value in route_filters.items() if key != "cnpj"}
     dense_records, ignorados_denso = _filtrar_por_base(
-        _selecionar(index_dir, bases, escopos), dense_filters
+        selecao._selecionar(index_dir, bases, escopos), dense_filters
     )
     if "cnpj" in route_filters:
         eligible = {str(record.get("chunk_id")) for record in sparse_records}
@@ -869,9 +435,9 @@ def _busca_bm25(r: _Recuperacao) -> tuple[list[RetrievalResult], list[RetrievalR
         pedidas = _normas_mencionadas(r.query)
         if pedidas:
             elegiveis = r.sparse_records if r.sparse_records is not None else (
-                _selecionar(r.index_dir, r.bases, r.escopos, documents_file=r.documents_file)
+                selecao._selecionar(r.index_dir, r.bases, r.escopos, documents_file=r.documents_file)
                 if not r.route_filters else
-                _records_for(r.index_dir, r.bases, r.route_filters, _read_jsonl(r.documents_file), r.escopos))
+                selecao._records_for(r.index_dir, r.bases, r.route_filters, _read_jsonl(r.documents_file), r.escopos))
             primarios = [registro for registro in elegiveis
                          if _record_natureza(registro, _metadata_of(registro)) == Natureza.NORMATIVA.value
                          and _norma_do_documento(_metadata_of(registro)) & pedidas]

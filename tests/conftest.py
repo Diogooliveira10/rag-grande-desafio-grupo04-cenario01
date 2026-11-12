@@ -44,7 +44,8 @@ def _logs_em_diretorio_temporario(tmp_path, monkeypatch):
     """Nenhum teste escreve no logs/ real do repositório."""
     monkeypatch.setattr(obs.default_logger, "logs_dir", tmp_path / "logs")
     from src import retrieve
-    monkeypatch.setattr(retrieve, "QUERY_CACHE_PATH", tmp_path / "query_cache.jsonl")
+    from src.retrieval import query_embedding
+    monkeypatch.setattr(query_embedding, "QUERY_CACHE_PATH", tmp_path / "query_cache.jsonl")
     retrieve._EMBEDDING_FAILURES.clear()
     from src import query_analysis
     monkeypatch.setattr(query_analysis, "ANALYSIS_MODE", "regras")

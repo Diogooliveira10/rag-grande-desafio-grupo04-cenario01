@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -35,7 +36,7 @@ def test_embedding_timeout_e_cooldown_por_endpoint(monkeypatch):
     monkeypatch.setattr(config, "QUERY_EMBEDDING_TIMEOUT", 2.5)
     monkeypatch.setattr(config, "QUERY_EMBEDDING_COOLDOWN", 30)
     clock = [100.0]
-    monkeypatch.setattr(ret.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
 
     def create(**kwargs):
         calls.append(kwargs)

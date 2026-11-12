@@ -4,6 +4,7 @@ import json
 import pytest
 
 from src import retrieve as retrieval
+from src.retrieval import selection as selecao
 from src.obs import default_logger
 from src.rerank import texto_para_rerank
 
@@ -84,7 +85,7 @@ def test_numero_nao_unico_usa_nome_do_fornecedor_antes_do_corte(tmp_path, monkey
     rows = [record(f"a{i:02}", "18/2024", fornecedor="Editora Azul") for i in range(25)]
     target = record("z-target", "18/2024", fornecedor="Editora Violeta S.A.")
     rows.append(target)
-    monkeypatch.setattr(retrieval, "_records_for", lambda *a, **kw: rows)
+    monkeypatch.setattr(selecao, "_records_for", lambda *a, **kw: rows)
     distractors = [retrieval._result(row, 1.0) for row in rows[:-1]]
     monkeypatch.setattr(retrieval, "dense_retrieve", lambda *a, **kw: distractors)
     monkeypatch.setattr(retrieval, "bm25_retrieve", lambda *a, **kw: distractors)

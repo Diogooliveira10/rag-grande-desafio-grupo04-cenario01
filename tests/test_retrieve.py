@@ -6,6 +6,7 @@ import pytest
 
 import config
 import src.retrieve as retrieve_module
+from src.retrieval import dense as densa, query_embedding, selection as selecao
 from src.pipeline import _chunk_from_retrieval
 from src.retrieve import (
     RetrievalResult,
@@ -211,7 +212,7 @@ def test_retrieve_excludes_and_logs_incompatible_embedding_dimensions(tmp_path, 
         _record("invalid", text="software", embedding=[1.0, 0.0, 0.0]),
         _record("valid", text="ambulancia", embedding=[1.0, 0.0]),
     ]
-    monkeypatch.setattr(retrieve_module, "_records_for", lambda *args, **kwargs: records)
+    monkeypatch.setattr(selecao, "_records_for", lambda *args, **kwargs: records)
 
     results = retrieve(
         "ambulancia",
@@ -605,7 +606,7 @@ def test_retrieve_registra_posicao_dense_bm25_rrf_e_promove_match_exato(
         "text": alvo.content,
         "metadata": alvo.metadata,
     }
-    monkeypatch.setattr(retrieve_module, "_records_for", lambda *args, **kwargs: [record])
+    monkeypatch.setattr(selecao, "_records_for", lambda *args, **kwargs: [record])
     monkeypatch.setattr(retrieve_module, "dense_retrieve", lambda *args, **kwargs: [*distractors, alvo])
     monkeypatch.setattr(retrieve_module, "bm25_retrieve", lambda *args, **kwargs: [*distractors, alvo])
 
@@ -1328,7 +1329,7 @@ def test_embed_de_consulta_usa_o_provedor_configurado(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "EMBEDDING_PROVIDER", "ollama")
     monkeypatch.setattr(config, "OLLAMA_LOCAL_URL", "http://127.0.0.1:18321/v1")
     monkeypatch.setattr(config, "OLLAMA_LOCAL_EMBEDDING_MODEL", "Qwen3-Embedding-0.6B.Q8_0")
-    monkeypatch.setattr(retrieve, "QUERY_CACHE_PATH", tmp_path / "query_cache.jsonl")
+    monkeypatch.setattr(query_embedding, "QUERY_CACHE_PATH", tmp_path / "query_cache.jsonl")
 
     visto = {}
 
@@ -1358,7 +1359,7 @@ def test_cache_de_query_separa_por_provedor(tmp_path, monkeypatch):
     from types import SimpleNamespace
     from src import retrieve
 
-    monkeypatch.setattr(retrieve, "QUERY_CACHE_PATH", tmp_path / "query_cache.jsonl")
+    monkeypatch.setattr(query_embedding, "QUERY_CACHE_PATH", tmp_path / "query_cache.jsonl")
     chamadas = []
 
     def fake_openai(**opcoes):
@@ -1393,7 +1394,7 @@ def test_read_jsonl_le_uma_vez_e_rele_quando_o_arquivo_muda(tmp_path, monkeypatc
 
     leituras = []
     original = json.loads
-    monkeypatch.setattr(retrieve_module.json, "loads", lambda *a, **k: leituras.append(1) or original(*a, **k))
+    monkeypatch.setattr(json, "loads", lambda *a, **k: leituras.append(1) or original(*a, **k))
     primeira = retrieve_module._read_jsonl(arquivo)
     primeira.append({"chunk_id": "intruso"})
     assert [r["chunk_id"] for r in retrieve_module._read_jsonl(arquivo)] == ["a"]
@@ -1414,7 +1415,7 @@ def test_pre_carregar_indices_deixa_os_arquivos_no_cache(tmp_path, monkeypatch):
     (base / "vectors.jsonl").write_text('{"chunk_id": "a"}\n', encoding="utf-8")
     documents = tmp_path / "documents.jsonl"
     documents.write_text('{"chunk_id": "a", "text": "x"}\n', encoding="utf-8")
-    monkeypatch.setattr(retrieve_module, "QUERY_CACHE_PATH", tmp_path / "sem-cache.jsonl")
+    monkeypatch.setattr(query_embedding, "QUERY_CACHE_PATH", tmp_path / "sem-cache.jsonl")
 
     assert retrieve_module.pre_carregar_indices(tmp_path / "index", documents) == 2
     assert str(base / "vectors.jsonl") in retrieve_module._JSONL_CACHE
@@ -1568,8 +1569,8 @@ def test_selecao_sem_filtro_e_calculada_uma_vez_por_versao_do_arquivo(tmp_path, 
     registros = [_record("c1", text="ambulancia"), _record("a1", text="ata", base_id="atas_conversacional")]
     documentos.write_text("".join(json.dumps(r) + "\n" for r in registros), encoding="utf-8")
     chamadas = []
-    original = retrieve_module._records_for
-    monkeypatch.setattr(retrieve_module, "_records_for", lambda *a, **k: chamadas.append(1) or original(*a, **k))
+    original = selecao._records_for
+    monkeypatch.setattr(selecao, "_records_for", lambda *a, **k: chamadas.append(1) or original(*a, **k))
 
     primeira = retrieve_module._selecionar(tmp_path, ["contratos_estruturado"], None, documents_file=documentos)
     segunda = retrieve_module._selecionar(tmp_path, ["contratos_estruturado"], None, documents_file=documentos)
@@ -1609,7 +1610,7 @@ def test_busca_densa_com_filtro_usa_o_faiss_dos_registros_lidos_sem_vetor(tmp_pa
     e a busca densa ficava vazia em qualquer pergunta com filtro."""
     base = _indice_com_faiss(tmp_path, [("longe", [-1.0, 0.0]), ("perto", [0.9, 0.1]), ("meio", [0.0, 1.0])])
     avisos = []
-    monkeypatch.setattr(retrieve_module, "registrar", lambda **k: avisos.append(k))
+    monkeypatch.setattr(densa, "registrar", lambda **k: avisos.append(k))
     sem_vetor = retrieve_module._registros_do_indice(base / "vectors.jsonl")
     assert all("embedding" not in r for r in sem_vetor)
 
@@ -1625,7 +1626,7 @@ def test_busca_densa_com_filtro_usa_o_faiss_dos_registros_lidos_sem_vetor(tmp_pa
 def test_aviso_de_vetor_descartado_grava_contagem_e_poucos_exemplos(monkeypatch):
     """O aviso listava os 106 mil contratos a cada pergunta: 461 MB do log de 26/10."""
     avisos = []
-    monkeypatch.setattr(retrieve_module, "registrar", lambda **k: avisos.append(k))
+    monkeypatch.setattr(densa, "registrar", lambda **k: avisos.append(k))
     incompativeis = [{"chunk_id": f"c{i}", "expected_dimension": 1024, "actual_dimension": 0} for i in range(5000)]
 
     retrieve_module._avisar_vetores_descartados("q", incompativeis, [], run_id="r", query_id="q")
